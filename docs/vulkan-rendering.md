@@ -356,6 +356,18 @@ exact bytes upload through the arena into a registry texture record, and switchi
 cube's material to it turns the lit scene red on the GPU — while the plain material
 stays neutral — under Khronos validation.
 
+Multi-material meshes are proven on the GPU two ways.
+`VulkanHardware.MultiMaterialGltfMeshRendersBothPrimitiveTextures` imports one glTF
+mesh whose two primitives each bind their own solid-colour baseColorTexture (red,
+green data URIs), asserts every primitive record's material/texture wiring at the
+asset layer, uploads each primitive's vertex/index slice as its own mesh, and renders
+both through the lit scene path — readback shows red *and* green regions in one frame
+under zero validation diagnostics.
+`VulkanHardware.MultiMaterialMeshSplitsIntoSharedBufferDraws` proves the shared-buffer
+form of the same split: the external-file loader feeds a red PNG and a green PNG to the
+import, both primitives' slices are drawn from one merged vertex/index buffer via byte
+`index_offset`s, and the per-material draws land in the same frame.
+
 ## Image Decoding + GPU Texture Upload
 
 PNG images decode on the CPU in `engine/asset/png_decoder.hpp` — a deterministic,
@@ -424,10 +436,13 @@ world-space instances (see the glTF section). Real-world glTF assets now load
 texture payloads in all three supported forms — embedded PNG/JPEG data URIs,
 bufferView images, and external files through the loader callback. Colour textures
 are sampled through sRGB image formats so lighting happens in linear space (below).
-Still open for real-world assets: the output side of the pipeline (an sRGB swapchain
-/ final write encode — today rendering targets are UNORM and shaders write linear
-values straight), per-primitive material *splitting* of a multi-material mesh into
-separate draws, and the GPU-driven culling path.
+The per-primitive *splitting* of a multi-material mesh into separate draws is
+already GPU-proven (see the two `MultiMaterial*` tests in the glTF section: slice
+draws and shared-buffer submesh records over one vertex/index buffer); what remains
+for real-world assets is engine plumbing that performs that split automatically
+from a single import instead of test-side records, the output side of the pipeline
+(an sRGB swapchain / final write encode — today rendering targets are UNORM and
+shaders write linear values straight), and the GPU-driven culling path.
 
 ## Swapchain Recreation
 
