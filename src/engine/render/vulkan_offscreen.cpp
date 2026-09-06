@@ -115,10 +115,11 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create_depth(
   }
   // Format must actually support depth attachment usage.
   VkImageFormatProperties fmt_props{};
+  constexpr VkImageUsageFlags base_depth_usage =
+      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
   if (vkGetPhysicalDeviceImageFormatProperties(
           physical_device, depth_format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
-          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-          0, &fmt_props) != VK_SUCCESS) {
+          base_depth_usage, 0, &fmt_props) != VK_SUCCESS) {
     return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
   }
 
@@ -131,11 +132,26 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create_depth(
   image_info.format = depth_format;
   image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
   image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  image_info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT;  // allow Hi-Z pyramid copies
+  VkFormatProperties format_properties{};
+  vkGetPhysicalDeviceFormatProperties(physical_device, depth_format,
+                                      &format_properties);
+  depth_sampleable_ =
+      (format_properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0;
+  image_info.usage = base_depth_usage;
+  if (depth_sampleable_) {
+    VkImageFormatProperties sampled_props{};
+    if (vkGetPhysicalDeviceImageFormatProperties(
+            physical_device, depth_format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
+            base_depth_usage | VK_IMAGE_USAGE_SAMPLED_BIT, 0, &sampled_props) == VK_SUCCESS) {
+      image_info.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+    } else {
+      depth_sampleable_ = false;
+    }
+  }
   image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
   if (vkCreateImage(device, &image_info, nullptr, &depth_image_) != VK_SUCCESS) {
+    depth_sampleable_ = false;
     return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
   }
 
@@ -350,6 +366,7 @@ void VulkanOffscreenTarget::cleanup(VkDevice device) noexcept {
   depth_view_ = VK_NULL_HANDLE;
   depth_memory_ = VK_NULL_HANDLE;
   depth_format_ = VK_FORMAT_UNDEFINED;
+  depth_sampleable_ = false;
   format_ = VK_FORMAT_UNDEFINED;
   width_ = 0;
   height_ = 0;

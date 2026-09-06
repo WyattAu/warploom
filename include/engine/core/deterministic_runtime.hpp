@@ -19,12 +19,17 @@ enum class RuntimeError : std::uint8_t {
   ok = 0,
   not_running,
   invalid_config,
+  invalid_state,
   event_queue_full,
   replay_checksum_mismatch,
   replay_version_unsupported,
   replay_truncated,
   file_io_error,
-  vulkan_not_available
+  vulkan_not_available,
+  //! Asset/document data failed to parse or violates an unsupported
+  //! requirement (e.g. malformed JSON, out-of-range glTF references,
+  //! unsupported component/encoding).
+  malformed_asset
 };
 
 //! Lightweight result type for runtime operations.

@@ -18,6 +18,10 @@ Khronos validation layer with zero diagnostics, and exercised in CI on Mesa lava
 | Render graph | `engine/render/vulkan_render_graph.hpp` | Automatic image barriers between passes |
 | Parallel recorder | `engine/render/vulkan_parallel_recorder.hpp` | Multithreaded secondary command buffers |
 | Offscreen target | `engine/render/vulkan_offscreen.hpp` | Headless color+depth targets with GPU readback |
+| H-Z pyramid | `engine/render/vulkan_hiz_pyramid.hpp` | Runtime-sized sampled hierarchical depth resource |
+| H-Z frame state | `engine/render/vulkan_hiz_frame_state.hpp` | A/B ownership, publication tokens, and invalidation |
+| Scene snapshot | `engine/render/vulkan_scene.hpp` | Immutable camera/object snapshots for indexed scene submission |
+| Depth convention | `engine/render/depth_convention.hpp` | Canonical projection and conservative sphere-depth equations |
 
 ## Feature Negotiation
 
@@ -155,12 +159,283 @@ Two execution backends, selected with `set_job_system`:
 
 The contention stress test exercises both backends in alternating waves.
 
+## H-Z Renderer Integration Contract
+
+`VulkanRenderer` can own a persistent H-Z pair when `RendererConfig::enable_hiz` is true.
+The pair is sized from the swapchain extent, `hiz_tile_size`, and `hiz_levels` (zero means
+all legal mips), and is rebuilt only while the device is idle. `hiz_frame_state()` exposes
+A/B selection and invalidation state; `begin_hiz_frame()` returns a generation-checked
+`HiZFrameToken`, and `complete_hiz_frame()` is the only operation that publishes a newly
+reduced pyramid as eligible previous-frame data. Camera cuts and projection changes are
+reported through `invalidate_hiz()`; swapchain resync invalidates and rebuilds the pair.
+
+`set_hiz_record_callback()` remains available for application-specific culling and scene-buffer work. During
+`record_commands()`, after the graphics depth pass, the callback receives `HiZFrameRecord`
+with the actual depth source, the destination/previous pyramid pair, runtime dimensions,
+and mip count. Returning false discards the token and fails the frame. The renderer does not
+claim H-Z completion until the corresponding frame submission succeeds.
+
+Set `RendererConfig::hiz_reduction_shader_path` to a compiled
+`depth_reduce_image.comp` SPIR-V module to enable the renderer-owned direct reduction path.
+The renderer then owns the compute pipeline, descriptor layout, and two per-pyramid/per-mip
+descriptor-set families; it records depth sampling, one dispatch per mip, and explicit
+write-to-read barriers directly in the frame command buffer. The callback, when installed,
+runs after this reduction and is intentionally still responsible for application-specific
+culling. This separation prevents a generic renderer from guessing the application's scene
+buffer ABI while making the expensive depth reduction a first-class renderer operation.
+
+`make_hiz_graph_plan()` converts that record into explicit per-mip `GraphComputePass`
+metadata, including depth-source sampling, destination storage writes, previous-frame
+sampling, runtime dispatch group counts, and external producer layout/access metadata.
+Pass metadata can be compiled by `compile_graph()`; the direct reduction recorder and
+custom culling callback share the same frame token and publication rules.
+
+## Production Indexed Scene Submission
+
+The first reusable scene-rendering seam is `VulkanScene` in
+`engine/render/vulkan_scene.hpp`. An extraction system creates an immutable snapshot
+containing a camera matrix and renderable objects. Each `SceneObject` refers to a stable
+`SceneMesh` resource, which supplies a vertex-storage buffer, an index buffer, and a
+material/mesh descriptor set. `VulkanRenderer::record_scene()` consumes that snapshot
+inside an active render pass, binds each mesh, pushes its model matrix with the camera
+view-projection matrix, and issues indexed `uint32` draws.
+
+The scene snapshot is populated from gameplay state through `extract_vulkan_scene()`.
+The ECS-facing components are `SceneCameraComponent`, `SceneRenderableComponent`, and
+`SceneTransformComponent`. Extraction is const-only and copies matrices into the snapshot;
+no mutable ECS references escape. Active cameras are selected by lowest priority and then
+entity ID. Visible renderables are filtered and sorted by entity ID, giving deterministic
+draw order. Missing transforms use identity. The resulting snapshot may be recorded on a
+render thread while gameplay continues mutating the next ECS state, provided mesh resource
+lifetime is protected by the renderer's frame/timeline retirement policy.
+
+Renderables may carry optional `SceneBounds` (model space). When the active camera is
+present, extraction builds a CPU frustum (`engine/render/frustum.hpp`, Gribb-Hartmann
+planes from the view-projection matrix) and drops objects whose transformed box is fully
+outside it; geometry without valid bounds is never culled. `SceneExtractionStats` reports
+the pre-cull and culled counts for deterministic verification, and glTF-imported meshes
+expose their POSITION min/max union as ready-made bounds (`GltfBounds`, valid only when
+every merged primitive declared min/max).
+
+This deliberately separates gameplay/ECS mutation from Vulkan recording. The renderer
+does not retain snapshot pointers or destroy mesh resources. Resource registries must defer
+GPU resource destruction until the relevant frame/timeline value has completed.
+
+All scene meshes share one canonical vertex layout: **eleven floats per vertex**
+(`kSceneVertexFloats`) — position.xyz, linear color.rgb, normal.xyz, uv.xy — fetched by
+`gl_VertexIndex` from a mesh storage buffer, with one descriptor set per mesh, indexed
+`uint32` draws, opaque depth-tested geometry, and a single graphics pipeline per snapshot.
+
+The scene has two snapshot modes over that layout. The existing pointer path binds a
+128-byte push-constant range (`view_projection`, `model`) and passes vertex color straight
+to the frame. The handle-backed path is the lit material layer:
+`VulkanSceneResourceRegistry` supplies generational mesh, material, and texture handles,
+`extract_vulkan_scene(...)` copies the resolved records into the snapshot, and
+`record_scene()` uses a 160-byte push-constant range (`view_projection`, `model`,
+`base_color`, bindless `albedo_index`) with
+`assets/shaders/indexed_scene_material.{vert,frag}.spv`. That fragment stage multiplies
+the tinted vertex color by a directional lambert term computed from the interpolated world
+normal and by an albedo texture sampled from the bindless set-1 array
+(`albedos[albedo_index]`); element 0 is the opaque-white fallback, so untextured
+materials sample it unchanged. Normals and UVs transform with the rigid/uniform-scale
+model matrices documented by the scene path. Slot reuse is deferred by the registry's
+`collect()` policy and must be gated by the frame/timeline retirement point.
+
+Stable mesh/material/texture registries and per-frame upload ownership are in place:
+`VulkanSceneResourceRegistry` provides generational handles with deferred slot reuse,
+and `VulkanFrameUploadArena` (in `engine/render/vulkan_frame_upload.hpp`) keeps one
+staging ring per frame slot so callers can wait on a slot, write staging memory, and
+submit slot-local copies without exposing a raw Vulkan command buffer. Frustum culling
+is integrated into extraction (see above).
+
+Cameras are first-class deterministic systems: `engine/render/scene_camera.hpp`
+provides `scene_camera_look_at()` / `scene_camera_projection()` /
+`scene_camera_view_projection()` (right-handed look-at view space looking down -Z at
+rest, fov_y-over-vertical projection, column-major, matching every hardware scene
+test), plus `update_orbit_cameras()` — a pure-arithmetic ECS system that ticks every
+entity carrying an active `SceneCameraComponent` and an `OrbitCameraController`
+component from a deterministic `OrbitCameraInput` (yaw/pitch look, exponential zoom,
+and frame-aligned target panning whose right/up axes match the look-at basis exactly)
+and writes the recomputed matrix into `SceneCameraComponent::view_projection`. No
+Vulkan, no clock, no randomness, so the same inputs always produce the same matrices
+and the module runs in headless builds; feeding it real mouse/keyboard state is an
+application-layer concern. What remains for a complete asset-driven renderer is
+window/input plumbing to those controls and the standard GPU-driven culling path
+(multi-material glTF assets are now captured per-primitive at import — see below —
+and the scene path already renders one material per object, so splitting a mesh into
+per-material draws is render-layer plumbing).
+
+## glTF 2.0 Asset Ingestion
+
+`import_gltf_mesh()` in `engine/asset/gltf_importer.hpp` converts a glTF 2.0 document
+(JSON plus its single external `.bin`, or fully embedded `data:` URIs) into the
+canonical engine mesh format consumed by the scene path: eleven floats per vertex
+(position.xyz, linear color.rgb, normal.xyz, uv.xy) plus one triangle-list
+`uint32` index stream. Material bindings are captured **per primitive**: the merged
+index/vertex streams keep a `GltfPrimitiveMaterial` record for every glTF primitive
+(contiguous index/vertex slice, material name, `baseColorFactor`, and optional albedo
+texture reference into the import's shared `images`), so multi-material meshes import
+completely and a render layer can split them into per-material draws without re-reading
+the document. The mesh-level `base_color`/`albedo` fields alias the first primitive
+that binds a material (the historical single-material convenience). Optional
+attributes default deterministically — color (1,1,1), normal (0,0,1), uv (0,0) — so
+positions-only geometry imports cleanly.
+
+The importer is dependency-free, deterministic, and strict: a self-contained RFC 8259
+JSON parser feeds a spec-conformant decoder that validates every reference against its
+declared buffer before reading. Supported input is `POSITION` (VEC3 float32), `COLOR_0`
+(VEC3/VEC4 float32), `NORMAL` (VEC3 float32), `TEXCOORD_0` (VEC2 float32) — optional
+attributes must match the POSITION vertex count — `SCALAR` indices as uint16 or uint32
+(non-indexed primitives become sequential indices), tightly packed or
+`byteStride`-interleaved buffer views, and multi-primitive meshes merged into one draw
+with re-based indices. Malformed documents are rejected with
+`RuntimeError::malformed_asset` and a diagnostic instead of being mis-decoded: sparse
+accessors, non-TRIANGLES modes, unsupported component types or attribute shapes,
+out-of-range indices, regions beyond their buffer view, strided index views, any
+external buffer beyond the first, and out-of-range material references on *any*
+primitive all fail loudly.
+
+Texture wiring is part of the same import: optional glTF `samplers`/`textures`/`images`
+arrays are validated eagerly (types, ranges, sampler filter/wrap enums, image source
+rules), and a material's `pbrMetallicRoughness.baseColorTexture` on `TEXCOORD_0` is
+decoded **lazily** into RGBA8 `GltfImage`s carried on the import, with the
+declared sampler state in glTF enum numbers. Bytes stay in the payload's *encoded*
+form — decoding never colour-transforms on the CPU — and each binding's
+`encoded_srgb` flag records that glTF `baseColorTexture` is an sRGB colour texture
+to be sampled through an sRGB image format (hardware linearisation; see the colour
+section below). Every primitive's material is processed: a texture shared by several
+primitives of one mesh decodes exactly once, and each primitive record's
+`albedo.image_index` names the shared image. Supported image payloads are PNG
+(`data:image/png;base64,...`) and baseline-JPEG (`data:image/jpeg;base64,...`) URIs,
+tightly packed (stride-free) bufferViews over the existing buffers, and **external
+image files** whose non-`data:` URI is resolved lazily through an optional
+`ExternalFileLoader` callback (the importer stays filesystem-free; without a loader,
+referencing an external file is a diagnostic error). Payloads are dispatched on magic
+bytes by `decode_image()`; non-zero texCoord sets, ambiguous images (uri + bufferView
+together), and out-of-range texture/image/sampler/material references are rejected
+with diagnostics. Payloads referenced by *unused* meshes never decode (and external
+files they reference never reach the loader), so a document mixing supported and
+unsupported image formats still imports for meshes that do not bind them.
+
+Whole scenes import through `import_gltf_scene()` (same inputs as
+`import_gltf_mesh`, plus the `scenes`/`nodes` arrays): the hierarchy is parsed
+(`matrix` XOR TRS transforms, shared-subtree DAGs, mesh references), validated
+(node/child/mesh/scene ranges, cycles, skinned nodes, matrix+TRS conflicts), and
+depth-first flattened into `GltfSceneImport` — one `Node` per mesh-bearing
+instance carrying its absolute column-major `model` (pure group nodes contribute
+transforms only, shared meshes import once and instantiate per path). Those
+world models drop straight into `SceneTransformComponent`, so a whole `.gltf`
+scene becomes a set of drawables with no manual transform math.
+
+Ingestion is covered two ways. `GltfImporter.*` unit tests exercise valid fixtures
+(all four attributes, interleaving, merging, base64, mesh selection, data-URI and
+bufferView texture decode, sampler round-trip/defaults), encoding variants,
+and malformed-input rejections — pure CPU, so they run in every build flavor. The
+end-to-end `VulkanHardware.GltfImportedSceneWithRegistryMaterials` test builds two cubes
+as glTF in memory with real per-vertex normals, imports them, uploads the streams,
+registers mesh + material handles, and renders through the 160-byte lit material ABI
+(with the opaque-white bindless fallback bound at albedo element 0): a red
+vertex-colored cube occludes a white-vertex cube tinted green purely by its material
+`baseColorFactor` under directional lambert shading; depth ordering and animation are
+verified by pixel readback, and the run is clean under Khronos validation. The companion
+`VulkanHardware.AlbedoTextureTintsLitMaterialScene` test proves the albedo texture path
+itself: two cubes share one white-vertex mesh, and switching one cube's material to a
+registry texture record pointing at a solid-red 1x1 (bindless element 1) turns that cube
+red under lambert on the GPU while its untextured neighbour stays neutral — verified by
+readback with zero validation diagnostics. `VulkanHardware.GltfSceneGraphRendersInstances`
+proves the scene import on the GPU: one cube mesh shared by a two-node hierarchy renders
+as two world-space instances (left green root, right red child whose model inherits the
+root translation), verified by readback with zero validation diagnostics.
+
+`VulkanHardware.GltfBaseColorTextureEndToEnd` and
+`VulkanHardware.GltfJpegBaseColorTextureEndToEnd` close the loop for real glTF files:
+the in-memory glTF embeds a solid red PNG / JPEG behind `baseColorTexture`, the
+importer decodes it through the magic-dispatched codecs (CPU assertions on
+dimensions/pixels/sampler — the JPEG's constant colour decodes bit-exactly), those
+exact bytes upload through the arena into a registry texture record, and switching the
+cube's material to it turns the lit scene red on the GPU — while the plain material
+stays neutral — under Khronos validation.
+
+## Image Decoding + GPU Texture Upload
+
+PNG images decode on the CPU in `engine/asset/png_decoder.hpp` — a deterministic,
+dependency-free decoder (self-contained RFC 1951 DEFLATE plus the PNG chunk layer)
+that turns file bytes into tightly packed 8-bit RGBA (`DecodedImage`, straight alpha).
+Supported input is the spec-relevant surface: colour types 0/2/3/4/6 at 8-bit, all five
+scanline filters, PLTE + tRNS (palette alpha and grey/truecolour keys), one or many
+consecutive IDAT chunks, and stored / fixed-Huffman / dynamic-Huffman DEFLATE blocks.
+Malformed data is rejected with `RuntimeError::malformed_asset` and a diagnostic — bad
+signatures, per-chunk CRC failures, unknown *critical* chunks, truncated framing,
+interlaced (Adam7) or non-8-bit images, palette-index overruns, invalid zlib headers
+(preset dictionaries included), over-subscribed Huffman tables, and matches beyond the
+emitted output never mis-decode. A 256 MiB decoded-size cap bounds hostile dimensions.
+Coverage runs everywhere (`PngDecoder.*`, 33 CPU tests): golden streams produced by an
+independent encoder (Python zlib: stored, fixed-Huffman, dynamic-Huffman) plus
+real-world Pillow files, with exact pixel comparisons.
+
+JPEG images decode on the CPU in `engine/asset/jpeg_decoder.hpp` — a deterministic,
+dependency-free **baseline sequential** decoder (self-contained Huffman decode,
+0xFF00 byte-stuffing, zigzag + dequantisation, float IDCT, BT.601 YCbCr→RGB, and
+triangle "fancy" chroma upsampling for 2x ratios with edge replication, matching
+libjpeg's default upsampler). Supported input: SOF0 8-bit frames with one component
+(grayscale) or three in the JFIF YCbCr convention, per-component sampling factors up
+to 4 with whole-number ratios (4:4:4, 4:2:2, 4:2:0, 4:1:1), 8-bit quantisation tables,
+restart intervals (DRI/RSTn), and APPn/COM segments. Progressive (SOF2), extended
+sequential / 12-bit (SOF1), arithmetic-coded frames, non-8-bit samples, fractional
+upsampling ratios, out-of-range table/component references, truncated entropy data,
+and a missing EOI are all rejected with `RuntimeError::malformed_asset` and a
+diagnostic — nothing unsupported is ever mis-decoded. A 256 MiB decoded-size cap
+bounds hostile dimensions. Coverage runs everywhere (`JpegDecoder.*`, 12 CPU tests):
+golden blobs from an independent encoder (Pillow over libjpeg — constant-grey exact,
+a 4:4:4 colour ramp and a 4:2:0 two-colour image bounded against the analytic source)
+plus strict malformed-input rejection; importer-level tests prove
+`data:image/jpeg;base64` payloads decode through the glTF pipeline.
+
+**Colour space:** glTF `baseColorTexture` bytes are sRGB-encoded and lighting must
+happen in linear space, so colour textures are uploaded as
+`VK_FORMAT_R8G8B8A8_SRGB` images — the hardware decodes to linear at sample time and
+no CPU colour transform is ever applied (an 8-bit CPU linearisation would quantise).
+Non-colour data textures (normal/ORM) will use plain UNORM. The importer marks each
+binding's colour role (`GltfMaterialTexture::encoded_srgb`) so uploaders choose the
+format; sampling an encoded value as raw-linear is the bug this convention prevents.
+`VulkanHardware.SrgbBaseColorTextureLinearisesAtSample` proves it on the GPU: an
+encoded grey 186 decodes to linear 0.491021, and the lit scene's frame-centre pixel
+reads ~104 whether that linear value arrives as a material factor or as an
+sRGB-format texture — while sampling the raw 186 as linear would read ~155.
+
+The decoded RGBA then travels the GPU path through the frame upload arena:
+`VulkanFrameUploadArena::record_copy_image_rgba8()` stages the span into a fresh
+`TRANSFER_DST | SAMPLED` image, records `UNDEFINED -> TRANSFER_DST ->
+SHADER_READ_ONLY_OPTIMAL` transitions with matching access/stage masks on the
+ring-owned command buffer, and leaves the image sample-ready after submit.
+`VulkanHardware.PngDecodedTextureUploadAndSample` proves the whole chain under Khronos
+validation: it builds an 8x8 PNG in memory, decodes it, uploads it through the arena,
+binds view + sampler in a descriptor set, and renders it with a UV-mapped textured
+quad; every one of the 64 texels is verified 1:1 (RGBA, alpha included) at its output
+location by readback.
+
+Packaging note: the repository's dependency manifests advertise an `stb` image feature
+(`vcpkg.json` "image", `OMNICPP_USE_STB`), but no build target links or uses stb — the
+image pipeline above is the engine's own decoder and is what the tests exercise. Registry
+textures are already sampled by the lit scene material path (bindless set 1, verified on
+the GPU), glTF `images`/`textures`/samplers (`baseColorTexture`) are decoded and wired
+into registry texture records, and whole `scenes`/`nodes` hierarchies flatten into
+world-space instances (see the glTF section). Real-world glTF assets now load
+texture payloads in all three supported forms — embedded PNG/JPEG data URIs,
+bufferView images, and external files through the loader callback. Colour textures
+are sampled through sRGB image formats so lighting happens in linear space (below).
+Still open for real-world assets: the output side of the pipeline (an sRGB swapchain
+/ final write encode — today rendering targets are UNORM and shaders write linear
+values straight), per-primitive material *splitting* of a multi-material mesh into
+separate draws, and the GPU-driven culling path.
+
 ## Swapchain Recreation
 
 `VulkanSwapchain::recreate()` rebuilds image views safely;
 `VulkanRenderer::resync_for_swapchain()` rebinds the swapchain and render pass, rebuilds
 per-image semaphores, and resets timeline history while the device is idle. Mid-frame
-resync is rejected.
+resync is rejected. When renderer-owned H-Z is enabled, resync also retires both pyramids,
+recreates them at the new extent, and invalidates previous-frame visibility data.
 
 ## Validation Gate
 
@@ -175,6 +450,7 @@ Key hardware tests (`tests/unit/test_rendering.cpp`):
 - `VulkanHardware.SwapchainRecreationStress`
 - `VulkanHardware.OffscreenTriangleReadback`
 - `VulkanHardware.HeadlessSwapchainAndRenderSubmission`
+- `VulkanHardware.RendererIndexedSceneSubmission`
 - `VulkanHardware.DescriptorReflectionAndUboRender`
 - `VulkanHardware.RenderGraphTwoPassBarriersAndRender`
 - `VulkanHardware.ParallelRecorderMultithreadedBands`
@@ -340,12 +616,42 @@ the lit ground dominates the lower frame, the sphere renders red-dominant at the
 center in front of the cube behind it, orbiting a cube changes the image while static
 elements stay identical, and the animation round-trips to a byte-identical frame.
 
+## Sampled H-Z Pyramid + Previous-Frame Ping-Pong
+
+`VulkanHiZPyramid` owns a device-local `R32_SFLOAT` image with a runtime-sized mip
+chain (`mip_levels_for_extent(width, height)`) and one nearest sampler. Passing
+`levels = 0` to `create()` requests the complete chain; explicit shorter chains
+are accepted only when they do not exceed the extent's legal mip count.
+`depth_reduce_image.comp` samples the actual D32 depth
+attachment for level 0 and max-reduces each subsequent 2x2 mip level on the GPU.
+Each destination mip is transitioned explicitly to `GENERAL` for image stores,
+then to `SHADER_READ_ONLY_OPTIMAL` before the next level; no workgroup-global
+synchronization assumption is used. `GraphImageUse` lets the mixed render/compute
+render graph declare these transitions per mip, so unrelated levels do not receive
+unnecessary whole-image barriers.
+
+`VulkanHiZFrameState` owns the CPU-side policy for the A/B resources: it computes
+runtime pyramid dimensions, selects the current write and previous read indices,
+and invalidates previous depth on first use, resize, camera cuts, projection changes,
+or explicit reset. A frame token must be completed only after reduction finishes;
+stale tokens cannot publish a partially recorded pyramid.
+
+The canonical forward-Z equations live in `depth_convention.hpp`: view-space
+near/far distances map to the same depth convention used by the culler, and H-Z
+stores maximum depth values so visibility rejection remains conservative.
+
+`cull_hiz_sampled.comp` consumes the completed pyramid as a sampled image,
+selects a mip from the projected sphere footprint, samples every covered texel,
+and rejects only when all sampled max-depth values are nearer than the sphere's
+nearest point. Two pyramids are ping-ponged: frame N writes one while culling
+uses the completed opposite image from frame N-1. `VulkanHardware.SampledHiZPreviousFramePingPong`
+verifies three cycles under Khronos validation with zero diagnostics.
+
 ## Remaining Roadmap
 
 1. **Cross-vendor hardware runs** (AMD/Intel/mobile) — requires physical hardware or a
    GPU CI service; the lavapipe CI job covers driver-independent correctness.
-2. Sampled-image pyramid (depth -> image with VK_IMAGE_USAGE_SAMPLED, filterable
-   reduction) to replace the buffer-copy path, and hierarchical per-tile descent
-   instead of whole-footprint single-level tests.
-3. Prev-frame pyramid ping-pong (double-buffered H-Z) so the cull runs on the
-   same frame's render instead of a CPU-reduced copy of the previous one.
+2. Integrate the runtime-sized resource into the production render graph and
+   descriptor-backed per-frame resource tables.
+3. Add hierarchical early-out traversal and depth-dilation policies for large,
+   partially covered footprints while preserving conservative visibility.

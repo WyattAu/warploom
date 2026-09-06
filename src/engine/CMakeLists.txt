@@ -7,17 +7,25 @@ cmake_minimum_required(VERSION 3.20)
 
 add_library(omnicpp_runtime SHARED
     core/engine.cpp
+    asset/gltf_importer.cpp
+    asset/image_decode.cpp
+    asset/png_decoder.cpp
+    asset/jpeg_decoder.cpp
     render/vulkan_context.cpp
     render/vulkan_surface.cpp
     render/vulkan_swapchain.cpp
     render/vulkan_render_pass.cpp
     render/vulkan_pipeline.cpp
     render/vulkan_renderer.cpp
+    render/vulkan_scene.cpp
+    render/scene_camera.cpp
+    render/vulkan_frame_upload.cpp
     render/vulkan_offscreen.cpp
     render/vulkan_memory_allocator.cpp
     render/vulkan_descriptors.cpp
     render/vulkan_render_graph.cpp
     render/vulkan_compute.cpp
+    render/vulkan_hiz_pyramid.cpp
     render/vulkan_parallel_recorder.cpp
 )
 set_target_properties(omnicpp_runtime PROPERTIES OUTPUT_NAME omnicpp_runtime)

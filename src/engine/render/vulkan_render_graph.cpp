@@ -8,6 +8,41 @@
 #include <vulkan/vulkan.h>
 #endif
 
+namespace {
+
+#ifdef OMNICPP_HAS_VULKAN
+[[nodiscard]] VkImageAspectFlags barrier_aspect_mask(
+    VkImageLayout layout, std::uint32_t explicit_aspect) noexcept {
+  if (explicit_aspect != 0U) return explicit_aspect;
+  switch (layout) {
+    case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+    case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+      return VK_IMAGE_ASPECT_DEPTH_BIT;
+    default:
+      return VK_IMAGE_ASPECT_COLOR_BIT;
+  }
+}
+#endif
+
+struct ImageSubresourceKey {
+  VkImage image{VK_NULL_HANDLE};
+  std::uint32_t base_mip{0};
+  friend bool operator==(const ImageSubresourceKey& lhs,
+                         const ImageSubresourceKey& rhs) noexcept {
+    return lhs.image == rhs.image && lhs.base_mip == rhs.base_mip;
+  }
+};
+
+struct ImageSubresourceKeyHash {
+  std::size_t operator()(const ImageSubresourceKey& key) const noexcept {
+    const auto image_bits = reinterpret_cast<std::uintptr_t>(key.image);
+    return std::hash<std::uintptr_t>{}(image_bits) ^
+           (std::hash<std::uint32_t>{}(key.base_mip) << 1U);
+  }
+};
+
+} // namespace
+
 namespace omnicpp::render {
 
 // Attachment builder helpers. Values mirror the Vulkan constants so the
@@ -76,13 +111,20 @@ struct ImageState {
 //! ordering matters (write-after-read, read-after-write, write-after-write).
 bool access_ordering_matters(std::uint32_t prev_access, std::uint32_t prev_stage,
                              std::uint32_t next_access, std::uint32_t next_stage) {
-  const bool prev_writes =
-      (prev_access & (0x40U /*COLOR_WRITE*/ | 0x200U /*DEPTH_WRITE*/ |
-                      0x8U /*TRANSFER_WRITE*/ | 0x1U /*SHADER_WRITE*/)) != 0U;
-  const bool next_writes =
-      (next_access & (0x40U | 0x200U | 0x8U | 0x1U)) != 0U;
+  // Vulkan access-mask values are stable across the core API and the project's
+  // Vulkan-off shim. Treat every attachment/transfer/shader write as an
+  // ordering edge; this is conservative and, importantly, recognizes
+  // VK_ACCESS_SHADER_WRITE_BIT (0x40), not the old placeholder bit.
+  constexpr std::uint32_t kShaderWrite = 0x40U;
+  constexpr std::uint32_t kColorWrite = 0x100U;
+  constexpr std::uint32_t kDepthWrite = 0x400U;
+  constexpr std::uint32_t kTransferWrite = 0x1000U;
+  constexpr std::uint32_t write_mask =
+      kShaderWrite | kColorWrite | kDepthWrite | kTransferWrite;
+  const bool prev_writes = (prev_access & write_mask) != 0U;
+  const bool next_writes = (next_access & write_mask) != 0U;
   (void)prev_stage; (void)next_stage;
-  return prev_writes || next_writes; // conservative: sync on any write edge
+  return prev_writes || next_writes;
 }
 
 } // namespace
@@ -90,7 +132,6 @@ bool access_ordering_matters(std::uint32_t prev_access, std::uint32_t prev_stage
 CompiledRenderGraph compile_render_graph(const std::vector<GraphPass>& passes) {
   CompiledRenderGraph out;
   out.barriers_per_pass.resize(passes.size());
-
   std::unordered_map<VkImage, ImageState> states;
 
   for (std::size_t p = 0; p < passes.size(); ++p) {
@@ -161,8 +202,9 @@ void execute_render_graph(
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         b.image = barrier.image;
-        b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        b.subresourceRange.levelCount = 1;
+        b.subresourceRange.aspectMask = barrier_aspect_mask(barrier.new_layout, barrier.aspect);
+        b.subresourceRange.baseMipLevel = barrier.base_mip;
+        b.subresourceRange.levelCount = barrier.level_count;
         b.subresourceRange.layerCount = 1;
         vk_barriers.push_back(b);
         src_stage_mask |= barrier.src_stage;
@@ -203,29 +245,12 @@ void execute_render_graph(
 // Mixed render/compute graph
 // =============================================================================
 
-namespace {
-
-#ifdef OMNICPP_HAS_VULKAN
-//! Depth transitions must barrier the DEPTH aspect, not COLOR.
-[[nodiscard]] VkImageAspectFlags barrier_aspect_mask(VkImageLayout layout) noexcept {
-  switch (layout) {
-    case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
-    case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
-      return VK_IMAGE_ASPECT_DEPTH_BIT;
-    default:
-      return VK_IMAGE_ASPECT_COLOR_BIT;
-  }
-}
-#endif
-
-}  // namespace
-
 CompiledGraph compile_graph(const std::vector<GraphNode>& nodes) {
   CompiledGraph out;
   out.barriers_per_node.resize(nodes.size());
   out.buffer_edges_per_node.resize(nodes.size());
+  std::unordered_map<ImageSubresourceKey, ImageState, ImageSubresourceKeyHash> states;
 
-  std::unordered_map<VkImage, ImageState> states;
   for (std::size_t p = 0; p < nodes.size(); ++p) {
     const GraphNode& node = nodes[p];
     const GraphPass* render = node.render;
@@ -233,7 +258,7 @@ CompiledGraph compile_graph(const std::vector<GraphNode>& nodes) {
       std::vector<GraphBarrier>& barriers = out.barriers_per_node[p];
       for (const RenderPassAttachment& att : render->attachments) {
         if (!att.image) continue;
-        ImageState& state = states[att.image];
+        ImageState& state = states[{att.image, 0U}];
         const bool needs_barrier =
             !state.valid ||
             state.layout != att.used_layout ||
@@ -247,12 +272,43 @@ CompiledGraph compile_graph(const std::vector<GraphNode>& nodes) {
           barrier.dst_access = att.access;
           barrier.src_stage = state.valid ? state.stage : 0U;
           barrier.dst_stage = att.stage;
+          barrier.aspect = 0U;
           barriers.push_back(barrier);
         }
         state.layout = att.final_layout;
         state.access = att.access;
         state.stage = att.stage;
         state.valid = true;
+      }
+    }
+
+    if (node.compute != nullptr) {
+      for (const GraphImageUse& use : node.compute->image_uses) {
+        if (!use.image || use.level_count == 0U) continue;
+        for (std::uint32_t level = 0; level < use.level_count; ++level) {
+          ImageState& state = states[{use.image, use.base_mip + level}];
+          const bool needs_barrier =
+              !state.valid || state.layout != use.used_layout ||
+              access_ordering_matters(state.access, state.stage, use.access, use.stage);
+          if (needs_barrier) {
+            GraphBarrier barrier;
+            barrier.image = use.image;
+            barrier.old_layout = state.valid ? state.layout : use.initial_layout;
+            barrier.new_layout = use.used_layout;
+            barrier.src_access = state.valid ? state.access : use.initial_access;
+            barrier.dst_access = use.access;
+            barrier.src_stage = state.valid ? state.stage : use.initial_stage;
+            barrier.dst_stage = use.stage;
+            barrier.base_mip = use.base_mip + level;
+            barrier.level_count = 1U;
+            barrier.aspect = use.aspect;
+            out.barriers_per_node[p].push_back(barrier);
+          }
+          state.layout = use.final_layout;
+          state.access = use.access;
+          state.stage = use.stage;
+          state.valid = true;
+        }
       }
     }
     // Buffer edges are declared on the CONSUMER node: the barrier must be
@@ -278,6 +334,7 @@ void execute_graph(
   // Staging vectors for the steady-state frame path (no heap operations);
   // thread_local keeps concurrent recording on separate buffers safe.
   thread_local std::vector<VkImageMemoryBarrier> vk_barriers;
+  thread_local std::vector<VkImageMemoryBarrier> vk_post_barriers;
   thread_local std::vector<VkBufferMemoryBarrier> vk_buffer_barriers;
   thread_local std::vector<VkBufferMemoryBarrier> vk_foreign_releases;
 
@@ -289,6 +346,7 @@ void execute_graph(
                             : std::vector<GraphBufferEdge>{};
 
     vk_barriers.clear();
+    vk_post_barriers.clear();
     vk_buffer_barriers.clear();
     vk_foreign_releases.clear();
 
@@ -302,8 +360,9 @@ void execute_graph(
       b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
       b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
       b.image = barrier.image;
-      b.subresourceRange.aspectMask = barrier_aspect_mask(barrier.new_layout);
-      b.subresourceRange.levelCount = 1;
+      b.subresourceRange.aspectMask = barrier_aspect_mask(barrier.new_layout, barrier.aspect);
+      b.subresourceRange.baseMipLevel = barrier.base_mip;
+      b.subresourceRange.levelCount = barrier.level_count;
       b.subresourceRange.layerCount = 1;
       vk_barriers.push_back(b);
     }
@@ -385,6 +444,44 @@ void execute_graph(
       vkCmdEndRenderPass(command_buffer);
     } else if (node.compute != nullptr && record_compute) {
       record_compute(command_buffer, *node.compute, node.compute->user_data);
+
+      // A compute pass declares both the layout used during dispatch and the
+      // layout it leaves behind. Render passes get their final-layout
+      // transition from VkRenderPass; compute passes need the executor to
+      // materialize it explicitly.
+      for (const GraphImageUse& use : node.compute->image_uses) {
+        if (!use.image || use.level_count == 0U ||
+            use.final_layout == use.used_layout) {
+          continue;
+        }
+        for (std::uint32_t level = 0; level < use.level_count; ++level) {
+          VkImageMemoryBarrier post{};
+          post.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+          post.srcAccessMask = use.access;
+          post.dstAccessMask =
+              use.final_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                  ? VK_ACCESS_SHADER_READ_BIT : use.access;
+          post.oldLayout = use.used_layout;
+          post.newLayout = use.final_layout;
+          post.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+          post.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+          post.image = use.image;
+          post.subresourceRange.aspectMask =
+              barrier_aspect_mask(use.final_layout, use.aspect);
+          post.subresourceRange.baseMipLevel = use.base_mip + level;
+          post.subresourceRange.levelCount = 1U;
+          post.subresourceRange.layerCount = 1U;
+          vk_post_barriers.push_back(post);
+        }
+      }
+    }
+
+    if (!vk_post_barriers.empty()) {
+      vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+                           0, nullptr, 0, nullptr,
+                           static_cast<std::uint32_t>(vk_post_barriers.size()),
+                           vk_post_barriers.data());
     }
   }
 #else

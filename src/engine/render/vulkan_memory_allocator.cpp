@@ -258,6 +258,7 @@ omnicpp::core::Result<Allocation> VulkanMemoryAllocator::create_buffer(
   }
   Allocation alloc = allocation.value();
   if (vkBindBufferMemory(device_, buffer, alloc.memory, alloc.offset) != VK_SUCCESS) {
+    destroy_allocation(alloc);
     vkDestroyBuffer(device_, buffer, nullptr);
     return omnicpp::core::Result<Allocation>::error(
         omnicpp::core::RuntimeError::vulkan_not_available);
@@ -284,6 +285,7 @@ omnicpp::core::Result<Allocation> VulkanMemoryAllocator::bind_image(
   if (!allocation.is_ok()) return allocation;
   Allocation alloc = allocation.value();
   if (vkBindImageMemory(device_, image, alloc.memory, alloc.offset) != VK_SUCCESS) {
+    destroy_allocation(alloc);
     return omnicpp::core::Result<Allocation>::error(
         omnicpp::core::RuntimeError::vulkan_not_available);
   }
@@ -436,13 +438,20 @@ omnicpp::core::Result<void> VulkanUploadRing::initialize(
 
 void VulkanUploadRing::retire_completed() noexcept {
 #ifdef OMNICPP_HAS_VULKAN
-  in_flight_.erase(
-      std::remove_if(in_flight_.begin(), in_flight_.end(),
-                     [this](const InFlight& f) {
-                       return f.fence != VK_NULL_HANDLE &&
-                              vkGetFenceStatus(device_, f.fence) == VK_SUCCESS;
-                     }),
-      in_flight_.end());
+  for (auto it = in_flight_.begin(); it != in_flight_.end();) {
+    if (it->fence == VK_NULL_HANDLE ||
+        vkGetFenceStatus(device_, it->fence) != VK_SUCCESS) {
+      ++it;
+      continue;
+    }
+    const VkFence completed = it->fence;
+    for (auto erase_it = in_flight_.begin(); erase_it != in_flight_.end();) {
+      if (erase_it->fence == completed) erase_it = in_flight_.erase(erase_it);
+      else ++erase_it;
+    }
+    vkDestroyFence(device_, completed, nullptr);
+    it = in_flight_.begin();
+  }
 #endif
 }
 
@@ -454,8 +463,14 @@ void VulkanUploadRing::wait_region_free(VkDeviceSize start, VkDeviceSize size) n
     const VkDeviceSize f_end = it->start + it->size;
     const bool overlaps = f_start < end && start < f_end;
     if (overlaps && it->fence != VK_NULL_HANDLE) {
-      vkWaitForFences(device_, 1, &it->fence, VK_TRUE, UINT64_MAX);
-      it = in_flight_.erase(it);
+      const VkFence completed = it->fence;
+      vkWaitForFences(device_, 1, &completed, VK_TRUE, UINT64_MAX);
+      for (auto erase_it = in_flight_.begin(); erase_it != in_flight_.end();) {
+        if (erase_it->fence == completed) erase_it = in_flight_.erase(erase_it);
+        else ++erase_it;
+      }
+      vkDestroyFence(device_, completed, nullptr);
+      it = in_flight_.begin();
     } else {
       ++it;
     }
@@ -510,6 +525,9 @@ omnicpp::core::Result<void> VulkanUploadRing::begin_commands() {
 #endif
 }
 
+omnicpp::core::Result<void> VulkanUploadRing::begin_recording() {
+  return begin_commands();
+}
 void VulkanUploadRing::record_copy(VkCommandBuffer command_buffer,
                                    const UploadSpan& span,
                                    VkBuffer dst_buffer,
@@ -556,9 +574,14 @@ omnicpp::core::Result<void> VulkanUploadRing::submit(VkQueue queue) {
     staged_ranges_.clear();
     return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
   }
+  if (staged_ranges_.empty()) {
+    vkDestroyFence(device_, fence, nullptr);
+    return omnicpp::core::Result<void>::ok();
+  }
   // Every range handed out since the last submit is guarded by this fence.
-  for (const auto& range : staged_ranges_) {
-    in_flight_.push_back({range.offset, range.size, fence});
+  for (std::size_t i = 0; i < staged_ranges_.size(); ++i) {
+    const auto& range = staged_ranges_[i];
+    in_flight_.push_back({range.offset, range.size, fence, i == 0U});
   }
   staged_ranges_.clear();
   return omnicpp::core::Result<void>::ok();
@@ -580,6 +603,13 @@ void VulkanUploadRing::wait_idle() noexcept {
   if (device_ && command_buffer_) {
     vkResetCommandBuffer(command_buffer_, 0);
   }
+  std::vector<VkFence> fences;
+  for (const auto& f : in_flight_) {
+    if (f.fence && std::find(fences.begin(), fences.end(), f.fence) == fences.end()) {
+      fences.push_back(f.fence);
+    }
+  }
+  for (const auto fence : fences) vkDestroyFence(device_, fence, nullptr);
 #endif
   in_flight_.clear();
   staged_ranges_.clear();
@@ -590,8 +620,12 @@ void VulkanUploadRing::cleanup() noexcept {
 #ifdef OMNICPP_HAS_VULKAN
   if (device_) {
     wait_idle();
-    for (auto& f : in_flight_) {
-      if (f.fence) vkDestroyFence(device_, f.fence, nullptr);
+    std::vector<VkFence> destroyed;
+    for (const auto& f : in_flight_) {
+      if (f.fence && std::find(destroyed.begin(), destroyed.end(), f.fence) == destroyed.end()) {
+        vkDestroyFence(device_, f.fence, nullptr);
+        destroyed.push_back(f.fence);
+      }
     }
     in_flight_.clear();
     if (ring_memory_) vkFreeMemory(device_, ring_memory_, nullptr);

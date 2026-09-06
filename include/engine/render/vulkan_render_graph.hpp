@@ -58,6 +58,34 @@ struct GraphBufferEdge {
   std::uint32_t consumer_family{kIgnoredQueueFamily};
 };
 
+//! Declares one image subresource use by a compute pass. Unlike a render  //! attachment, this can name an individual H-Z mip and its explicit layout.
+  //! The renderer records exactly one depth-sourced H-Z pass per frame when H-Z is
+  //! enabled; any future scene integration that wants post-depth culling must reuse the
+  //! renderer-owned reduction pass, the single callback slot, or a separate graph
+  //! submission path rather than recording a second depth-sourced H-Z pass here.
+  //!
+  //! Design note: when the renderer owns the reduction pass, the callback slot, and
+  //! the frame token, duplicate depth-sourced H-Z work in the same frame is an ABI
+  //! misuse, not a feature. That constraint is enforced at record time, not postponed
+  //! to submission, so a broken scene integration fails fast instead of leaking a stale
+  //! previous-frame pyramid.
+struct GraphImageUse {
+  VkImage image{VK_NULL_HANDLE};
+  std::uint32_t base_mip{0};
+  std::uint32_t level_count{1};
+  std::uint32_t aspect{0};   //!< VkImageAspectFlags; 0 means infer from layout.
+  VkImageLayout used_layout{VK_IMAGE_LAYOUT_UNDEFINED};
+  VkImageLayout final_layout{VK_IMAGE_LAYOUT_UNDEFINED};
+  std::uint32_t access{0};
+  std::uint32_t stage{0};
+  //! Layout before the first graph use when an external pass produced it.
+  VkImageLayout initial_layout{VK_IMAGE_LAYOUT_UNDEFINED};
+  //! Access/stage of an external producer when this is the first graph use.
+  //! These are needed for a real render-pass -> compute dependency.
+  std::uint32_t initial_access{0};
+  std::uint32_t initial_stage{0};
+};
+
 struct GraphPass {
   const char* name{nullptr};
   VkRenderPass render_pass{VK_NULL_HANDLE};
@@ -83,6 +111,9 @@ struct GraphBarrier {
   std::uint32_t dst_access{0};
   std::uint32_t src_stage{0};
   std::uint32_t dst_stage{0};
+  std::uint32_t base_mip{0};
+  std::uint32_t level_count{1};
+  std::uint32_t aspect{0}; //!< VkImageAspectFlags; 0 means infer from layout.
 };
 
 struct GraphComputePass {
@@ -92,6 +123,8 @@ struct GraphComputePass {
   std::uint32_t group_count_z{1};
   //! Buffer resource edges the pass needs synchronized (see GraphBufferEdge).
   std::vector<GraphBufferEdge> buffer_edges;
+  //! Image subresources the pass reads/writes, including individual H-Z mips.
+  std::vector<GraphImageUse> image_uses;
   //! Opaque handle returned to the record callback.
   void* user_data{nullptr};
 };

@@ -40,7 +40,7 @@ omnicpp::core::Result<void> VulkanRenderPass::create(
   depth_attachment.format = depth_format;
   depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
   depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-  depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
   depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -162,6 +162,27 @@ omnicpp::core::Result<void> VulkanRenderPass::create_depth_resources(
   image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
   image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   image_info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+  VkFormatProperties format_properties{};
+  vkGetPhysicalDeviceFormatProperties(physical_device, format,
+                                      &format_properties);
+  depth_sampleable_ = false;
+  VkImageFormatProperties usage_properties{};
+  const VkImageUsageFlags sampled_usage =
+      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  if ((format_properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0 &&
+      vkGetPhysicalDeviceImageFormatProperties(
+          physical_device, format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
+          sampled_usage, 0, &usage_properties) == VK_SUCCESS) {
+    image_info.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+    depth_sampleable_ = true;
+  }
+  const VkImageUsageFlags transfer_usage =
+      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  if (vkGetPhysicalDeviceImageFormatProperties(
+          physical_device, format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
+          transfer_usage, 0, &usage_properties) == VK_SUCCESS) {
+    image_info.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  }
   image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
 
@@ -207,7 +228,15 @@ omnicpp::core::Result<void> VulkanRenderPass::create_depth_resources(
     return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
   }
 
-  vkBindImageMemory(device, depth_image_, depth_memory_, 0);
+  result = vkBindImageMemory(device, depth_image_, depth_memory_, 0);
+  if (result != VK_SUCCESS) {
+    vkFreeMemory(device, depth_memory_, nullptr);
+    vkDestroyImage(device, depth_image_, nullptr);
+    depth_image_ = VK_NULL_HANDLE;
+    depth_memory_ = VK_NULL_HANDLE;
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::vulkan_not_available);
+  }
 
   // Create depth image view
   VkImageViewCreateInfo view_info{};
@@ -225,9 +254,11 @@ omnicpp::core::Result<void> VulkanRenderPass::create_depth_resources(
   if (result != VK_SUCCESS) {
     vkFreeMemory(device, depth_memory_, nullptr);
     vkDestroyImage(device, depth_image_, nullptr);
-    depth_image_ = nullptr;
-    depth_memory_ = nullptr;
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    depth_image_ = VK_NULL_HANDLE;
+    depth_memory_ = VK_NULL_HANDLE;
+    depth_sampleable_ = false;
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::vulkan_not_available);
   }
 
   return omnicpp::core::Result<void>::ok();
@@ -254,6 +285,7 @@ void VulkanRenderPass::cleanup([[maybe_unused]] VkDevice device) noexcept {
   depth_memory_ = nullptr;
   depth_view_ = nullptr;
   depth_format_ = VK_FORMAT_UNDEFINED;
+  depth_sampleable_ = false;
 #endif
 }
 

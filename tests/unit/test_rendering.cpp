@@ -26,6 +26,50 @@
 #if OMNICPP_VULKAN_TYPES_AVAILABLE
 namespace {
 
+struct HiZCallbackState {
+  std::uint32_t calls{0};
+  std::uint32_t plans{0};
+  bool saw_previous{false};
+  bool valid{true};
+  bool reject{false};
+  omnicpp::render::VulkanRenderer* renderer{nullptr};
+};
+
+bool record_hiz_contract(VkCommandBuffer, const omnicpp::render::HiZFrameRecord& record,
+                         void* user_data) {
+  auto* state = static_cast<HiZCallbackState*>(user_data);
+  if (state == nullptr || record.depth_image == VK_NULL_HANDLE ||
+      record.depth_view == VK_NULL_HANDLE || !record.depth_is_sampleable ||
+      record.destination_pyramid == nullptr || record.render_width == 0U ||
+      record.render_height == 0U || record.tile_size == 0U || record.levels == 0U) {
+    if (state != nullptr) state->valid = false;
+    return false;
+  }
+  if (state->reject) return false;
+  ++state->calls;
+  state->saw_previous = state->saw_previous || record.token.has_previous;
+  if (state->renderer != nullptr) {
+    const auto plan = state->renderer->make_hiz_graph_plan(record);
+    const std::size_t expected_passes =
+        record.levels + (record.token.has_previous ? 1U : 0U);
+    const auto compiled = plan.compile();
+    if (compiled.barriers_per_node.empty() || compiled.barriers_per_node[0].size() < 2U ||
+        compiled.barriers_per_node[0][1].old_layout != VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ||
+        compiled.barriers_per_node[0][1].src_access == 0U) {
+      state->valid = false;
+      return false;
+    }
+    if (plan.passes.size() != expected_passes ||
+        compiled.barriers_per_node.size() != expected_passes) {
+      state->valid = false;
+      return false;
+    }
+    ++state->plans;
+  }
+  return true;
+}
+
+
 // Image-readback helpers live in the shared test header.
 #include "vulkan_test_readback.hpp"
 
@@ -182,11 +226,23 @@ TEST(VulkanHardware, HeadlessSwapchainAndRenderSubmission) {
   GTEST_SKIP() << "Test shaders were not compiled";
 #endif
 
+  ASSERT_TRUE(render_pass.depth_is_sampleable());
+  omnicpp::render::RendererConfig renderer_config;
+  renderer_config.enable_hiz = true;
+  renderer_config.hiz_tile_size = 32U;
+#ifdef OMNICPP_TEST_SHADER_DIR
+  renderer_config.hiz_reduction_shader_path =
+      std::string(OMNICPP_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
+#endif
   omnicpp::render::VulkanRenderer renderer;
   renderer.set_timeline_pacing(context.has_timeline_semaphores());
-  ASSERT_TRUE(renderer.initialize(context, swapchain, render_pass).is_ok());
+  ASSERT_TRUE(renderer.initialize(context, swapchain, render_pass, renderer_config).is_ok());
+  ASSERT_TRUE(renderer.hiz_direct_enabled());
   renderer.set_synchronization2(context.has_synchronization2());
   renderer.set_pipeline(pipeline.pipeline());
+  HiZCallbackState hiz_callback_state;
+  hiz_callback_state.renderer = &renderer;
+  renderer.set_hiz_record_callback(record_hiz_contract, &hiz_callback_state);
   if (context.has_timeline_semaphores()) {
     EXPECT_TRUE(renderer.uses_timeline_pacing());
   }
@@ -195,6 +251,13 @@ TEST(VulkanHardware, HeadlessSwapchainAndRenderSubmission) {
   ASSERT_TRUE(renderer.record_commands(image.value(), render_pass.framebuffer(image.value()),
                                        swapchain.extent_width(), swapchain.extent_height()).is_ok());
   ASSERT_TRUE(renderer.submit_frame().is_ok());
+  EXPECT_TRUE(renderer.hiz_enabled());
+  EXPECT_EQ(hiz_callback_state.calls, 1U);
+  EXPECT_TRUE(hiz_callback_state.valid);
+  EXPECT_FALSE(hiz_callback_state.saw_previous);
+  EXPECT_NE(renderer.hiz_pyramid(0U), nullptr);
+  EXPECT_NE(renderer.hiz_pyramid(1U), nullptr);
+  EXPECT_TRUE(renderer.hiz_frame_state().has_previous_frame());
 
   const auto readback = readback_swapchain_image(
       context.physical_device(), context.device(), context.graphics_queue(),
@@ -239,6 +302,24 @@ TEST(VulkanHardware, HeadlessSwapchainAndRenderSubmission) {
   EXPECT_EQ(renderer.frame_latency_tracker().total_count(), 9U);
   EXPECT_EQ(renderer.frame_latency_stats().window_count, 9U);
   EXPECT_GT(renderer.frame_latency_stats().p50_ns, 0U);
+  EXPECT_EQ(hiz_callback_state.calls, 9U);
+  EXPECT_EQ(hiz_callback_state.plans, 9U);
+  EXPECT_TRUE(hiz_callback_state.saw_previous);
+  EXPECT_TRUE(hiz_callback_state.valid);
+
+  // A rejected recorder must discard the token rather than publish stale or
+  // partially recorded depth as the next frame's previous pyramid.
+  hiz_callback_state.reject = true;
+  auto rejected_image = renderer.begin_frame();
+  ASSERT_TRUE(rejected_image.is_ok());
+  // The renderer now rejects accidental duplicate H-Z passes in the same frame.
+  // The first frame of this loop is the one that must fail; later frames should
+  // not be polluted by the stale token.
+  EXPECT_FALSE(renderer.record_commands(
+      rejected_image.value(), render_pass.framebuffer(rejected_image.value()),
+      swapchain.extent_width(), swapchain.extent_height()).is_ok());
+  EXPECT_FALSE(renderer.hiz_frame_state().has_previous_frame());
+
   EXPECT_EQ(context.validation_error_count(), 0U);
   EXPECT_EQ(context.validation_warning_count(), 0U);
 

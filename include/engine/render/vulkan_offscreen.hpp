@@ -29,7 +29,8 @@ public:
 
   //! Optional depth-stencil attachment. Call BEFORE create_render_pass();
   //! when present, the render pass gains a depth attachment (cleared to
-  //! 1.0, stored DONT_CARE) and the framebuffer includes its view.
+  //! 1.0, stored for post-pass depth extraction) and the framebuffer includes
+  //! its view.
   [[nodiscard]] omnicpp::core::Result<void> create_depth(
       VkDevice device, VkPhysicalDevice physical_device, VkFormat depth_format);
 
@@ -43,6 +44,8 @@ public:
   [[nodiscard]] VkImageView depth_view() const noexcept { return depth_view_; }
   [[nodiscard]] VkFormat depth_format() const noexcept { return depth_format_; }
   [[nodiscard]] bool has_depth() const noexcept { return depth_image_ != VK_NULL_HANDLE; }
+  //! True when the depth image can be sampled in a shader.
+  [[nodiscard]] bool depth_is_sampleable() const noexcept { return depth_sampleable_; }
   [[nodiscard]] VkRenderPass render_pass() const noexcept { return render_pass_; }
   [[nodiscard]] VkFramebuffer framebuffer() const noexcept { return framebuffer_; }
   [[nodiscard]] VkFormat format() const noexcept { return format_; }
@@ -65,6 +68,7 @@ private:
   VkImageView depth_view_{VK_NULL_HANDLE};
   VkDeviceMemory depth_memory_{VK_NULL_HANDLE};
   VkFormat depth_format_{VK_FORMAT_UNDEFINED};
+  bool depth_sampleable_{false};
   bool depth_uses_allocator_{false};
   Allocation depth_allocation_{};
   VkRenderPass render_pass_{VK_NULL_HANDLE};

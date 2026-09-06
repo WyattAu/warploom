@@ -577,6 +577,31 @@ public:
     }
   }
 
+  //! Iterate all entities with component T and call f(Entity, const T&).
+  template <typename T, typename Func>
+  void for_each(Func&& f) const {
+    for (const auto& arch : archetypes_) {
+      if (!arch.has<T>()) continue;
+      const auto& arr = arch.get_array<T>();
+      for (std::size_t i = 0; i < arch.size(); ++i) {
+        f(arch.entities()[i], arr.at(i));
+      }
+    }
+  }
+
+  //! Iterate all entities with components T1, T2, ... and call f(Entity, const T1&, const T2&...).
+  template <typename T1, typename T2, typename Func>
+  void for_each(Func&& f) const {
+    for (const auto& arch : archetypes_) {
+      if (!arch.has<T1>() || !arch.has<T2>()) continue;
+      const auto& a1 = arch.get_array<T1>();
+      const auto& a2 = arch.get_array<T2>();
+      for (std::size_t i = 0; i < arch.size(); ++i) {
+        f(arch.entities()[i], a1.at(i), a2.at(i));
+      }
+    }
+  }
+
   // -- Query API --
 
   //! Query all entities with components T1, T2, ... and call f(Entity, T1&, T2&, ...).

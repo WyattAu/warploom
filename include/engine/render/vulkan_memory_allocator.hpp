@@ -148,6 +148,14 @@ public:
   //! Record a copy from the staged span into `dst_buffer` at `dst_offset`.
   void record_copy(VkCommandBuffer command_buffer, const UploadSpan& span,
                    VkBuffer dst_buffer, VkDeviceSize dst_offset = 0) const noexcept;
+  //! Expose the ring-owned command buffer for an arena that records copies
+  //! without managing a second command buffer. The buffer is begun lazily by
+  //! acquire().
+  [[nodiscard]] VkCommandBuffer command_buffer_for_recording() const noexcept {
+    return command_buffer_;
+  }
+  //! Begin the ring-owned command buffer for an upload batch.
+  [[nodiscard]] omnicpp::core::Result<void> begin_recording();
   //! Submit the ring's one-time command buffer; the fence guards the span.
   [[nodiscard]] omnicpp::core::Result<void> submit(VkQueue queue);
 
@@ -162,6 +170,7 @@ private:
     VkDeviceSize start{0};
     VkDeviceSize size{0};
     VkFence fence{VK_NULL_HANDLE};
+    bool owns_fence{false};
   };
 
   [[nodiscard]] omnicpp::core::Result<void> begin_commands();

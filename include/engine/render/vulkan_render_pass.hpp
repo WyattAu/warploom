@@ -39,8 +39,11 @@ public:
   [[nodiscard]] VkRenderPass render_pass() const noexcept { return render_pass_; }
   [[nodiscard]] std::size_t framebuffer_count() const noexcept { return framebuffers_.size(); }
   [[nodiscard]] VkFramebuffer framebuffer(std::size_t index) const noexcept { return framebuffers_[index]; }
+  [[nodiscard]] VkImage depth_image() const noexcept { return depth_image_; }
   [[nodiscard]] VkImageView depth_view() const noexcept { return depth_view_; }
   [[nodiscard]] VkFormat depth_format() const noexcept { return depth_format_; }
+  //! True when the depth attachment was created with sampled-image usage.
+  [[nodiscard]] bool depth_is_sampleable() const noexcept { return depth_sampleable_; }
 
   [[nodiscard]] static VkFormat find_supported_depth_format(VkPhysicalDevice device);
 
@@ -51,6 +54,7 @@ private:
   VkDeviceMemory depth_memory_{VK_NULL_HANDLE};
   VkImageView depth_view_{VK_NULL_HANDLE};
   VkFormat depth_format_{VK_FORMAT_UNDEFINED};
+  bool depth_sampleable_{false};
 };
 
 } // namespace omnicpp::render

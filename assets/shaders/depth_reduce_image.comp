@@ -1,0 +1,63 @@
+#version 450
+
+// depth_reduce_image.comp — one dispatch builds one max-depth mip level.
+// Level 0 reduces the sampled D32 depth attachment into an 8x8 coarse image;
+// later levels max-reduce a 2x2 footprint from the preceding pyramid level.
+// The caller transitions each destination mip to GENERAL before dispatch and
+// to SHADER_READ_ONLY_OPTIMAL after dispatch.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform sampler2D depth_source;
+layout(set = 0, binding = 1, r32f) uniform image2D dst_level;
+layout(set = 0, binding = 2) uniform sampler2D previous_pyramid;
+
+layout(push_constant) uniform Push {
+  uint width;
+  uint height;
+  uint tile_size;
+  uint level;
+} push;
+
+void main() {
+  const uvec2 out_px = gl_GlobalInvocationID.xy;
+  // Level zero is ceil(source_extent / tile_size); each later level follows
+  // Vulkan's floor-halved mip extent. This supports arbitrary non-square
+  // render targets and any legal mip count, including odd dimensions.
+  const uvec2 base_dim = uvec2(
+      (push.width + push.tile_size - 1u) / push.tile_size,
+      (push.height + push.tile_size - 1u) / push.tile_size);
+  const uvec2 dim = max(uvec2(1u), base_dim >> push.level);
+  if (out_px.x >= dim.x || out_px.y >= dim.y) return;
+
+  float max_depth = 0.0;
+  if (push.level == 0u) {
+    const uint base_x = out_px.x * push.tile_size;
+    const uint base_y = out_px.y * push.tile_size;
+    for (uint y = 0u; y < push.tile_size; ++y) {
+      const uint py = base_y + y;
+      if (py >= push.height) break;
+      for (uint x = 0u; x < push.tile_size; ++x) {
+        const uint px = base_x + x;
+        if (px >= push.width) break;
+        max_depth = max(max_depth, texelFetch(depth_source, ivec2(px, py), 0).r);
+      }
+    }
+  } else {
+    // The host binds a single-mip view of the preceding level. Keeping the
+    // sampled view single-mip makes its descriptor layout unambiguous while
+    // retaining the same textureLod/texelFetch semantics.
+    const uvec2 previous_dim = max(uvec2(1u), base_dim >> (push.level - 1u));
+    const uvec2 base_u = min(out_px * 2u, previous_dim - 1u);
+    const ivec2 base = ivec2(base_u);
+    const ivec2 x1 = ivec2(min(base_u + uvec2(1u, 0u), previous_dim - 1u));
+    const ivec2 y1 = ivec2(min(base_u + uvec2(0u, 1u), previous_dim - 1u));
+    const ivec2 xy1 = ivec2(min(base_u + uvec2(1u, 1u), previous_dim - 1u));
+    max_depth = texelFetch(previous_pyramid, base, 0).r;
+    max_depth = max(max_depth, texelFetch(previous_pyramid, x1, 0).r);
+    max_depth = max(max_depth, texelFetch(previous_pyramid, y1, 0).r);
+    max_depth = max(max_depth, texelFetch(previous_pyramid, xy1, 0).r);
+  }
+
+  imageStore(dst_level, ivec2(out_px), vec4(max_depth));
+}

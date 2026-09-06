@@ -5,6 +5,7 @@
 
 #include "engine/render/vulkan_renderer.hpp"
 #include "engine/core/clock.hpp"
+#include <algorithm>
 #include <cstring>
 
 #ifdef OMNICPP_HAS_VULKAN
@@ -43,9 +44,11 @@ omnicpp::core::Result<void> VulkanRenderer::initialize(
   }
 
   device_ = context.device();
+  physical_device_ = context.physical_device();
   graphics_queue_ = context.graphics_queue();
   present_queue_ = context.present_queue();
   render_pass_ = render_pass.render_pass();
+  render_pass_resource_ = &render_pass;
   swapchain_ = &swapchain;
   config_ = config;
 
@@ -118,11 +121,112 @@ omnicpp::core::Result<void> VulkanRenderer::initialize(
     image_last_frame_.assign(swapchain.image_count(), 0);
   }
 
+  if (config_.enable_hiz &&
+      (!render_pass_resource_ || !render_pass_resource_->depth_image() ||
+       !render_pass_resource_->depth_is_sampleable())) {
+    cleanup(device_);
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::invalid_config);
+  }
+
   initialized_ = true;
+  if (config_.enable_hiz) {
+    auto hiz_result = recreate_hiz_resources(swapchain.extent_width(),
+                                              swapchain.extent_height());
+    if (!hiz_result.is_ok()) {
+      cleanup(device_);
+      return hiz_result;
+    }
+  }
   return omnicpp::core::Result<void>::ok();
 #else
   (void)context; (void)swapchain; (void)render_pass; (void)config;
   return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
+omnicpp::core::Result<void> VulkanRenderer::record_scene(
+    VkCommandBuffer command_buffer, const VulkanScene& scene,
+    std::uint32_t width, std::uint32_t height) const {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!command_buffer || !scene.pipeline || !scene.pipeline_layout ||
+      width == 0U || height == 0U) {
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::invalid_config);
+  }
+
+  VkViewport viewport{};
+  viewport.width = static_cast<float>(width);
+  viewport.height = static_cast<float>(height);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+  vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+
+  VkRect2D scissor{};
+  scissor.extent = {width, height};
+  vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    scene.pipeline);
+
+  // 160-byte material ABI: view_projection (64) + model (64) + base_color
+  // (16) + albedo bindless index (4) + padding (12), matching the push
+  // blocks in indexed_scene_material.{vert,frag}.
+  struct PushConstants {
+    SceneMatrix view_projection;
+    SceneMatrix model;
+    std::array<float, 4> base_color;
+    std::uint32_t albedo_index{0};
+    std::uint32_t pad[3]{0, 0, 0};
+  } push{};
+  push.view_projection = scene.camera.view_projection;
+
+  // Bind the bindless albedo-texture array once when the caller provided it
+  // (set 1). The material fragment samples albedos[albedo_index]; element 0
+  // is the opaque-white fallback for untextured materials.
+  if (scene.material_push_constants && scene.texture_set != VK_NULL_HANDLE) {
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene.pipeline_layout, 1, 1, &scene.texture_set, 0,
+                            nullptr);
+  }
+
+  for (const SceneObject& object : scene.objects) {
+    const SceneMesh* mesh_ptr = object.effective_mesh();
+    if (mesh_ptr == nullptr || !mesh_ptr->is_drawable()) continue;
+    const SceneMesh& mesh = *mesh_ptr;
+    push.model = object.model;
+    push.base_color = object.has_material
+        ? object.material_value.base_color
+        : std::array<float, 4>{1.0f, 1.0f, 1.0f, 1.0f};
+    push.albedo_index = object.has_albedo ? object.albedo_value.bindless_index : 0U;
+    const std::uint32_t push_size = scene.material_push_constants
+        ? static_cast<std::uint32_t>(sizeof(push))
+        : static_cast<std::uint32_t>(sizeof(SceneMatrix) * 2U);
+    // The material fragment stage reads the push block (albedo_index), so the
+    // material layout's range covers VERTEX|FRAGMENT. The legacy unlit layout
+    // declares a VERTEX-only range, so keep that stage set there.
+    const VkShaderStageFlags push_stages =
+        scene.material_push_constants
+        ? static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT |
+                                          VK_SHADER_STAGE_FRAGMENT_BIT)
+        : static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT);
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene.pipeline_layout, 0, 1,
+                            &mesh.descriptor_set, 0, nullptr);
+    vkCmdPushConstants(command_buffer, scene.pipeline_layout,
+                       push_stages, 0,
+                       push_size, &push);
+    vkCmdBindIndexBuffer(command_buffer, mesh.index_buffer,
+                         mesh.index_offset, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0);
+  }
+  return omnicpp::core::Result<void>::ok();
+#else
+  (void)command_buffer;
+  (void)scene;
+  (void)width;
+  (void)height;
+  return omnicpp::core::Result<void>::error(
+      omnicpp::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -255,14 +359,59 @@ omnicpp::core::Result<void> VulkanRenderer::record_commands(
   }
 
   vkCmdEndRenderPass(cb);
-  vkEndCommandBuffer(cb);
+
+  if (hiz_enabled_ && (hiz_direct_enabled_ || hiz_record_callback_) &&
+      render_pass_resource_ && render_pass_resource_->depth_is_sampleable()) {
+    pending_hiz_token_ = hiz_state_.begin_frame();
+    const std::uint32_t destination_index = pending_hiz_token_.write_index;
+    const std::uint32_t previous_index = pending_hiz_token_.previous_index;
+    HiZFrameRecord record{};
+    record.token = pending_hiz_token_;
+    record.depth_image = render_pass_resource_->depth_image();
+    record.depth_view = render_pass_resource_->depth_view();
+    record.depth_is_sampleable = render_pass_resource_->depth_is_sampleable();
+    record.destination_initialized = hiz_pyramid_initialized_[destination_index];
+    record.previous_pyramid = pending_hiz_token_.has_previous ? hiz_pyramids_[previous_index].get() : nullptr;
+    record.destination_pyramid = hiz_pyramids_[destination_index].get();
+    record.render_width = width;
+    record.render_height = height;
+    record.tile_size = hiz_state_.tile_size();
+    record.levels = hiz_state_.levels();
+    if (hiz_direct_enabled_ && !record_hiz_reduction(cb, record)) {
+      hiz_state_.discard_frame(pending_hiz_token_);
+      pending_hiz_frame_ = false;
+      vkEndCommandBuffer(cb);
+      return omnicpp::core::Result<void>::error(
+          omnicpp::core::RuntimeError::vulkan_not_available);
+    }
+    if (hiz_record_callback_ && !hiz_record_callback_(cb, record, hiz_record_user_data_)) {
+      hiz_state_.discard_frame(pending_hiz_token_);
+      pending_hiz_frame_ = false;
+      vkEndCommandBuffer(cb);
+      return omnicpp::core::Result<void>::error(
+          omnicpp::core::RuntimeError::invalid_config);
+    }
+    pending_hiz_frame_ = true;
+    pending_hiz_destination_index_ = destination_index;
+  }
+
+  if (vkEndCommandBuffer(cb) != VK_SUCCESS) {
+    if (pending_hiz_frame_) {
+      hiz_state_.discard_frame(pending_hiz_token_);
+      pending_hiz_frame_ = false;
+    }
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::vulkan_not_available);
+  }
 
   return omnicpp::core::Result<void>::ok();
 #else
   (void)image_index; (void)framebuffer; (void)width; (void)height;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return omnicpp::core::Result<void>::error(
+      omnicpp::core::RuntimeError::vulkan_not_available);
 #endif
 }
+
 
 omnicpp::core::Result<void> VulkanRenderer::submit_frame() {
 #ifdef OMNICPP_HAS_VULKAN
@@ -326,12 +475,24 @@ omnicpp::core::Result<void> VulkanRenderer::submit_frame() {
       const VkResult result = submit2(graphics_queue_, 1, &submit2_info,
           timeline_pacing_ ? VK_NULL_HANDLE : frame.in_flight_fence);
       if (result != VK_SUCCESS) {
+        if (pending_hiz_frame_) {
+          hiz_state_.discard_frame(pending_hiz_token_);
+          pending_hiz_frame_ = false;
+        }
         return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
       }
       frame.frame_in_flight = true;
-      frame_counter_ = signal_frame;
-      image_last_frame_[acquired_image_index_] = signal_frame;
+      if (pending_hiz_frame_) {
+        hiz_pyramid_initialized_[pending_hiz_destination_index_] = true;
+        hiz_state_.complete_frame(pending_hiz_token_);
+        pending_hiz_frame_ = false;
+      }
+      if (timeline_pacing_) {
+        frame_counter_ = signal_frame;
+        image_last_frame_[acquired_image_index_] = signal_frame;
+      }
       return omnicpp::core::Result<void>::ok();
+
     }
   }
 
@@ -351,9 +512,18 @@ omnicpp::core::Result<void> VulkanRenderer::submit_frame() {
   const VkResult result = vkQueueSubmit(graphics_queue_, 1, &submit_info,
       timeline_pacing_ ? VK_NULL_HANDLE : frame.in_flight_fence);
   if (result != VK_SUCCESS) {
+    if (pending_hiz_frame_) {
+      hiz_state_.discard_frame(pending_hiz_token_);
+      pending_hiz_frame_ = false;
+    }
     return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
   }
   frame.frame_in_flight = true;
+  if (pending_hiz_frame_) {
+    hiz_pyramid_initialized_[pending_hiz_destination_index_] = true;
+    hiz_state_.complete_frame(pending_hiz_token_);
+    pending_hiz_frame_ = false;
+  }
   if (timeline_pacing_) {
     frame_counter_ = signal_frame;
     image_last_frame_[acquired_image_index_] = signal_frame;
@@ -415,6 +585,340 @@ const omnicpp::core::LatencyStats& VulkanRenderer::frame_latency_stats() {
   return frame_latency_stats_;
 }
 
+HiZGraphPlan VulkanRenderer::make_hiz_graph_plan(
+    const HiZFrameRecord& record) const {
+  HiZGraphPlan plan;
+  if (record.destination_pyramid == nullptr || record.levels == 0U) {
+    return plan;
+  }
+
+#ifdef OMNICPP_HAS_VULKAN
+  constexpr std::uint32_t kShaderRead = VK_ACCESS_SHADER_READ_BIT;
+  constexpr std::uint32_t kShaderWrite = VK_ACCESS_SHADER_WRITE_BIT;
+  constexpr std::uint32_t kCompute = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+  constexpr std::uint32_t kDepthAspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+  constexpr std::uint32_t kDepthWrite = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  constexpr std::uint32_t kLateFragment = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+#else
+  constexpr std::uint32_t kShaderRead = 0x20U;
+  constexpr std::uint32_t kShaderWrite = 0x40U;
+  constexpr std::uint32_t kCompute = 0x20U;
+  constexpr std::uint32_t kDepthAspect = 0x2U;
+  constexpr std::uint32_t kDepthWrite = 0x200U;
+  constexpr std::uint32_t kLateFragment = 0x2000U;
+#endif
+
+  const std::uint32_t levels = std::min(record.levels,
+                                        record.destination_pyramid->levels());
+  plan.passes.reserve(levels + (record.token.has_previous ? 1U : 0U));
+  for (std::uint32_t level = 0; level < levels; ++level) {
+    GraphComputePass pass{};
+    pass.name = "hiz_reduce";
+    const std::uint32_t mip_width =
+        std::max(1U, record.destination_pyramid->width() >> level);
+    const std::uint32_t mip_height =
+        std::max(1U, record.destination_pyramid->height() >> level);
+    pass.group_count_x = (mip_width + 7U) / 8U;
+    pass.group_count_y = (mip_height + 7U) / 8U;
+    pass.image_uses.push_back({record.destination_pyramid->image(), level, 1U, 0U,
+                               VK_IMAGE_LAYOUT_GENERAL,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               kShaderWrite, kCompute,
+                               record.destination_initialized
+                                   ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                   : VK_IMAGE_LAYOUT_UNDEFINED});
+    if (level == 0U && record.depth_image != VK_NULL_HANDLE) {
+      pass.image_uses.push_back({record.depth_image, 0U, 1U, kDepthAspect,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                 kShaderRead, kCompute,
+                                 VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                                 kDepthWrite, kLateFragment});
+    } else if (level > 0U) {
+      pass.image_uses.push_back({record.destination_pyramid->image(), level - 1U, 1U, 0U,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                 kShaderRead, kCompute,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                 kShaderRead, kCompute});
+    }
+    plan.passes.push_back(std::move(pass));
+  }
+
+  if (record.token.has_previous && record.previous_pyramid != nullptr) {
+    GraphComputePass cull{};
+    cull.name = "hiz_cull";
+    cull.group_count_x = 1U;
+    cull.group_count_y = 1U;
+    cull.image_uses.push_back({record.previous_pyramid->image(), 0U,
+                               record.previous_pyramid->levels(), 0U,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               kShaderRead, kCompute,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               kShaderRead, kCompute});
+    plan.passes.push_back(std::move(cull));
+  }
+  return plan;
+}
+
+void VulkanRenderer::complete_hiz_frame(const HiZFrameToken& token) noexcept {
+  hiz_state_.complete_frame(token);
+}
+
+void VulkanRenderer::discard_hiz_frame(const HiZFrameToken& token) noexcept {
+  hiz_state_.discard_frame(token);
+}
+
+const VulkanHiZPyramid* VulkanRenderer::hiz_pyramid(std::uint32_t index) const noexcept {
+  return index < 2U ? hiz_pyramids_[index].get() : nullptr;
+}
+
+VulkanHiZPyramid* VulkanRenderer::hiz_pyramid(std::uint32_t index) noexcept {
+  return index < 2U ? hiz_pyramids_[index].get() : nullptr;
+}
+
+void VulkanRenderer::cleanup_hiz_pipeline_resources() noexcept {
+#ifdef OMNICPP_HAS_VULKAN
+  // Descriptor sets/layouts must be released before the image views they
+  // reference. The device is idle whenever this helper is called.
+  if (hiz_reduction_pipeline_) {
+    hiz_reduction_pipeline_->cleanup(device_);
+    hiz_reduction_pipeline_.reset();
+  }
+  if (hiz_descriptor_manager_) {
+    hiz_descriptor_manager_->cleanup();
+    hiz_descriptor_manager_.reset();
+  }
+#endif
+  hiz_reduction_layout_ = VK_NULL_HANDLE;
+  hiz_reduction_sets_[0].clear();
+  hiz_reduction_sets_[1].clear();
+  hiz_pyramid_initialized_[0] = false;
+  hiz_pyramid_initialized_[1] = false;
+  hiz_direct_enabled_ = false;
+}
+
+void VulkanRenderer::record_hiz_graph_pass(
+    VkCommandBuffer command_buffer, const GraphComputePass& pass, void* user_data) {
+  auto* renderer = static_cast<VulkanRenderer*>(user_data);
+  if (renderer != nullptr) renderer->record_hiz_dispatch(command_buffer, pass);
+}
+
+void VulkanRenderer::record_hiz_dispatch(
+    VkCommandBuffer command_buffer, const GraphComputePass& pass) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!command_buffer || active_hiz_record_ == nullptr ||
+      !hiz_reduction_pipeline_) return;
+  const auto& record = *active_hiz_record_;
+  if (pass.image_uses.empty()) return;
+  const std::uint32_t level = pass.image_uses.front().base_mip;
+  if (level >= record.levels || level >= hiz_reduction_sets_[record.token.write_index].size()) {
+    return;
+  }
+  const std::uint32_t mip_width =
+      std::max(1U, record.destination_pyramid->width() >> level);
+  const std::uint32_t mip_height =
+      std::max(1U, record.destination_pyramid->height() >> level);
+  const VkDescriptorSet set = hiz_reduction_sets_[record.token.write_index][level];
+  const std::uint32_t push[4] = {
+      record.render_width, record.render_height, record.tile_size, level};
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    hiz_reduction_pipeline_->pipeline());
+  vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          hiz_reduction_pipeline_->pipeline_layout(), 0, 1,
+                          &set, 0, nullptr);
+  vkCmdPushConstants(command_buffer, hiz_reduction_pipeline_->pipeline_layout(),
+                     VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), push);
+  vkCmdDispatch(command_buffer, (mip_width + 7U) / 8U,
+                (mip_height + 7U) / 8U, 1U);
+  ++hiz_dispatch_count_;
+#else
+  (void)command_buffer;
+  (void)pass;
+#endif
+}
+#ifdef OMNICPP_HAS_VULKAN
+bool VulkanRenderer::record_hiz_reduction(
+    VkCommandBuffer command_buffer, const HiZFrameRecord& record) {
+  if (!command_buffer || !hiz_direct_enabled_ || !hiz_reduction_pipeline_ ||
+      !hiz_reduction_layout_ || !record.destination_pyramid ||
+      !render_pass_resource_ || !render_pass_resource_->depth_is_sampleable()) {
+    return false;
+  }
+  const auto destination_index = record.token.write_index;
+  if (destination_index >= 2U ||
+      hiz_reduction_sets_[destination_index].size() < record.levels) {
+    return false;
+  }
+
+  auto plan = make_hiz_graph_plan(record);
+  if (plan.passes.size() < record.levels) return false;
+  std::vector<GraphNode> nodes;
+  nodes.reserve(record.levels);
+  for (std::uint32_t level = 0; level < record.levels; ++level) {
+    plan.passes[level].user_data = this;
+    nodes.push_back(GraphNode::from_compute(plan.passes[level]));
+  }
+  const auto compiled = compile_graph(nodes);
+  hiz_dispatch_count_ = 0U;
+  active_hiz_record_ = &record;
+  execute_graph(command_buffer, nodes, compiled, nullptr,
+                &VulkanRenderer::record_hiz_graph_pass);
+  active_hiz_record_ = nullptr;
+  return hiz_dispatch_count_ == record.levels;
+}
+#endif
+
+omnicpp::core::Result<void> VulkanRenderer::recreate_hiz_resources(
+    std::uint32_t render_width, std::uint32_t render_height) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!device_ || !physical_device_ || render_width == 0U || render_height == 0U ||
+      config_.hiz_tile_size == 0U) {
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::invalid_config);
+  }
+
+  vkDeviceWaitIdle(device_);
+  hiz_enabled_ = false;
+  pending_hiz_frame_ = false;
+  cleanup_hiz_pipeline_resources();
+  for (auto& pyramid : hiz_pyramids_) {
+    if (pyramid) {
+      pyramid->cleanup(device_);
+      pyramid.reset();
+    }
+  }
+  if (hiz_allocator_) {
+    hiz_allocator_->cleanup();
+    hiz_allocator_.reset();
+  }
+
+  auto state_result = hiz_state_.configure(render_width, render_height,
+                                           config_.hiz_tile_size,
+                                           config_.hiz_levels);
+  if (!state_result.is_ok()) return state_result;
+
+  const std::uint32_t width = hiz_state_.pyramid_width();
+  const std::uint32_t height = hiz_state_.pyramid_height();
+  const std::uint32_t levels = hiz_state_.levels();
+
+  auto allocator = std::make_unique<VulkanMemoryAllocator>();
+  auto allocator_result = allocator->initialize(device_, physical_device_);
+  if (!allocator_result.is_ok()) return allocator_result;
+
+  auto first = std::make_unique<VulkanHiZPyramid>();
+  auto first_result = first->create(device_, physical_device_, width, height,
+                                    levels, allocator.get());
+  if (!first_result.is_ok()) return first_result;
+
+  auto second = std::make_unique<VulkanHiZPyramid>();
+  auto second_result = second->create(device_, physical_device_, width, height,
+                                      levels, allocator.get());
+  if (!second_result.is_ok()) return second_result;
+
+  hiz_allocator_ = std::move(allocator);
+  hiz_pyramids_[0] = std::move(first);
+  hiz_pyramids_[1] = std::move(second);
+
+  if (!config_.hiz_reduction_shader_path.empty()) {
+    hiz_descriptor_manager_ = std::make_unique<VulkanDescriptorManager>();
+    auto descriptor_result = hiz_descriptor_manager_->initialize(device_);
+    if (!descriptor_result.is_ok()) {
+      cleanup_hiz_pipeline_resources();
+      for (auto& pyramid : hiz_pyramids_) pyramid.reset();
+      if (hiz_allocator_) hiz_allocator_.reset();
+      return descriptor_result;
+    }
+    const std::vector<ReflectedBinding> bindings = {
+        {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+         VK_SHADER_STAGE_COMPUTE_BIT},
+        {0U, 1U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+         VK_SHADER_STAGE_COMPUTE_BIT},
+        {0U, 2U, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+         VK_SHADER_STAGE_COMPUTE_BIT}};
+    auto layout_result = hiz_descriptor_manager_->create_layout(bindings, 2U * levels);
+    if (!layout_result.is_ok()) {
+      cleanup_hiz_pipeline_resources();
+      return omnicpp::core::Result<void>::error(layout_result.error());
+    }
+    hiz_reduction_layout_ = layout_result.value();
+
+    hiz_reduction_pipeline_ = std::make_unique<VulkanPipeline>();
+    auto shader_result = hiz_reduction_pipeline_->load_shader_stage_file(
+        device_, config_.hiz_reduction_shader_path, "compute");
+    if (!shader_result.is_ok()) {
+      cleanup_hiz_pipeline_resources();
+      return shader_result;
+    }
+    const VkPushConstantRange push_range{
+        VK_SHADER_STAGE_COMPUTE_BIT, 0U, 4U * sizeof(std::uint32_t)};
+    auto pipeline_layout_result = hiz_reduction_pipeline_->create_pipeline_layout(
+        device_, &hiz_reduction_layout_, 1U, &push_range);
+    if (!pipeline_layout_result.is_ok()) {
+      cleanup_hiz_pipeline_resources();
+      return pipeline_layout_result;
+    }
+    auto pipeline_result = hiz_reduction_pipeline_->create_compute_pipeline(
+        device_, hiz_reduction_pipeline_->pipeline_layout());
+    if (!pipeline_result.is_ok()) {
+      cleanup_hiz_pipeline_resources();
+      return pipeline_result;
+    }
+
+    for (std::uint32_t pyramid_index = 0; pyramid_index < 2U; ++pyramid_index) {
+      auto& sets = hiz_reduction_sets_[pyramid_index];
+      sets.reserve(levels);
+      for (std::uint32_t level = 0; level < levels; ++level) {
+        auto set_result = hiz_descriptor_manager_->allocate_set(hiz_reduction_layout_);
+        if (!set_result.is_ok()) {
+          cleanup_hiz_pipeline_resources();
+          return omnicpp::core::Result<void>::error(set_result.error());
+        }
+        const VkImageView preceding = level == 0U
+            ? render_pass_resource_->depth_view()
+            : hiz_pyramids_[pyramid_index]->mip_view(level - 1U);
+        if (!hiz_descriptor_manager_->write_image(
+                set_result.value(), 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                hiz_pyramids_[pyramid_index]->sampler(),
+                render_pass_resource_->depth_view(),
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL).is_ok() ||
+            !hiz_descriptor_manager_->write_image(
+                set_result.value(), 1U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                VK_NULL_HANDLE, hiz_pyramids_[pyramid_index]->mip_view(level),
+                VK_IMAGE_LAYOUT_GENERAL).is_ok() ||
+            !hiz_descriptor_manager_->write_image(
+                set_result.value(), 2U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                hiz_pyramids_[pyramid_index]->sampler(), preceding,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL).is_ok()) {
+          cleanup_hiz_pipeline_resources();
+          for (auto& pyramid : hiz_pyramids_) pyramid.reset();
+          if (hiz_allocator_) hiz_allocator_.reset();
+          return omnicpp::core::Result<void>::error(
+              omnicpp::core::RuntimeError::vulkan_not_available);
+        }
+        sets.push_back(set_result.value());
+      }
+    }
+    hiz_direct_enabled_ = true;
+  }
+  hiz_enabled_ = true;
+  hiz_state_.invalidate(HiZInvalidation::resize);
+  return omnicpp::core::Result<void>::ok();
+#else
+  (void)render_width;
+  (void)render_height;
+  return omnicpp::core::Result<void>::error(
+      omnicpp::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
+omnicpp::core::Result<void> VulkanRenderer::resync_for_swapchain(
+    const VulkanSwapchain& swapchain, const VulkanRenderPass& render_pass) {
+  render_pass_resource_ = &render_pass;
+  return resync_for_swapchain(swapchain, render_pass.render_pass());
+}
+
 omnicpp::core::Result<void> VulkanRenderer::resync_for_swapchain(
     const VulkanSwapchain& swapchain, VkRenderPass render_pass) {
 #ifdef OMNICPP_HAS_VULKAN
@@ -429,6 +933,16 @@ omnicpp::core::Result<void> VulkanRenderer::resync_for_swapchain(
   vkDeviceWaitIdle(device_);
   swapchain_ = &swapchain;
   render_pass_ = render_pass;
+  if (render_pass_resource_ != nullptr &&
+      render_pass_resource_->render_pass() != render_pass) {
+    render_pass_resource_ = nullptr;
+  }
+  hiz_state_.invalidate(HiZInvalidation::resize);
+  if (hiz_enabled_) {
+    auto hiz_result = recreate_hiz_resources(swapchain.extent_width(),
+                                              swapchain.extent_height());
+    if (!hiz_result.is_ok()) return hiz_result;
+  }
 
   // Retire and rebuild per-image resources for the new image set.
   for (auto semaphore : render_finished_semaphores_) {
@@ -469,6 +983,7 @@ void VulkanRenderer::cleanup(VkDevice device) noexcept {
   VkDevice dev = device ? device : device_;
   if (dev) {
     vkDeviceWaitIdle(dev);
+    cleanup_hiz_pipeline_resources();
     for (auto& frame : frames_) frame.cleanup(dev);
     for (auto semaphore : render_finished_semaphores_) {
       if (semaphore) vkDestroySemaphore(dev, semaphore, nullptr);
@@ -483,10 +998,17 @@ void VulkanRenderer::cleanup(VkDevice device) noexcept {
   frame_counter_ = 0;
   image_last_frame_.clear();
   command_pool_ = nullptr;
+  physical_device_ = nullptr;
+  for (auto& pyramid : hiz_pyramids_) pyramid.reset();
+  if (hiz_allocator_) hiz_allocator_.reset();
+  hiz_enabled_ = false;
+  hiz_state_.reset();
   device_ = nullptr;
   graphics_queue_ = nullptr;
   present_queue_ = nullptr;
   render_pass_ = nullptr;
+  render_pass_resource_ = nullptr;
+  pending_hiz_frame_ = false;
   pipeline_ = nullptr;
   pipeline_layout_ = nullptr;
   swapchain_ = nullptr;

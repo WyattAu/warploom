@@ -163,6 +163,22 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
         )
 
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/depth_reduce_image.comp.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/depth_reduce_image.comp
+                    -o ${OMNICPP_SHADER_DIR}/depth_reduce_image.comp.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/depth_reduce_image.comp
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/cull_hiz_sampled.comp.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/cull_hiz_sampled.comp
+                    -o ${OMNICPP_SHADER_DIR}/cull_hiz_sampled.comp.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/cull_hiz_sampled.comp
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/gen_cube_ring.comp.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/gen_cube_ring.comp
@@ -203,6 +219,54 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/bindless_palette.frag
             VERBATIM
         )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/indexed_scene.vert.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/indexed_scene.vert
+                    -o ${OMNICPP_SHADER_DIR}/indexed_scene.vert.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/indexed_scene.vert
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/indexed_scene.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/indexed_scene.frag
+                    -o ${OMNICPP_SHADER_DIR}/indexed_scene.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/indexed_scene.frag
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/indexed_scene_material.vert.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/indexed_scene_material.vert
+                    -o ${OMNICPP_SHADER_DIR}/indexed_scene_material.vert.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/indexed_scene_material.vert
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/indexed_scene_material.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/indexed_scene_material.frag
+                    -o ${OMNICPP_SHADER_DIR}/indexed_scene_material.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/indexed_scene_material.frag
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/textured_quad.vert
+                    -o ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/textured_quad.vert
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/textured_quad.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/textured_quad.frag
+                    -o ${OMNICPP_SHADER_DIR}/textured_quad.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/textured_quad.frag
+            VERBATIM
+        )
         add_custom_target(omnicpp_test_shaders
             DEPENDS
                 ${OMNICPP_SHADER_DIR}/triangle.vert.spv
@@ -224,9 +288,15 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/cull_lod_occlude.comp.spv
                 ${OMNICPP_SHADER_DIR}/depth_reduce.comp.spv
                 ${OMNICPP_SHADER_DIR}/depth_reduce_mips.comp.spv
+                ${OMNICPP_SHADER_DIR}/depth_reduce_image.comp.spv
+                ${OMNICPP_SHADER_DIR}/cull_hiz_sampled.comp.spv
                 ${OMNICPP_SHADER_DIR}/gen_cube_ring.comp.spv
-                ${OMNICPP_SHADER_DIR}/scene.vert.spv
-                ${OMNICPP_SHADER_DIR}/scene.frag.spv
+                ${OMNICPP_SHADER_DIR}/indexed_scene.vert.spv
+                ${OMNICPP_SHADER_DIR}/indexed_scene.frag.spv
+                ${OMNICPP_SHADER_DIR}/indexed_scene_material.vert.spv
+                ${OMNICPP_SHADER_DIR}/indexed_scene_material.frag.spv
+                ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
+                ${OMNICPP_SHADER_DIR}/textured_quad.frag.spv
         )
     endif()
 endif()
@@ -248,9 +318,21 @@ add_executable(omnicpp_unit_tests
     unit/test_scene3d.cpp
     unit/test_depth_pyramid.cpp
     unit/test_depth_pyramid_mips.cpp
+    unit/test_depth_convention.cpp
+    unit/test_hiz_frame_state.cpp
+    unit/test_renderer_hiz_contract.cpp
+    unit/test_hiz_sampled_pingpong.cpp
     unit/test_dual_queue_graph.cpp
     unit/test_gpu_driven.cpp
-    unit/test_objects3d.cpp
+    unit/test_scene_submission.cpp
+    unit/test_scene_extraction.cpp
+    unit/test_scene_camera.cpp
+    unit/test_scene_resources.cpp
+    unit/test_gltf_importer.cpp
+    unit/test_gltf_scene.cpp
+    unit/test_png_decoder.cpp
+    unit/test_jpeg_decoder.cpp
+    unit/test_png_texture.cpp
     unit/test_reflector_and_allocator_robustness.cpp
     unit/test_latency_telemetry.cpp
     unit/test_job_system.cpp
