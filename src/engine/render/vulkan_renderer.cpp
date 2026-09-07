@@ -230,6 +230,87 @@ omnicpp::core::Result<void> VulkanRenderer::record_scene(
 #endif
 }
 
+omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
+    VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
+    std::uint32_t width, std::uint32_t height) const {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!command_buffer || !scene.pipeline || !scene.pipeline_layout ||
+      width == 0U || height == 0U) {
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::invalid_config);
+  }
+
+  VkViewport viewport{};
+  viewport.width = static_cast<float>(width);
+  viewport.height = static_cast<float>(height);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+  vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+
+  VkRect2D scissor{};
+  scissor.extent = {width, height};
+  vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    scene.pipeline);
+
+  // 160-byte PBR ABI: view_projection (64) + model (64) + camera_position
+  // (16) + material_index (4) + padding (12), matching the push blocks in
+  // pbr_scene.{vert,frag}. Texture indices and shading factors are read by
+  // the fragment stage from the set-2 material SSBO.
+  struct PushConstants {
+    SceneMatrix view_projection;
+    SceneMatrix model;
+    std::array<float, 4> camera_position;
+    std::uint32_t material_index{0xffffffffU};
+    std::uint32_t pad[3]{0, 0, 0};
+  } push{};
+  push.view_projection = scene.camera.view_projection;
+  push.camera_position = scene.camera_position;
+
+  constexpr std::uint32_t kInvalidMaterial = 0xffffffffU;
+  if (scene.texture_set != VK_NULL_HANDLE) {
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene.pipeline_layout, 1, 1, &scene.texture_set, 0,
+                            nullptr);
+  }
+  if (scene.material_set != VK_NULL_HANDLE) {
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene.pipeline_layout, 2, 1, &scene.material_set, 0,
+                            nullptr);
+  }
+
+  constexpr VkShaderStageFlags kPushStages =
+      static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT |
+                                      VK_SHADER_STAGE_FRAGMENT_BIT);
+  for (const ScenePbrObject& object : scene.objects) {
+    const SceneMesh* mesh_ptr = object.effective_mesh();
+    if (mesh_ptr == nullptr || !mesh_ptr->is_drawable() ||
+        object.material_index == kInvalidMaterial) {
+      continue;
+    }
+    const SceneMesh& mesh = *mesh_ptr;
+    push.model = object.model;
+    push.material_index = object.material_index;
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene.pipeline_layout, 0, 1,
+                            &mesh.descriptor_set, 0, nullptr);
+    vkCmdPushConstants(command_buffer, scene.pipeline_layout, kPushStages, 0,
+                       sizeof(push), &push);
+    vkCmdBindIndexBuffer(command_buffer, mesh.index_buffer,
+                         mesh.index_offset, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0);
+  }
+  return omnicpp::core::Result<void>::ok();
+#else
+  (void)command_buffer;
+  (void)scene;
+  (void)width;
+  (void)height;
+  return omnicpp::core::Result<void>::error(
+      omnicpp::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
 omnicpp::core::Result<std::uint32_t> VulkanRenderer::begin_frame() {
 #ifdef OMNICPP_HAS_VULKAN
   if (!initialized_) return omnicpp::core::Result<std::uint32_t>::error(omnicpp::core::RuntimeError::vulkan_not_available);

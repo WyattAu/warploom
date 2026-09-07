@@ -91,6 +91,65 @@ struct SceneMaterial {
   TextureHandle albedo{};
 };
 
+// ---------------------------------------------------------------------------
+// PBR material data (glTF 2.0 metallic-roughness workflow).
+// ---------------------------------------------------------------------------
+
+//! Flags controlling which bindless texture indices are active for a PBR draw.
+//! Bit values match the fragment shader's flag constants.
+enum class PbrMaterialFlags : std::uint32_t {
+  kNone        = 0x00,
+  kHasAlbedo   = 0x01,
+  kHasNormal   = 0x02,
+  kHasMR       = 0x04,  //!< metallic-roughness texture
+  kHasEmissive = 0x08,
+  kHasAO       = 0x10,
+};
+
+inline PbrMaterialFlags operator|(PbrMaterialFlags a, PbrMaterialFlags b) {
+  return static_cast<PbrMaterialFlags>(static_cast<std::uint32_t>(a) |
+                                       static_cast<std::uint32_t>(b));
+}
+inline bool operator&(PbrMaterialFlags a, PbrMaterialFlags b) {
+  return (static_cast<std::uint32_t>(a) &
+          static_cast<std::uint32_t>(b)) != 0u;
+}
+
+//! GPU-side PBR material parameters plus the bindless texture indices of its
+//! optional maps.  One 64-byte SSBO slot per material; the byte layout exactly
+//! matches the fragment shader's PbrMaterial struct (std430):
+//!   base_color_factor (16) + emissive_factor (12) + metallic (4) +
+//!   roughness (4) + ao_strength (4) + flags (4) + five texture indices (20)
+//!   = 64 bytes, so array stride == sizeof(PbrMaterialData).
+//! A texture index of 0 means "no map": element 0 of the bindless set-1
+//! array is the opaque-white fallback (albedo/MR multiply by 1, normal and
+//! AO maps are skipped via their flag bits).
+struct PbrMaterialData {
+  std::array<float, 4> base_color_factor{1.0f, 1.0f, 1.0f, 1.0f};
+  std::array<float, 3> emissive_factor{0.0f, 0.0f, 0.0f};
+  float metallic_factor{1.0f};
+  float roughness_factor{1.0f};
+  float ao_strength{0.0f};        //!< 0 = no AO map, 1 = full
+  std::uint32_t flags{0};         //!< PbrMaterialFlags bitmask
+  std::uint32_t albedo_index{0};        //!< bindless set-1 element (0 = white)
+  std::uint32_t normal_index{0};        //!< 0 = geometric normal (no map)
+  std::uint32_t metallic_roughness_index{0};  //!< 0 = factors only
+  std::uint32_t emissive_index{0};      //!< 0 = factors only
+  std::uint32_t ao_index{0};            //!< 0 = no AO map
+};
+
+static_assert(sizeof(PbrMaterialData) == 64,
+              "PbrMaterialData must be exactly one 64-byte SSBO slot");
+
+struct SceneMaterialPbr {
+  SceneMaterial base{};            //!< legacy base_color + albedo handle
+  PbrMaterialData pbr{};           //!< PBR parameters
+  TextureHandle normal{};         //!< tangent-space normal map
+  TextureHandle metallic_roughness{}; //!< metallic (B) / roughness (G)
+  TextureHandle emissive{};       //!< emissive RGB texture
+  TextureHandle ao{};             //!< ambient occlusion (R channel)
+};
+
 struct SceneObject {
   // Legacy/external-resource path. Kept for source compatibility.
   const SceneMesh* mesh{nullptr};
@@ -206,6 +265,23 @@ private:
   std::vector<RetiredSlot> retired_textures_;
 };
 
+//! One drawable in a PBR scene snapshot: mesh + model + the SSBO slot of the
+//! material that shades it. GPU records stay externally owned; recording never
+//! retains pointers beyond the call.
+struct ScenePbrObject {
+  //! Legacy/external-resource path. Kept for source compatibility.
+  const SceneMesh* mesh{nullptr};
+  //! Snapshot-owned copy used by handle-backed extraction.
+  SceneMesh mesh_value{};
+  SceneMatrix model{scene_identity_matrix()};
+  //! Index into the material SSBO bound at set 2 (record_pbr_scene).
+  std::uint32_t material_index{0xffffffffU};
+
+  [[nodiscard]] const SceneMesh* effective_mesh() const noexcept {
+    return mesh != nullptr ? mesh : &mesh_value;
+  }
+};
+
 struct VulkanScene {
   VkPipeline pipeline{VK_NULL_HANDLE};
   VkPipelineLayout pipeline_layout{VK_NULL_HANDLE};
@@ -218,6 +294,23 @@ struct VulkanScene {
   //! texture; the material path samples albedos[albedo_index] per object.
   VkDescriptorSet texture_set{VK_NULL_HANDLE};
   std::vector<SceneObject> objects;
+};
+
+//! Immutable snapshot for the PBR (metallic-roughness) scene path recorded by
+//! record_pbr_scene. Set 0 = per-mesh vertex storage, set 1 = bindless
+//! sampler array (element 0 opaque-white fallback), set 2 = material SSBO
+//! (one 64-byte PbrMaterialData slot per material). The push block is the
+//! 160-byte PBR ABI: view-projection (64) + model (64) + camera position
+//! (16) + material index (4) + padding (12).
+struct VulkanPbrScene {
+  VkPipeline pipeline{VK_NULL_HANDLE};
+  VkPipelineLayout pipeline_layout{VK_NULL_HANDLE};
+  SceneCamera camera{};
+  //! World-space eye position for the view vector (specular).
+  std::array<float, 4> camera_position{0.0f, 0.0f, 0.0f, 1.0f};
+  VkDescriptorSet texture_set{VK_NULL_HANDLE};   //!< set 1, bindless samplers
+  VkDescriptorSet material_set{VK_NULL_HANDLE};  //!< set 2, material SSBO
+  std::vector<ScenePbrObject> objects;
 };
 
 //! Extract from const ECS state using legacy externally owned mesh pointers.

@@ -32,6 +32,11 @@ struct ReadbackResult {
   std::size_t red_dominant_pixels{0};
   std::size_t green_dominant_pixels{0};
   std::size_t blue_dominant_pixels{0};
+  //! Pixels whose decoded RGB channels are all >= 200 (near-white). Used by
+  //! the PBR tests to detect a bright specular highlight.
+  std::size_t bright_pixels{0};
+  //! Largest decoded r+g+b across the image (0..765).
+  std::uint32_t peak_luma{0};
   std::uint32_t center_pixel{0};
   std::uint32_t upper_triangle_pixel{0};
   std::uint32_t lower_triangle_pixel{0};
@@ -214,6 +219,11 @@ inline ReadbackResult readback_swapchain_image(VkPhysicalDevice physical_device,
         if (r > g && r > b) ++output.red_dominant_pixels;
         if (g > r && g > b) ++output.green_dominant_pixels;
         if (b > r && b > g) ++output.blue_dominant_pixels;
+        if (r >= 200U && g >= 200U && b >= 200U) ++output.bright_pixels;
+        const std::uint32_t luma = static_cast<std::uint32_t>(r) +
+                                   static_cast<std::uint32_t>(g) +
+                                   static_cast<std::uint32_t>(b);
+        if (luma > output.peak_luma) output.peak_luma = luma;
         const std::uint32_t pixel = static_cast<std::uint32_t>(r) |
                                      (static_cast<std::uint32_t>(g) << 8U) |
                                      (static_cast<std::uint32_t>(b) << 16U) |

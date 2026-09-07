@@ -124,6 +124,17 @@ public:
       VkCommandBuffer command_buffer, const VulkanScene& scene,
       std::uint32_t width, std::uint32_t height) const;
 
+  //! Record an immutable PBR (metallic-roughness) scene inside an active
+  //! render pass. The PBR pipeline uses the 160-byte push ABI
+  //! (view-projection + model + camera position + material index); sets are
+  //! bound as: 0 = per-mesh vertex storage (each object's descriptor set),
+  //! 1 = bindless sampler array (scene.texture_set, once), 2 = material SSBO
+  //! (scene.material_set, once). Objects whose material_index is invalid are
+  //! skipped.
+  [[nodiscard]] omnicpp::core::Result<void> record_pbr_scene(
+      VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
+      std::uint32_t width, std::uint32_t height) const;
+
   //! Rebind to a recreated swapchain and rebuilt pass/framebuffer resources.
   [[nodiscard]] omnicpp::core::Result<void> resync_for_swapchain(
       const VulkanSwapchain& swapchain, VkRenderPass render_pass);

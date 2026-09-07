@@ -241,6 +241,52 @@ materials sample it unchanged. Normals and UVs transform with the rigid/uniform-
 model matrices documented by the scene path. Slot reuse is deferred by the registry's
 `collect()` policy and must be gated by the frame/timeline retirement point.
 
+### PBR Metallic-Roughness Scene Path
+
+The next lighting layer over the same eleven-float vertex layout is the PBR scene
+path, which implements the glTF 2.0 metallic-roughness workflow with a Cook-Torrance
+microfacet BRDF (GGX NDF, Smith geometry, Schlick Fresnel). A PBR snapshot is a
+`VulkanPbrScene` (`engine/render/vulkan_scene.hpp`): pipeline + layout, camera
+(view-projection plus a world-space eye position for the specular view vector), the
+bindless set-1 sampler array, a set-2 material storage buffer, and `ScenePbrObject`s
+(each: mesh + model + `material_index`). `VulkanRenderer::record_pbr_scene()` binds
+sets 0/1/2 and pushes a **160-byte PBR ABI** — `view_projection` (64) + `model` (64) +
+`camera_position` (16) + `material_index` (4) + padding — with
+`assets/shaders/pbr_scene.{vert,frag}.spv`.
+
+Materials live in a CPU-uploaded SSBO (`PbrMaterialData`, one exactly-64-byte slot per
+material, layout-identical to the shader's `PbrMaterial` std430 struct so array stride
+== `sizeof`): `base_color_factor`, `emissive_factor`, `metallic_factor`,
+`roughness_factor`, `ao_strength`, a `PbrMaterialFlags` bitmask, and the five bindless
+set-1 texture indices (albedo, normal, metallic-roughness, emissive, AO). Texture
+indices travel inside the material record rather than the push block — objects sharing
+one material slot share its maps. The fragment stage samples the base-color map
+unconditionally (element 0 of the bindless array is the opaque-white fallback),
+modulates metallic/roughness per-texel from the MR map (G = roughness, B = metallic),
+perturbs the normal with a derivative-based TBN from UV/world-position gradients,
+multiplies the ambient term by the AO map, adds the emissive factor × map, and shades
+with one fixed directional key light plus a small ambient — no IBL yet (an environment
+cubemap + split-sum BRDF LUT on a later set is the natural next layer). The BRDF
+numerics are readback-proven on the GPU (`tests/unit/test_pbr_scene.cpp`):
+
+- `VulkanHardware.PbrMetallicRoughnessDiscrimination` — a smooth metallic cube
+  concentrates a bright near-white specular highlight where an identical rough
+  diffuse cube produces none; two SSBO slots populated and selected by
+  `material_index` also prove slot addressing and the 64-byte stride (a stride or
+  offset bug reads the neighbour slot's factors and breaks the expected shading)
+- `VulkanHardware.PbrEmissiveAddsUnlitColor` — a black base factor with a red
+  emissive factor renders a pure-red cube (ambient and diffuse vanish; the
+  additive emissive term is the only light), against a poisoned second SSBO slot
+  to catch mis-addressing
+- `VulkanHardware.PbrAlbedoTextureTintsLitCube` — a 1×1 red base-colour texture at
+  bindless set-1 element 1, referenced by the material slot's `albedo_index`,
+  tints the lit cube red, proving set-1 sampling under the PBR ABI
+
+Scene *extraction* and glTF *import* of PBR materials (metallic-roughness factors and
+maps, normal/emissive/occlusion textures) is the next plumbing step; today the PBR
+material table is populated programmatically (the fixtures above build
+`PbrMaterialData` directly), exactly as the lit path started.
+
 Stable mesh/material/texture registries and per-frame upload ownership are in place:
 `VulkanSceneResourceRegistry` provides generational handles with deferred slot reuse,
 and `VulkanFrameUploadArena` (in `engine/render/vulkan_frame_upload.hpp`) keeps one
@@ -469,6 +515,9 @@ Key hardware tests (`tests/unit/test_rendering.cpp`):
 - `VulkanHardware.DescriptorReflectionAndUboRender`
 - `VulkanHardware.RenderGraphTwoPassBarriersAndRender`
 - `VulkanHardware.ParallelRecorderMultithreadedBands`
+- `VulkanHardware.PbrMetallicRoughnessDiscrimination`
+- `VulkanHardware.PbrEmissiveAddsUnlitColor`
+- `VulkanHardware.PbrAlbedoTextureTintsLitCube`
 - `VulkanHardware.ParallelRecorderContentionStress` — repeated multithreaded
   recording waves with band count above core count (TSan pressure test)
 - Allocator/upload-ring sub-allocation and byte-verification tests

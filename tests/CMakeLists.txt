@@ -252,6 +252,22 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pbr_scene.vert.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_scene.vert
+                    -o ${OMNICPP_SHADER_DIR}/pbr_scene.vert.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_scene.vert
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pbr_scene.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_scene.frag
+                    -o ${OMNICPP_SHADER_DIR}/pbr_scene.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_scene.frag
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/textured_quad.vert
@@ -295,6 +311,8 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/indexed_scene.frag.spv
                 ${OMNICPP_SHADER_DIR}/indexed_scene_material.vert.spv
                 ${OMNICPP_SHADER_DIR}/indexed_scene_material.frag.spv
+                ${OMNICPP_SHADER_DIR}/pbr_scene.vert.spv
+                ${OMNICPP_SHADER_DIR}/pbr_scene.frag.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.frag.spv
         )
@@ -330,6 +348,7 @@ add_executable(omnicpp_unit_tests
     unit/test_scene_resources.cpp
     unit/test_gltf_importer.cpp
     unit/test_gltf_scene.cpp
+    unit/test_pbr_scene.cpp
     unit/test_png_decoder.cpp
     unit/test_jpeg_decoder.cpp
     unit/test_png_texture.cpp
