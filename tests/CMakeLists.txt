@@ -340,6 +340,38 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/fullscreen.vert.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/fullscreen.vert
+                    -o ${OMNICPP_SHADER_DIR}/fullscreen.vert.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/fullscreen.vert
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/tonemap_fxaa.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/tonemap_fxaa.frag
+                    -o ${OMNICPP_SHADER_DIR}/tonemap_fxaa.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/tonemap_fxaa.frag
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/bloom_downsample.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/bloom_downsample.frag
+                    -o ${OMNICPP_SHADER_DIR}/bloom_downsample.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/bloom_downsample.frag
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/bloom_upsample.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/bloom_upsample.frag
+                    -o ${OMNICPP_SHADER_DIR}/bloom_upsample.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/bloom_upsample.frag
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/textured_quad.vert
@@ -394,6 +426,10 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/shadow.frag.spv
                 ${OMNICPP_SHADER_DIR}/pbr_shadow.frag.spv
                 ${OMNICPP_SHADER_DIR}/pbr_ibl_shadow.frag.spv
+                ${OMNICPP_SHADER_DIR}/fullscreen.vert.spv
+                ${OMNICPP_SHADER_DIR}/tonemap_fxaa.frag.spv
+                ${OMNICPP_SHADER_DIR}/bloom_downsample.frag.spv
+                ${OMNICPP_SHADER_DIR}/bloom_upsample.frag.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.frag.spv
         )
@@ -432,6 +468,7 @@ add_executable(omnicpp_unit_tests
     unit/test_pbr_scene.cpp
     unit/test_pbr_ibl.cpp
     unit/test_shadow_mapping.cpp
+    unit/test_postprocessing.cpp
     unit/test_png_decoder.cpp
     unit/test_jpeg_decoder.cpp
     unit/test_png_texture.cpp
