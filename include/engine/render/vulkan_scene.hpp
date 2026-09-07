@@ -310,6 +310,11 @@ struct VulkanPbrScene {
   std::array<float, 4> camera_position{0.0f, 0.0f, 0.0f, 1.0f};
   VkDescriptorSet texture_set{VK_NULL_HANDLE};   //!< set 1, bindless samplers
   VkDescriptorSet material_set{VK_NULL_HANDLE};  //!< set 2, material SSBO
+  //! Set 3, IBL environment resources (prefiltered cube, irradiance cube,
+  //! BRDF LUT) when the scene's pipeline is the 4-set IBL variant built from
+  //! pbr_ibl.frag. record_pbr_scene binds it when non-null; pipelines whose
+  //! fragment stage never samples set 3 may leave it null.
+  VkDescriptorSet ibl_set{VK_NULL_HANDLE};
   std::vector<ScenePbrObject> objects;
 };
 

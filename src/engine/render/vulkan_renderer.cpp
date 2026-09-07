@@ -278,6 +278,13 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
                             scene.pipeline_layout, 2, 1, &scene.material_set, 0,
                             nullptr);
   }
+  if (scene.ibl_set != VK_NULL_HANDLE) {
+    // IBL variant (pbr_ibl.frag): prefiltered env cube, irradiance cube and
+    // split-sum BRDF LUT live at set 3. Non-IBL pipelines leave it null.
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene.pipeline_layout, 3, 1, &scene.ibl_set, 0,
+                            nullptr);
+  }
 
   constexpr VkShaderStageFlags kPushStages =
       static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT |

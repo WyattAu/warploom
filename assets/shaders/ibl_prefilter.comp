@@ -1,0 +1,114 @@
+#version 450
+
+// ibl_prefilter.comp — specular-IBL prefilter. One dispatch per mip level
+// writes a full cube (z = face layer) into the layer range of that mip of a
+// cube-compatible 2D-array storage image. Each output texel's normal is the
+// standard cube-face direction for (layer, x, y); radiance arriving from the
+// GGX lobe around that direction is importance-sampled from the equirect
+// sky. Roughness 0 (mip 0) degenerates to a direct sky lookup, so mip 0 is
+// the unfiltered environment and higher mips carry wider lobes.
+//
+// The cube face direction table below is the Khronos/OpenGL cubemap
+// convention (face order +X, -X, +Y, -Y, +Z, -Z), matching how samplerCube
+// selects texels in the consuming PBR fragment shader.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform sampler2D sky_sampler;
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2DArray out_cube;
+
+layout(push_constant) uniform Push {
+  float roughness;
+} pc;
+
+const uint kSampleCount = 64u;
+
+float radical_inverse_vdc(uint bits) {
+  bits = (bits << 16u) | (bits >> 16u);
+  bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+  bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+  bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+  bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+  return float(bits) * 2.3283064365386963e-10;  // 1 / 2^32
+}
+
+vec2 hammersley(uint i) {
+  return vec2(float(i) / float(kSampleCount), radical_inverse_vdc(i));
+}
+
+//! Build a tangent frame from an arbitrary normal.
+mat3 tangent_frame(vec3 n) {
+  vec3 up = abs(n.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+  vec3 t = normalize(cross(up, n));
+  vec3 b = cross(n, t);
+  return mat3(t, b, n);
+}
+
+//! GGX importance-sampled half vector in the frame of n.
+vec3 importance_sample_ggx(vec2 xi, vec3 n, float roughness) {
+  const float a = roughness * roughness;
+  const float phi = 6.28318530718f * xi.x;
+  const float cos_theta = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
+  const float sin_theta = sqrt(max(1.0 - cos_theta * cos_theta, 0.0));
+  const vec3 h = vec3(cos(phi) * sin_theta, sin(phi) * sin_theta, cos_theta);
+  return normalize(tangent_frame(n) * h);
+}
+
+//! Equirectangular lookup of a world direction (matches ibl_sky.comp).
+vec3 sample_sky(vec3 d) {
+  const float phi = atan(d.z, d.x);
+  const float theta = acos(clamp(d.y, -1.0, 1.0));
+  const vec2 uv = vec2(phi / 6.28318530718f + 0.5, theta / 3.14159265359f);
+  return texture(sky_sampler, uv).rgb;
+}
+
+//! Standard cubemap face direction for (layer, texel). u/v span [-1, 1]
+//! across the face; the returned direction is normalised.
+vec3 face_direction(uint layer, float u, float v) {
+  // Khronos/OpenGL cubemap convention (faces +X,-X,+Y,-Y,+Z,-Z = layers 0..5).
+  // sc/tc per face: +X:(-z,-y) -X:(+z,-y) +Y:(+x,+z) -Y:(+x,-z) +Z:(+x,-y)
+  //                 -Z:(-x,-y) with ma = |axis|.
+  vec3 d;
+  if (layer == 0u) {
+    d = vec3(1.0, -v, -u);      // +X
+  } else if (layer == 1u) {
+    d = vec3(-1.0, -v, u);      // -X
+  } else if (layer == 2u) {
+    d = vec3(u, 1.0, v);        // +Y
+  } else if (layer == 3u) {
+    d = vec3(u, -1.0, -v);      // -Y
+  } else if (layer == 4u) {
+    d = vec3(u, -v, 1.0);       // +Z
+  } else {
+    d = vec3(-u, -v, -1.0);     // -Z
+  }
+  return normalize(d);
+}
+
+void main() {
+  const ivec3 p = ivec3(gl_GlobalInvocationID);
+  const ivec3 size = imageSize(out_cube);  // x,y = mip dims, z = 6 layers
+  if (p.x >= size.x || p.y >= size.y || p.z >= size.z) {
+    return;
+  }
+
+  const float ru = (float(p.x) + 0.5f) / float(size.x) * 2.0f - 1.0f;
+  const float rv = (float(p.y) + 0.5f) / float(size.y) * 2.0f - 1.0f;
+  const vec3 n = face_direction(uint(p.z), ru, rv);
+
+  vec3 acc = vec3(0.0);
+  float weight = 0.0;
+  for (uint i = 0u; i < kSampleCount; ++i) {
+    const vec2 xi = hammersley(i);
+    const vec3 h = importance_sample_ggx(xi, n, pc.roughness);
+    // V = N for the mirror direction convention used by split-sum IBL.
+    const vec3 l = normalize(2.0 * dot(n, h) * h - n);
+    const float ndotl = max(dot(n, l), 0.0);
+    if (ndotl > 0.0) {
+      acc += sample_sky(l) * ndotl;
+      weight += ndotl;
+    }
+  }
+  const vec3 color = weight > 0.0 ? acc / weight : sample_sky(n);
+  imageStore(out_cube, p, vec4(color, 1.0));
+}

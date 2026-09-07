@@ -268,6 +268,46 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pbr_ibl.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_ibl.frag
+                    -o ${OMNICPP_SHADER_DIR}/pbr_ibl.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_ibl.frag
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/ibl_sky.comp.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/ibl_sky.comp
+                    -o ${OMNICPP_SHADER_DIR}/ibl_sky.comp.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/ibl_sky.comp
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/ibl_prefilter.comp.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/ibl_prefilter.comp
+                    -o ${OMNICPP_SHADER_DIR}/ibl_prefilter.comp.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/ibl_prefilter.comp
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/ibl_irradiance.comp.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/ibl_irradiance.comp
+                    -o ${OMNICPP_SHADER_DIR}/ibl_irradiance.comp.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/ibl_irradiance.comp
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/ibl_brdf_lut.comp.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/ibl_brdf_lut.comp
+                    -o ${OMNICPP_SHADER_DIR}/ibl_brdf_lut.comp.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/ibl_brdf_lut.comp
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/textured_quad.vert
@@ -313,6 +353,11 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/indexed_scene_material.frag.spv
                 ${OMNICPP_SHADER_DIR}/pbr_scene.vert.spv
                 ${OMNICPP_SHADER_DIR}/pbr_scene.frag.spv
+                ${OMNICPP_SHADER_DIR}/pbr_ibl.frag.spv
+                ${OMNICPP_SHADER_DIR}/ibl_sky.comp.spv
+                ${OMNICPP_SHADER_DIR}/ibl_prefilter.comp.spv
+                ${OMNICPP_SHADER_DIR}/ibl_irradiance.comp.spv
+                ${OMNICPP_SHADER_DIR}/ibl_brdf_lut.comp.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.frag.spv
         )
@@ -349,6 +394,7 @@ add_executable(omnicpp_unit_tests
     unit/test_gltf_importer.cpp
     unit/test_gltf_scene.cpp
     unit/test_pbr_scene.cpp
+    unit/test_pbr_ibl.cpp
     unit/test_png_decoder.cpp
     unit/test_jpeg_decoder.cpp
     unit/test_png_texture.cpp

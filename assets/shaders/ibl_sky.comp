@@ -1,0 +1,47 @@
+#version 450
+
+// ibl_sky.comp — fills an equirectangular HDR sky (RGBA16F storage image,
+// W x H pixels spanning phi in [-pi, pi] across u and theta in [0, pi]
+// across v, with y = cos(theta) so v = 0 is the +Y pole). A hard sun disc
+// (smoothstepped angular radius) is composited over a uniform ambient.
+//
+// Direction parametrisation (must match ibl_prefilter.comp /
+// ibl_irradiance.comp when they convert a world direction back to u/v):
+//   theta = acos(clamp(d.y, -1, 1));  phi = atan(d.z, d.x);
+//   u = phi / (2*pi) + 0.5;           v = theta / pi;
+//   d = (sin(theta)*cos(phi), cos(theta), sin(theta)*sin(phi))
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0, rgba16f) uniform writeonly image2D out_sky;
+
+layout(push_constant) uniform Push {
+  vec4 sun_dir;    // xyz = unit sun direction (world), w unused
+  vec4 sun_color;  // xyz = HDR sun radiance
+  vec4 sky_color;  // xyz = uniform ambient radiance
+  vec4 misc;       // x = sun angular radius (radians), y = sky gain
+} pc;
+
+void main() {
+  const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+  const ivec2 size = imageSize(out_sky);
+  if (p.x >= size.x || p.y >= size.y) {
+    return;
+  }
+
+  const float u = (float(p.x) + 0.5f) / float(size.x);
+  const float v = (float(p.y) + 0.5f) / float(size.y);
+  const float phi = u * 6.28318530718f - 3.14159265359f;
+  const float theta = v * 3.14159265359f;
+  const float st = sin(theta);
+  const vec3 d = vec3(st * cos(phi), cos(theta), st * sin(phi));
+
+  const vec3 sun = normalize(pc.sun_dir.xyz);
+  const float ang = acos(clamp(dot(d, sun), -1.0, 1.0));
+  const float radius = max(pc.misc.x, 0.001);
+  // 1 inside the disc, feathered over a 30% penumbra.
+  const float disc = 1.0 - smoothstep(radius * 0.7, radius, ang);
+
+  const vec3 col = pc.sky_color.xyz * pc.misc.y + pc.sun_color.xyz * disc;
+  imageStore(out_sky, p, vec4(col, 1.0));
+}

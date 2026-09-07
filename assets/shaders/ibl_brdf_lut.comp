@@ -1,0 +1,82 @@
+#version 450
+
+// ibl_brdf_lut.comp — split-sum environment BRDF LUT (the "Epic/UE4" table).
+// Each texel (NdotV on x, roughness on y) integrates the GGX specular BRDF
+// against a pure white environment with importance sampling and stores
+//   out.x = scale  (coefficient of F0)
+//   out.y = bias   (constant Fresnel term)
+// so that specular-IBL evaluates to  prefiltered * (F0 * LUT.x + LUT.y).
+// A 256x256 RGBA16F storage image is the conventional resolution.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0, rgba16f) uniform writeonly image2D out_lut;
+
+const uint kSampleCount = 256u;
+
+float radical_inverse_vdc(uint bits) {
+  bits = (bits << 16u) | (bits >> 16u);
+  bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+  bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+  bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+  bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+  return float(bits) * 2.3283064365386963e-10;
+}
+
+vec2 hammersley(uint i) {
+  return vec2(float(i) / float(kSampleCount), radical_inverse_vdc(i));
+}
+
+float geometry_schlick_ggx(float ndotv, float roughness) {
+  // IBL variant: k = roughness^2 / 2 (UE4).
+  const float k = (roughness * roughness) / 2.0;
+  return ndotv / (ndotv * (1.0 - k) + k);
+}
+
+float geometry_smith(float ndotv, float ndotl, float roughness) {
+  return geometry_schlick_ggx(ndotv, roughness) *
+         geometry_schlick_ggx(ndotl, roughness);
+}
+
+vec2 integrate_brdf(float ndotv, float roughness) {
+  const vec3 n = vec3(0.0, 0.0, 1.0);
+  const vec3 v = vec3(sqrt(max(1.0 - ndotv * ndotv, 0.0)), 0.0, ndotv);
+
+  float a = 0.0;
+  float b = 0.0;
+  for (uint i = 0u; i < kSampleCount; ++i) {
+    const vec2 xi = hammersley(i);
+    // Importance-sample the GGX distribution for the half vector.
+    const float r = roughness * roughness;
+    const float phi = 6.28318530718f * xi.x;
+    const float cos_theta = sqrt((1.0 - xi.y) / (1.0 + (r * r - 1.0) * xi.y));
+    const float sin_theta = sqrt(max(1.0 - cos_theta * cos_theta, 0.0));
+    const vec3 h = normalize(vec3(cos(phi) * sin_theta, sin(phi) * sin_theta,
+                                  cos_theta));
+    const vec3 l = normalize(2.0 * dot(v, h) * h - v);
+    const float ndotl = max(l.z, 0.0);
+    const float ndoth = max(h.z, 0.0);
+    const float vdoth = max(dot(v, h), 0.0);
+    if (ndotl <= 0.0) {
+      continue;
+    }
+    const float g = geometry_smith(ndotv, ndotl, roughness);
+    const float g_vis = (g * vdoth) / (ndoth * ndotv + 0.0001);
+    const float fc = pow(1.0 - vdoth, 5.0);
+    a += (1.0 - fc) * g_vis;
+    b += fc * g_vis;
+  }
+  return vec2(a, b) / float(kSampleCount);
+}
+
+void main() {
+  const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+  const ivec2 size = imageSize(out_lut);
+  if (p.x >= size.x || p.y >= size.y) {
+    return;
+  }
+  const float ndotv = (float(p.x) + 0.5f) / float(size.x);
+  const float roughness = (float(p.y) + 0.5f) / float(size.y);
+  const vec2 result = integrate_brdf(ndotv, roughness);
+  imageStore(out_lut, p, vec4(result, 0.0, 1.0));
+}
