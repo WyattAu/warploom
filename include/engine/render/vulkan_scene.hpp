@@ -315,6 +315,16 @@ struct VulkanPbrScene {
   //! pbr_ibl.frag. record_pbr_scene binds it when non-null; pipelines whose
   //! fragment stage never samples set 3 may leave it null.
   VkDescriptorSet ibl_set{VK_NULL_HANDLE};
+  // --- Shadow map resources ---
+  //! Shadow depth pipeline and layout (depth-only, light VP + model push).
+  VkPipeline shadow_pipeline{VK_NULL_HANDLE};
+  VkPipelineLayout shadow_pipeline_layout{VK_NULL_HANDLE};
+  //! Set 4: combined shadow depth texture (sampled in the fragment stage).
+  VkDescriptorSet shadow_set{VK_NULL_HANDLE};
+  VkRenderPass shadow_render_pass{VK_NULL_HANDLE};
+  VkFramebuffer shadow_framebuffer{VK_NULL_HANDLE};
+  //! Light-space view-projection used by the shadow pre-pass.
+  SceneMatrix shadow_light_vp{scene_identity_matrix()};
   std::vector<ScenePbrObject> objects;
 };
 

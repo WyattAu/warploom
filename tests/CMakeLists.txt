@@ -308,6 +308,38 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/shadow.vert.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/shadow.vert
+                    -o ${OMNICPP_SHADER_DIR}/shadow.vert.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/shadow.vert
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/shadow.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/shadow.frag
+                    -o ${OMNICPP_SHADER_DIR}/shadow.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/shadow.frag
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pbr_shadow.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_shadow.frag
+                    -o ${OMNICPP_SHADER_DIR}/pbr_shadow.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_shadow.frag
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pbr_ibl_shadow.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_ibl_shadow.frag
+                    -o ${OMNICPP_SHADER_DIR}/pbr_ibl_shadow.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_ibl_shadow.frag
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/textured_quad.vert
@@ -358,6 +390,10 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/ibl_prefilter.comp.spv
                 ${OMNICPP_SHADER_DIR}/ibl_irradiance.comp.spv
                 ${OMNICPP_SHADER_DIR}/ibl_brdf_lut.comp.spv
+                ${OMNICPP_SHADER_DIR}/shadow.vert.spv
+                ${OMNICPP_SHADER_DIR}/shadow.frag.spv
+                ${OMNICPP_SHADER_DIR}/pbr_shadow.frag.spv
+                ${OMNICPP_SHADER_DIR}/pbr_ibl_shadow.frag.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.frag.spv
         )
@@ -395,6 +431,7 @@ add_executable(omnicpp_unit_tests
     unit/test_gltf_scene.cpp
     unit/test_pbr_scene.cpp
     unit/test_pbr_ibl.cpp
+    unit/test_shadow_mapping.cpp
     unit/test_png_decoder.cpp
     unit/test_jpeg_decoder.cpp
     unit/test_png_texture.cpp

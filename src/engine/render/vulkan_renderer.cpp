@@ -253,6 +253,7 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     scene.pipeline);
 
+  // ---- Main PBR lit pass ------------------------------------------------
   // 160-byte PBR ABI: view_projection (64) + model (64) + camera_position
   // (16) + material_index (4) + padding (12), matching the push blocks in
   // pbr_scene.{vert,frag}. Texture indices and shading factors are read by
@@ -267,6 +268,8 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
   push.view_projection = scene.camera.view_projection;
   push.camera_position = scene.camera_position;
 
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    scene.pipeline);
   constexpr std::uint32_t kInvalidMaterial = 0xffffffffU;
   if (scene.texture_set != VK_NULL_HANDLE) {
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -283,6 +286,12 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
     // split-sum BRDF LUT live at set 3. Non-IBL pipelines leave it null.
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             scene.pipeline_layout, 3, 1, &scene.ibl_set, 0,
+                            nullptr);
+  }
+  if (scene.shadow_set != VK_NULL_HANDLE) {
+    // Shadow map from set 4: sampled in the fragment stage for PCF.
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene.pipeline_layout, 4, 1, &scene.shadow_set, 0,
                             nullptr);
   }
 
