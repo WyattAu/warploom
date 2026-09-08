@@ -340,6 +340,22 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/sky.vert.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/sky.vert
+                    -o ${OMNICPP_SHADER_DIR}/sky.vert.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/sky.vert
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/sky.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/sky.frag
+                    -o ${OMNICPP_SHADER_DIR}/sky.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/sky.frag
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/fullscreen.vert.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/fullscreen.vert
@@ -439,6 +455,8 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/bloom_downsample.frag.spv
                 ${OMNICPP_SHADER_DIR}/bloom_upsample.frag.spv
                 ${OMNICPP_SHADER_DIR}/skinned_scene.vert.spv
+                ${OMNICPP_SHADER_DIR}/sky.vert.spv
+                ${OMNICPP_SHADER_DIR}/sky.frag.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.frag.spv
         )
@@ -477,6 +495,7 @@ add_executable(omnicpp_unit_tests
     unit/test_pbr_scene.cpp
     unit/test_pbr_ibl.cpp
     unit/test_shadow_mapping.cpp
+    unit/test_sky.cpp
     unit/test_postprocessing.cpp
     unit/test_gpu_skinning.cpp
     unit/test_png_decoder.cpp
