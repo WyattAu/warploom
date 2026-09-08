@@ -350,8 +350,9 @@ struct VulkanPbrScene {
   // --- Analytic sky pass (optional) ---
   //! Full-screen sky pipeline built from sky.vert/sky.frag: 3-vertex draw,
   //! depth test LEQUAL with writes OFF, set 0 = sky-params UBO, 64-byte push.
-  //! record_pbr_scene draws it before the objects; cleared depth (1.0) lets
-  //! geometry overdraw it, and the sky's far-plane depth wins empty pixels.
+  //! record_pbr_scene draws it before the objects (via record_sky_pre_draw);
+  //! cleared depth (1.0) lets geometry overdraw it, and the sky's far-plane
+  //! depth wins empty pixels.
   VkPipeline sky_pipeline{VK_NULL_HANDLE};
   VkPipelineLayout sky_pipeline_layout{VK_NULL_HANDLE};
   VkDescriptorSet sky_set{VK_NULL_HANDLE};  //!< set 0, SkyParams UBO

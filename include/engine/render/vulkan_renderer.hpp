@@ -166,6 +166,13 @@ public:
       VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
       std::uint32_t width, std::uint32_t height) const;
 
+  //! Record the analytic sky pre-draw inside an active render pass (full-
+  //! screen triangle, depth test on / writes off, LEQUAL vs cleared 1.0).
+  //! Callers recording their own scene can compose it; record_pbr_scene
+  //! invokes this when scene.sky_pipeline is set. No-op Ok when unset.
+  [[nodiscard]] omnicpp::core::Result<void> record_sky_pre_draw(
+      VkCommandBuffer command_buffer, const VulkanPbrScene& scene) const;
+
   //! Graph-driven whole-frame recording: compiles a [shadow pre-pass -> main
   //! lit pass] node sequence (empty when no shadow pipeline is set), lets
   //! compile_graph compute the shadow map's DEPTH_ATTACHMENT -> DEPTH_READ

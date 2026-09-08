@@ -256,28 +256,10 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
   // depth test (sky writes no depth; LEQUAL against cleared 1.0 lets it
   // through on empty pixels and behind geometry it simply loses).
   if (scene.sky_pipeline != VK_NULL_HANDLE) {
-    struct SkyPush {
-      std::array<float, 4> camera_position;  // xyz eye, w tan_half_fov
-      std::array<float, 4> forward;          // xyz forward, w aspect
-      std::array<float, 4> right;
-      std::array<float, 4> up;
-    } sky_push{};
-    sky_push.camera_position = scene.sky_view.camera_position;
-    sky_push.forward = scene.sky_view.forward;
-    sky_push.right = scene.sky_view.right;
-    sky_push.up = scene.sky_view.up;
-
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      scene.sky_pipeline);
-    if (scene.sky_set != VK_NULL_HANDLE) {
-      vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              scene.sky_pipeline_layout, 0, 1, &scene.sky_set,
-                              0, nullptr);
+    if (!record_sky_pre_draw(command_buffer, scene).is_ok()) {
+      return omnicpp::core::Result<void>::error(
+          omnicpp::core::RuntimeError::invalid_config);
     }
-    vkCmdPushConstants(command_buffer, scene.sky_pipeline_layout,
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0, sizeof(sky_push), &sky_push);
-    vkCmdDraw(command_buffer, 3, 1, 0, 0);
     // Main pipeline rebind follows below; sky state does not leak.
   }
 
@@ -630,6 +612,48 @@ omnicpp::core::Result<void> VulkanRenderer::record_fullscreen_pass(
   (void)command_buffer;
   (void)pass;
   (void)set0;
+  return omnicpp::core::Result<void>::error(
+      omnicpp::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
+omnicpp::core::Result<void> VulkanRenderer::record_sky_pre_draw(
+    VkCommandBuffer command_buffer, const VulkanPbrScene& scene) const {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!command_buffer) {
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::invalid_config);
+  }
+  if (scene.sky_pipeline == VK_NULL_HANDLE) {
+    return omnicpp::core::Result<void>::ok();  // Optional pass: no-op.
+  }
+
+  struct SkyPush {
+    std::array<float, 4> camera_position;  // xyz eye, w tan_half_fov
+    std::array<float, 4> forward;          // xyz forward, w aspect
+    std::array<float, 4> right;
+    std::array<float, 4> up;
+  } sky_push{};
+  sky_push.camera_position = scene.sky_view.camera_position;
+  sky_push.forward = scene.sky_view.forward;
+  sky_push.right = scene.sky_view.right;
+  sky_push.up = scene.sky_view.up;
+
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    scene.sky_pipeline);
+  if (scene.sky_set != VK_NULL_HANDLE) {
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene.sky_pipeline_layout, 0, 1, &scene.sky_set,
+                            0, nullptr);
+  }
+  vkCmdPushConstants(command_buffer, scene.sky_pipeline_layout,
+                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                     0, sizeof(sky_push), &sky_push);
+  vkCmdDraw(command_buffer, 3, 1, 0, 0);
+  return omnicpp::core::Result<void>::ok();
+#else
+  (void)command_buffer;
+  (void)scene;
   return omnicpp::core::Result<void>::error(
       omnicpp::core::RuntimeError::vulkan_not_available);
 #endif
