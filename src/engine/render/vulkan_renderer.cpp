@@ -326,11 +326,33 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
   constexpr VkShaderStageFlags kPushStages =
       static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT |
                                       VK_SHADER_STAGE_FRAGMENT_BIT);
+
+  // ---- GPU LOD resolution (optional) -------------------------------------
+  // The app maps the selection buffer (HOST_VISIBLE|HOST_COHERENT) and hands
+  // record_pbr_scene the host pointer; per-object uvec2(lod, visible) results
+  // start at word 26 + 4*N, matching lod_select.comp's output layout.
+  const bool lod_active = scene.lod_results != nullptr &&
+                          scene.lod_object_count > 0U &&
+                          scene.lod_object_count == scene.objects.size();
+  const std::uint32_t lod_result_base = 26U + 4U * scene.lod_object_count;
+
   for (const ScenePbrObject& object : scene.objects) {
     const SceneMesh* mesh_ptr = object.effective_mesh();
     if (mesh_ptr == nullptr || !mesh_ptr->is_drawable() ||
         object.material_index == kInvalidMaterial) {
       continue;
+    }
+    // Resolve the GPU-selected LOD level for this object (index order must
+    // match the selection dispatch). Objects without a chain always draw
+    // level 0; culled objects are skipped.
+    if (lod_active) {
+      const std::size_t obj = &object - scene.objects.data();
+      const std::uint32_t lod = scene.lod_results[lod_result_base + 2U * obj];
+      const std::uint32_t visible =
+          scene.lod_results[lod_result_base + 2U * obj + 1U];
+      if (visible == 0U) continue;
+      mesh_ptr = object.mesh_for_lod(lod);
+      if (mesh_ptr == nullptr || !mesh_ptr->is_drawable()) continue;
     }
     const SceneMesh& mesh = *mesh_ptr;
     push.model = object.model;

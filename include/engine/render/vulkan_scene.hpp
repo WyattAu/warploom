@@ -273,12 +273,24 @@ struct ScenePbrObject {
   const SceneMesh* mesh{nullptr};
   //! Snapshot-owned copy used by handle-backed extraction.
   SceneMesh mesh_value{};
+  //! Optional LOD chain: variants from most to least detailed (index 0 must
+  //! equal `mesh` semantics — the full-detail mesh). When non-empty and a GPU
+  //! LOD selection buffer is bound on the scene, record_pbr_scene resolves
+  //! the selected level per object; otherwise level 0 draws.
+  std::vector<const SceneMesh*> lod_meshes{};
   SceneMatrix model{scene_identity_matrix()};
   //! Index into the material SSBO bound at set 2 (record_pbr_scene).
   std::uint32_t material_index{0xffffffffU};
 
   [[nodiscard]] const SceneMesh* effective_mesh() const noexcept {
     return mesh != nullptr ? mesh : &mesh_value;
+  }
+  //! Mesh for the given LOD level, clamped to the available variants.
+  [[nodiscard]] const SceneMesh* mesh_for_lod(std::uint32_t level) const noexcept {
+    if (lod_meshes.empty() || level == 0U) return effective_mesh();
+    const std::uint32_t idx = level < lod_meshes.size() ? level
+                                                        : static_cast<std::uint32_t>(lod_meshes.size()) - 1U;
+    return lod_meshes[idx] != nullptr ? lod_meshes[idx] : effective_mesh();
   }
 };
 
@@ -337,6 +349,18 @@ struct VulkanPbrScene {
   VkPipeline sky_pipeline{VK_NULL_HANDLE};
   VkPipelineLayout sky_pipeline_layout{VK_NULL_HANDLE};
   VkDescriptorSet sky_set{VK_NULL_HANDLE};  //!< set 0, SkyParams UBO
+  // --- GPU LOD selection (optional) ---
+  //! Host pointer to the mapped lod_select.comp output buffer (HOST_VISIBLE
+  //! | HOST_COHERENT by contract). Word layout matches the compute pass:
+  //! [0] instance_count, [1] visible_count, [2..25] frustum planes,
+  //! [26+4i .. +3] bounding spheres, then per-object uvec2(lod, visible)
+  //! starting at word 26 + 4*count. When lod_results is non-null and
+  //! lod_object_count matches objects.size(), record_pbr_scene draws the
+  //! mesh variant selected by the GPU pass from
+  //! ScenePbrObject::lod_meshes; the app dispatches lod_select.comp before
+  //! recording the graphics pass so the results are current.
+  const std::uint32_t* lod_results{nullptr};
+  std::uint32_t lod_object_count{0U};
   //! Camera basis for the sky ray reconstruction. The app fills this from
   //! the camera orientation (w slots: tan_half_fov in camera_position, aspect
   //! ratio in forward); it is pushed verbatim to the sky shaders.

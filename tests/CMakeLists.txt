@@ -506,6 +506,7 @@ add_executable(omnicpp_unit_tests
     unit/test_shadow_mapping.cpp
     unit/test_sky.cpp
     unit/test_sky_integration.cpp
+    unit/test_lod_integration.cpp
     unit/test_postprocessing.cpp
     unit/test_gpu_skinning.cpp
     unit/test_mesh_lod.cpp
