@@ -18,6 +18,8 @@
 #include <vector>
 
 #include "engine/render/vulkan_context.hpp"
+#include "engine/render/vulkan_render_graph.hpp"
+#include "engine/render/vulkan_renderer.hpp"
 #include "engine/render/vulkan_descriptors.hpp"
 #include "engine/render/vulkan_frame_upload.hpp"
 #include "engine/render/vulkan_memory_allocator.hpp"
@@ -294,62 +296,78 @@ struct PostProcessHarness {
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cb, &bi);
 
-    // Pass 1: HDR scene to hdr_image.
-    {
-      VkClearValue cv{}; cv.color = {{0,0,0,1}};
-      VkRenderPassBeginInfo rpb{};
-      rpb.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-      rpb.renderPass = hdr_rp; rpb.framebuffer = hdr_fb;
-      rpb.renderArea.extent = {256,256};
-      rpb.clearValueCount = 1; rpb.pClearValues = &cv;
-      vkCmdBeginRenderPass(cb, &rpb, VK_SUBPASS_CONTENTS_INLINE);
-      VkViewport vp{0,0,256,256,0,1};
-      vkCmdSetViewport(cb, 0, 1, &vp);
-      VkRect2D sc{{0,0},{256,256}};
-      vkCmdSetScissor(cb, 0, 1, &sc);
-      vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, scene.pipeline);
-      if (scene.texture_set) vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-          scene.pipeline_layout, 1, 1, &scene.texture_set, 0, nullptr);
-      if (scene.material_set) vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-          scene.pipeline_layout, 2, 1, &scene.material_set, 0, nullptr);
-      struct Push { SceneMatrix vp; SceneMatrix model; std::array<float,4> cam; uint32_t mi; uint32_t p[3]{}; } push{};
-      push.vp = scene.camera.view_projection; push.cam = scene.camera_position;
-      VkShaderStageFlags ks = VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT;
-      for (auto& o : scene.objects) {
-        auto* m = o.effective_mesh();
-        if (!m||!m->is_drawable()) continue;
-        push.model = o.model; push.mi = o.material_index;
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-            scene.pipeline_layout, 0, 1, &m->descriptor_set, 0, nullptr);
-        vkCmdPushConstants(cb, scene.pipeline_layout, ks, 0, sizeof(push), &push);
-        vkCmdBindIndexBuffer(cb, m->index_buffer, m->index_offset, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(cb, m->index_count, 1, 0, 0, 0);
-      }
-      vkCmdEndRenderPass(cb);
-    }
+    // Graph-driven two-node frame: [HDR scene -> tonemap/FXAA]. The compiler
+    // computes the hdr_image COLOR_ATTACHMENT -> SHADER_READ transition and
+    // the write -> read barrier between the nodes from the attachment
+    // finalLayout + tonemap sampled declaration. Pass contexts travel via
+    // user_data shims.
+    omnicpp::render::VulkanRenderer frame_renderer;
 
-    // Pass 2: tonemap + FXAA to out_target.
-    {
-      VkClearValue clears[2]{};
-      clears[0].color = {{0,0,0,1}};
-      clears[1].depthStencil = {1.0f, 0};
-      VkRenderPassBeginInfo rpb{};
-      rpb.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-      rpb.renderPass = out_target.render_pass();
-      rpb.framebuffer = out_target.framebuffer();
-      rpb.renderArea.extent = {256,256};
-      rpb.clearValueCount = 2; rpb.pClearValues = clears;
-      vkCmdBeginRenderPass(cb, &rpb, VK_SUBPASS_CONTENTS_INLINE);
-      VkViewport vp{0,0,256,256,0,1};
-      vkCmdSetViewport(cb, 0, 1, &vp);
-      VkRect2D sc{{0,0},{256,256}};
-      vkCmdSetScissor(cb, 0, 1, &sc);
-      vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, tonemap_pipe.pipeline());
-      vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-          tonemap_pipe.pipeline_layout(), 0, 1, &hdr_ds, 0, nullptr);
-      vkCmdDraw(cb, 3, 1, 0, 0);  // fullscreen triangle
-      vkCmdEndRenderPass(cb);
-    }
+    omnicpp::render::GraphPass hdr_pass{};
+    hdr_pass.name = "hdr_scene";
+    hdr_pass.render_pass = hdr_rp;
+    hdr_pass.framebuffer = hdr_fb;
+    hdr_pass.width = 256;
+    hdr_pass.height = 256;
+    hdr_pass.attachments = {omnicpp::render::color_attachment(
+        hdr_image, hdr_view, VK_FORMAT_R16G16B16A16_SFLOAT,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)};
+    VkClearValue hdr_clear{};
+    hdr_clear.color = {{0, 0, 0, 1}};
+    hdr_pass.clear_values = &hdr_clear;
+    hdr_pass.clear_value_count = 1;
+    struct SceneCtx {
+      const VulkanPbrScene* scene;
+      omnicpp::render::VulkanRenderer* self;
+    } scene_ctx{&scene, &frame_renderer};
+    struct TmCtx {
+      omnicpp::render::VulkanRenderer* self;
+      omnicpp::render::VulkanRenderer::FullscreenPass* pass;
+      VkDescriptorSet set0;
+    } tm_ctx{&frame_renderer, nullptr, hdr_ds};
+    hdr_pass.user_data = &scene_ctx;
+    omnicpp::render::VulkanRenderer::FullscreenPass tm{};
+    tm.pipeline = tonemap_pipe.pipeline();
+    tm.pipeline_layout = tonemap_pipe.pipeline_layout();
+    tm.render_pass = out_target.render_pass();
+    tm.framebuffer = out_target.framebuffer();
+    tm.width = 256;
+    tm.height = 256;
+    VkClearValue tm_clears[2]{};
+    tm_clears[0].color = {{0, 0, 0, 1}};
+    tm_clears[1].depthStencil = {1.0f, 0};
+    tm.clear_values = tm_clears;
+    tm.clear_value_count = 2;
+    tm.samples[0] = {hdr_image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_IMAGE_ASPECT_COLOR_BIT};
+    tm.sample_count = 1;
+    tm_ctx.pass = &tm;
+
+    omnicpp::render::GraphPass tm_pass =
+        frame_renderer.fullscreen_graph_pass(tm);
+    tm_pass.name = "tonemap_fxaa";
+    tm_pass.user_data = &tm_ctx;
+
+    const std::vector<omnicpp::render::GraphNode> nodes = {
+        omnicpp::render::GraphNode::from_render(hdr_pass),
+        omnicpp::render::GraphNode::from_render(tm_pass),
+    };
+    const auto compiled = omnicpp::render::compile_graph(nodes);
+
+    omnicpp::render::execute_graph(cb, nodes, compiled,
+        [](VkCommandBuffer command_buffer, const omnicpp::render::GraphPass& p,
+           void* user_data) {
+          if (p.name != nullptr && std::strcmp(p.name, "hdr_scene") == 0) {
+            auto& sc = *static_cast<SceneCtx*>(user_data);
+            (void)sc.self->record_pbr_scene(command_buffer, *sc.scene, p.width,
+                                            p.height);
+          } else {
+            auto& fx = *static_cast<TmCtx*>(user_data);
+            (void)fx.self->record_fullscreen_draw(command_buffer, *fx.pass,
+                                                  fx.set0);
+          }
+        },
+        nullptr);
 
     vkEndCommandBuffer(cb);
     vkResetFences(dev, 1, &fence);

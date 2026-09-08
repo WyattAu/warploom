@@ -546,6 +546,95 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_frame(
 #endif
 }
 
+namespace {
+
+//! Fullscreen-record shim for execute_graph: user_data carries a
+//! FullscreenCtx (renderer + pass + set), the callback records the draw.
+struct FullscreenCtx {
+  const VulkanRenderer* self;
+  const VulkanRenderer::FullscreenPass* pass;
+  VkDescriptorSet set0;
+};
+
+void fullscreen_render_cb(VkCommandBuffer cb, const GraphPass& pass,
+                          void* user_data) {
+  auto& fx = *static_cast<FullscreenCtx*>(user_data);
+  (void)pass;
+  (void)fx.self->record_fullscreen_draw(cb, *fx.pass, fx.set0);
+}
+
+}  // namespace
+
+omnicpp::core::Result<void> VulkanRenderer::record_fullscreen_draw(
+    VkCommandBuffer command_buffer, const FullscreenPass& pass,
+    VkDescriptorSet set0) const {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!command_buffer || pass.pipeline == VK_NULL_HANDLE ||
+      pass.pipeline_layout == VK_NULL_HANDLE) {
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::invalid_config);
+  }
+  // Dynamic viewport/scissor: safe inside an active render pass (graph
+  // callback path) and idempotent before one (direct path).
+  VkViewport viewport{};
+  viewport.width = static_cast<float>(pass.width);
+  viewport.height = static_cast<float>(pass.height);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+  vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+  VkRect2D scissor{};
+  scissor.extent = {pass.width, pass.height};
+  vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    pass.pipeline);
+  if (set0 != VK_NULL_HANDLE) {
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pass.pipeline_layout, 0, 1, &set0, 0, nullptr);
+  }
+  vkCmdDraw(command_buffer, pass.vertex_count, pass.instance_count, 0, 0);
+  return omnicpp::core::Result<void>::ok();
+#else
+  (void)command_buffer;
+  (void)pass;
+  (void)set0;
+  return omnicpp::core::Result<void>::error(
+      omnicpp::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
+omnicpp::core::Result<void> VulkanRenderer::record_fullscreen_pass(
+    VkCommandBuffer command_buffer, const FullscreenPass& pass,
+    VkDescriptorSet set0) const {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!command_buffer || pass.render_pass == VK_NULL_HANDLE ||
+      pass.framebuffer == VK_NULL_HANDLE || pass.width == 0U ||
+      pass.height == 0U) {
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::invalid_config);
+  }
+
+  VkRenderPassBeginInfo begin{};
+  begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  begin.renderPass = pass.render_pass;
+  begin.framebuffer = pass.framebuffer;
+  begin.renderArea.extent = {pass.width, pass.height};
+  begin.clearValueCount = pass.clear_value_count;
+  begin.pClearValues = pass.clear_values;
+  vkCmdBeginRenderPass(command_buffer, &begin, VK_SUBPASS_CONTENTS_INLINE);
+
+  const auto draw = record_fullscreen_draw(command_buffer, pass, set0);
+  vkCmdEndRenderPass(command_buffer);
+  return draw;
+#else
+  (void)command_buffer;
+  (void)pass;
+  (void)set0;
+  return omnicpp::core::Result<void>::error(
+      omnicpp::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
 omnicpp::core::Result<std::uint32_t> VulkanRenderer::begin_frame() {
 #ifdef OMNICPP_HAS_VULKAN
   if (!initialized_) return omnicpp::core::Result<std::uint32_t>::error(omnicpp::core::RuntimeError::vulkan_not_available);

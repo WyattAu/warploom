@@ -16,6 +16,7 @@
 #include "engine/render/vulkan_hiz_pyramid.hpp"
 #include "engine/render/vulkan_render_graph.hpp"
 #include "engine/render/vulkan_scene.hpp"
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -175,6 +176,76 @@ public:
   [[nodiscard]] omnicpp::core::Result<void> record_pbr_frame(
       VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
       const PbrFrameTargets& targets) const;
+
+  //! One full-screen triangle sampling up to 4 source images (post-process:
+  //! tonemap/FXAA/bloom combine, sky resolve, SSAO blur...). The graph node
+  //! declares the sources as sampled_images so compile_graph computes the
+  //! producer->sample layout transitions. Callback-based so tests can also
+  //! use it inside execute_graph nodes; the direct-call form below records
+  //! its own render pass begin/end.
+  struct FullscreenPass {
+    VkPipeline pipeline{VK_NULL_HANDLE};
+    VkPipelineLayout pipeline_layout{VK_NULL_HANDLE};
+    VkRenderPass render_pass{VK_NULL_HANDLE};
+    VkFramebuffer framebuffer{VK_NULL_HANDLE};
+    std::uint32_t width{0};
+    std::uint32_t height{0};
+    //! Clear values for the target (color+depth as declared by the render
+    //! pass; may be null when every attachment load-ops LOAD).
+    const VkClearValue* clear_values{nullptr};
+    std::uint32_t clear_value_count{0};
+    //! Images the shader samples; layouts must match the descriptor writes.
+    struct Sampled {
+      VkImage image{VK_NULL_HANDLE};
+      VkImageLayout layout{VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+      std::uint32_t aspect{1};  //!< VkImageAspectFlags; 1 = COLOR_BIT.
+    };
+    std::array<Sampled, 4> samples{};
+    std::uint32_t sample_count{0};
+    //! Optional draw parameters (default: 3-vertex triangle, 1 instance).
+    std::uint32_t vertex_count{3};
+    std::uint32_t instance_count{1};
+  };
+
+  //! Record one FullscreenPass inside an ACTIVE render pass (no begin/end,
+  //! viewport/scissor to width x height, bind pipeline + set 0 = the caller's
+  //! single set, draw). Callback-compatible with graph record hooks.
+  [[nodiscard]] omnicpp::core::Result<void> record_fullscreen_draw(
+      VkCommandBuffer command_buffer, const FullscreenPass& pass,
+      VkDescriptorSet set0) const;
+
+  //! Graph node wrapper: records render-pass begin + record_fullscreen_draw
+  //! + end. Compatible with execute_graph's record_render hook via the
+  //! user_data pointer pattern.
+  [[nodiscard]] omnicpp::core::Result<void> record_fullscreen_pass(
+      VkCommandBuffer command_buffer, const FullscreenPass& pass,
+      VkDescriptorSet set0) const;
+
+  //! Build a GraphPass for a FullscreenPass: extents/clears forwarded,
+  //! sampled_images filled from pass.samples so compile_graph computes the
+  //! producer -> sample transitions. Attachments stay empty (fullscreen
+  //! targets have no in-graph producer; VkRenderPass owns their layout).
+  //! The FullscreenPass must outlive the recording call (clear pointer).
+  [[nodiscard]] inline GraphPass fullscreen_graph_pass(
+      const FullscreenPass& pass) {
+    GraphPass out{};
+    out.name = "fullscreen";
+    out.render_pass = pass.render_pass;
+    out.framebuffer = pass.framebuffer;
+    out.width = pass.width;
+    out.height = pass.height;
+    out.clear_values = pass.clear_values;
+    out.clear_value_count = pass.clear_value_count;
+    for (std::uint32_t i = 0;
+         i < pass.sample_count && i < pass.samples.size(); ++i) {
+      GraphSampledImage s{};
+      s.image = pass.samples[i].image;
+      s.used_layout = pass.samples[i].layout;
+      s.aspect = pass.samples[i].aspect;
+      out.sampled_images.push_back(s);
+    }
+    return out;
+  }
 
   //! Rebind to a recreated swapchain and rebuilt pass/framebuffer resources.
   [[nodiscard]] omnicpp::core::Result<void> resync_for_swapchain(
