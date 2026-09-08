@@ -31,5 +31,7 @@ void main() {
   // only uses the ray direction and camera origin).
   v_world_pos = pc.camera_position.xyz + rd * 1e6;
 
-  gl_Position = vec4(ndc, 1.0, 1.0);  // z = far plane
+  gl_Position = vec4(ndc, 0.999999, 1.0);  // just inside the far plane so a
+                                           // LESS depth compare still passes
+                                           // against cleared depth 1.0
 }

@@ -329,6 +329,23 @@ struct VulkanPbrScene {
   //! pre-multiplied with the inverse bind matrix on the CPU). Bound only when
   //! the pipeline's vertex stage samples the skinning SSBO (skinned_scene.vert).
   VkDescriptorSet bone_set{VK_NULL_HANDLE};
+  // --- Analytic sky pass (optional) ---
+  //! Full-screen sky pipeline built from sky.vert/sky.frag: 3-vertex draw,
+  //! depth test LEQUAL with writes OFF, set 0 = sky-params UBO, 64-byte push.
+  //! record_pbr_scene draws it before the objects; cleared depth (1.0) lets
+  //! geometry overdraw it, and the sky's far-plane depth wins empty pixels.
+  VkPipeline sky_pipeline{VK_NULL_HANDLE};
+  VkPipelineLayout sky_pipeline_layout{VK_NULL_HANDLE};
+  VkDescriptorSet sky_set{VK_NULL_HANDLE};  //!< set 0, SkyParams UBO
+  //! Camera basis for the sky ray reconstruction. The app fills this from
+  //! the camera orientation (w slots: tan_half_fov in camera_position, aspect
+  //! ratio in forward); it is pushed verbatim to the sky shaders.
+  struct SkyView {
+    std::array<float, 4> camera_position{0.0f, 0.0f, 0.0f, 0.57735026f};
+    std::array<float, 4> forward{0.0f, 0.0f, -1.0f, 1.0f};
+    std::array<float, 4> right{1.0f, 0.0f, 0.0f, 0.0f};
+    std::array<float, 4> up{0.0f, 1.0f, 0.0f, 0.0f};
+  } sky_view{};
   std::vector<ScenePbrObject> objects;
 };
 
