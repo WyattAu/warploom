@@ -61,7 +61,7 @@ RenderPassAttachment color_attachment(
   a.access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
   a.stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 #else
-  constexpr std::uint32_t kColorWriteAccess = 0x40;
+  constexpr std::uint32_t kColorWriteAccess = 0x100;  // COLOR_ATTACHMENT_WRITE
   constexpr std::uint32_t kColorOutStage = 0x200;
   a.access = kColorWriteAccess;
   a.stage = kColorOutStage;
@@ -84,7 +84,7 @@ RenderPassAttachment depth_attachment(
   a.stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
             VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
 #else
-  constexpr std::uint32_t kDepthWriteAccess = 0x200;
+  constexpr std::uint32_t kDepthWriteAccess = 0x400;  // DEPTH_STENCIL_ATTACHMENT_WRITE
   constexpr std::uint32_t kEarlyFrag = 0x1000;
   constexpr std::uint32_t kLateFrag = 0x2000;
   a.access = kDepthWriteAccess;
@@ -256,6 +256,13 @@ CompiledGraph compile_graph(const std::vector<GraphNode>& nodes) {
     const GraphPass* render = node.render;
     if (render != nullptr) {
       std::vector<GraphBarrier>& barriers = out.barriers_per_node[p];
+#ifdef OMNICPP_HAS_VULKAN
+      constexpr std::uint32_t kShaderRead = VK_ACCESS_SHADER_READ_BIT;
+      constexpr std::uint32_t kFragStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+#else
+      constexpr std::uint32_t kShaderRead = 0x20;   // SHADER_READ
+      constexpr std::uint32_t kFragStage = 0x80;    // FRAGMENT_SHADER
+#endif
       for (const RenderPassAttachment& att : render->attachments) {
         if (!att.image) continue;
         ImageState& state = states[{att.image, 0U}];
@@ -279,6 +286,45 @@ CompiledGraph compile_graph(const std::vector<GraphNode>& nodes) {
         state.access = att.access;
         state.stage = att.stage;
         state.valid = true;
+      }
+
+      // Sampled (non-attachment) images: track the layout transition from
+      // whatever an earlier graph pass left behind into the sampled layout.
+      // A depth attachment -> shader read (shadow map) carries the
+      // write->read execution barrier inside the layout transition.
+      for (const GraphSampledImage& sampled : render->sampled_images) {
+        if (!sampled.image) continue;
+        ImageState& state = states[{sampled.image, 0U}];
+        if (!state.valid) {
+          // No in-graph producer: the app owns the image's external state
+          // and guarantees the declared layout; record it without a barrier.
+          state.layout = sampled.used_layout;
+          state.access = kShaderRead;
+          state.stage = kFragStage;
+          state.valid = true;
+          continue;
+        }
+        constexpr std::uint32_t kSampleAccess = kShaderRead;
+        constexpr std::uint32_t kSampleStage = kFragStage;
+        if (state.layout != sampled.used_layout ||
+            access_ordering_matters(state.access, state.stage,
+                                    kSampleAccess, kSampleStage)) {
+          GraphBarrier barrier;
+          barrier.image = sampled.image;
+          barrier.old_layout = state.layout;
+          barrier.new_layout = sampled.used_layout;
+          barrier.src_access = state.access;
+          barrier.dst_access = kSampleAccess;
+          barrier.src_stage = state.stage;
+          barrier.dst_stage = kSampleStage;
+          barrier.aspect = sampled.aspect;
+          barriers.push_back(barrier);
+        }
+        // Sampling is a read: state keeps the sampled layout with read
+        // access so a later writer sees the WAR edge.
+        state.layout = sampled.used_layout;
+        state.access = kSampleAccess;
+        state.stage = kSampleStage;
       }
     }
 

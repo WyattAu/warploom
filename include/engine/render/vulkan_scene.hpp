@@ -331,10 +331,16 @@ struct VulkanPbrScene {
   //! Shadow depth pipeline and layout (depth-only, light VP + model push).
   VkPipeline shadow_pipeline{VK_NULL_HANDLE};
   VkPipelineLayout shadow_pipeline_layout{VK_NULL_HANDLE};
-  //! Set 4: combined shadow depth texture (sampled in the fragment stage).
+  //! Combined shadow depth texture (sampled in the fragment stage). Bound at
+  //! shadow_set_slot (4 for the IBL+shadow variant pbr_ibl_shadow.frag, 3 for
+  //! the shadow-only variant pbr_shadow.frag).
   VkDescriptorSet shadow_set{VK_NULL_HANDLE};
-  VkRenderPass shadow_render_pass{VK_NULL_HANDLE};
-  VkFramebuffer shadow_framebuffer{VK_NULL_HANDLE};
+  //! Descriptor-set index the main pass binds shadow_set at. Must match the
+  //! pipeline's fragment stage; 0 means default (4).
+  std::uint32_t shadow_set_slot{0U};
+  //! Shadow-map extent for graph-driven recording (0 = target-provided).
+  std::uint32_t shadow_width{0U};
+  std::uint32_t shadow_height{0U};
   //! Light-space view-projection used by the shadow pre-pass.
   SceneMatrix shadow_light_vp{scene_identity_matrix()};
   //! Set 5: GPU skinning bone matrices (one column-major mat4 per joint,

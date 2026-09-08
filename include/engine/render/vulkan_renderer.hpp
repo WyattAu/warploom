@@ -135,6 +135,47 @@ public:
       VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
       std::uint32_t width, std::uint32_t height) const;
 
+  //! Target resources the graph-driven PBR frame records into. The renderer
+  //! never owns these; they must outlive the recording call.
+  struct PbrFrameTargets {
+    //! Shadow pre-pass (depth-only). Used when scene.shadow_pipeline is set.
+    VkRenderPass shadow_render_pass{VK_NULL_HANDLE};
+    VkFramebuffer shadow_framebuffer{VK_NULL_HANDLE};
+    VkImage shadow_image{VK_NULL_HANDLE};
+    VkFormat shadow_format{VK_FORMAT_UNDEFINED};
+    std::uint32_t shadow_width{0};
+    std::uint32_t shadow_height{0};
+    //! Main lit pass.
+    VkRenderPass render_pass{VK_NULL_HANDLE};
+    VkFramebuffer framebuffer{VK_NULL_HANDLE};
+    std::uint32_t width{0};
+    std::uint32_t height{0};
+    //! Clear values for the main pass (may be null when the render pass has
+    //! no clear-load attachments, e.g. color-only to an already-cleared
+    //! target; most callers pass colour + depth).
+    const VkClearValue* clear_values{nullptr};
+    std::uint32_t clear_value_count{0};
+  };
+
+  //! Record the shadow-map depth pre-pass inside an active render pass.
+  //! Same draw list semantics as record_pbr_scene (skips non-drawable meshes
+  //! and invalid materials); LOD selection does not apply here — the shadow
+  //! of an object is drawn from its full-detail mesh.
+  [[nodiscard]] omnicpp::core::Result<void> record_shadow_pre_pass(
+      VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
+      std::uint32_t width, std::uint32_t height) const;
+
+  //! Graph-driven whole-frame recording: compiles a [shadow pre-pass -> main
+  //! lit pass] node sequence (empty when no shadow pipeline is set), lets
+  //! compile_graph compute the shadow map's DEPTH_ATTACHMENT -> DEPTH_READ
+  //! layout transition and write->read barrier, and records both passes via
+  //! execute_graph in one command buffer. All other scene features (sky
+  //! pre-draw, GPU LOD resolution, IBL/shadow/skin descriptor sets) behave
+  //! exactly as in record_pbr_scene.
+  [[nodiscard]] omnicpp::core::Result<void> record_pbr_frame(
+      VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
+      const PbrFrameTargets& targets) const;
+
   //! Rebind to a recreated swapchain and rebuilt pass/framebuffer resources.
   [[nodiscard]] omnicpp::core::Result<void> resync_for_swapchain(
       const VulkanSwapchain& swapchain, VkRenderPass render_pass);

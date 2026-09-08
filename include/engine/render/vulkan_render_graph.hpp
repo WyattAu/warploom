@@ -46,6 +46,17 @@ struct RenderPassAttachment {
     VkImage image, VkImageView view, VkFormat format,
     VkImageLayout final_layout);
 
+//! Declares how one pass SAMPLES an image (shader read, not an attachment).
+//! The compiler tracks sampled state between passes exactly like attachments:
+//! a shadow pre-pass writes depth and the next pass samples it, so the
+//! executor materializes the DEPTH_ATTACHMENT -> DEPTH_READ layout transition
+//! and the write->read execution barrier without manual authoring.
+struct GraphSampledImage {
+  VkImage image{VK_NULL_HANDLE};
+  VkImageLayout used_layout{VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  std::uint32_t aspect{0};  //!< VkImageAspectFlags; 0 means infer from layout.
+};
+
 //! One render pass: a name, its attachments, and a record callback handle.
 struct GraphBufferEdge {
   VkBuffer buffer{VK_NULL_HANDLE};
@@ -58,7 +69,8 @@ struct GraphBufferEdge {
   std::uint32_t consumer_family{kIgnoredQueueFamily};
 };
 
-//! Declares one image subresource use by a compute pass. Unlike a render  //! attachment, this can name an individual H-Z mip and its explicit layout.
+//! Declares one image subresource use by a compute pass. Unlike a render
+//! attachment, this can name an individual H-Z mip and its explicit layout.
   //! The renderer records exactly one depth-sourced H-Z pass per frame when H-Z is
   //! enabled; any future scene integration that wants post-depth culling must reuse the
   //! renderer-owned reduction pass, the single callback slot, or a separate graph
@@ -93,6 +105,9 @@ struct GraphPass {
   std::vector<RenderPassAttachment> attachments;
   //! Buffer dependencies this pass CONSUMES (barriers run before the pass).
   std::vector<GraphBufferEdge> buffer_edges;
+  //! Images this pass SAMPLES (shader reads, e.g. a shadow map written by an
+  //! earlier pass). Barriers run before the pass; must NOT alias attachments.
+  std::vector<GraphSampledImage> sampled_images;
   //! Clear values handed to the record callback (ownership stays with caller).
   const VkClearValue* clear_values{nullptr};
   std::uint32_t clear_value_count{0};

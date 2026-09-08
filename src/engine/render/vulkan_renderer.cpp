@@ -317,10 +317,15 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
                             nullptr);
   }
   if (scene.shadow_set != VK_NULL_HANDLE) {
-    // Shadow map from set 4: sampled in the fragment stage for PCF.
+    // Shadow map sampled in the fragment stage for PCF. Slot matches the
+    // pipeline variant: 4 for IBL+shadow (pbr_ibl_shadow.frag), 3 for
+    // shadow-only (pbr_shadow.frag); scene.shadow_set_slot == 0 keeps the
+    // historical default of 4.
+    const std::uint32_t shadow_slot =
+        scene.shadow_set_slot != 0U ? scene.shadow_set_slot : 4U;
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            scene.pipeline_layout, 4, 1, &scene.shadow_set, 0,
-                            nullptr);
+                            scene.pipeline_layout, shadow_slot, 1,
+                            &scene.shadow_set, 0, nullptr);
   }
 
   constexpr VkShaderStageFlags kPushStages =
@@ -372,6 +377,170 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
   (void)scene;
   (void)width;
   (void)height;
+  return omnicpp::core::Result<void>::error(
+      omnicpp::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
+namespace {
+
+//! Graph record shim: execute_graph's callbacks are plain function pointers,
+//! so the frame context (renderer + scene + which pass) travels through
+//! GraphPass::user_data and dispatches back into the public record methods.
+struct PbrFrameRecordCtx {
+  const VulkanRenderer* self;
+  const VulkanPbrScene* scene;
+  bool shadow;
+};
+
+void pbr_frame_render_cb(VkCommandBuffer cb, const GraphPass& pass,
+                         void* user_data) {
+  auto& ctx = *static_cast<PbrFrameRecordCtx*>(user_data);
+  if (ctx.shadow) {
+    (void)ctx.self->record_shadow_pre_pass(cb, *ctx.scene, pass.width,
+                                           pass.height);
+  } else {
+    (void)ctx.self->record_pbr_scene(cb, *ctx.scene, pass.width, pass.height);
+  }
+}
+
+}  // namespace
+
+omnicpp::core::Result<void> VulkanRenderer::record_shadow_pre_pass(
+    VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
+    std::uint32_t width, std::uint32_t height) const {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!command_buffer || scene.shadow_pipeline == VK_NULL_HANDLE ||
+      scene.shadow_pipeline_layout == VK_NULL_HANDLE || width == 0U ||
+      height == 0U) {
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::invalid_config);
+  }
+
+  VkViewport viewport{};
+  viewport.width = static_cast<float>(width);
+  viewport.height = static_cast<float>(height);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+  vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+
+  VkRect2D scissor{};
+  scissor.extent = {width, height};
+  vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+
+  // Depth-only pre-pass: light VP + model push (128 bytes), one set 0 per
+  // mesh. Shadows are cast from the full-detail mesh; LOD selection and the
+  // sky do not participate.
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    scene.shadow_pipeline);
+  struct ShadowPush {
+    SceneMatrix light_view_projection;
+    SceneMatrix model;
+  } push{};
+  push.light_view_projection = scene.shadow_light_vp;
+  for (const ScenePbrObject& object : scene.objects) {
+    const SceneMesh* mesh_ptr = object.effective_mesh();
+    if (mesh_ptr == nullptr || !mesh_ptr->is_drawable() ||
+        object.material_index == 0xffffffffU) {
+      continue;
+    }
+    const SceneMesh& mesh = *mesh_ptr;
+    push.model = object.model;
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene.shadow_pipeline_layout, 0, 1,
+                            &mesh.descriptor_set, 0, nullptr);
+    vkCmdPushConstants(command_buffer, scene.shadow_pipeline_layout,
+                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
+    vkCmdBindIndexBuffer(command_buffer, mesh.index_buffer,
+                         mesh.index_offset, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0);
+  }
+  return omnicpp::core::Result<void>::ok();
+#else
+  (void)command_buffer;
+  (void)scene;
+  (void)width;
+  (void)height;
+  return omnicpp::core::Result<void>::error(
+      omnicpp::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
+omnicpp::core::Result<void> VulkanRenderer::record_pbr_frame(
+    VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
+    const PbrFrameTargets& targets) const {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!command_buffer || targets.render_pass == VK_NULL_HANDLE ||
+      targets.framebuffer == VK_NULL_HANDLE || targets.width == 0U ||
+      targets.height == 0U) {
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::invalid_config);
+  }
+
+  const bool shadow_active =
+      scene.shadow_pipeline != VK_NULL_HANDLE &&
+      targets.shadow_render_pass != VK_NULL_HANDLE &&
+      targets.shadow_framebuffer != VK_NULL_HANDLE &&
+      targets.shadow_image != VK_NULL_HANDLE &&
+      targets.shadow_width > 0U && targets.shadow_height > 0U;
+
+  // Optional shadow pre-pass node. Declaring the depth attachment lets the
+  // graph compiler own the image's state: the UNDEFINED -> DEPTH_ATTACHMENT
+  // barrier runs before the pass, VkRenderPass lands it in DEPTH_READ, and
+  // the main pass's sampled_images declaration produces the write -> read
+  // execution barrier with no manual authoring.
+  GraphPass shadow_pass{};
+  PbrFrameRecordCtx shadow_ctx{this, &scene, true};
+  if (shadow_active) {
+    VkClearValue shadow_clear{};
+    shadow_clear.depthStencil = {1.0f, 0U};
+    shadow_pass.name = "shadow_pre_pass";
+    shadow_pass.render_pass = targets.shadow_render_pass;
+    shadow_pass.framebuffer = targets.shadow_framebuffer;
+    shadow_pass.width = targets.shadow_width;
+    shadow_pass.height = targets.shadow_height;
+    shadow_pass.clear_values = &shadow_clear;
+    shadow_pass.clear_value_count = 1U;
+    shadow_pass.attachments = {depth_attachment(
+        targets.shadow_image, VK_NULL_HANDLE, targets.shadow_format,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)};
+    shadow_pass.user_data = &shadow_ctx;
+  }
+
+  // Main lit pass node. The target's images have no in-graph producer, so
+  // no attachment declarations are needed: VkRenderPass handles the layout
+  // (initial UNDEFINED, final per its attachment descriptions) and the
+  // shadow map arrives via sampled_images.
+  GraphPass main_pass{};
+  main_pass.name = "pbr_main";
+  main_pass.render_pass = targets.render_pass;
+  main_pass.framebuffer = targets.framebuffer;
+  main_pass.width = targets.width;
+  main_pass.height = targets.height;
+  main_pass.clear_values = targets.clear_values;
+  main_pass.clear_value_count = targets.clear_value_count;
+  PbrFrameRecordCtx main_ctx{this, &scene, false};
+  main_pass.user_data = &main_ctx;
+  if (shadow_active) {
+    main_pass.sampled_images = {GraphSampledImage{
+        targets.shadow_image,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        VK_IMAGE_ASPECT_DEPTH_BIT}};
+  }
+
+  std::vector<GraphNode> nodes;
+  nodes.reserve(shadow_active ? 2U : 1U);
+  if (shadow_active) nodes.push_back(GraphNode::from_render(shadow_pass));
+  nodes.push_back(GraphNode::from_render(main_pass));
+
+  const CompiledGraph compiled = compile_graph(nodes);
+  execute_graph(command_buffer, nodes, compiled, &pbr_frame_render_cb,
+                nullptr);
+  return omnicpp::core::Result<void>::ok();
+#else
+  (void)command_buffer;
+  (void)scene;
+  (void)targets;
   return omnicpp::core::Result<void>::error(
       omnicpp::core::RuntimeError::vulkan_not_available);
 #endif

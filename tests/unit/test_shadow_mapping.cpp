@@ -386,74 +386,36 @@ struct ShadowHarness {
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cb, &bi);
 
-    // Shadow pre-pass
-    if (scene.shadow_pipeline) {
-      VkRenderPassBeginInfo rpb{};
-      rpb.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-      rpb.renderPass = shadow_rp;
-      rpb.framebuffer = shadow_fb;
-      rpb.renderArea.extent = {kRes, kRes};
-      VkClearValue cv{}; cv.depthStencil = {1.0f, 0};
-      rpb.clearValueCount = 1; rpb.pClearValues = &cv;
-      vkCmdBeginRenderPass(cb, &rpb, VK_SUBPASS_CONTENTS_INLINE);
-      VkViewport vp{0,0,(float)kRes,(float)kRes,0,1};
-      vkCmdSetViewport(cb, 0, 1, &vp);
-      VkRect2D sc{{0,0},{kRes,kRes}};
-      vkCmdSetScissor(cb, 0, 1, &sc);
-      vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, scene.shadow_pipeline);
-      struct SP { SceneMatrix lvp; SceneMatrix model; } sp{};
-      sp.lvp = scene.shadow_light_vp;
-      for (auto& o : scene.objects) {
-        auto* m = o.effective_mesh();
-        if (!m||!m->is_drawable()) continue;
-        sp.model = o.model;
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-            scene.shadow_pipeline_layout, 0, 1, &m->descriptor_set, 0, nullptr);
-        vkCmdPushConstants(cb, scene.shadow_pipeline_layout,
-            VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(sp), &sp);
-        vkCmdBindIndexBuffer(cb, m->index_buffer, m->index_offset, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(cb, m->index_count, 1, 0, 0, 0);
-      }
-      vkCmdEndRenderPass(cb);
+    // Graph-driven frame: the renderer compiles the [shadow pre-pass -> main
+    // lit pass] node sequence itself, computes the shadow map's
+    // DEPTH_ATTACHMENT -> DEPTH_READ transition and the write -> read
+    // barrier via compile_graph, and records both passes through
+    // execute_graph. The hand-sequenced version of this test proved the
+    // same pixels; this path proves the graph produces identical output.
+    omnicpp::render::VulkanRenderer frame_renderer;
+    omnicpp::render::VulkanRenderer::PbrFrameTargets targets{};
+    targets.shadow_render_pass = shadow_rp;
+    targets.shadow_framebuffer = shadow_fb;
+    targets.shadow_image = shadow_img;
+    targets.shadow_format = VK_FORMAT_D32_SFLOAT;
+    targets.shadow_width = kRes;
+    targets.shadow_height = kRes;
+    targets.render_pass = target.render_pass();
+    targets.framebuffer = target.framebuffer();
+    targets.width = 256;
+    targets.height = 256;
+    VkClearValue frame_clears[2]{};
+    frame_clears[0].color = {{0, 0, 0, 1}};
+    frame_clears[1].depthStencil = {1.0f, 0};
+    targets.clear_values = frame_clears;
+    targets.clear_value_count = 2;
+    const auto frame_r = frame_renderer.record_pbr_frame(cb, scene, targets);
+    if (!frame_r.is_ok()) {
+      vkEndCommandBuffer(cb);
+      vkDestroyFence(ctx.device(), fence, nullptr);
+      vkDestroyCommandPool(ctx.device(), pr.value(), nullptr);
+      return {};
     }
-
-    // Main scene pass
-    VkRenderPassBeginInfo rpb{};
-    rpb.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpb.renderPass = target.render_pass();
-    rpb.framebuffer = target.framebuffer();
-    rpb.renderArea.extent = {256, 256};
-    VkClearValue clears[2]{};
-    clears[0].color = {{0,0,0,1}};
-    clears[1].depthStencil = {1.0f, 0};
-    rpb.clearValueCount = 2; rpb.pClearValues = clears;
-    vkCmdBeginRenderPass(cb, &rpb, VK_SUBPASS_CONTENTS_INLINE);
-    VkViewport vp{0,0,256,256,0,1};
-    vkCmdSetViewport(cb, 0, 1, &vp);
-    VkRect2D sc{{0,0},{256,256}};
-    vkCmdSetScissor(cb, 0, 1, &sc);
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, scene.pipeline);
-    if (scene.texture_set) vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        scene.pipeline_layout, 1, 1, &scene.texture_set, 0, nullptr);
-    if (scene.material_set) vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        scene.pipeline_layout, 2, 1, &scene.material_set, 0, nullptr);
-    if (scene.shadow_set) vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        scene.pipeline_layout, 3, 1, &scene.shadow_set, 0, nullptr);
-    struct Push { SceneMatrix vp; SceneMatrix model; std::array<float,4> cam; uint32_t mi; uint32_t p[3]{}; } push{};
-    push.vp = scene.camera.view_projection;
-    push.cam = scene.camera_position;
-    VkShaderStageFlags ks = VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT;
-    for (auto& o : scene.objects) {
-      auto* m = o.effective_mesh();
-      if (!m||!m->is_drawable()) continue;
-      push.model = o.model; push.mi = o.material_index;
-      vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-          scene.pipeline_layout, 0, 1, &m->descriptor_set, 0, nullptr);
-      vkCmdPushConstants(cb, scene.pipeline_layout, ks, 0, sizeof(push), &push);
-      vkCmdBindIndexBuffer(cb, m->index_buffer, m->index_offset, VK_INDEX_TYPE_UINT32);
-      vkCmdDrawIndexed(cb, m->index_count, 1, 0, 0, 0);
-    }
-    vkCmdEndRenderPass(cb);
     vkEndCommandBuffer(cb);
     vkResetFences(ctx.device(), 1, &fence);
     VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -515,6 +477,7 @@ TEST(VulkanHardware, ShadowMapOccludesFarObject) {
   scene.texture_set = h.tex_set;
   scene.material_set = h.mat_set;
   scene.shadow_set = h.shadow_set;
+  scene.shadow_set_slot = 3;  // pbr_shadow.frag samples the map at set 3
   scene.shadow_pipeline = h.shadow_pipe.pipeline();
   scene.shadow_pipeline_layout = h.shadow_pipe.pipeline_layout();
   scene.shadow_light_vp = light_vp;
