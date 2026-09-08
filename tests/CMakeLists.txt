@@ -260,11 +260,27 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pbr_gpu_driven.vert.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_gpu_driven.vert
+                    -o ${OMNICPP_SHADER_DIR}/pbr_gpu_driven.vert.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_gpu_driven.vert
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/pbr_scene.frag.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_scene.frag
                     -o ${OMNICPP_SHADER_DIR}/pbr_scene.frag.spv
             DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_scene.frag
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pbr_gpu_driven.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_gpu_driven.frag
+                    -o ${OMNICPP_SHADER_DIR}/pbr_gpu_driven.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_gpu_driven.frag
             VERBATIM
         )
         add_custom_command(
@@ -449,6 +465,8 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/indexed_scene_material.frag.spv
                 ${OMNICPP_SHADER_DIR}/pbr_scene.vert.spv
                 ${OMNICPP_SHADER_DIR}/pbr_scene.frag.spv
+                ${OMNICPP_SHADER_DIR}/pbr_gpu_driven.vert.spv
+                ${OMNICPP_SHADER_DIR}/pbr_gpu_driven.frag.spv
                 ${OMNICPP_SHADER_DIR}/pbr_ibl.frag.spv
                 ${OMNICPP_SHADER_DIR}/ibl_sky.comp.spv
                 ${OMNICPP_SHADER_DIR}/ibl_prefilter.comp.spv
@@ -495,6 +513,8 @@ add_executable(omnicpp_unit_tests
     unit/test_hiz_sampled_pingpong.cpp
     unit/test_dual_queue_graph.cpp
     unit/test_gpu_driven.cpp
+    unit/test_gpu_driven_ab.cpp
+    unit/test_mesh_table.cpp
     unit/test_scene_submission.cpp
     unit/test_scene_extraction.cpp
     unit/test_scene_camera.cpp

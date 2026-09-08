@@ -17,6 +17,7 @@ add_library(omnicpp_runtime SHARED
     render/vulkan_render_pass.cpp
     render/vulkan_pipeline.cpp
     render/vulkan_renderer.cpp
+    render/vulkan_mesh_table.cpp
     render/vulkan_scene.cpp
     render/scene_camera.cpp
     render/vulkan_frame_upload.cpp

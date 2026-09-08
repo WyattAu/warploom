@@ -160,6 +160,13 @@ omnicpp::core::Result<void> VulkanContext::initialize(
   // enable when the device supports it so compute-generated geometry works.
   device_features.vertexPipelineStoresAndAtomics =
       supported_features.vertexPipelineStoresAndAtomics;
+  // GPU-driven draws: vkCmdDrawIndexedIndirect with drawCount > 1 (one
+  // command per object, degenerate commands cull) needs multiDrawIndirect;
+  // per-command firstInstance lets gl_InstanceIndex address the object
+  // payload SSBO slot for each draw command.
+  device_features.multiDrawIndirect = supported_features.multiDrawIndirect;
+  device_features.drawIndirectFirstInstance =
+      supported_features.drawIndirectFirstInstance;
 
   if (!check_device_extension_support(physical_device_)) {
     cleanup();
@@ -175,14 +182,19 @@ omnicpp::core::Result<void> VulkanContext::initialize(
   vulkan13_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
   VkPhysicalDeviceVulkan12Features vulkan12_features{};
   vulkan12_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+  VkPhysicalDeviceVulkan11Features vulkan11_features{};
+  vulkan11_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
   if (is_vulkan13 || is_vulkan12) {
     VkPhysicalDeviceFeatures2 features2{};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     features2.features = device_features;
-    // Chain: features2 -> 1.3 features -> 1.2 features.
+    // Chain: features2 -> 1.3 -> 1.2 -> 1.1.
     if (is_vulkan13) {
       features2.pNext = &vulkan13_features;
-      if (is_vulkan12) vulkan13_features.pNext = &vulkan12_features;
+      if (is_vulkan12) {
+        vulkan13_features.pNext = &vulkan12_features;
+        vulkan12_features.pNext = &vulkan11_features;
+      }
     }
     vkGetPhysicalDeviceFeatures2(physical_device_, &features2);
   }
@@ -221,6 +233,13 @@ omnicpp::core::Result<void> VulkanContext::initialize(
       vulkan12_features.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
       device_extensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
     }
+    // shaderDrawParameters (Vulkan 1.1 feature struct): makes
+    // gl_InstanceIndex / gl_BaseInstance include the draw's firstInstance.
+    // GPU-driven draws rely on per-command firstInstance to address the
+    // object payload SSBO slot.
+    if (vulkan11_features.shaderDrawParameters == VK_TRUE) {
+      vulkan11_features.shaderDrawParameters = VK_TRUE;
+    }
   }
   // Enable the negotiated feature structs on the device.
   if (synchronization2_enabled_) {
@@ -230,6 +249,12 @@ omnicpp::core::Result<void> VulkanContext::initialize(
   if (timeline_semaphores_enabled_) {
     vulkan12_features.pNext = features_chain;
     features_chain = reinterpret_cast<VkBaseOutStructure*>(&vulkan12_features);
+  }
+  // The 1.1 struct rides at the chain tail when any 1.2-level feature was
+  // enabled through it (shaderDrawParameters is the current consumer).
+  if (is_vulkan12 && vulkan11_features.shaderDrawParameters == VK_TRUE) {
+    vulkan11_features.pNext = features_chain;
+    features_chain = reinterpret_cast<VkBaseOutStructure*>(&vulkan11_features);
   }
 
   VkDeviceCreateInfo device_create_info{};
