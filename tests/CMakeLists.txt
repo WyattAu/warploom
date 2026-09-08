@@ -372,6 +372,14 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/skinned_scene.vert.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/skinned_scene.vert
+                    -o ${OMNICPP_SHADER_DIR}/skinned_scene.vert.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/skinned_scene.vert
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/textured_quad.vert
@@ -430,6 +438,7 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/tonemap_fxaa.frag.spv
                 ${OMNICPP_SHADER_DIR}/bloom_downsample.frag.spv
                 ${OMNICPP_SHADER_DIR}/bloom_upsample.frag.spv
+                ${OMNICPP_SHADER_DIR}/skinned_scene.vert.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.frag.spv
         )
@@ -469,6 +478,7 @@ add_executable(omnicpp_unit_tests
     unit/test_pbr_ibl.cpp
     unit/test_shadow_mapping.cpp
     unit/test_postprocessing.cpp
+    unit/test_gpu_skinning.cpp
     unit/test_png_decoder.cpp
     unit/test_jpeg_decoder.cpp
     unit/test_png_texture.cpp

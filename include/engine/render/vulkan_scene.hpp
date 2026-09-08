@@ -325,6 +325,10 @@ struct VulkanPbrScene {
   VkFramebuffer shadow_framebuffer{VK_NULL_HANDLE};
   //! Light-space view-projection used by the shadow pre-pass.
   SceneMatrix shadow_light_vp{scene_identity_matrix()};
+  //! Set 5: GPU skinning bone matrices (one column-major mat4 per joint,
+  //! pre-multiplied with the inverse bind matrix on the CPU). Bound only when
+  //! the pipeline's vertex stage samples the skinning SSBO (skinned_scene.vert).
+  VkDescriptorSet bone_set{VK_NULL_HANDLE};
   std::vector<ScenePbrObject> objects;
 };
 
