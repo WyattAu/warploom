@@ -1,0 +1,101 @@
+#version 450
+
+// lod_select.comp — GPU-driven mesh LOD selection. Each invocation computes
+// one instance's projected screen-space size from its bounding sphere and
+// picks the highest-detail LOD whose screen error budget is still acceptable:
+//
+//   screen_size = (radius / max(distance, epsilon)) * (viewport_h / (2*tan_half_fov))
+//
+// LOD i is chosen when screen_size >= threshold[i]; when screen_size falls
+// below the last threshold (or the sphere is behind the near plane / outside
+// the far range) the instance is culled entirely. Selection results land in
+// a per-instance uvec2 (lod, visible) — the render loop reads this to bind
+// the matching mesh variant, or the GPU-driven path can compact it later.
+//
+// Binding 0, flat uint words (std430, stride 4):
+//   [0]                 instance_count
+//   [1]                 visible_count   (atomic: result)
+//   [2  .. 25]          frustum: 6 planes x (nx, ny, nz, d), inside = +d
+//   [sp .. sp+4N-1]     spheres: N x (cx, cy, cz, radius)
+//   [lp .. lp+2N-1]     LOD results: N x uvec2(lod, visible)  (output)
+//   sp = 26, lp = 26 + 4*N (push constants)
+
+layout(local_size_x = 64) in;
+
+layout(set = 0, binding = 0, std430) buffer LodBuffer {
+  uint words[];
+} lod;
+
+layout(push_constant) uniform Push {
+  uint sphere_offset;   // word index of the spheres (26)
+  uint result_offset;   // word index of the LOD results (26 + 4*N)
+  float tan_half_fov;   // tan(fov_y / 2)
+  float viewport_h;     // viewport height in pixels
+  float near_z;         // near plane distance (front-of-camera test)
+  float far_margin;     // screen-size threshold below which we cull
+  uint threshold_count; // number of LOD thresholds
+  uint pad0;
+  // Thresholds follow in words 8..8+K-1 as float bits (screen sizes for
+  // LOD 0..K-1; LOD i chosen when screen_size >= thresholds[i]).
+  float thresholds[8];
+  vec4 camera_position; // xyz = eye, w unused
+  vec4 forward;         // xyz = view forward (normalized), w unused
+} push;
+
+void main() {
+  const uint i = gl_GlobalInvocationID.x;
+  if (i >= lod.words[0]) return;
+
+  const uint sp = push.sphere_offset + i * 4u;
+  const vec4 s = vec4(uintBitsToFloat(lod.words[sp]),
+                      uintBitsToFloat(lod.words[sp + 1u]),
+                      uintBitsToFloat(lod.words[sp + 2u]),
+                      uintBitsToFloat(lod.words[sp + 3u]));
+
+  // Frustum test (same planes as the cull pass): inside = +d.
+  bool visible = true;
+  for (int p = 0; p < 6; ++p) {
+    const uint fp = 2u + uint(p) * 4u;
+    const vec3 n = vec3(uintBitsToFloat(lod.words[fp]),
+                        uintBitsToFloat(lod.words[fp + 1u]),
+                        uintBitsToFloat(lod.words[fp + 2u]));
+    const float d = uintBitsToFloat(lod.words[fp + 3u]);
+    if (dot(n, s.xyz) + d < -s.w) {
+      visible = false;
+      break;
+    }
+  }
+
+  uint out_lod = 0u;
+  uint out_visible = 0u;
+
+  if (visible) {
+    // View depth along the camera forward axis; a sphere entirely behind
+    // the near plane is culled even if the plane tests slipped it through.
+    const float depth = dot(s.xyz - push.camera_position.xyz, push.forward.xyz);
+    if (depth + s.w >= push.near_z) {
+      const float d = max(depth, 1e-3f);
+      const float screen_size =
+          (s.w / d) * (push.viewport_h / (2.0f * push.tan_half_fov));
+
+      // Choose the finest LOD whose threshold the size still meets.
+      uint selected = push.threshold_count;  // sentinel = below all thresholds
+      for (uint t = 0u; t < push.threshold_count; ++t) {
+        if (screen_size >= push.thresholds[t]) {
+          selected = t;
+          break;
+        }
+      }
+
+      if (selected < push.threshold_count && screen_size >= push.far_margin) {
+        out_lod = selected;
+        out_visible = 1u;
+      }
+    }
+  }
+
+  const uint rp = push.result_offset + i * 2u;
+  lod.words[rp] = out_lod;
+  lod.words[rp + 1u] = out_visible;
+  if (out_visible != 0u) atomicAdd(lod.words[1], 1u);
+}

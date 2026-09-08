@@ -396,6 +396,14 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/lod_select.comp.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/lod_select.comp
+                    -o ${OMNICPP_SHADER_DIR}/lod_select.comp.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/lod_select.comp
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/textured_quad.vert
@@ -455,6 +463,7 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/bloom_downsample.frag.spv
                 ${OMNICPP_SHADER_DIR}/bloom_upsample.frag.spv
                 ${OMNICPP_SHADER_DIR}/skinned_scene.vert.spv
+                ${OMNICPP_SHADER_DIR}/lod_select.comp.spv
                 ${OMNICPP_SHADER_DIR}/sky.vert.spv
                 ${OMNICPP_SHADER_DIR}/sky.frag.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
@@ -498,6 +507,7 @@ add_executable(omnicpp_unit_tests
     unit/test_sky.cpp
     unit/test_postprocessing.cpp
     unit/test_gpu_skinning.cpp
+    unit/test_mesh_lod.cpp
     unit/test_png_decoder.cpp
     unit/test_jpeg_decoder.cpp
     unit/test_png_texture.cpp
