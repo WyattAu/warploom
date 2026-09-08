@@ -1,0 +1,127 @@
+#version 450
+
+// cull_and_draw_lod.comp — GPU-driven cull + LOD selection + draw-command
+// generation (migration step 3 of docs/gpu-driven-rendering.md). One
+// invocation per object: frustum test against 6 planes, then projected-size
+// LOD selection from the payload's bounding sphere. Writes the object's
+// VkDrawIndexedIndirectCommand directly from the mesh table — degenerate
+// indexCount = 0 when culled — and bumps the visible counter atomically.
+//
+// The graphics pass then executes ONE vkCmdDrawIndexedIndirect over all
+// commands; per-command firstInstance addresses the payload slot.
+//
+// Buffer layout (binding 1 = payload, shared with pbr_gpu_driven.vert):
+//   [0] object_count, [1] reserved
+//   [2 + 24*i .. +23]  object i (see the vertex shader's layout comment)
+// Mesh table (binding 2, 5 words per entry, index_count/index_offset/
+// vertex_base/vertex_count/dedup_of), one slot per LOD level:
+//   entry e: [5*e + 0] index_count, [5*e + 1] index_offset, ...
+//
+// Output (binding 3):
+//   [4*i .. +4]  VkDrawIndexedIndirectCommand words: indexCount,
+//                instanceCount, firstIndex, vertexOffset, firstInstance
+//   [5*N]        visible counter (atomic add; N = object_count)
+
+layout(local_size_x = 64) in;
+
+layout(set = 0, binding = 1, std430) readonly buffer ObjectPayload {
+  uint meta[];
+} objects;
+
+layout(set = 0, binding = 2, std430) readonly buffer MeshTable {
+  uint entries[];  // 5 words per slot
+} table;
+
+layout(set = 0, binding = 3, std430) buffer DrawCommands {
+  uint words[];
+} draws;
+
+layout(push_constant) uniform Push {
+  uint object_count;
+  uint sphere_word;      // word offset of object 0's sphere (2 + 18)
+  uint draw_word;        // word offset of command 0 (4 per command)
+  uint visible_word;     // word offset of the visible counter
+  float planes[6][4];    // frustum planes (a,b,c,d): front = dot(p,n)+d > 0
+  float tan_half_fov;
+  float viewport_h;
+  uint lod_threshold_count;
+  float lod_thresholds[4];  // screen-space px, descending
+} pc;
+
+uint load_sphere(uint obj, out vec3 center, out float radius) {
+  // base = word 18 of object obj's payload (sphere start).
+  const uint base = pc.sphere_word + obj * 24u;
+  center = uintBitsToFloat(uvec3(objects.meta[base + 0u],
+                                 objects.meta[base + 1u],
+                                 objects.meta[base + 2u]));
+  radius = uintBitsToFloat(objects.meta[base + 3u]);
+  return obj;
+}
+
+void main() {
+  const uint obj = gl_GlobalInvocationID.x;
+  if (obj >= pc.object_count) return;
+
+  vec3 center; float radius;
+  load_sphere(obj, center, radius);
+
+  // --- Frustum cull: sphere fully behind any plane -> culled -------------
+  bool visible = true;
+  for (int p = 0; p < 6; ++p) {
+    const vec3 n = vec3(pc.planes[p][0], pc.planes[p][1], pc.planes[p][2]);
+    const float d = pc.planes[p][3];
+    if (dot(n, center) + d < -radius) {
+      visible = false;
+      break;
+    }
+  }
+
+  uint index_count = 0u;
+  uint index_offset = 0u;
+  uint first_instance = obj;  // gl_InstanceIndex addresses the payload
+
+  if (visible) {
+    // --- View depth for projected-size LOD selection -----------------------
+    // Camera at origin looking down -Z (matches the scene tests' convention);
+    // view depth = -center.z, clamped to a positive epsilon.
+    const float depth = max(-center.z, 0.01);
+    const float screen_h = 2.0 * radius / depth * pc.viewport_h /
+                           (2.0 * pc.tan_half_fov);
+
+    // --- LOD selection: first threshold the projected size clears ----------
+    uint level = 0u;
+    for (uint t = 0; t + 1u < pc.lod_threshold_count; ++t) {
+      if (screen_h < pc.lod_thresholds[t]) {
+        level = t + 1u;
+        break;
+      }
+    }
+    // Sane fallback when every threshold misses: coarsest level.
+    if (level == 0u && pc.lod_threshold_count > 1u &&
+        screen_h < pc.lod_thresholds[pc.lod_threshold_count - 1u]) {
+      level = pc.lod_threshold_count - 1u;
+    }
+
+    // Payload fields relative to `base` (= object start + 18):
+    //   base - 1 = mesh_slot, base + 0..3 = sphere, base + 4 = lod_count.
+    const uint lod_count = objects.meta[pc.sphere_word + obj * 24u + 4u];
+    if (level >= lod_count) level = lod_count - 1u;
+
+    const uint mesh_slot = objects.meta[pc.sphere_word + obj * 24u - 1u];
+    const uint slot = mesh_slot + level;
+    index_count = table.entries[slot * 5u + 0u];
+    index_offset = table.entries[slot * 5u + 1u];
+  }
+
+  // --- Write the draw command (degenerate when culled) --------------------
+  const uint cmd_base = pc.draw_word + obj * 5u;
+  draws.words[cmd_base + 0u] = index_count;
+  draws.words[cmd_base + 1u] = visible ? 1u : 0u;
+  draws.words[cmd_base + 2u] = index_offset;
+  draws.words[cmd_base + 3u] = 0u;  // vertexOffset: global indices
+  draws.words[cmd_base + 4u] = first_instance;
+
+  if (visible) {
+    atomicAdd(draws.words[pc.visible_word], 1u);
+  }
+}

@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <vector>
 
 #ifdef OMNICPP_HAS_VULKAN
 #include <vulkan/vulkan.h>
@@ -28,6 +29,9 @@ inline bool find_host_memory_type(VkPhysicalDevice physical_device, std::uint32_
 
 struct ReadbackResult {
   bool submitted{false};
+  //! Decoded pixels (r | g<<8 | b<<16 | a<<24), row-major, top-left origin
+  //! semantics matching pixel_at. Populated only when store_pixels=true.
+  std::vector<std::uint32_t> pixels;
   std::size_t non_clear_pixels{0};
   std::size_t red_dominant_pixels{0};
   std::size_t green_dominant_pixels{0};
@@ -67,7 +71,8 @@ inline ReadbackResult readback_swapchain_image(VkPhysicalDevice physical_device,
                                         VkImage image, VkFormat image_format,
                                         std::uint32_t width, std::uint32_t height,
                                         VkImageLayout initial_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                                        VkImageLayout final_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+                                        VkImageLayout final_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                        bool store_pixels = false) {
   ReadbackResult output;
   const VkDeviceSize byte_size = static_cast<VkDeviceSize>(width) * height * 4;
 
@@ -232,6 +237,15 @@ inline ReadbackResult readback_swapchain_image(VkPhysicalDevice physical_device,
         hash *= 1099511628211ULL;
       }
       output.center_pixel = pixel_at(width / 2U, height / 2U);
+      if (store_pixels) {
+        output.pixels.resize(static_cast<std::size_t>(width) * height);
+        for (std::uint32_t py = 0; py < height; ++py) {
+          for (std::uint32_t px2 = 0; px2 < width; ++px2) {
+            output.pixels[static_cast<std::size_t>(py) * width + px2] =
+                pixel_at(px2, py);
+          }
+        }
+      }
       // Both samples lie on the triangle's vertical centerline, away from its
       // edges. Vulkan's framebuffer row orientation does not affect this test.
       output.upper_triangle_pixel = pixel_at(width / 2U, height / 4U);

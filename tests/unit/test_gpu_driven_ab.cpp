@@ -265,15 +265,21 @@ void destroy_solid_texture(VkDevice device,
   }
 }
 
-//! Object payload word layout (18 words), matching pbr_gpu_driven.vert:
+//! Object payload word layout (24 words), matching pbr_gpu_driven.vert and
+//! the step-3 cull-pass ABI:
 //! [0..15] column-major model matrix (bitcast floats),
-//! [16] material_index, [17] mesh_slot (informational in the vertex stage).
+//! [16] material_index, [17] mesh_slot,
+//! [18..21] world-space bounding sphere (center.xyz + radius),
+//! [22] lod_count, [23] pad.
 struct Payload {
   omnicpp::render::SceneMatrix model;
   std::uint32_t material_index;
   std::uint32_t mesh_slot;
+  std::array<float, 4> sphere;  // center.xyz + radius
+  std::uint32_t lod_count;
+  std::uint32_t pad;
 };
-static_assert(sizeof(Payload) == 72U, "18 words expected");
+static_assert(sizeof(Payload) == 96U, "24 words expected");
 
 }  // namespace
 
@@ -337,10 +343,12 @@ TEST(VulkanHardware, GpuDrivenVertexPullMatchesPerDrawPixels) {
   const SceneMatrix model_a = make_translation(-1.6f, 0.0f, -4.5f);
   const SceneMatrix model_b =
       mat_mul(make_translation(1.6f, 0.0f, -4.5f), make_rotation_y(0.6f));
+  // Bounding sphere: unit cube half-extent 0.5 -> radius sqrt(3)/2.
   const Payload payloads[kObjectCount] = {
-      {model_a, 0U, slot_cube},
-      {model_b, 1U, slot_cube},
-      {omnicpp::render::scene_identity_matrix(), 0U, slot_cube},
+      {model_a, 0U, slot_cube, {-1.6f, 0.0f, -4.5f, 0.8660254f}, 1U, 0U},
+      {model_b, 1U, slot_cube, {1.6f, 0.0f, -4.5f, 0.8660254f}, 1U, 0U},
+      {omnicpp::render::scene_identity_matrix(), 0U, slot_cube,
+       {0.0f, 0.0f, 0.0f, 0.8660254f}, 1U, 0U},
   };
   {
     auto* words = static_cast<std::uint32_t*>(payload_buf.value().mapped);

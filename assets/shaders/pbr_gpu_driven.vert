@@ -13,11 +13,17 @@
 //
 // Object payload SSBO (set 0, binding 1, uint words, std430):
 //   [0] object_count (informational)
-//   [1] reserved (mesh-table word offset, consumed by the cull pass in
-//       step 3, not by this shader)
-//   [2 + 18*i .. +17]  object i:
-//       model matrix, column-major: 4 words per column (bitcast floats)
-//       material_index (word 16), mesh_slot (word 17, informational here)
+//   [1] reserved
+//   [2 + 24*i .. +23]  object i (96 bytes):
+//       [0..15]  model matrix, column-major (4 words per column)
+//       [16]     material_index
+//       [17]     mesh_slot (LOD-0 base slot in the mesh table; level k
+//                lives at mesh_slot + k)
+//       [18..21] world-space bounding sphere: center.xyz + radius
+//       [22]     lod_count (consecutive table slots in the chain)
+//       [23]     pad
+//   The cull/LOD compute pass (cull_and_draw_lod.comp) reads the same
+//   payload and writes the indirect draw commands.
 
 layout(set = 0, binding = 0, std430) readonly buffer SharedVertices {
   float values[];   // concatenated vertex blocks, 11 floats per vertex
@@ -45,7 +51,7 @@ layout(location = 3) out vec3 v_world_pos;
 layout(location = 4) flat out uint v_material_index;
 
 void main() {
-  const uint obj_base = 2u + uint(gl_InstanceIndex) * 18u;
+  const uint obj_base = 2u + uint(gl_InstanceIndex) * 24u;
   const uint material_index = objects.meta[obj_base + 16u];
   // Column-major mat4: words [ob..ob+3] are column 0, etc.
   const mat4 model = mat4(
