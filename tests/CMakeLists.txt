@@ -292,6 +292,14 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/cull_and_draw_lod_occlude.comp.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/cull_and_draw_lod_occlude.comp
+                    -o ${OMNICPP_SHADER_DIR}/cull_and_draw_lod_occlude.comp.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/cull_and_draw_lod_occlude.comp
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/pbr_ibl.frag.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_ibl.frag
@@ -476,6 +484,7 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/pbr_gpu_driven.vert.spv
                 ${OMNICPP_SHADER_DIR}/pbr_gpu_driven.frag.spv
                 ${OMNICPP_SHADER_DIR}/cull_and_draw_lod.comp.spv
+                ${OMNICPP_SHADER_DIR}/cull_and_draw_lod_occlude.comp.spv
                 ${OMNICPP_SHADER_DIR}/pbr_ibl.frag.spv
                 ${OMNICPP_SHADER_DIR}/ibl_sky.comp.spv
                 ${OMNICPP_SHADER_DIR}/ibl_prefilter.comp.spv
@@ -525,6 +534,7 @@ add_executable(omnicpp_unit_tests
     unit/test_gpu_driven_ab.cpp
     unit/test_gpu_driven_cull.cpp
     unit/test_gpu_driven_frame.cpp
+    unit/test_gpu_driven_occlusion_frame.cpp
     unit/test_mesh_table.cpp
     unit/test_scene_submission.cpp
     unit/test_scene_extraction.cpp

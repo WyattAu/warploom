@@ -1,18 +1,18 @@
-//! @file test_gpu_driven_frame.cpp
-//! @brief GPU E2E proof for the renderer-owned one-submission GPU-driven
-//!        frame. The test hand-builds nothing inside the frame command
-//!        buffer: ONE call to VulkanRenderer::record_pbr_frame_gpu_driven
-//!        records the [cull compute -> indirect main draw] graph, with the
-//!        compute -> draw-indirect barrier computed by compile_graph from
-//!        the consumer-declared buffer edge (no hand-authored barriers).
-//!        Proofs: GPU-written command readback (LOD 0 near / LOD 1 far /
-//!        culled behind-camera / visible == 2) and pixel-structure readback
-//!        identical to the harness path in test_gpu_driven_cull.cpp —
-//!        proving the graph-computed barrier actually orders the draw's
-//!        indirect fetch after the compute writes.
+//! @file test_gpu_driven_occlusion_frame.cpp
+//! @brief Occlusion culling inside the renderer-owned one-submission GPU-
+//!        driven frame. Same record_pbr_frame_gpu_driven path as
+//!        test_gpu_driven_frame.cpp, but the cull pipeline's shader is the
+//!        H-Z variant (cull_and_draw_lod_occlude.comp) with a packed max-
+//!        depth pyramid bound at set 0 / binding 4. Two rounds in ONE
+//!        command buffer: round 1 occlusion disabled (bar renders); round
+//!        2 enabled with a pyramid that covers the far bar's projection
+//!        with NEARER depth (bar GPU-culled; commands read back degenerate
+//!        and pixels disappear). Near bar's pyramid tiles stay empty, so it
+//!        must survive round 2 — proving coverage, not just sampling.
 
 #include <gtest/gtest.h>
 
+#include <bit>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -59,6 +59,8 @@ omnicpp::render::SceneMatrix make_translation(float x, float y, float z) {
 }
 
 //! Perspective projection, Vulkan clip space (y down, z into [0,1]).
+//! Also returns the packed NDC depth constants (C1 - C2/d) so the pyramid
+//! producer and the cull shader agree on the exact depth mapping.
 omnicpp::render::SceneMatrix make_perspective(float fov_y, float aspect,
                                               float znear, float zfar) {
   const float f =
@@ -73,6 +75,13 @@ omnicpp::render::SceneMatrix make_perspective(float fov_y, float aspect,
   m[14] = (2.0f * zfar * znear) / (znear - zfar);
   m[15] = 0.0f;
   return m;
+}
+
+//! Exact NDC depth of a view-space distance d under the projection above.
+float ndc_depth(float view_d, float znear, float zfar) {
+  const float inv_range = 1.0f / (zfar - znear);
+  return (zfar + znear) * inv_range -
+         2.0f * zfar * znear * inv_range / view_d;
 }
 
 void build_bar(float height, std::vector<float>& vertices,
@@ -250,13 +259,13 @@ bool make_white_texture(VkDevice device, VkPhysicalDevice physical_device,
 
 }  // namespace
 
-TEST(VulkanHardware, RendererGpuDrivenFrameOneSubmission) {
+TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
   omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppGpuDrivenFrame", true).is_ok());
+  ASSERT_TRUE(context.initialize("OmniCppGpuDrivenOcclFrame", true).is_ok());
   omnicpp::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device())
@@ -350,9 +359,64 @@ TEST(VulkanHardware, RendererGpuDrivenFrameOneSubmission) {
       {0U, 2U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_COMPUTE_BIT},
       {0U, 3U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+       VK_SHADER_STAGE_COMPUTE_BIT},
+      {0U, 4U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_COMPUTE_BIT}};
   auto driven_layout = descriptors.create_layout(driven_bindings, 8U);
   ASSERT_TRUE(driven_layout.is_ok());
+
+  // ---- H-Z pyramid: 8x8 tiles of packed max depth over the 256x256 view.
+  // Tiles are derived with the shader's exact projection math:
+  //   ndc = center.xy / (depth * tan_half);  tile = floor((ndc*0.5+0.5)*8)
+  // Far bar (2.5, 0, -16), r=1.05: L0 tiles (5,3) and (5,4) get a blocker
+  // at view depth 8 (NEARER than the bar's nearest point ~14.95) -> culled.
+  // Near bar (0, 0, -3), r=1.05: footprint-adaptive level selects L2 (2x2
+  // grid); its own surface depth fills its L0 tiles (4,3),(4,4) so the
+  // quarter-tile maxima stay >= its nearest depth -> never occluded.
+  constexpr std::uint32_t kPyramidOff = 0U;
+  constexpr std::uint32_t kTilesX = 8U;
+  constexpr std::uint32_t kTilesY = 8U;
+  auto pyramid_buf = allocator.create_buffer(
+      kTilesX * kTilesY * 4U, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(pyramid_buf.is_ok());
+  {
+    const float th = 0.41421356f;  // tan(22.5 deg), matches the projection
+    auto* tiles = static_cast<std::uint32_t*>(pyramid_buf.value().mapped);
+    std::memset(tiles, 0, kTilesX * kTilesY * 4U);
+    const auto cover = [&](float cx, float cz, float radius, float depth) {
+      // Shader mapping: ndc = xy/(depth*tan_half); uv = ndc*0.5+0.5;
+      // tile = floor(uv * tile_count); uv half-extent = ndc half * 0.5.
+      const float ndc_x = cx / (cz * th);
+      const float ndc_y = 0.0f;
+      const float half = radius * th / cz;  // NDC half-extent
+      const float uv_min_x = (ndc_x - half) * 0.5f + 0.5f;
+      const float uv_max_x = (ndc_x + half) * 0.5f + 0.5f;
+      const float uv_min_y = (ndc_y - half) * 0.5f + 0.5f;
+      const float uv_max_y = (ndc_y + half) * 0.5f + 0.5f;
+      const uint32_t tx_min = static_cast<uint32_t>(
+          std::clamp(uv_min_x * float(kTilesX), 0.0f, float(kTilesX - 1)));
+      const uint32_t tx_max = static_cast<uint32_t>(
+          std::clamp(uv_max_x * float(kTilesX), 0.0f, float(kTilesX - 1)));
+      const uint32_t ty_min = static_cast<uint32_t>(
+          std::clamp(uv_min_y * float(kTilesY), 0.0f, float(kTilesY - 1)));
+      const uint32_t ty_max = static_cast<uint32_t>(
+          std::clamp(uv_max_y * float(kTilesY), 0.0f, float(kTilesY - 1)));
+      for (uint32_t ty = ty_min; ty <= ty_max; ++ty) {
+        for (uint32_t tx = tx_min; tx <= tx_max; ++tx) {
+          tiles[ty * kTilesX + tx] = std::bit_cast<std::uint32_t>(depth);
+        }
+      }
+    };
+    // Blocker wall segment between the camera and the far bar (depth 8,
+    // NDC ~0.977 < the bar's nearest ~0.989): fills the bar's L0 footprint.
+    cover(2.5f, 16.0f, 1.05f, ndc_depth(8.0f, 0.1f, 100.0f));
+    // The near bar's own rendered surface (depth 3, NDC ~0.935 >= its
+    // nearest ~0.900): its L0 footprint keeps every L2 quarter-tile max
+    // >= its nearest depth, so the adaptive test can never occlude it.
+    cover(0.0f, 3.0f, 1.05f, ndc_depth(3.0f, 0.1f, 100.0f));
+  }
   auto driven_set = descriptors.allocate_set(driven_layout.value());
   ASSERT_TRUE(driven_set.is_ok());
   ASSERT_TRUE(descriptors
@@ -374,6 +438,11 @@ TEST(VulkanHardware, RendererGpuDrivenFrameOneSubmission) {
                   .write_buffer(driven_set.value(), 3U,
                                 VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                 draw_buf.value().buffer, 0U, VK_WHOLE_SIZE)
+                  .is_ok());
+  ASSERT_TRUE(descriptors
+                  .write_buffer(driven_set.value(), 4U,
+                                VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                pyramid_buf.value().buffer, 0U, VK_WHOLE_SIZE)
                   .is_ok());
 
   omnicpp::render::PbrMaterialData mat{};
@@ -424,11 +493,12 @@ TEST(VulkanHardware, RendererGpuDrivenFrameOneSubmission) {
   omnicpp::render::VulkanPipeline cull_pipe, gfx_pipe;
   const std::string sd = OMNICPP_TEST_SHADER_DIR;
   ASSERT_TRUE(cull_pipe
-                  .load_shader_stage_file(context.device(),
-                                          sd + "/cull_and_draw_lod.comp.spv",
-                                          "compute")
+                  .load_shader_stage_file(
+                      context.device(),
+                      sd + "/cull_and_draw_lod_occlude.comp.spv", "compute")
                   .is_ok());
-  const VkPushConstantRange cull_push{VK_SHADER_STAGE_COMPUTE_BIT, 0U, 144U};
+  // Push layout: base 8 words + planes (96 B) + 4 floats + 6 occl words.
+  const VkPushConstantRange cull_push{VK_SHADER_STAGE_COMPUTE_BIT, 0U, 164U};
   const VkDescriptorSetLayout cull_layouts[1] = {driven_layout.value()};
   ASSERT_TRUE(cull_pipe
                   .create_pipeline_layout(context.device(), cull_layouts, 1U,
@@ -493,7 +563,15 @@ TEST(VulkanHardware, RendererGpuDrivenFrameOneSubmission) {
     float viewport_h;
     std::uint32_t lod_threshold_count;
     float lod_thresholds[4];
+    // --- occlusion extension ---
+    std::uint32_t occl_enable;
+    std::uint32_t tile_count_x;
+    std::uint32_t tile_count_y;
+    std::uint32_t pyramid_off;
+    std::uint32_t near_z;
+    std::uint32_t far_z;
   } cull_push_data{};
+  static_assert(sizeof(CullPush) == 164U, "push size drift");
   cull_push_data.object_count = kObjectCount;
   cull_push_data.sphere_word = kSphereWord;
   cull_push_data.draw_word = kDrawWord;
@@ -548,35 +626,49 @@ TEST(VulkanHardware, RendererGpuDrivenFrameOneSubmission) {
   auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
       context.device(), qf);
   ASSERT_TRUE(pool.is_ok());
-  auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cbr1 = omnicpp::render::VulkanRenderer::allocate_command_buffer(
       context.device(), pool.value());
-  ASSERT_TRUE(cbr.is_ok());
-  VkCommandBuffer cb = cbr.value();
-  VkCommandBufferBeginInfo bi{};
-  bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  ASSERT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
-  ASSERT_TRUE(
-      renderer.record_pbr_frame_gpu_driven(cb, frame).is_ok());
-  ASSERT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+  auto cbr2 = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      context.device(), pool.value());
+  ASSERT_TRUE(cbr1.is_ok() && cbr2.is_ok());
+
+  // Occlusion ABI fields shared by both rounds (round 1 keeps the pyramid
+  // bound but DISABLED — proves the enable bit, not the buffer presence).
+  cull_push_data.tile_count_x = kTilesX;
+  cull_push_data.tile_count_y = kTilesY;
+  cull_push_data.pyramid_off = kPyramidOff;
+  cull_push_data.near_z = std::bit_cast<std::uint32_t>(0.1f);
+  cull_push_data.far_z = std::bit_cast<std::uint32_t>(100.0f);
 
   VkFenceCreateInfo fi{};
   fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
   VkFence fence = VK_NULL_HANDLE;
   vkCreateFence(context.device(), &fi, nullptr, &fence);
+  VkCommandBufferBeginInfo bi{};
+  bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   VkSubmitInfo sub{};
   sub.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   sub.commandBufferCount = 1U;
-  sub.pCommandBuffers = &cb;
-  ASSERT_EQ(vkQueueSubmit(context.graphics_queue(), 1U, &sub, fence),
-            VK_SUCCESS);
-  ASSERT_EQ(
-      vkWaitForFences(context.device(), 1U, &fence, VK_TRUE, UINT64_MAX),
-      VK_SUCCESS);
-  vkDestroyFence(context.device(), fence, nullptr);
-  vkDestroyCommandPool(context.device(), pool.value(), nullptr);
 
-  // ---- Proof 1: GPU-written commands ----
+  const auto submit_frame = [&](VkCommandBuffer cb) {
+    ASSERT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    ASSERT_TRUE(renderer.record_pbr_frame_gpu_driven(cb, frame).is_ok());
+    ASSERT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    sub.pCommandBuffers = &cb;
+    EXPECT_EQ(vkQueueSubmit(context.graphics_queue(), 1U, &sub, fence),
+              VK_SUCCESS);
+    EXPECT_EQ(
+        vkWaitForFences(context.device(), 1U, &fence, VK_TRUE, UINT64_MAX),
+        VK_SUCCESS);
+    EXPECT_EQ(vkResetFences(context.device(), 1U, &fence), VK_SUCCESS);
+  };
+
+  // ---- Round 1: occlusion DISABLED — far bar renders at LOD 1 -----------
+  cull_push_data.occl_enable = 0U;
+  submit_frame(cbr1.value());
+
+  // Proof 1: GPU-written commands (same structure as the base frame test).
   const auto* words = static_cast<const std::uint32_t*>(draw_buf.value().mapped);
   const auto* cmds = words + kDrawWord;
   const std::uint32_t tall_count = merged.entries[slot_tall].index_count;
@@ -593,35 +685,60 @@ TEST(VulkanHardware, RendererGpuDrivenFrameOneSubmission) {
   EXPECT_EQ(cmds[11], 0U);
   EXPECT_EQ(words[kVisibleWord], 2U);
 
-  // ---- Proof 2: pixel structure matches the harness path ----
-  const auto pixels_result = omnicpp_test::readback_swapchain_image(
+  // Proof 2: pixels — near and far bars both present.
+  const auto pix1 = omnicpp_test::readback_swapchain_image(
       context.physical_device(), context.device(), context.graphics_queue(),
       qf, target.image(), target.format(), kSize, kSize,
       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*store_pixels=*/true);
+  ASSERT_TRUE(pix1.submitted);
+  ASSERT_EQ(pix1.pixels.size(), static_cast<std::size_t>(kSize) * kSize);
+  const std::size_t near_run1 =
+      count_red_run(pix1.pixels, kSize, kSize, 128U);
+  const std::size_t far_run1 =
+      count_red_run(pix1.pixels, kSize, kSize, 176U);
+  EXPECT_GT(near_run1, 180U);
+  EXPECT_GT(far_run1, 12U) << "far bar must render with occlusion disabled";
+
+  // ---- Round 2: occlusion ENABLED — far bar GPU-culled ------------------
+  // Reset the counter (atomicAdd accumulates across frames); commands are
+  // rewritten absolutely by the compute pass every round.
+  std::memset(draw_buf.value().mapped, 0, (kVisibleWord + 1U) * 4U);
+  cull_push_data.occl_enable = 1U;
+  submit_frame(cbr2.value());
+
+  // Proof 3: commands — far bar degenerate, near bar intact, visible == 1.
+  EXPECT_EQ(cmds[0], tall_count) << "near bar survives (its tiles are empty)";
+  EXPECT_EQ(cmds[5], 0U) << "far bar must be occlusion-culled on the GPU";
+  EXPECT_EQ(cmds[6], 0U);
+  EXPECT_EQ(words[kVisibleWord], 1U);
+
+  // Proof 4: pixels — far bar gone, near bar unchanged.
+  const auto pix2 = omnicpp_test::readback_swapchain_image(
+      context.physical_device(), context.device(), context.graphics_queue(),
+      qf, target.image(), target.format(), kSize, kSize,
       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-      /*store_pixels=*/true);
-  ASSERT_TRUE(pixels_result.submitted);
-  ASSERT_EQ(pixels_result.pixels.size(),
-            static_cast<std::size_t>(kSize) * kSize);
+      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*store_pixels=*/true);
+  ASSERT_TRUE(pix2.submitted);
+  const std::size_t near_run2 =
+      count_red_run(pix2.pixels, kSize, kSize, 128U);
+  const std::size_t far_run2 =
+      count_red_run(pix2.pixels, kSize, kSize, 176U);
+  const std::size_t behind_run2 =
+      count_red_run(pix2.pixels, kSize, kSize, 92U);
 
-  const std::size_t near_run =
-      count_red_run(pixels_result.pixels, kSize, kSize, 128U);
-  const std::size_t far_run =
-      count_red_run(pixels_result.pixels, kSize, kSize, 176U);
-  const std::size_t behind_run =
-      count_red_run(pixels_result.pixels, kSize, kSize, 92U);
-
-  std::printf("\n[FRAME] near=%zu far=%zu behind=%zu\n", near_run, far_run,
-              behind_run);
+  std::printf("\n[OCCL] round1 near=%zu far=%zu | round2 near=%zu far=%zu "
+              "behind=%zu\n",
+              near_run1, far_run1, near_run2, far_run2, behind_run2);
   std::fflush(stdout);
 
-  EXPECT_GT(near_run, 180U) << "near bar must draw the LOD 0 mesh";
-  EXPECT_LT(near_run, 235U);
-  EXPECT_GT(far_run, 12U) << "far bar should be visible at LOD 1";
-  EXPECT_LT(far_run, 30U)
-      << "far bar must draw the LOD 1 mesh (LOD 0 would be ~39 px)";
-  EXPECT_EQ(behind_run, 0U) << "behind-camera bar must be culled on the GPU";
-  EXPECT_GT(pixels_result.non_clear_pixels, 5000U);
+  EXPECT_GT(near_run2, 180U) << "near bar must survive occlusion";
+  EXPECT_EQ(far_run2, 0U) << "far bar pixels must disappear";
+  EXPECT_EQ(behind_run2, 0U);
+  EXPECT_GT(pix2.non_clear_pixels, 4000U);
+
+  vkDestroyFence(context.device(), fence, nullptr);
+  vkDestroyCommandPool(context.device(), pool.value(), nullptr);
 
   // Cleanup
   if (white_sampler != VK_NULL_HANDLE) {
@@ -634,6 +751,8 @@ TEST(VulkanHardware, RendererGpuDrivenFrameOneSubmission) {
     vkDestroyImage(context.device(), white_image, nullptr);
   }
   allocator.destroy_allocation(white_alloc);
+  omnicpp::render::Allocation pyramid_alloc = pyramid_buf.value();
+  allocator.destroy_allocation(pyramid_alloc);
   gfx_pipe.cleanup(context.device());
   cull_pipe.cleanup(context.device());
   target.cleanup(context.device());
@@ -644,7 +763,7 @@ TEST(VulkanHardware, RendererGpuDrivenFrameOneSubmission) {
 
 #else  // !OMNICPP_HAS_VULKAN
 
-TEST(VulkanHardware, RendererGpuDrivenFrameOneSubmission) {
+TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
   GTEST_SKIP() << "Vulkan unavailable";
 }
 

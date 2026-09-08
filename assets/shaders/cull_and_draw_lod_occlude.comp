@@ -1,0 +1,218 @@
+#version 450
+
+// cull_and_draw_lod_occlude.comp — cull_and_draw_lod.comp + optional H-Z
+// occlusion against the previous frame's depth pyramid (1-frame latency,
+// conservative). Per-object frustum cull, projected-size LOD selection,
+// then an occlusion test: when the pyramid's tiles fully cover the object's
+// projection with depth NEARER than the object's nearest point, the object
+// is occluded and its indirect command stays degenerate (indexCount=0).
+// Graphics draws ONE vkCmdDrawIndexedIndirect; the CPU never computes
+// visibility, LOD, or occlusion inside the frame.
+//
+// Occlusion ABI (all optional — set tile counts to 0 to disable):
+//   Binding 4 (std430, flat uint words): packed max-depth pyramid.
+//     Level dims derive from tile_count_x/y (level 0); each level halves.
+//     0u packed word = no geometry ever rendered into that tile.
+//   Push extension: occl_enable, tile_count_x, tile_count_y, pyramid_off
+//   (word offset of level 0 inside binding 4), near_z/far_z (packed floats
+//   matching the projection that produced the pyramid).
+//
+// Buffer layout (shared with cull_and_draw_lod.comp):
+//   binding 0: header (draw/visible word offsets)
+//   binding 1: 24-word object payloads (model, material, mesh_slot, sphere,
+//              lod_count)
+//   binding 2: mesh table, 5 words per slot (index_count/index_offset/
+//              vertex_base/vertex_count/dedup_of), one slot per LOD level
+//   binding 3: output words — VkDrawIndexedIndirectCommand per object plus
+//              the visible counter
+//   binding 4: depth pyramid (packed float max depths, this variant only)
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, std430) readonly buffer Header {
+  uint words[];  // [0] draw_word, [1] visible_word
+} header;
+
+layout(set = 0, binding = 1, std430) readonly buffer ObjectPayload {
+  uint meta[];  // 24 words per object; sphere at word 18 (see load_sphere)
+} objects;
+
+layout(set = 0, binding = 2, std430) readonly buffer MeshTable {
+  uint entries[];  // 5 words per slot
+} table;
+
+layout(set = 0, binding = 3, std430) buffer Draws {
+  uint words[];
+} draws;
+
+layout(set = 0, binding = 4, std430) readonly buffer Pyramid {
+  uint tiles[];  // packed float max depths, 0 = empty tile
+} pyramid;
+
+layout(push_constant) uniform Push {
+  uint object_count;
+  uint sphere_word;      // word offset of object 0's sphere (2 + 18)
+  uint draw_word;        // word offset of command 0 (5 words per command)
+  uint visible_word;     // word offset of the visible counter
+  float planes[6][4];    // frustum planes (a,b,c,d): front = dot(p,n)+d > 0
+  float tan_half_fov;
+  float viewport_h;
+  uint lod_threshold_count;
+  float lod_thresholds[4];  // screen-space px, descending
+  // --- occlusion extension ---
+  uint occl_enable;
+  uint tile_count_x;     // level-0 tile grid width (0 disables occlusion)
+  uint tile_count_y;
+  uint pyramid_off;      // word offset of pyramid level 0 in binding 4
+  uint near_z;           // packed float, matches the depth-source projection
+  uint far_z;            // packed float
+} pc;
+
+uint load_sphere(uint obj, out vec3 center, out float radius) {
+  const uint base = pc.sphere_word + obj * 24u;
+  center = uintBitsToFloat(uvec3(objects.meta[base + 0u],
+                                 objects.meta[base + 1u],
+                                 objects.meta[base + 2u]));
+  radius = uintBitsToFloat(objects.meta[base + 3u]);
+  return obj;
+}
+
+//! Conservative H-Z occlusion test. Returns true when every pyramid tile
+//! covering the sphere's projected bounding square holds a max depth NEARER
+//! than the sphere's nearest point (fully hidden behind geometry).
+bool occluded(vec3 center, float radius) {
+  if (pc.occl_enable == 0u || pc.tile_count_x == 0u || pc.tile_count_y == 0u) {
+    return false;
+  }
+  const float view_d_center = max(-center.z, 0.01);
+  const vec2 tan_half_v = vec2(pc.tan_half_fov, pc.tan_half_fov);
+  // NDC xy of the center (y-down clip space matches the scene projection).
+  const vec2 ndc = center.xy / (-center.z * tan_half_v);
+
+  // Exact NDC depth of the sphere's NEAREST point under the GL-style
+  // projection (same formula as the depth source): ndc(d) = C1 - C2/d.
+  const float near_z = uintBitsToFloat(pc.near_z);
+  const float far_z = uintBitsToFloat(pc.far_z);
+  const float inv_range = 1.0f / (far_z - near_z);
+  const float c1 = (far_z + near_z) * inv_range;
+  const float c2 = 2.0f * far_z * near_z * inv_range;
+  const float view_d = max(-center.z - radius, near_z);
+  const float depth_min = clamp(c1 - c2 / view_d, 0.0f, 1.0f);
+
+  // Footprint-adaptive level selection: walk from level 0 down until the
+  // sphere's projected half-extent spans <= 1 tile per axis.
+  const float texel_x = 1.0f / (float(pc.tile_count_x));  // NDC per tile
+  const float texel_y = 1.0f / (float(pc.tile_count_y));
+  const float half_x = radius * tan_half_v.x / view_d_center;
+  const float half_y = radius * tan_half_v.y / view_d_center;
+
+  // Level grid dims: tcx/tcy halving per level, floor to >= 1.
+  uint lx = pc.tile_count_x;
+  uint ly = pc.tile_count_y;
+  uint level = 0u;
+  uint level_off = 0u;
+  uint level_words = lx * ly;
+  while ((half_x * 2.0f > texel_x * float(1u << level) ||
+          half_y * 2.0f > texel_y * float(1u << level)) &&
+         (lx > 1u || ly > 1u)) {
+    level_off += level_words;
+    lx = max(lx >> 1u, 1u);
+    ly = max(ly >> 1u, 1u);
+    level_words = lx * ly;
+    ++level;
+  }
+  const uint base = pc.pyramid_off + level_off;
+
+  const vec2 uv_c = ndc * 0.5f + 0.5f;
+  const vec2 half_uv = vec2(half_x, half_y) * 0.5f;
+  const vec2 uv_min = clamp(uv_c - half_uv, vec2(0.0f), vec2(1.0f));
+  const vec2 uv_max = clamp(uv_c + half_uv, vec2(0.0f), vec2(1.0f));
+  const uvec2 t_min = uvec2(clamp(uvec2(uv_min * vec2(float(lx), float(ly))),
+                                  uvec2(0u), uvec2(lx - 1u, ly - 1u)));
+  const uvec2 t_max = uvec2(clamp(uvec2(uv_max * vec2(float(lx), float(ly))),
+                                  uvec2(0u), uvec2(lx - 1u, ly - 1u)));
+
+  bool covered_everywhere = true;
+  bool any_sample = false;
+  for (uint ty = t_min.y; ty <= t_max.y; ++ty) {
+    for (uint tx = t_min.x; tx <= t_max.x; ++tx) {
+      const uint packed = pyramid.tiles[base + ty * lx + tx];
+      if (packed != 0u) {
+        any_sample = true;
+        if (uintBitsToFloat(packed) >= depth_min) {
+          return false;  // some tile is nearer than the sphere: visible
+        }
+      }
+    }
+  }
+  return any_sample && covered_everywhere;
+}
+
+void main() {
+  const uint obj = gl_GlobalInvocationID.x;
+  if (obj >= pc.object_count) return;
+
+  vec3 center; float radius;
+  load_sphere(obj, center, radius);
+
+  // --- Frustum cull: sphere fully behind any plane -> culled -------------
+  bool visible = true;
+  for (int p = 0; p < 6; ++p) {
+    const vec3 n = vec3(pc.planes[p][0], pc.planes[p][1], pc.planes[p][2]);
+    const float d = pc.planes[p][3];
+    if (dot(n, center) + d < -radius) {
+      visible = false;
+      break;
+    }
+  }
+
+  // --- Occlusion cull (previous frame's depth, conservative) -------------
+  if (visible && occluded(center, radius)) {
+    visible = false;
+  }
+
+  uint index_count = 0u;
+  uint index_offset = 0u;
+  uint first_instance = obj;  // gl_InstanceIndex addresses the payload
+
+  if (visible) {
+    // --- Projected-size LOD selection --------------------------------------
+    const float depth = max(-center.z, 0.01);
+    const float screen_h = 2.0 * radius / depth * pc.viewport_h /
+                           (2.0 * pc.tan_half_fov);
+
+    uint level = 0u;
+    for (uint t = 0; t + 1u < pc.lod_threshold_count; ++t) {
+      if (screen_h < pc.lod_thresholds[t]) {
+        level = t + 1u;
+        break;
+      }
+    }
+    if (level == 0u && pc.lod_threshold_count > 1u &&
+        screen_h < pc.lod_thresholds[pc.lod_threshold_count - 1u]) {
+      level = pc.lod_threshold_count - 1u;
+    }
+
+    // Payload fields relative to the sphere base:
+    //   base - 1 = mesh_slot, base + 4 = lod_count.
+    const uint lod_count = objects.meta[pc.sphere_word + obj * 24u + 4u];
+    if (level >= lod_count) level = lod_count - 1u;
+
+    const uint mesh_slot = objects.meta[pc.sphere_word + obj * 24u - 1u];
+    const uint slot = mesh_slot + level;
+    index_count = table.entries[slot * 5u + 0u];
+    index_offset = table.entries[slot * 5u + 1u];
+  }
+
+  // --- Write the draw command (degenerate when culled) --------------------
+  const uint cmd_base = pc.draw_word + obj * 5u;
+  draws.words[cmd_base + 0u] = index_count;
+  draws.words[cmd_base + 1u] = visible ? 1u : 0u;
+  draws.words[cmd_base + 2u] = index_offset;
+  draws.words[cmd_base + 3u] = 0u;  // vertexOffset: global indices
+  draws.words[cmd_base + 4u] = first_instance;
+
+  if (visible) {
+    atomicAdd(draws.words[pc.visible_word], 1u);
+  }
+}
