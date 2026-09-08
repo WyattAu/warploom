@@ -528,6 +528,132 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_frame(
 #endif
 }
 
+#ifdef OMNICPP_HAS_VULKAN
+namespace {
+
+//! Record shims for the one-submission GPU-driven frame: user_data carries
+//! the borrowed frame description. Raw vkCmd* calls here (not renderer
+//! methods) because the shims execute inside execute_graph callbacks where
+//! the graph already owns sequencing.
+struct GpuDrivenCtx {
+  const VulkanRenderer::GpuDrivenFrame* frame;
+};
+
+void gpu_driven_compute_cb(VkCommandBuffer cb, const GraphComputePass& pass,
+                           void* user_data) {
+  (void)pass;
+  const auto& f = *static_cast<GpuDrivenCtx*>(user_data)->frame;
+  vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, f.cull_pipeline);
+  vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          f.cull_pipeline_layout, 0, 1, &f.cull_set, 0,
+                          nullptr);
+  if (f.cull_push.data != nullptr && f.cull_push.size > 0U) {
+    vkCmdPushConstants(cb, f.cull_pipeline_layout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, f.cull_push.size,
+                       f.cull_push.data);
+  }
+  const std::uint32_t groups = (f.object_count + 63U) / 64U;
+  vkCmdDispatch(cb, groups, 1U, 1U);
+}
+
+void gpu_driven_render_cb(VkCommandBuffer cb, const GraphPass& pass,
+                          void* user_data) {
+  const auto& f = *static_cast<GpuDrivenCtx*>(user_data)->frame;
+
+  VkViewport viewport{};
+  viewport.width = static_cast<float>(pass.width);
+  viewport.height = static_cast<float>(pass.height);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+  vkCmdSetViewport(cb, 0, 1, &viewport);
+  VkRect2D scissor{};
+  scissor.extent = {pass.width, pass.height};
+  vkCmdSetScissor(cb, 0, 1, &scissor);
+
+  vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, f.draw_pipeline);
+  if (f.draw_set_count > 0U) {
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            f.draw_pipeline_layout, 0, f.draw_set_count,
+                            f.draw_sets, 0, nullptr);
+  }
+  if (f.draw_push.data != nullptr && f.draw_push.size > 0U) {
+    vkCmdPushConstants(cb, f.draw_pipeline_layout,
+                       static_cast<VkShaderStageFlags>(
+                           VK_SHADER_STAGE_VERTEX_BIT |
+                           VK_SHADER_STAGE_FRAGMENT_BIT),
+                       0, f.draw_push.size, f.draw_push.data);
+  }
+  vkCmdBindIndexBuffer(cb, f.index_buffer, 0, VK_INDEX_TYPE_UINT32);
+  vkCmdDrawIndexedIndirect(cb, f.indirect_buffer, 0, f.object_count,
+                           sizeof(VkDrawIndexedIndirectCommand));
+}
+
+}  // namespace
+#endif  // OMNICPP_HAS_VULKAN
+
+omnicpp::core::Result<void> VulkanRenderer::record_pbr_frame_gpu_driven(
+    VkCommandBuffer command_buffer, const GpuDrivenFrame& frame) const {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!command_buffer || frame.cull_pipeline == VK_NULL_HANDLE ||
+      frame.cull_pipeline_layout == VK_NULL_HANDLE ||
+      frame.cull_set == VK_NULL_HANDLE || frame.object_count == 0U ||
+      frame.indirect_buffer == VK_NULL_HANDLE ||
+      frame.draw_pipeline == VK_NULL_HANDLE ||
+      frame.draw_pipeline_layout == VK_NULL_HANDLE ||
+      frame.draw_set_count == 0U || frame.draw_set_count > 4U ||
+      frame.index_buffer == VK_NULL_HANDLE ||
+      frame.render_pass == VK_NULL_HANDLE ||
+      frame.framebuffer == VK_NULL_HANDLE || frame.width == 0U ||
+      frame.height == 0U) {
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::invalid_config);
+  }
+
+  // Compute node: cull + LOD + command generation (one invocation per
+  // object; 64-wide groups matching cull_and_draw_lod.comp).
+  GraphComputePass cull{};
+  cull.name = "gpu_driven_cull";
+  cull.group_count_x = (frame.object_count + 63U) / 64U;
+  GpuDrivenCtx ctx{&frame};
+  cull.user_data = &ctx;
+
+  // Main node: ONE indirect draw consuming the GPU-written commands. The
+  // consumer-declared buffer edge makes execute_graph emit the
+  // COMPUTE_SHADER(WRITE) -> DRAW_INDIRECT(READ) barrier before the render
+  // pass begins; no barrier is hand-authored anywhere in the frame.
+  GraphPass main_pass{};
+  main_pass.name = "gpu_driven_main";
+  main_pass.render_pass = frame.render_pass;
+  main_pass.framebuffer = frame.framebuffer;
+  main_pass.width = frame.width;
+  main_pass.height = frame.height;
+  main_pass.clear_values = frame.clear_values;
+  main_pass.clear_value_count = frame.clear_value_count;
+  GraphBufferEdge edge{};
+  edge.buffer = frame.indirect_buffer;
+  edge.producer_stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+  edge.consumer_stage = VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+  edge.consumer_access = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+  main_pass.buffer_edges = {edge};
+  main_pass.user_data = &ctx;
+
+  std::vector<GraphNode> nodes;
+  nodes.reserve(2U);
+  nodes.push_back(GraphNode::from_compute(cull));
+  nodes.push_back(GraphNode::from_render(main_pass));
+
+  const CompiledGraph compiled = compile_graph(nodes);
+  execute_graph(command_buffer, nodes, compiled, &gpu_driven_render_cb,
+                &gpu_driven_compute_cb);
+  return omnicpp::core::Result<void>::ok();
+#else
+  (void)command_buffer;
+  (void)frame;
+  return omnicpp::core::Result<void>::error(
+      omnicpp::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
 namespace {
 
 //! Fullscreen-record shim for execute_graph: user_data carries a

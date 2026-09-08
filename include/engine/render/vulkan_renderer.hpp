@@ -184,6 +184,50 @@ public:
       VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
       const PbrFrameTargets& targets) const;
 
+  //! Borrowed resources for one renderer-recorded GPU-driven frame. The
+  //! renderer records [cull compute -> indirect main draw] as graph nodes in
+  //! ONE command buffer; compile_graph emits the compute -> draw-indirect
+  //! buffer barrier from the command buffer edge, so the CPU never waits on
+  //! or reads GPU cull results inside the frame. All handles are borrowed:
+  //! they must be valid for the duration of the recording call.
+  struct GpuDrivenPush {
+    const void* data{nullptr};
+    std::uint32_t size{0};
+  };
+  struct GpuDrivenFrame {
+    //! Compute cull/LOD pass (writes VkDrawIndexedIndirectCommands + a
+    //! visible counter into command_buffer_handle, per the proven
+    //! cull_and_draw_lod.comp contract).
+    VkPipeline cull_pipeline{VK_NULL_HANDLE};
+    VkPipelineLayout cull_pipeline_layout{VK_NULL_HANDLE};
+    VkDescriptorSet cull_set{VK_NULL_HANDLE};
+    std::uint32_t object_count{0};
+    GpuDrivenPush cull_push{};
+    //! Buffer holding the GPU-written draw commands (INDIRECT_USAGE).
+    VkBuffer indirect_buffer{VK_NULL_HANDLE};
+    //! Main lit pass drawing ONE vkCmdDrawIndexedIndirect over the commands.
+    VkPipeline draw_pipeline{VK_NULL_HANDLE};
+    VkPipelineLayout draw_pipeline_layout{VK_NULL_HANDLE};
+    VkDescriptorSet draw_sets[4]{VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                 VK_NULL_HANDLE, VK_NULL_HANDLE};
+    std::uint32_t draw_set_count{0};
+    GpuDrivenPush draw_push{};
+    VkBuffer index_buffer{VK_NULL_HANDLE};
+    //! Target.
+    VkRenderPass render_pass{VK_NULL_HANDLE};
+    VkFramebuffer framebuffer{VK_NULL_HANDLE};
+    std::uint32_t width{0};
+    std::uint32_t height{0};
+    const VkClearValue* clear_values{nullptr};
+    std::uint32_t clear_value_count{0};
+  };
+
+  //! Record the one-submission GPU-driven frame. Validation fails with
+  //! invalid_config when required handles are missing. The compute node's
+  //! dispatch is ceil(object_count / 64) groups (matches the shared shader).
+  [[nodiscard]] omnicpp::core::Result<void> record_pbr_frame_gpu_driven(
+      VkCommandBuffer command_buffer, const GpuDrivenFrame& frame) const;
+
   //! One full-screen triangle sampling up to 4 source images (post-process:
   //! tonemap/FXAA/bloom combine, sky resolve, SSAO blur...). The graph node
   //! declares the sources as sampled_images so compile_graph computes the

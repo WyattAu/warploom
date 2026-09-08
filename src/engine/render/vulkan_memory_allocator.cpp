@@ -63,11 +63,15 @@ omnicpp::core::Result<void> VulkanMemoryAllocator::initialize(
 void VulkanMemoryAllocator::cleanup() noexcept {
 #ifdef OMNICPP_HAS_VULKAN
   if (device_) {
+    for (const VkBuffer buffer : live_buffers_) {
+      vkDestroyBuffer(device_, buffer, nullptr);
+    }
     for (auto& block : blocks_) {
       if (block.memory) vkFreeMemory(device_, block.memory, nullptr);
     }
   }
 #endif
+  live_buffers_.clear();
   blocks_.clear();
   allocation_count_ = 0;
   device_ = VK_NULL_HANDLE;
@@ -264,6 +268,7 @@ omnicpp::core::Result<Allocation> VulkanMemoryAllocator::create_buffer(
         omnicpp::core::RuntimeError::vulkan_not_available);
   }
   alloc.buffer = buffer;
+  live_buffers_.push_back(buffer);
   return omnicpp::core::Result<Allocation>::ok(alloc);
 #else
   (void)size; (void)usage; (void)properties;
@@ -303,6 +308,13 @@ void VulkanMemoryAllocator::destroy_allocation(Allocation& allocation) noexcept 
   if (!device_ || !allocation.is_valid()) return;
   if (allocation.buffer) {
     vkDestroyBuffer(device_, allocation.buffer, nullptr);
+    for (std::size_t i = 0; i < live_buffers_.size(); ++i) {
+      if (live_buffers_[i] == allocation.buffer) {
+        live_buffers_.erase(live_buffers_.begin() +
+                            static_cast<std::ptrdiff_t>(i));
+        break;
+      }
+    }
     allocation.buffer = VK_NULL_HANDLE;
   }
   if (allocation.block_index < blocks_.size()) {

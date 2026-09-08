@@ -106,6 +106,11 @@ private:
   [[nodiscard]] std::uint32_t find_memory_type(
       std::uint32_t type_bits, VkMemoryPropertyFlags properties) const;
 
+  //! Buffer handles owned by live allocations (created by create_buffer);
+  //! destroyed by cleanup() so a dropped allocator never leaks VkBuffers.
+  //! Images are caller-created via bind_image and stay caller-owned.
+  std::vector<VkBuffer> live_buffers_;
+
   VkDevice device_{VK_NULL_HANDLE};
   VkPhysicalDevice physical_device_{VK_NULL_HANDLE};
   std::vector<Block> blocks_;
