@@ -7,6 +7,8 @@ cmake_minimum_required(VERSION 3.20)
 
 add_library(omnicpp_runtime SHARED
     core/engine.cpp
+    core/input_state.cpp
+    core/input_translators.cpp
     asset/gltf_importer.cpp
     asset/gltf_animation.cpp
     asset/image_decode.cpp

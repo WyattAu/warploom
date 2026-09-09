@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,7 @@
 #include "engine/asset/gltf_animation.hpp"
 #include "engine/asset/gltf_importer.hpp"
 #include "engine/core/input_state.hpp"
+#include "engine/core/input_translators.hpp"
 #include "engine/render/vulkan_context.hpp"
 #include "engine/render/vulkan_descriptors.hpp"
 #include "engine/render/vulkan_memory_allocator.hpp"
@@ -199,6 +201,13 @@ struct ViewportApp {
   omnicpp::core::InputState input;
   omnicpp::core::VirtualInputDriver virtual_input;
   bool input_scripted{false};
+  //! Real-device translation: the XCB event loop feeds raw key/mouse
+  //! events in; apply() writes the same actions/axes the virtual driver
+  //! produces. The gamepad driver is optional (absent device = no-op).
+  omnicpp::core::XcbKeyMouseTranslator kb_mouse;
+#if defined(__linux__)
+  std::unique_ptr<omnicpp::core::LinuxJoystickDriver> gamepad;
+#endif
   //! Camera response accumulators driven by input actions.
   float camera_orbit_bias{0.0f};   //!< extra rad/s from orbit_left/right
   float camera_radius_bias{0.0f};  //!< zoom accumulator
@@ -231,14 +240,18 @@ bool setup_window(ViewportApp& app) {
 
   app.window = xcb_generate_id(app.connection);
   const std::uint32_t event_mask = XCB_EVENT_MASK_KEY_PRESS |
+                                   XCB_EVENT_MASK_KEY_RELEASE |
+                                   XCB_EVENT_MASK_BUTTON_PRESS |
+                                   XCB_EVENT_MASK_BUTTON_RELEASE |
+                                   XCB_EVENT_MASK_POINTER_MOTION |
                                    XCB_EVENT_MASK_STRUCTURE_NOTIFY;
   xcb_create_window(app.connection, XCB_COPY_FROM_PARENT, app.window,
                     screen->root, 0, 0, kWidth, kHeight, 0,
                     XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual,
                     XCB_CW_EVENT_MASK, &event_mask);
   xcb_change_property(app.connection, XCB_PROP_MODE_REPLACE, app.window,
-                      XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, 14,
-                      "OmniCpp Viewport");
+                      XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
+                      sizeof("OmniCpp Viewport") - 1, "OmniCpp Viewport");
   xcb_map_window(app.connection, app.window);
   xcb_flush(app.connection);
   return true;
@@ -285,6 +298,23 @@ bool poll_events(ViewportApp& app) {
         free(event);
         return false;
       }
+      app.kb_mouse.on_key(key->detail, true);
+    } else if (type == XCB_KEY_RELEASE) {
+      const auto* key =
+          reinterpret_cast<const xcb_key_release_event_t*>(event);
+      app.kb_mouse.on_key(key->detail, false);
+    } else if (type == XCB_MOTION_NOTIFY) {
+      const auto* motion =
+          reinterpret_cast<const xcb_motion_notify_event_t*>(event);
+      app.kb_mouse.on_motion(motion->event_x, motion->event_y);
+    } else if (type == XCB_BUTTON_PRESS) {
+      const auto* button =
+          reinterpret_cast<const xcb_button_press_event_t*>(event);
+      app.kb_mouse.on_button(button->detail, true);
+    } else if (type == XCB_BUTTON_RELEASE) {
+      const auto* button =
+          reinterpret_cast<const xcb_button_press_event_t*>(event);
+      app.kb_mouse.on_button(button->detail, false);
     } else if (type == XCB_DESTROY_NOTIFY) {
       free(event);
       return false;
@@ -1058,6 +1088,22 @@ bool ViewportApp::initialize() {
     } else {
       telemetry.log_event("init", context.device_properties().name);
     }
+#if defined(__linux__)
+    // Optional gamepad: an absent device is normal (the driver no-ops and
+    // is dropped). Opened regardless of telemetry so real devices work in
+    // plain interactive use.
+    constexpr int kJsIndex = 0;
+    {
+      auto pad =
+          std::make_unique<omnicpp::core::LinuxJoystickDriver>(kJsIndex);
+      if (pad->is_open()) {
+        if (telemetry_enabled) {
+          telemetry.log_event("gamepad", "linux_joystick js0");
+        }
+        gamepad = std::move(pad);
+      }
+    }
+#endif
 
     // ----------------------------------------------------------------------
     // Static scene manifest: readable structure of everything on screen.
@@ -1148,7 +1194,17 @@ void ViewportApp::run() {
     // Input tick: poll drivers (virtual script when present), let the
     // camera respond, and log consumed events for auditability.
     input.begin_tick();
-    if (input_scripted) virtual_input.poll(input);
+    // Driver priority: a script, when present, stands in for all real
+    // devices (deterministic runs must be isolated from human input);
+    // otherwise keyboard/mouse and gamepad compose.
+    if (input_scripted) {
+      virtual_input.poll(input);
+    } else {
+      kb_mouse.apply(input);
+#if defined(__linux__)
+      if (gamepad && gamepad->is_open()) gamepad->poll(input);
+#endif
+    }
     input.clamp_axes();
     input.commit_tick();
     // Response: orbit_left/right (actions) and zoom_in/out (actions) move
