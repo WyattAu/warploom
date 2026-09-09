@@ -36,6 +36,7 @@
 #include "engine/render/vulkan_render_pass.hpp"
 #include "engine/render/vulkan_renderer.hpp"
 #include "engine/render/vulkan_scene.hpp"
+#include "engine/render/vulkan_mesh_table.hpp"
 #include "engine/render/scene_camera.hpp"
 #include "engine/render/vulkan_surface.hpp"
 #include "engine/render/vulkan_swapchain.hpp"
@@ -174,6 +175,43 @@ struct ViewportApp {
   std::uint32_t dump_shadow_frame{0};
   VkBuffer dump_shadow_buffer{VK_NULL_HANDLE};
   omnicpp::render::Allocation dump_shadow_allocation{};
+  //! GPU-driven draw path (OMNICPP_GPU_DRIVEN=1, cubes scene only): the
+  //! compute cull/LOD pass writes indirect draw commands and the main pass
+  //! draws the whole scene with ONE vkCmdDrawIndexedIndirect — no CPU
+  //! visibility, LOD, or per-draw submission inside the frame.
+  bool gpu_driven{false};
+  //! 11-float cube geometry through the mesh table (shared vertex/index
+  //! buffers + per-mesh table slots); one slot per mesh (no LOD chain yet,
+  //! lod_count = 1).
+  omnicpp::render::SceneMeshTableBuilder gd_table_builder;
+  omnicpp::render::MeshTableBuild gd_table;
+  std::uint32_t gd_slot_cube{0};
+  std::uint32_t gd_slot_ground{0};
+  VkBuffer gd_shared_vertex_buffer{VK_NULL_HANDLE};
+  omnicpp::render::Allocation gd_shared_vertex_allocation{};
+  VkBuffer gd_shared_index_buffer{VK_NULL_HANDLE};
+  omnicpp::render::Allocation gd_shared_index_allocation{};
+  //! Per-frame payload (2 header words + 3 objects x 24 words), one copy
+  //! per swapchain image so CPU writes never race in-flight GPU reads.
+  std::vector<VkBuffer> gd_payload_buffers;
+  std::vector<omnicpp::render::Allocation> gd_payload_allocations;
+  VkBuffer gd_indirect_buffer{VK_NULL_HANDLE};
+  omnicpp::render::Allocation gd_indirect_allocation{};
+  VkBuffer gd_table_buffer{VK_NULL_HANDLE};
+  omnicpp::render::Allocation gd_table_allocation{};
+  //! Set 0 for the cull pass and the draw pass (vertices + payload +
+  //! mesh table + draw commands; per-image payload copy -> per-image set).
+  VkDescriptorSetLayout gd_set0_layout{VK_NULL_HANDLE};
+  std::vector<VkDescriptorSet> gd_cull_sets;
+  std::vector<VkDescriptorSet> gd_draw_sets;
+  omnicpp::render::VulkanPipeline gd_cull_pipeline;
+  omnicpp::render::VulkanPipeline gd_draw_pipeline;
+  //! The draw pipeline's full layout (sets 0..2, 160-byte push) so the
+  //! pre-pass hook can bind the compute set under the draw layout when
+  //! chaining the cull dispatch ahead of the indirect draw.
+  VkPipelineLayout gd_draw_pipeline_layout{VK_NULL_HANDLE};
+  //! Staging for the 144-byte cull push (rebuilt every frame).
+  std::array<std::byte, 144> gd_cull_push_staging{};
   VkDescriptorSetLayout mesh_layout{VK_NULL_HANDLE};
   VkDescriptorSetLayout textures_layout{VK_NULL_HANDLE};
   VkDescriptorSetLayout material_layout{VK_NULL_HANDLE};
@@ -401,6 +439,21 @@ bool poll_events(ViewportApp& app) {
 bool make_mesh(ViewportApp& app, const std::vector<float>& vertices,
                const std::vector<std::uint32_t>& indices,
                ViewportApp::MeshBuffers& out);
+
+//! Frames of payload copies (must match the renderer's frames in flight).
+constexpr std::uint32_t kViewportMaxFramesInFlight = 2U;
+//! GPU-driven scene: ground slab + two cubes (payload/cull/dispatch count).
+constexpr std::uint32_t kGdObjectCount = 3U;
+//! Push block for the vertex-pull draw pipeline (pbr_gpu_driven.vert +
+//! pbr_gpu_driven_full.frag): 160 bytes, model/material arrive via payload.
+struct GdPush {
+  omnicpp::render::SceneMatrix view_projection;
+  omnicpp::render::SceneMatrix model_unused;
+  std::array<float, 4> camera_position;
+  std::uint32_t material_index_unused;
+  std::array<std::uint32_t, 3> pad{};
+};
+static_assert(sizeof(GdPush) == 160U);
 
 //! Read a small binary file fully; false when unavailable.
 bool read_file_bytes(const std::string& path, std::string& out_text,
@@ -897,6 +950,337 @@ bool setup_scene(ViewportApp& app) {
   return true;
 }
 
+//! GPU-driven path (cubes scene): shared geometry through the mesh table
+//! (one slot per mesh, no LOD chain), payload/indirect buffers with per-image
+//! payload copies, the cull/LOD compute pipeline, and the vertex-pull draw
+//! pipeline over the swapchain render pass. Composes on top of composed
+//! lighting (IBL + shadows) when lighting_ready.
+bool setup_gpu_driven(ViewportApp& app) {
+  // 144-byte cull push: object/draw/visible word indices + 6 planes +
+  // tan/viewport + LOD thresholds (matches cull_and_draw_lod.comp).
+  const VkPushConstantRange kGdCullPush{VK_SHADER_STAGE_COMPUTE_BIT, 0U, 144U};
+  VkDevice dev = app.context.device();
+  const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
+  const std::string shader_dir =
+      shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
+
+  // --- Shared geometry through the mesh table ----------------------------
+  // Host-side copies of the cube + ground geometry (same 11-float layout as
+  // the per-draw path) go through the table builder, which rewrites indices
+  // into one global vertex space. The ground slab's (8, 0.1, 8) scale is
+  // baked into its vertices so the payload model stays identity.
+  std::vector<float> cube_verts;
+  std::vector<std::uint32_t> cube_idx;
+  build_unit_cube(cube_verts, cube_idx);
+  std::vector<float> ground_verts;
+  ground_verts.reserve(cube_verts.size());
+  for (std::size_t i = 0; i < cube_verts.size(); i += 11U) {
+    ground_verts.insert(
+        ground_verts.end(),
+        {cube_verts[i] * 8.0f, cube_verts[i + 1] * 0.1f,
+         cube_verts[i + 2] * 8.0f, cube_verts[i + 3], cube_verts[i + 4],
+         cube_verts[i + 5], cube_verts[i + 6], cube_verts[i + 7],
+         cube_verts[i + 8], cube_verts[i + 9], cube_verts[i + 10]});
+  }
+  std::vector<std::uint32_t> ground_idx(cube_idx);
+
+  app.gd_slot_cube = app.gd_table_builder.add(
+      omnicpp::render::SceneMesh{}, cube_verts, cube_idx);
+  app.gd_slot_ground = app.gd_table_builder.add(
+      omnicpp::render::SceneMesh{}, ground_verts, ground_idx);
+  if (app.gd_slot_cube ==
+          omnicpp::render::SceneMeshTableBuilder::kInvalidSlot ||
+      app.gd_slot_ground ==
+          omnicpp::render::SceneMeshTableBuilder::kInvalidSlot) {
+    std::fprintf(stderr, "viewport: gd mesh table add failed\n");
+    return false;
+  }
+  app.gd_table = app.gd_table_builder.build();
+
+  // --- Shared vertex/index buffers (host-visible, app convention) --------
+  auto vbuf = app.allocator.create_buffer(
+      app.gd_table.vertex_bytes(), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  auto ibuf = app.allocator.create_buffer(
+      app.gd_table.index_bytes(), VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (!vbuf.is_ok() || !ibuf.is_ok()) {
+    std::fprintf(stderr, "viewport: gd shared geometry buffers failed\n");
+    return false;
+  }
+  app.gd_shared_vertex_allocation = vbuf.value();
+  app.gd_shared_vertex_buffer = app.gd_shared_vertex_allocation.buffer;
+  app.gd_shared_index_allocation = ibuf.value();
+  app.gd_shared_index_buffer = app.gd_shared_index_allocation.buffer;
+  std::memcpy(app.gd_shared_vertex_allocation.mapped,
+              app.gd_table.vertex_data.data(), app.gd_table.vertex_bytes());
+  std::memcpy(app.gd_shared_index_allocation.mapped,
+              app.gd_table.index_data.data(), app.gd_table.index_bytes());
+
+  // --- Payload (per-image) + indirect buffers -----------------------------
+  constexpr std::uint32_t kObjectCount = 3U;  // ground + spinner + rough
+  constexpr VkDeviceSize kPayloadBytes = (2U + 24U * kObjectCount) * 4U;
+  constexpr VkDeviceSize kDrawWords = 5U * kObjectCount + 1U;  // + counter
+  app.gd_payload_buffers.resize(kViewportMaxFramesInFlight);
+  app.gd_payload_allocations.resize(kViewportMaxFramesInFlight);
+  for (std::uint32_t i = 0; i < kViewportMaxFramesInFlight; ++i) {
+    auto pbuf = app.allocator.create_buffer(
+        kPayloadBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (!pbuf.is_ok()) {
+      std::fprintf(stderr, "viewport: gd payload buffer failed\n");
+      return false;
+    }
+    app.gd_payload_allocations[i] = pbuf.value();
+    app.gd_payload_buffers[i] = app.gd_payload_allocations[i].buffer;
+  }
+  auto dbuf = app.allocator.create_buffer(
+      kDrawWords * 4U,
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+          VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  if (!dbuf.is_ok()) {
+    std::fprintf(stderr, "viewport: gd indirect buffer failed\n");
+    return false;
+  }
+  app.gd_indirect_allocation = dbuf.value();
+  app.gd_indirect_buffer = app.gd_indirect_allocation.buffer;
+
+  // Mesh table buffer (5 words per slot, read by the cull pass at binding 2).
+  const VkDeviceSize table_bytes =
+      static_cast<VkDeviceSize>(app.gd_table.entries.size()) * 5U * 4U;
+  auto tbuf = app.allocator.create_buffer(
+      table_bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (!tbuf.is_ok()) {
+    std::fprintf(stderr, "viewport: gd table buffer failed\n");
+    return false;
+  }
+  app.gd_table_allocation = tbuf.value();
+  app.gd_table_buffer = app.gd_table_allocation.buffer;
+  std::memcpy(app.gd_table_allocation.mapped, app.gd_table.entries.data(),
+              static_cast<std::size_t>(table_bytes));
+
+  // --- Set-0 layout (shared by cull + draw): vertices/payload/table/cmds --
+  const std::vector<omnicpp::render::ReflectedBinding> gd_bindings = {
+      {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT},
+      {0U, 1U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT},
+      {0U, 2U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT},
+      {0U, 3U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT}};
+  auto gd_layout = app.descriptors.create_layout(gd_bindings, 16U);
+  if (!gd_layout.is_ok()) {
+    std::fprintf(stderr, "viewport: gd set0 layout failed\n");
+    return false;
+  }
+  app.gd_set0_layout = gd_layout.value();
+  app.gd_cull_sets.resize(kViewportMaxFramesInFlight);
+  app.gd_draw_sets.resize(kViewportMaxFramesInFlight);
+  for (std::uint32_t i = 0; i < kViewportMaxFramesInFlight; ++i) {
+    auto cs = app.descriptors.allocate_set(app.gd_set0_layout);
+    auto ds = app.descriptors.allocate_set(app.gd_set0_layout);
+    if (!cs.is_ok() || !ds.is_ok()) {
+      std::fprintf(stderr, "viewport: gd set allocation failed\n");
+      return false;
+    }
+    app.gd_cull_sets[i] = cs.value();
+    app.gd_draw_sets[i] = ds.value();
+    for (VkDescriptorSet* set : {&app.gd_cull_sets[i], &app.gd_draw_sets[i]}) {
+      if (!app.descriptors
+               .write_buffer(*set, 0U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                             app.gd_shared_vertex_buffer, 0U, VK_WHOLE_SIZE)
+               .is_ok() ||
+          !app.descriptors
+               .write_buffer(*set, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                             app.gd_payload_buffers[i], 0U, VK_WHOLE_SIZE)
+               .is_ok() ||
+          !app.descriptors
+               .write_buffer(*set, 2U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                             app.gd_table_buffer, 0U, VK_WHOLE_SIZE)
+               .is_ok() ||
+          !app.descriptors
+               .write_buffer(*set, 3U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                             app.gd_indirect_buffer, 0U, VK_WHOLE_SIZE)
+               .is_ok()) {
+        std::fprintf(stderr, "viewport: gd set writes failed\n");
+        return false;
+      }
+    }
+  }
+
+  // --- Pipelines ----------------------------------------------------------
+  if (!app.gd_cull_pipeline
+           .load_shader_stage_file(
+               dev, shader_dir + "/cull_and_draw_lod.comp.spv", "compute")
+           .is_ok() ||
+      !app.gd_cull_pipeline
+           .create_pipeline_layout(
+               dev, &app.gd_set0_layout, 1U, &kGdCullPush)
+           .is_ok() ||
+      !app.gd_cull_pipeline.create_compute_pipeline(dev).is_ok()) {
+    std::fprintf(stderr, "viewport: gd cull pipeline failed\n");
+    return false;
+  }
+  // The driven fragment shader statically uses the shadow (set 4) and IBL
+  // (set 5) slots, so the draw layout declares all five sets. gd mode is only
+  // enabled with composed lighting (both sets are always bound).
+  const VkDescriptorSetLayout draw_layouts[5] = {
+      app.gd_set0_layout, app.textures_layout, app.material_layout,
+      app.shadow_layout, app.ibl5_layout};
+  const VkPushConstantRange draw_push{
+      static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT |
+                                      VK_SHADER_STAGE_FRAGMENT_BIT),
+      0U, 160U};
+  if (!app.gd_draw_pipeline
+           .load_shader_stage_file(dev,
+                                   shader_dir + "/pbr_gpu_driven.vert.spv",
+                                   "vertex")
+           .is_ok() ||
+      !app.gd_draw_pipeline
+           .load_shader_stage_file(
+               dev, shader_dir + "/pbr_gpu_driven_full.frag.spv", "fragment")
+           .is_ok() ||
+      !app.gd_draw_pipeline
+           .create_pipeline_layout(               dev, draw_layouts, 5U, &draw_push)
+           .is_ok() ||
+      !app.gd_draw_pipeline
+           .create_graphics_pipeline(dev, app.render_pass.render_pass(),
+                                     app.swapchain.image_format(),
+                                     app.gd_draw_pipeline.pipeline_layout(),
+                                     /*depth_test=*/true,
+                                     /*depth_write=*/true, /*cull=*/false)
+           .is_ok()) {
+    std::fprintf(stderr, "viewport: gd draw pipeline failed\n");
+    return false;
+  }
+  app.gd_draw_pipeline_layout = app.gd_draw_pipeline.pipeline_layout();
+  return true;
+}
+
+//! Per-frame CPU work for the GPU-driven path: compute the same object
+//! transforms as the per-draw scene (pure function of sim time), write the
+//! payload slot for THIS frame's in-flight copy, and build the cull push
+//! (eye-anchored frustum planes in the cull shader's convention).
+void write_gpu_driven_payload(ViewportApp& app, std::uint32_t frame_slot,
+                              float t, std::uint32_t height) {
+  constexpr std::uint32_t kObjectCount = 3U;
+  auto* words = static_cast<std::uint32_t*>(
+      app.gd_payload_allocations[frame_slot].mapped);
+  words[0] = kObjectCount;
+  words[1] = 0U;  // reserved
+
+  const auto write_obj = [&](std::uint32_t obj, const SceneMatrix& model,
+                             std::uint32_t material, std::uint32_t slot,
+                             const std::array<float, 3>& center,
+                             float radius) {
+    auto* u = words + 2U + 24U * obj;
+    std::memcpy(u, model.data(), 64U);
+    u[16] = material;
+    u[17] = slot;
+    auto* sph = reinterpret_cast<float*>(u + 18U);
+    sph[0] = center[0]; sph[1] = center[1]; sph[2] = center[2];
+    sph[3] = radius;
+    u[22] = 1U;  // lod_count
+    u[23] = 0U;
+  };
+
+  // Same transforms as record_scene_into's cubes branch; the ground slab's
+  // scale is baked into its mesh-table geometry, so its model is identity.
+  write_obj(0U, omnicpp::render::scene_identity_matrix(), 2U,
+            app.gd_slot_ground, {0.0f, -0.05f, 0.0f}, 5.66f);
+  write_obj(1U,
+            multiply(translation_matrix(0.0f, 1.4f, 0.0f),
+                     rotation_y_matrix(t * 0.8f)),
+            0U, app.gd_slot_cube, {0.0f, 1.4f, 0.0f},
+            0.8660254f * 1.35f);
+  write_obj(2U,
+            multiply(translation_matrix(-2.4f, 1.0f, 0.6f),
+                     multiply(rotation_y_matrix(-t * 0.5f),
+                              scale_matrix(0.7f, 0.7f, 0.7f))),
+            1U, app.gd_slot_cube, {-2.4f, 1.0f, 0.6f},
+            0.8660254f * 0.7f);
+
+  // Cull push (144 bytes): word indices + 6 planes + LOD params.
+  // Camera basis: computed from the SAME pure orbit formula record_scene_into
+  // uses for time t (the hook runs before it, with app.time == t), so the
+  // cull frustum matches the frame's view projection exactly.
+  auto* pushu =
+      reinterpret_cast<std::uint32_t*>(app.gd_cull_push_staging.data());
+  auto* pushf = reinterpret_cast<float*>(app.gd_cull_push_staging.data());
+  pushu[0] = kObjectCount;
+  pushu[1] = 2U + 18U;        // sphere word of object 0
+  pushu[2] = 0U;              // draw-command word 0
+  pushu[3] = 5U * kObjectCount;  // visible-counter word
+  const float orbit_base = std::isnan(app.run_config.camera_radius)
+                               ? 6.5f
+                               : app.run_config.camera_radius;
+  const float orbit_height = std::isnan(app.run_config.camera_height)
+                                 ? 3.2f
+                                 : app.run_config.camera_height;
+  const float orbit_angle = t * 0.25f + app.camera_orbit_bias * t;
+  const float orbit_radius =
+      std::min(std::max(orbit_base + app.camera_radius_bias, 1.2f), 12.0f);
+  const float eye[3] = {orbit_radius * std::cos(orbit_angle), orbit_height,
+                        orbit_radius * std::sin(orbit_angle)};
+  const float target_y = 0.8f;
+  float fwd[3] = {-eye[0], target_y - eye[1], -eye[2]};
+  const float fl =
+      std::sqrt(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
+  fwd[0] /= fl; fwd[1] /= fl; fwd[2] /= fl;
+  // Camera basis: right = normalize(cross(fwd, world_up)), up =
+  // cross(right, fwd).
+  float right[3] = {-fwd[2], 0.0f, fwd[0]};
+  const float rl = std::sqrt(right[0] * right[0] + right[2] * right[2]);
+  right[0] /= rl; right[2] /= rl;
+  const float up[3] = {right[1] * fwd[2] - right[2] * fwd[1],
+                       right[2] * fwd[0] - right[0] * fwd[2],
+                       right[0] * fwd[1] - right[1] * fwd[0]};
+  const float th = std::tan(1.05f * 0.5f);  // tan(fov_y/2), fov matches
+                                            // record_scene_into's 1.05f
+  const float r_eye = right[0] * eye[0] + right[2] * eye[2];
+  const float u_eye =
+      up[0] * eye[0] + up[1] * eye[1] + up[2] * eye[2];
+  const float f_eye =
+      fwd[0] * eye[0] + fwd[1] * eye[1] + fwd[2] * eye[2];
+  struct Plane { float n[3]; float d; };
+  const Plane planes[6] = {
+      // left bound: keeps dot(right, p-eye) >= -th*depth
+      {{right[0] + th * fwd[0], th * fwd[1], right[2] + th * fwd[2]},
+       -r_eye - th * f_eye},
+      // right bound: keeps dot(right, p-eye) <= th*depth
+      {{-right[0] + th * fwd[0], -th * fwd[1], -right[2] + th * fwd[2]},
+       r_eye - th * f_eye},
+      // bottom: keeps dot(up, p-eye) >= -th*depth
+      {{up[0] + th * fwd[0], up[1] + th * fwd[1], up[2] + th * fwd[2]},
+       -u_eye - th * f_eye},
+      // top: keeps dot(up, p-eye) <= th*depth
+      {{-up[0] + th * fwd[0], -up[1] + th * fwd[1], -up[2] + th * fwd[2]},
+       u_eye - th * f_eye},
+      // near: keeps dot(fwd, p-eye) >= 0.1
+      {{fwd[0], fwd[1], fwd[2]}, -f_eye - 0.1f},
+      // far: keeps dot(fwd, p-eye) <= 150
+      {{-fwd[0], -fwd[1], -fwd[2]}, f_eye + 150.0f},
+  };
+  for (int p = 0; p < 6; ++p) {
+    pushf[4 + p * 4 + 0] = planes[p].n[0];
+    pushf[4 + p * 4 + 1] = planes[p].n[1];
+    pushf[4 + p * 4 + 2] = planes[p].n[2];
+    pushf[4 + p * 4 + 3] = planes[p].d;
+  }
+  pushf[28] = th;
+  pushf[29] = static_cast<float>(height);
+  pushu[30] = 1U;        // single LOD level
+  pushf[31] = 0.0f;      // threshold (unused at count 1)
+  (void)pushu;
+}
+
 //! Build the composed full-lighting stack: IBL bake from the analytic sky,
 //! shadow-map resources (depth image, render pass, UBO, descriptor set),
 //! the composed pbr_full pipelines (static + skinned), and the depth-only
@@ -1304,8 +1688,42 @@ bool setup_lighting(ViewportApp& app) {
 //! (stashed in scene.shadow_light_vp inside record_scene_into, which runs
 //! first within the frame).
 bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
-                        std::uint32_t height, void* user_data) {
+                        std::uint32_t                        height, void* user_data) {
   auto& app = *static_cast<ViewportApp*>(user_data);
+
+  // GPU-driven cull/LOD pass: compute (outside any render pass) writes this
+  // frame's indirect draw commands from the payload slot for the in-flight
+  // frame. The main pass consumes them with ONE vkCmdDrawIndexedIndirect.
+  if (app.gpu_driven) {
+    const std::uint32_t gd_slot = app.renderer.current_frame();
+    write_gpu_driven_payload(app, gd_slot, app.time, height);
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      app.gd_cull_pipeline.pipeline());
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            app.gd_cull_pipeline.pipeline_layout(), 0U, 1U,
+                            &app.gd_cull_sets[gd_slot], 0U, nullptr);
+    vkCmdPushConstants(command_buffer, app.gd_cull_pipeline.pipeline_layout(),
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0U,
+                       app.gd_cull_push_staging.size(),
+                       app.gd_cull_push_staging.data());
+    vkCmdDispatch(command_buffer, (kGdObjectCount + 63U) / 64U, 1U, 1U);
+    VkBufferMemoryBarrier bb{};
+    bb.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    bb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    bb.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
+                       VK_ACCESS_SHADER_READ_BIT;
+    bb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bb.buffer = app.gd_indirect_buffer;
+    bb.offset = 0U;
+    bb.size = VK_WHOLE_SIZE;
+    vkCmdPipelineBarrier(command_buffer,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
+                             VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                         0U, 0U, nullptr, 1U, &bb, 0U, nullptr);
+  }
+
   if (!app.lighting_ready) return true;  // nothing to pre-render
   (void)width;
   (void)height;
@@ -1555,6 +1973,33 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
           ? app.shadow_pipeline_static.pipeline_layout()
           : VK_NULL_HANDLE;
 
+  // GPU-driven mode: the scene description above only feeds the shadow
+  // pre-pass and telemetry. The lit draw itself is ONE indirect command over
+  // the mesh table — the cull/LOD compute pass (recorded in the pre-pass
+  // hook) already wrote every draw command and the visibility counter, so
+  // the CPU never computes visibility, LOD, or per-draw submission.
+  if (app.gpu_driven) {
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      app.gd_draw_pipeline.pipeline());
+    const VkDescriptorSet draw_sets[5] = {
+        app.gd_draw_sets[app.renderer.current_frame()], app.scene.texture_set,
+        app.scene.material_set, app.scene.shadow_set, app.scene.ibl_set};
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            app.gd_draw_pipeline_layout, 0U, 5U, draw_sets,
+                            0U, nullptr);
+    const GdPush push{app.scene.camera.view_projection,
+                      {}, app.scene.camera_position, {}};
+    vkCmdPushConstants(command_buffer, app.gd_draw_pipeline_layout,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0U, sizeof(push), &push);
+    vkCmdBindIndexBuffer(command_buffer, app.gd_shared_index_buffer, 0U,
+                         VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexedIndirect(command_buffer, app.gd_indirect_buffer, 0U,
+                             kGdObjectCount,
+                             sizeof(VkDrawIndexedIndirectCommand));
+    return true;
+  }
+
   return omnicpp::render::VulkanRenderer{}
       .record_pbr_scene(command_buffer, app.scene, width, height)
       .is_ok();
@@ -1683,6 +2128,14 @@ bool ViewportApp::initialize() {
   lighting_ready = setup_lighting(*this);
   if (lighting_ready) {
     renderer.set_frame_pre_pass_callback(shadow_pre_pass_cb, this);
+    // GPU-driven draw path (cubes scene only): cull/LOD on the GPU, one
+    // indirect draw per frame. Requires composed lighting (the driven
+    // fragment shader statically uses the shadow + IBL sets).
+    const char* gd_env = std::getenv("OMNICPP_GPU_DRIVEN");
+    if (gd_env != nullptr && gd_env[0] == '1' && !has_mannequin &&
+        setup_gpu_driven(*this)) {
+      gpu_driven = true;
+    }
   }
   renderer.set_scene_record_callback(record_scene_cb, this);
 

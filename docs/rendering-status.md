@@ -59,8 +59,27 @@ Khronos layer.
 
 ## What is NOT yet app-facing
 
-- **GPU-driven frame in the viewport**: the renderer API exists and is
-  proven; the app still uses the per-draw path.
+- **RT (ray query) in the viewport**: BLAS/TLAS build, ray-query shadows/AO,
+  and reflections are proven offscreen but not wired into the window path.
+
+## GPU-driven draw path (C2) — DONE
+
+`OMNICPP_GPU_DRIVEN=1` (cubes scene) moves the entire visibility/LOD/draw
+pipeline onto the GPU: the frame's object transforms go into a per-image
+payload, the `cull_and_draw_lod` compute pass (recorded in the renderer's
+pre-pass hook, after the shadow pass) writes every
+`VkDrawIndexedIndirectCommand` from the mesh table, and the main pass issues
+**one** `vkCmdDrawIndexedIndirect` for the whole scene. The CPU inside the
+frame computes no visibility, no LOD, and no per-draw submission.
+
+| Claim | Proof | Source |
+|---|---|---|
+| GPU-driven path is pixel-exact vs per-draw | A/B live runs, identical config: **0.0000% byte difference** at frames 60 and 120 (orbiting camera), 0 VUIDs both paths | capture diff |
+| Draw commands come from the GPU | indirect buffer is device-local (never host-mapped); garbage init + byte-identical output implies the compute pass wrote the commands | `setup_gpu_driven` |
+| Frustum matches the view camera | cull planes derived from the same pure orbit formula + `tan(fov/2)` as `record_scene_into`; identical pixels confirm | `write_gpu_driven_payload` |
+| No CPU/GPU race on payload | one payload copy per swapchain image, indexed by `current_frame()` | descriptor sets |
+| Composed lighting preserved | driven fragment shader uses the same shadow (set 4) + IBL (set 5) sets as `pbr_full.frag` | `pbr_gpu_driven_full.frag` |
+| Regressions guarded | full ctest suite passes under validation; scenario runner 13/13 + byte-identical determinism | CI matrix |
 
 ## Composed lighting (C1) — DONE
 
