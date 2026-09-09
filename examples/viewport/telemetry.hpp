@@ -143,20 +143,21 @@ class TelemetryLogger {
                  float eye_x, float eye_y, float eye_z, std::size_t objects,
                  std::size_t drawn_objects, bool skinned_pipeline,
                  double record_us, double total_us, float fps,
-                 const std::string& capture_file, float blend) {
+                 const std::string& capture_file, float blend,
+                 double gpu_ns = 0.0) {
     if (file_ == nullptr) return;
     std::fprintf(file_,
                  "{\"type\":\"frame\",\"frame\":%u,\"t\":%.6f,"
                  "\"walk_t\":%.6f,\"eye\":[%.4f,%.4f,%.4f],"
                  "\"objects\":%zu,\"drawn\":%zu,\"skinned\":%s,"
                  "\"record_us\":%.1f,\"total_us\":%.1f,\"fps\":%.2f,"
-                 "\"capture\":\"%s\",\"blend\":%.4f}\n",
+                 "\"capture\":\"%s\",\"blend\":%.4f,\"gpu_ns\":%.0f}\n",
                  frame, static_cast<double>(sim_time),
                  static_cast<double>(walk_time), static_cast<double>(eye_x),
                  static_cast<double>(eye_y), static_cast<double>(eye_z),
                  objects, drawn_objects, skinned_pipeline ? "true" : "false",
                  record_us, total_us, fps, capture_file.c_str(),
-                 static_cast<double>(blend));
+                 static_cast<double>(blend), gpu_ns);
   }
 
   void log_event(const std::string& event, const std::string& detail) {

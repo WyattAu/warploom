@@ -67,6 +67,43 @@ omnicpp::core::Result<void> VulkanRenderer::initialize(
   frames_.resize(config.max_frames_in_flight);
   images_in_flight_.assign(swapchain.image_count(), VK_NULL_HANDLE);
   render_finished_semaphores_.assign(swapchain.image_count(), VK_NULL_HANDLE);
+  // GPU timestamp queries: 2 per frame slot (frame start, main-pass end).
+  // Availability is a queue-family property; the pool is created regardless
+  // so record paths can be unconditional, and results are only resolved
+  // when the device reports support.
+  gpu_timing_enabled_ = config.enable_gpu_timing;
+  timestamp_valid_.assign(frames_.size(), false);
+  if (gpu_timing_enabled_) {
+    VkQueryPoolCreateInfo qp_info{};
+    qp_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    qp_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    qp_info.queryCount = static_cast<std::uint32_t>(frames_.size()) * 2U;
+    VkQueueFamilyProperties queue_props{};
+    std::uint32_t qcount = 0U;
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &qcount, nullptr);
+    if (qcount > static_cast<std::uint32_t>(
+                     context.queue_families().graphics_family)) {
+      std::vector<VkQueueFamilyProperties> props(qcount);
+      vkGetPhysicalDeviceQueueFamilyProperties(
+          physical_device_, &qcount, props.data());
+      queue_props = props[static_cast<std::size_t>(
+          context.queue_families().graphics_family)];
+    }
+    const bool timestamp_supported =
+        qcount > 0U &&
+        queue_props.timestampValidBits > 0U &&
+        (queue_props.queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0U;
+    gpu_timing_.available = timestamp_supported;
+    gpu_timing_.timestamp_period_ns =
+        context.device_properties().timestamp_period_ns;
+    timestamp_period_ns_ = gpu_timing_.timestamp_period_ns;
+    if (vkCreateQueryPool(device_, &qp_info, nullptr, &timestamp_pool_) !=
+        VK_SUCCESS) {
+      cleanup(device_);
+      return omnicpp::core::Result<void>::error(
+          omnicpp::core::RuntimeError::vulkan_not_available);
+    }
+  }
   // Timeline pacing decision up front: it changes which resources are created.
   timeline_pacing_ = timeline_pacing_requested_ && context.has_timeline_semaphores();
   VkSemaphoreCreateInfo sem_info{};
@@ -810,6 +847,9 @@ omnicpp::core::Result<std::uint32_t> VulkanRenderer::begin_frame() {
 
   auto& frame = frames_[current_frame_];
   frame_begin_ns_ = omnicpp::core::SteadyClock::now_ns();
+  if (gpu_timing_enabled_) {
+    resolve_gpu_timestamps(current_frame_);
+  }
   if (timeline_pacing_) {
     // Timeline pacing: this frame's slot is safe when the timeline has passed
     // the value this slot last signaled (one frame in flight per slot).
@@ -900,6 +940,16 @@ omnicpp::core::Result<void> VulkanRenderer::record_commands(
   begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(cb, &begin_info);
 
+  // GPU timestamps: reset this slot's pair and write the frame-start stamp.
+  // The begin_frame wait above guarantees the previous submit on this slot
+  // completed, so reset and resolve are both race-free.
+  if (gpu_timing_enabled_ && timestamp_pool_ != VK_NULL_HANDLE) {
+    const std::uint32_t base = current_frame_ * 2U;
+    vkCmdResetQueryPool(cb, timestamp_pool_, base, 2U);
+    vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestamp_pool_,
+                        base);
+  }
+
   // Application pre-pass hook: independent earlier passes (shadow-map depth
   // pre-pass, compute) recorded before the main render pass. Owns its own
   // render-pass begin/end; a false return fails the frame.
@@ -957,6 +1007,12 @@ omnicpp::core::Result<void> VulkanRenderer::record_commands(
   }
 
   vkCmdEndRenderPass(cb);
+
+  // End stamp: after the main render pass, before presentation commands.
+  if (gpu_timing_enabled_ && timestamp_pool_ != VK_NULL_HANDLE) {
+    vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                        timestamp_pool_, current_frame_ * 2U + 1U);
+  }
 
   if (hiz_enabled_ && (hiz_direct_enabled_ || hiz_record_callback_) &&
       render_pass_resource_ && render_pass_resource_->depth_is_sampleable()) {
@@ -1587,6 +1643,10 @@ void VulkanRenderer::cleanup(VkDevice device) noexcept {
       if (semaphore) vkDestroySemaphore(dev, semaphore, nullptr);
     }
     if (timeline_semaphore_) vkDestroySemaphore(dev, timeline_semaphore_, nullptr);
+    if (timestamp_pool_ != VK_NULL_HANDLE) {
+      vkDestroyQueryPool(dev, timestamp_pool_, nullptr);
+      timestamp_pool_ = VK_NULL_HANDLE;
+    }
     if (command_pool_) vkDestroyCommandPool(dev, command_pool_, nullptr);
   }
   frames_.clear();
@@ -1613,12 +1673,41 @@ void VulkanRenderer::cleanup(VkDevice device) noexcept {
   current_frame_ = 0;
   frame_count_ = 0;
   images_in_flight_.clear();
+  timestamp_valid_.clear();
+  gpu_timing_ = GpuTiming{};
+  gpu_timing_enabled_ = false;
   initialized_ = false;
   acquired_image_index_ = 0;
   frame_acquired_ = false;
 #else
   (void)device;
 #endif
+}
+
+void VulkanRenderer::resolve_gpu_timestamps(std::uint32_t slot) noexcept {
+  if (!gpu_timing_enabled_ || !gpu_timing_.available ||
+      timestamp_pool_ == VK_NULL_HANDLE || timestamp_period_ns_ <= 0.0f) {
+    return;
+  }
+  const std::uint32_t base = slot * 2U;
+  if (slot >= timestamp_valid_.size() || !timestamp_valid_[slot]) {
+    timestamp_valid_[slot] = true;  // armed: written at record time this frame
+    return;
+  }
+  std::uint64_t stamps[2] = {0U, 0U};
+  const VkResult result = vkGetQueryPoolResults(
+      device_, timestamp_pool_, base, 2U, sizeof(stamps), stamps,
+      sizeof(std::uint64_t), VK_QUERY_RESULT_64_BIT);
+  if (result != VK_SUCCESS) {
+    return;  // VK_NOT_READY or device loss: keep the previous value
+  }
+  if (stamps[1] >= stamps[0]) {
+    gpu_timing_.last_total_ticks = stamps[1] - stamps[0];
+    gpu_timing_.last_total_ns =
+        static_cast<double>(gpu_timing_.last_total_ticks) *
+        static_cast<double>(timestamp_period_ns_);
+    ++gpu_timing_.queries_resolved;
+  }
 }
 
 omnicpp::core::Result<VkCommandPool> VulkanRenderer::create_command_pool(

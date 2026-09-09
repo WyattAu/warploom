@@ -26,7 +26,17 @@ namespace omnicpp::render {
 
 //! Per-frame GPU timing telemetry in nanoseconds.
 struct GpuTiming {
-  std::uint64_t render_pass_ns{0};
+  //! False on devices without graphics-stage timestamps or when disabled.
+  bool available{false};
+  //! Device timestamp period (nanoseconds per tick).
+  float timestamp_period_ns{0.0f};
+  //! Last resolved frame duration for the slot being reused, in device
+  //! ticks and nanoseconds: TOP_OF_PIPE at command-buffer start to
+  //! BOTTOM_OF_PIPE after the main render pass (covers pre-pass hooks).
+  std::uint64_t last_total_ticks{0};
+  double last_total_ns{0.0};
+  //! Number of successfully resolved frames.
+  std::uint64_t queries_resolved{0};
 };
 
 //! Resources and immutable frame token passed to the H-Z recording callback.
@@ -89,6 +99,11 @@ struct RendererConfig {
   //! records the depth-to-H-Z reduction; the callback remains available for
   //! application-specific culling and scene-buffer work.
   std::string hiz_reduction_shader_path{};
+  //! Record GPU timestamp queries around each frame (2 per frame slot) and
+  //! resolve the previous frame's duration on slot reuse. Zero overhead when
+  //! disabled; `gpu_timing().available` reports whether the device supports
+  //! graphics-stage timestamps.
+  bool enable_gpu_timing{false};
 };
 
 class VulkanRenderer final {
@@ -465,6 +480,15 @@ private:
   // Timeline mode: frame value whose submit last rendered each swapchain image.
   std::vector<std::uint64_t> image_last_frame_;
   GpuTiming gpu_timing_{};
+  //! GPU timestamp queries (config_.enable_gpu_timing): 2 per frame slot,
+  //! reset+written at record time, resolved on slot reuse (the begin_frame
+  //! wait guarantees the previous submit on this slot completed).
+  VkQueryPool timestamp_pool_{VK_NULL_HANDLE};
+  std::vector<bool> timestamp_valid_;
+  float timestamp_period_ns_{0.0f};
+  bool gpu_timing_enabled_{false};
+  //! Resolve the previous frame's timestamps for `slot` into gpu_timing_.
+  void resolve_gpu_timestamps(std::uint32_t slot) noexcept;
   // CPU frame-time telemetry.
   static constexpr std::int64_t kNoTimestamp = -1;
   std::int64_t frame_begin_ns_{kNoTimestamp};

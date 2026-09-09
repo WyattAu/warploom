@@ -181,6 +181,25 @@ def analyze(manifest, frames, events, telemetry_dir, expect_skinned,
     check(med < 100_000.0, "median frame under 100 ms (vsync or faster)",
           f"median {med / 1000:.1f} ms")
 
+    print("== GPU timestamps ==")
+    gpu_ns = [f.get("gpu_ns", 0.0) for f in frames]
+    nonzero = [g for g in gpu_ns if g > 0.0]
+    check(len(nonzero) >= len(frames) * 0.9,
+          "gpu_ns resolved on >=90% of frames",
+          f"{len(nonzero)}/{len(frames)}")
+    if nonzero:
+        med_gpu_us = sorted(nonzero)[len(nonzero) // 2] / 1000.0
+        check(1.0 < med_gpu_us < 50_000.0,
+              "median GPU frame duration plausible (1 us .. 50 ms)",
+              f"median {med_gpu_us:.1f} us")
+        # GPU work cannot be wildly faster than the CPU submission interval:
+        # both measure the same frames. Compare medians loosely (2x) to stay
+        # robust to vsync stretching total_us beyond GPU duration.
+        med_total_us = sorted(totals)[len(totals) // 2]
+        check(med_gpu_us <= med_total_us * 2.0 + 1_000.0,
+              "GPU duration not exceeding CPU frame interval by >2x",
+              f"gpu {med_gpu_us:.1f} us vs cpu {med_total_us:.1f} us")
+
     print("== GPU captures ==")
     captures = [f for f in frames if f["capture"]]
     if captures:

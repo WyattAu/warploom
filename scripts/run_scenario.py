@@ -92,7 +92,7 @@ def strip_volatile(path):
             continue
         record = json.loads(line)
         if record.get("type") == "frame":
-            for key in ("record_us", "total_us", "fps"):
+            for key in ("record_us", "total_us", "fps", "gpu_ns"):
                 record.pop(key, None)
         # Normalize run-specific paths (e.g. the per-run input script).
         text = json.dumps(record, sort_keys=True).replace(run_root, "<RUN>")

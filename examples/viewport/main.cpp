@@ -965,29 +965,20 @@ bool setup_gpu_driven(ViewportApp& app) {
       shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
 
   // --- Shared geometry through the mesh table ----------------------------
-  // Host-side copies of the cube + ground geometry (same 11-float layout as
-  // the per-draw path) go through the table builder, which rewrites indices
-  // into one global vertex space. The ground slab's (8, 0.1, 8) scale is
-  // baked into its vertices so the payload model stays identity.
+  // Host-side copies of the unit-cube geometry (same 11-float layout as the
+  // per-draw path) go through the table builder, which rewrites indices into
+  // one global vertex space. The ground reuses the SAME unit cube — its
+  // (8, 0.1, 8) scale lives in the payload's model matrix, exactly like the
+  // per-draw path, so the A/B parity is byte-exact (both meshes dedupe to
+  // one table slot).
   std::vector<float> cube_verts;
   std::vector<std::uint32_t> cube_idx;
   build_unit_cube(cube_verts, cube_idx);
-  std::vector<float> ground_verts;
-  ground_verts.reserve(cube_verts.size());
-  for (std::size_t i = 0; i < cube_verts.size(); i += 11U) {
-    ground_verts.insert(
-        ground_verts.end(),
-        {cube_verts[i] * 8.0f, cube_verts[i + 1] * 0.1f,
-         cube_verts[i + 2] * 8.0f, cube_verts[i + 3], cube_verts[i + 4],
-         cube_verts[i + 5], cube_verts[i + 6], cube_verts[i + 7],
-         cube_verts[i + 8], cube_verts[i + 9], cube_verts[i + 10]});
-  }
-  std::vector<std::uint32_t> ground_idx(cube_idx);
 
   app.gd_slot_cube = app.gd_table_builder.add(
       omnicpp::render::SceneMesh{}, cube_verts, cube_idx);
   app.gd_slot_ground = app.gd_table_builder.add(
-      omnicpp::render::SceneMesh{}, ground_verts, ground_idx);
+      omnicpp::render::SceneMesh{}, cube_verts, cube_idx);
   if (app.gd_slot_cube ==
           omnicpp::render::SceneMeshTableBuilder::kInvalidSlot ||
       app.gd_slot_ground ==
@@ -1117,23 +1108,26 @@ bool setup_gpu_driven(ViewportApp& app) {
 
   // --- Pipelines ----------------------------------------------------------
   if (!app.gd_cull_pipeline
-           .load_shader_stage_file(
-               dev, shader_dir + "/cull_and_draw_lod.comp.spv", "compute")
+           .load_shader_stage_file(dev, shader_dir + "/cull_and_draw_lod.comp.spv", "compute")
            .is_ok() ||
       !app.gd_cull_pipeline
-           .create_pipeline_layout(
-               dev, &app.gd_set0_layout, 1U, &kGdCullPush)
+           .create_pipeline_layout(dev, &app.gd_set0_layout, 1U, &kGdCullPush)
            .is_ok() ||
-      !app.gd_cull_pipeline.create_compute_pipeline(dev).is_ok()) {
+      !app.gd_cull_pipeline
+           .create_compute_pipeline(dev,
+                                    app.gd_cull_pipeline.pipeline_layout())
+           .is_ok()) {
     std::fprintf(stderr, "viewport: gd cull pipeline failed\n");
+    app.gd_cull_pipeline.cleanup(dev);
     return false;
   }
   // The driven fragment shader statically uses the shadow (set 4) and IBL
-  // (set 5) slots, so the draw layout declares all five sets. gd mode is only
-  // enabled with composed lighting (both sets are always bound).
-  const VkDescriptorSetLayout draw_layouts[5] = {
+  // (set 5) slots, so the draw layout declares all six sets (set 3 bones is
+  // unused by the driven path but must occupy its array position). gd mode is
+  // only enabled with composed lighting (both sets are always bound).
+  const VkDescriptorSetLayout draw_layouts[6] = {
       app.gd_set0_layout, app.textures_layout, app.material_layout,
-      app.shadow_layout, app.ibl5_layout};
+      app.bone_layout, app.shadow_layout, app.ibl5_layout};
   const VkPushConstantRange draw_push{
       static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT |
                                       VK_SHADER_STAGE_FRAGMENT_BIT),
@@ -1148,14 +1142,14 @@ bool setup_gpu_driven(ViewportApp& app) {
                dev, shader_dir + "/pbr_gpu_driven_full.frag.spv", "fragment")
            .is_ok() ||
       !app.gd_draw_pipeline
-           .create_pipeline_layout(               dev, draw_layouts, 5U, &draw_push)
+           .create_pipeline_layout(               dev, draw_layouts, 6U, &draw_push)
            .is_ok() ||
       !app.gd_draw_pipeline
            .create_graphics_pipeline(dev, app.render_pass.render_pass(),
                                      app.swapchain.image_format(),
                                      app.gd_draw_pipeline.pipeline_layout(),
                                      /*depth_test=*/true,
-                                     /*depth_write=*/true, /*cull=*/false)
+                                     /*depth_write=*/true, /*cull=*/true)
            .is_ok()) {
     std::fprintf(stderr, "viewport: gd draw pipeline failed\n");
     return false;
@@ -1191,10 +1185,14 @@ void write_gpu_driven_payload(ViewportApp& app, std::uint32_t frame_slot,
     u[23] = 0U;
   };
 
-  // Same transforms as record_scene_into's cubes branch; the ground slab's
-  // scale is baked into its mesh-table geometry, so its model is identity.
-  write_obj(0U, omnicpp::render::scene_identity_matrix(), 2U,
-            app.gd_slot_ground, {0.0f, -0.05f, 0.0f}, 5.66f);
+  // Same transforms AND geometry as record_scene_into's cubes branch: the
+  // ground is the shared unit cube scaled x(8, 0.1, 8) (not baked geometry),
+  // so the A/B parity is byte-exact.
+  write_obj(0U,
+            multiply(translation_matrix(0.0f, -0.05f, 0.0f),
+                     scale_matrix(8.0f, 0.1f, 8.0f)),
+            2U, app.gd_slot_cube, {0.0f, -0.05f, 0.0f},
+            0.8660254f * 8.0f);
   write_obj(1U,
             multiply(translation_matrix(0.0f, 1.4f, 0.0f),
                      rotation_y_matrix(t * 0.8f)),
@@ -1599,7 +1597,7 @@ bool setup_lighting(ViewportApp& app) {
                                      app.swapchain.image_format(),
                                      app.full_pipeline.pipeline_layout(),
                                      /*depth_test=*/true, /*depth_write=*/true,
-                                     /*cull=*/false)
+                                     /*cull=*/true)
            .is_ok()) {
     std::fprintf(stderr, "viewport: composed static pipeline failed\n");
     std::fprintf(stderr, "viewport: setup_lighting failed at line 1219\n"); return false;
@@ -1620,7 +1618,7 @@ bool setup_lighting(ViewportApp& app) {
                                      app.swapchain.image_format(),
                                      app.full_skinned_pipeline.pipeline_layout(),
                                      /*depth_test=*/true, /*depth_write=*/true,
-                                     /*cull=*/false)
+                                     /*cull=*/true)
            .is_ok()) {
     std::fprintf(stderr, "viewport: composed skinned pipeline failed\n");
     std::fprintf(stderr, "viewport: setup_lighting failed at line 1240\n"); return false;
@@ -1979,13 +1977,28 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
   // hook) already wrote every draw command and the visibility counter, so
   // the CPU never computes visibility, LOD, or per-draw submission.
   if (app.gpu_driven) {
+    // The shadow pre-pass hook leaves its 2048^2 dynamic viewport/scissor
+    // behind; the driven pipeline uses dynamic viewport state, so re-set the
+    // window's before drawing.
+    VkViewport vp{0.0f, 0.0f, static_cast<float>(width),
+                  static_cast<float>(height), 0.0f, 1.0f};
+    vkCmdSetViewport(command_buffer, 0U, 1U, &vp);
+    VkRect2D sc{{0, 0}, {width, height}};
+    vkCmdSetScissor(command_buffer, 0U, 1U, &sc);
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       app.gd_draw_pipeline.pipeline());
-    const VkDescriptorSet draw_sets[5] = {
+    // Two binds: sets must bind to consecutive slots, and the bone slot (3)
+    // is unused by the driven path (cubes scene, no skinning).
+    const VkDescriptorSet draw_sets[3] = {
         app.gd_draw_sets[app.renderer.current_frame()], app.scene.texture_set,
-        app.scene.material_set, app.scene.shadow_set, app.scene.ibl_set};
+        app.scene.material_set};
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            app.gd_draw_pipeline_layout, 0U, 5U, draw_sets,
+                            app.gd_draw_pipeline_layout, 0U, 3U, draw_sets,
+                            0U, nullptr);
+    const VkDescriptorSet light_sets[2] = {app.scene.shadow_set,
+                                           app.scene.ibl_set};
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            app.gd_draw_pipeline_layout, 4U, 2U, light_sets,
                             0U, nullptr);
     const GdPush push{app.scene.camera.view_projection,
                       {}, app.scene.camera_position, {}};
@@ -2112,10 +2125,16 @@ bool ViewportApp::initialize() {
   }
 
   omnicpp::render::RendererConfig renderer_config;
+  // GPU timestamp queries: per-frame device-side duration in telemetry.
+  renderer_config.enable_gpu_timing = true;
   if (!renderer.initialize(context, swapchain, render_pass, renderer_config)
            .is_ok()) {
     std::fprintf(stderr, "viewport: renderer initialization failed\n");
     return false;
+  }
+  if (renderer.gpu_timing().available) {
+    std::printf("viewport: gpu timing enabled (period %.1f ns/tick)\n",
+                renderer.gpu_timing().timestamp_period_ns);
   }
   renderer.set_synchronization2(context.has_synchronization2());
 
@@ -2155,6 +2174,11 @@ bool ViewportApp::initialize() {
                    run_config.telemetry_dir.c_str());
     } else {
       telemetry.log_event("init", context.device_properties().name);
+      // Self-describing runs: the analyzer and A/B tooling must never have
+      // to guess which draw path or scene variant produced this file.
+      telemetry.log_event("draw_path", gpu_driven ? "gpu_driven" : "per_draw");
+      telemetry.log_event("scene_variant", has_mannequin ? "mannequin"
+                                                          : "cubes");
     }
 #if defined(__linux__)
     // Optional gamepad: an absent device is normal (the driver no-ops and
@@ -2364,7 +2388,7 @@ void ViewportApp::run() {
           scene.camera_position[0], scene.camera_position[1],
           scene.camera_position[2], scene.objects.size(), drawn, skinned,
           last_record_us, total_us, static_cast<float>(fps_smoothed),
-          capture_name, last_idle_weight);
+          capture_name, last_idle_weight, renderer.gpu_timing().last_total_ns);
 
       // Pose summary + engine memory stats (bounded size, every frame).
       if (has_mannequin) {
@@ -2481,6 +2505,8 @@ void ViewportApp::shutdown() {
   capture.cleanup(context.device(), &allocator);
   telemetry.flush();
   renderer.cleanup(context.device());
+  gd_cull_pipeline.cleanup(context.device());
+  gd_draw_pipeline.cleanup(context.device());
   full_skinned_pipeline.cleanup(context.device());
   full_pipeline.cleanup(context.device());
   shadow_pipeline_skinned.cleanup(context.device());

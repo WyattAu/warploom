@@ -74,12 +74,38 @@ frame computes no visibility, no LOD, and no per-draw submission.
 
 | Claim | Proof | Source |
 |---|---|---|
-| GPU-driven path is pixel-exact vs per-draw | A/B live runs, identical config: **0.0000% byte difference** at frames 60 and 120 (orbiting camera), 0 VUIDs both paths | capture diff |
-| Draw commands come from the GPU | indirect buffer is device-local (never host-mapped); garbage init + byte-identical output implies the compute pass wrote the commands | `setup_gpu_driven` |
-| Frustum matches the view camera | cull planes derived from the same pure orbit formula + `tan(fov/2)` as `record_scene_into`; identical pixels confirm | `write_gpu_driven_payload` |
+| GPU-driven path matches per-draw output | A/B live runs, identical cubes-only config: **98.1% of pixels byte-identical**; the 1.9% residual is ±3-level edge pixels where depth-adjacent faces share rasterization edges (verified: ~100% of diff pixels have a tiny depth diff; same-path A/A is bit-exact; fragment shader proven byte-equivalent to `pbr_full.frag`) | capture diff + depth diff |
+| Draw commands come from the GPU | indirect buffer is device-local (never host-mapped); the cull pass writes all commands from the mesh table | `setup_gpu_driven` |
+| Frustum matches the view camera | cull planes derived from the same pure orbit formula + `tan(fov/2)` as `record_scene_into` | `write_gpu_driven_payload` |
 | No CPU/GPU race on payload | one payload copy per swapchain image, indexed by `current_frame()` | descriptor sets |
 | Composed lighting preserved | driven fragment shader uses the same shadow (set 4) + IBL (set 5) sets as `pbr_full.frag` | `pbr_gpu_driven_full.frag` |
+| Self-describing runs | telemetry logs `draw_path` (`per_draw`/`gpu_driven`) and `scene_variant` (`mannequin`/`cubes`) events — A/B tooling never guesses | telemetry.jsonl |
 | Regressions guarded | full ctest suite passes under validation; scenario runner 13/13 + byte-identical determinism | CI matrix |
+
+## GPU timestamps + sustained benchmark (C3) — DONE
+
+The renderer owns a timestamp query pool (2 queries per frame slot: TOP_OF_PIPE
+at command-buffer start, BOTTOM_OF_PIPE after the main render pass — covering
+the shadow pre-pass and cull dispatch). Results resolve on slot reuse (the
+begin_frame wait guarantees the previous submit finished), surface through
+`renderer.gpu_timing()`, and land in telemetry as `gpu_ns` on every frame
+line. The analyzer gates GPU-timestamp plausibility; the scenario runner
+strips `gpu_ns` from determinism comparisons (volatile by nature).
+
+`scripts/benchmark_sustained.sh [frames]` runs both draw paths under
+validation on identical config, gates each through the full analyzer, and
+prints a CPU/GPU comparison table. Measured on RTX 2060, 600 frames,
+cubes-only scene:
+
+| path | record p50 | total p50 | GPU p50 |
+|---|---|---|---|
+| per-draw | 71 µs | 4.09 ms (vsync) | 151 µs |
+| gpu-driven | **43 µs** | 9.99 ms (vsync) | 368 µs |
+
+CPU submission cost drops ~40% on 3 objects; the GPU cull-pass overhead
+(368 vs 151 µs) is fixed-cost and amortizes with instance count — the
+crossover where GPU-driven wins outright is exactly what the E-phase
+benchmark scenarios will measure.
 
 ## Composed lighting (C1) — DONE
 
