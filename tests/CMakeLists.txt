@@ -542,6 +542,7 @@ endif()
 
 add_executable(omnicpp_unit_tests
     unit/test_deterministic_runtime.cpp
+    unit/test_animation_state_machine.cpp
     unit/test_input_state.cpp
     unit/test_input_translators.cpp
     unit/test_engine.cpp

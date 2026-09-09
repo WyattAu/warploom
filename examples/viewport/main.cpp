@@ -29,6 +29,7 @@
 #include "engine/asset/gltf_importer.hpp"
 #include "engine/core/input_state.hpp"
 #include "engine/core/input_translators.hpp"
+#include "engine/core/animation_state_machine.hpp"
 #include "engine/render/vulkan_context.hpp"
 #include "engine/render/vulkan_descriptors.hpp"
 #include "engine/render/vulkan_ibl_baker.hpp"
@@ -324,6 +325,14 @@ struct ViewportApp {
   //! input-fade mode (overriding the periodic cross-fade demo).
   float fade_target{0.0f};
   float fade_current{0.0f};
+  //! Deterministic animation state machine (D1). Owned pointer because the
+  //! mannequin's clip set determines the configuration; null when no
+  //! mannequin is loaded. Ticked once per window frame after input commit;
+  //! the capture path re-records without ticking so both paths render the
+  //! identical pose.
+  std::unique_ptr<omnicpp::anim::AnimationStateMachine<omnicpp::core::InputSnapshot>>
+      machine;
+  std::string machine_last_state{"walk"};
   std::chrono::steady_clock::time_point frame_started{};
   double fps_smoothed{0.0};
 
@@ -651,6 +660,29 @@ bool setup_mannequin(ViewportApp& app) {
     return false;
   }
   app.has_mannequin = true;
+  // D1: build the walk/idle machine (only when both clips exist).
+  if (app.mannequin.animations.size() >= 2U) {
+    using AnimMachine =
+        omnicpp::anim::AnimationStateMachine<omnicpp::core::InputSnapshot>;
+    app.machine = std::make_unique<AnimMachine>();
+    app.machine->add_state("walk", 0.0f);
+    app.machine->add_state("idle", 1.0f);
+    omnicpp::anim::AnimTransition to_idle;
+    to_idle.from = "walk";
+    to_idle.to = "idle";
+    to_idle.action = "fade_toggle";
+    to_idle.min_time_in_state = 0.25f;
+    to_idle.fade_duration = 0.4f;
+    app.machine->add_transition(to_idle);
+    omnicpp::anim::AnimTransition to_walk;
+    to_walk.from = "idle";
+    to_walk.to = "walk";
+    to_walk.action = "fade_toggle";
+    to_walk.min_time_in_state = 0.25f;
+    to_walk.fade_duration = 0.4f;
+    app.machine->add_transition(to_walk);
+    app.machine->set_initial("walk");
+  }
   return true;
 }
 
@@ -1837,56 +1869,19 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
   app.scene.objects.push_back(ground);
 
   if (app.has_mannequin) {
-    // Walking mannequin at the origin: skinned pipeline, pose sampled from
-    // the walk cycle (optionally cross-faded to idle), bones uploaded before
-    // recording.
-    //
-    // Blend selection: the scripted "fade_toggle" action takes priority once
-    // engaged (target or current nonzero). Otherwise the time-driven
-    // walk<->idle demo cycle runs when configured.
-    const bool input_fade =
-        app.fade_target != 0.0f || app.fade_current != 0.0f;
-    if (input_fade) {
-      // Ease the current weight toward the target (2.5/s -> ~0.4 s fade).
-      const float step = 2.5f * app.run_config.fixed_dt;
-      if (app.fade_current < app.fade_target) {
-        app.fade_current =
-            std::min(app.fade_current + step, app.fade_target);
-      } else if (app.fade_current > app.fade_target) {
-        app.fade_current =
-            std::max(app.fade_current - step, app.fade_target);
-      }
-      app.last_idle_weight = app.fade_current;
-      const bool idle_dominates = app.fade_current > 0.5f;
-      const float prev_walk = app.walk_time;
-      update_mannequin_pose(app, walk_t);
-      if (app.fade_current > 0.0f) {
-        // Blend the idle clip over the walk pose by the current weight.
-        std::vector<omnicpp::asset::GltfSkinNode> pose = app.mannequin.nodes;
-        omnicpp::asset::sample_clip_blended(
-            app.mannequin, app.mannequin.animations[1], walk_t,
-            app.fade_current, pose);
-        app.mannequin.nodes = pose;
-      }
-      if (idle_dominates) app.walk_time = prev_walk;  // pause walk clock
-    } else if (app.run_config.crossfade_period > 0.0f &&
-               app.mannequin.animations.size() >= 2U) {
-      // walk <-> idle cycle: fade out over the first half, back over the
-      // second. The walk clock pauses while idle dominates (feet planted).
-      const float period = app.run_config.crossfade_period;
-      const float phase = std::fmod(t, 2.0f * period);
-      float idle_weight;
-      if (phase < period) {
-        idle_weight = phase / period;  // walk -> idle
-      } else {
-        idle_weight = 2.0f - phase / period;  // idle -> walk
-      }
-      app.last_idle_weight = idle_weight;
+    // Walking mannequin at the origin: skinned pipeline, pose driven by the
+    // deterministic animation state machine (ticked once per frame in the
+    // window callback; the capture path re-records without ticking, so both
+    // see the identical pose).
+    const float idle_weight =
+        app.machine != nullptr ? app.machine->blended_weight() : 0.0f;
+    app.last_idle_weight = idle_weight;
+    {
       const bool idle_dominates = idle_weight > 0.5f;
       const float prev_walk = app.walk_time;
       update_mannequin_pose(app, walk_t);
-      if (idle_dominates) {
-        // Blend the idle clip over the walk pose by the excess weight.
+      if (idle_weight > 0.0f) {
+        // Blend the idle clip over the walk pose by the machine's weight.
         std::vector<omnicpp::asset::GltfSkinNode> pose = app.mannequin.nodes;
         omnicpp::asset::sample_clip_blended(
             app.mannequin, app.mannequin.animations[1], walk_t,
@@ -1894,9 +1889,6 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
         app.mannequin.nodes = pose;
       }
       if (idle_dominates) app.walk_time = prev_walk;  // pause walk clock
-    } else {
-      app.last_idle_weight = 0.0f;
-      update_mannequin_pose(app, walk_t);
     }
     for (auto& buffers : app.mannequin_meshes) {
       omnicpp::render::ScenePbrObject part;
@@ -2315,6 +2307,29 @@ void ViewportApp::run() {
     }
     input.clamp_axes();
     input.commit_tick();
+    // D1: tick the animation state machine exactly once per window frame,
+    // after input commit (so it sees this tick's actions) and before the
+    // next frame's scene record (so the capture path sees the settled pose).
+    // Snapshot selection: scripted/real input wins; otherwise the time-driven
+    // demo cycle synthesizes the toggle action at each half-period boundary
+    // so ONE machine configuration serves both modes.
+    if (machine) {
+      if (input_scripted) {
+        machine->tick(input.current(), run_config.fixed_dt);
+      } else if (run_config.crossfade_period > 0.0f) {
+        omnicpp::core::InputSnapshot demo = input.current();
+        const float period = run_config.crossfade_period;
+        demo.actions["fade_toggle"] = std::fmod(time, 2.0f * period) <
+                                       run_config.fixed_dt;
+        machine->tick(demo, run_config.fixed_dt);
+      } else {
+        machine->tick(input.current(), run_config.fixed_dt);
+      }
+      if (telemetry_enabled && machine->state() != machine_last_state) {
+        machine_last_state = machine->state();
+        telemetry.log_event("anim_state", machine->state());
+      }
+    }
     // Response: orbit_left/right (actions) and zoom_in/out (actions) move
     // the camera; move_x/move_y axes are logged for downstream consumers.
     if (input.action("orbit_left")) camera_orbit_bias -= 0.02f;
@@ -2322,10 +2337,20 @@ void ViewportApp::run() {
     if (input.action("zoom_in")) camera_radius_bias -= 1.5f * run_config.fixed_dt;
     if (input.action("zoom_out")) camera_radius_bias += 1.5f * run_config.fixed_dt;
     if (input.action_pressed("fade_toggle")) {
-      fade_target = fade_target > 0.5f ? 0.0f : 1.0f;
-      if (telemetry_enabled) {
-        telemetry.log_input(frame_index, "virtual", "fade_toggle",
-                            fade_target);
+      if (machine) {
+        // D1: the machine consumed the edge in its tick this frame (the
+        // press scans its own min-time guards). Log the resulting state as
+        // the outcome value: idle = 1.0, walk = 0.0 (the scenario contract).
+        if (telemetry_enabled) {
+          telemetry.log_input(frame_index, "virtual", "fade_toggle",
+                              machine->state() == "idle" ? 1.0f : 0.0f);
+        }
+      } else {
+        fade_target = fade_target > 0.5f ? 0.0f : 1.0f;
+        if (telemetry_enabled) {
+          telemetry.log_input(frame_index, "virtual", "fade_toggle",
+                              fade_target);
+        }
       }
     }
     camera_radius_bias =
