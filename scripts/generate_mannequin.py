@@ -87,8 +87,11 @@ def box(center, size, joint):
         for u, v, w in corners:
             positions.append((cx + u * hx, cy + v * hy, cz + w * hz))
             normals.append(normal)
-        indices += [base, base + 1, base + 2,
-                    base, base + 2, base + 3]
+        # Engine convention (see pbr_scene.vert): author triangles CW from
+        # outside so the projection's y-flip lands them CCW in framebuffer
+        # space against the pipeline's COUNTER_CLOCKWISE front face.
+        indices += [base, base + 2, base + 1,
+                    base, base + 3, base + 2]
     # Single-joint binding: weights (1,0,0,0).
     return positions, normals, indices, [joint] * 4 * len(positions), \
         [1.0, 0.0, 0.0, 0.0] * len(positions)

@@ -551,6 +551,7 @@ add_executable(omnicpp_unit_tests
     unit/test_lod_integration.cpp
     unit/test_postprocessing.cpp
     unit/test_gpu_skinning.cpp
+    unit/test_gpu_mannequin.cpp
     unit/test_mesh_lod.cpp
     unit/test_png_decoder.cpp
     unit/test_jpeg_decoder.cpp
@@ -561,11 +562,14 @@ add_executable(omnicpp_unit_tests
 )
 target_link_libraries(omnicpp_unit_tests PRIVATE omnicpp_runtime Threads::Threads gtest gtest_main)
 target_include_directories(omnicpp_unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/include)
+# Asset directory for file-based tests (mannequin model); shader-dir define
+# only applies when the test shader targets exist (GPU presets).
+target_compile_definitions(omnicpp_unit_tests PRIVATE
+    OMNICPP_TEST_ASSET_DIR=\"${CMAKE_SOURCE_DIR}/assets/models\")
 if(TARGET omnicpp_test_shaders)
     add_dependencies(omnicpp_unit_tests omnicpp_test_shaders)
     target_compile_definitions(omnicpp_unit_tests PRIVATE
-        OMNICPP_TEST_SHADER_DIR=\"${OMNICPP_SHADER_DIR}\"
-        OMNICPP_TEST_ASSET_DIR=\"${CMAKE_SOURCE_DIR}/assets/models\")
+        OMNICPP_TEST_SHADER_DIR=\"${OMNICPP_SHADER_DIR}\")
 endif()
 
 add_executable(omnicpp_runtime_only_tests
