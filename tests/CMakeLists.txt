@@ -554,6 +554,7 @@ add_executable(omnicpp_unit_tests
     unit/test_gpu_mannequin.cpp
     unit/test_mesh_lod.cpp
     unit/test_png_decoder.cpp
+    unit/test_ktx2_decoder.cpp
     unit/test_jpeg_decoder.cpp
     unit/test_png_texture.cpp
     unit/test_reflector_and_allocator_robustness.cpp

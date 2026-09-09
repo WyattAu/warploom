@@ -10,6 +10,7 @@ add_library(omnicpp_runtime SHARED
     asset/gltf_importer.cpp
     asset/gltf_animation.cpp
     asset/image_decode.cpp
+    asset/ktx2_decoder.cpp
     asset/png_decoder.cpp
     asset/jpeg_decoder.cpp
     render/vulkan_context.cpp
