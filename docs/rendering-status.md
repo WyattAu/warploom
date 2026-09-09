@@ -21,6 +21,11 @@ app-facing**.
 | Skeletal glTF import (skins, node forest, animations) | rest pose reproduces the bind pose exactly; malformed-document rejections; byte determinism | `test_gltf_animation` |
 | GLB 2.0 container import (all glTF entry points) | mannequin packed as .glb imports byte-identically to .gltf+.bin (FNV fingerprint + sampled pose); 6 malformed-container rejections | `test_gltf_animation` |
 | CUBICSPLINE animation samplers | exact Hermite basis values at quarter/midpoint, tangents steer the curve, unit-norm rotations, 3x-count contract enforced | `test_gltf_animation` |
+| Matrix node decomposition (real DCC exports) | 90-degree matrix root decomposes to TRS and recomposes to 1e-5; shear/singular rejected | `test_gltf_animation` |
+| Real rigged asset (Khronos CesiumMan) | full import: 22 nodes, 19 joints, 2 s 57-channel walk, decoded texture; sampling moves >= 3 joints | `test_gltf_animation` |
+| Pose blending / clip cross-fade | exact endpoints, 45-degree midpoint quaternion, clamped alpha, full-alpha == direct sampling; live viewport walk<->idle cycle validated | `test_gltf_animation`, telemetry run |
+| KTX2 containers (uncompressed RGBA8) | mip-chained container decodes level 0 byte-exactly; 12 malformed variants rejected; supercompressed payloads fail loudly | `test_ktx2_decoder` |
+| Viewport observability (telemetry + GPU capture) | JSONL per-frame log, deterministic env run control, offscreen color+depth captures; 31-check analyzer passes on both scene variants with 0 validation diagnostics | `scripts/analyze_telemetry.py` + live runs |
 | Animated mannequin through the skinned pipeline | imported on-disk asset walks: rest vs mid-stride render different images, >800 px each | `test_gpu_mannequin` |
 | Mesh LOD (GPU selection via projected size) | near/mid/far bars select LOD 0/1/2 on the GPU; readback proof | `test_lod_integration`, `test_gpu_driven_cull` |
 | H-Z depth pyramid + occlusion culling | mip-chained real-depth pyramid; footprint-adaptive selection culls fully-covered objects | `test_gpu_lod_occlusion`, `test_depth_pyramid_mips` |
