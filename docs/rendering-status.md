@@ -18,7 +18,9 @@ app-facing**.
 | HDR post: ACES tonemap + FXAA | pixel-identical readback through two graph nodes | `test_postprocessing` |
 | glTF 2.0 import (meshes, materials, embedded PNG/JPEG, skins, nodes) | whole-scene import renders; per-primitive multi-material sRGB proofs; malformed-input rejection suite | `test_gltf_scene`, `test_gltf_importer` |
 | GPU vertex skinning (bone SSBO, blended deform) | bent pose changes rendered pixels exactly as the bone math predicts | `test_gpu_skinning` |
-| Skeletal glTF import (skins, node forest, animations) | rest pose reproduces the bind pose exactly; 7 malformed-document rejections; byte determinism | `test_gltf_animation` |
+| Skeletal glTF import (skins, node forest, animations) | rest pose reproduces the bind pose exactly; malformed-document rejections; byte determinism | `test_gltf_animation` |
+| GLB 2.0 container import (all glTF entry points) | mannequin packed as .glb imports byte-identically to .gltf+.bin (FNV fingerprint + sampled pose); 6 malformed-container rejections | `test_gltf_animation` |
+| CUBICSPLINE animation samplers | exact Hermite basis values at quarter/midpoint, tangents steer the curve, unit-norm rotations, 3x-count contract enforced | `test_gltf_animation` |
 | Animated mannequin through the skinned pipeline | imported on-disk asset walks: rest vs mid-stride render different images, >800 px each | `test_gpu_mannequin` |
 | Mesh LOD (GPU selection via projected size) | near/mid/far bars select LOD 0/1/2 on the GPU; readback proof | `test_lod_integration`, `test_gpu_driven_cull` |
 | H-Z depth pyramid + occlusion culling | mip-chained real-depth pyramid; footprint-adaptive selection culls fully-covered objects | `test_gpu_lod_occlusion`, `test_depth_pyramid_mips` |
