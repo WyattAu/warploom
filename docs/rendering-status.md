@@ -18,6 +18,8 @@ app-facing**.
 | HDR post: ACES tonemap + FXAA | pixel-identical readback through two graph nodes | `test_postprocessing` |
 | glTF 2.0 import (meshes, materials, embedded PNG/JPEG, skins, nodes) | whole-scene import renders; per-primitive multi-material sRGB proofs; malformed-input rejection suite | `test_gltf_scene`, `test_gltf_importer` |
 | GPU vertex skinning (bone SSBO, blended deform) | bent pose changes rendered pixels exactly as the bone math predicts | `test_gpu_skinning` |
+| Skeletal glTF import (skins, node forest, animations) | rest pose reproduces the bind pose exactly; 7 malformed-document rejections; byte determinism | `test_gltf_animation` |
+| Animated mannequin through the skinned pipeline | imported on-disk asset walks: rest vs mid-stride render different images, >800 px each | `test_gpu_mannequin` |
 | Mesh LOD (GPU selection via projected size) | near/mid/far bars select LOD 0/1/2 on the GPU; readback proof | `test_lod_integration`, `test_gpu_driven_cull` |
 | H-Z depth pyramid + occlusion culling | mip-chained real-depth pyramid; footprint-adaptive selection culls fully-covered objects | `test_gpu_lod_occlusion`, `test_depth_pyramid_mips` |
 | Mesh table + dedup (GPU-driven step 1) | byte-exact dedup, global index rewrite (CPU tests, headless) | `test_mesh_table` |
@@ -46,10 +48,12 @@ Khronos layer.
 
 ## What is NOT yet app-facing
 
-- **Skeletal animation in the viewport**: GPU skinning is proven offscreen;
-  wiring an animated character asset into the windowed scene is the next
-  asset-pipeline step (no `.gltf`/`.glb` ships in `assets/` yet — tests
-  synthesize glTF JSON in memory).
+- **Skeletal animation in the viewport**: the whole path is now proven end
+  to end offscreen — `assets/models/mannequin.gltf` ships on disk, imports
+  with skins/animations, and its walk cycle deforms through the GPU skinned
+  pipeline (`test_gpu_mannequin`). Wiring the animated figure into the
+  windowed scene (bone upload inside the frame callback) is mechanical but
+  not yet done.
 - **Shadow/IBL/sky in the default viewport scene**: proven features whose
   viewport composition (multi-pipeline scene assembly) is pending.
 - **GPU-driven frame in the viewport**: the renderer API exists and is
