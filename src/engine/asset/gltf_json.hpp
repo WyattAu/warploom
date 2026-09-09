@@ -672,4 +672,165 @@ inline void trs_matrix(const float* translation, const float* quaternion,
   }
 }
 
+//! Shared prologue of every glTF importer: decodes the `buffers` array
+//! (external buffer 0 is served from bin_bytes / bin_len; others must be
+//! data: URIs), the `bufferViews` array (ranges proven in-bounds, strides
+//! validated), and the `accessors` array (component types restricted to the
+//! supported subset, sparse accessors rejected). Returns false with `error`
+//! set on any malformed input; on success the out-vectors are filled.
+//! LIFETIME: `sources` holds pointers into `embedded_storage`, which must
+//! therefore be owned by (and outlive) the caller's import scope.
+[[nodiscard]] inline bool parse_gltf_buffers_views_accessors(
+    const Json& document, const std::uint8_t* bin_bytes,
+    std::size_t bin_len, std::vector<BufferSource>& sources,
+    std::vector<View>& views, std::vector<AccessorInfo>& accessors,
+    std::vector<std::vector<std::uint8_t>>& embedded_storage,
+    std::string& error) {
+  const Json* buffers = find_member(document, "buffers");
+  const Json* views_json = find_member(document, "bufferViews");
+  const Json* accessors_json = find_member(document, "accessors");
+  if (buffers == nullptr || buffers->kind != Json::Kind::Array) {
+    return fail_asset(error, "document is missing buffers array");
+  }
+  if (views_json == nullptr || views_json->kind != Json::Kind::Array) {
+    return fail_asset(error, "document is missing bufferViews array");
+  }
+  if (accessors_json == nullptr ||
+      accessors_json->kind != Json::Kind::Array) {
+    return fail_asset(error, "document is missing accessors array");
+  }
+
+  // ------------------------------------------------------------------ buffers
+  sources.reserve(buffers->items.size());
+  embedded_storage.reserve(buffers->items.size());
+  for (std::size_t i = 0; i < buffers->items.size(); ++i) {
+    const Json& buffer_json = buffers->items[i];
+    std::size_t byte_length = 0;
+    bool length_present = false;
+    if (!member_uint(buffer_json, "byteLength", 0, byte_length, error,
+                     "buffers[" + std::to_string(i) + "]", length_present)) {
+      return false;
+    }
+    if (!length_present) {
+      return fail_asset(
+          error, "buffers[" + std::to_string(i) + "] is missing byteLength");
+    }
+    const Json* uri_member = find_member(buffer_json, "uri");
+    BufferSource source{};
+    if (uri_member == nullptr) {
+      return fail_asset(
+          error, "buffers[" + std::to_string(i) +
+                     "] has no uri (GLB-style buffers are not supported)");
+    }
+    if (uri_member->kind != Json::Kind::String) {
+      return fail_asset(error, "buffers[" + std::to_string(i) +
+                                   "].uri must be a string");
+    }
+    const std::string_view uri = uri_member->string;
+    if (uri.size() >= 5U && uri.substr(0, 5U) == "data:") {
+      if (!decode_data_uri(uri, source, embedded_storage, error)) {
+        return false;
+      }
+    } else {
+      // External file: only buffer 0 may be external, served from the
+      // caller-provided bytes.
+      if (i != 0U) {
+        return fail_asset(
+            error, "buffers[" + std::to_string(i) +
+                       "] is external; only the first external buffer is "
+                       "supported (embed with data: URIs instead)");
+      }
+      source.data = bin_bytes;
+      source.size = bin_len;
+    }
+    if (source.size != byte_length) {
+      return fail_asset(
+          error, "buffers[" + std::to_string(i) + "] data length " +
+                     std::to_string(source.size) +
+                     " does not match declared byteLength " +
+                     std::to_string(byte_length));
+    }
+    sources.push_back(source);
+  }
+
+  // ------------------------------------------------------------ bufferViews
+  views.reserve(views_json->items.size());
+  for (std::size_t i = 0; i < views_json->items.size(); ++i) {
+    const Json& view_json = views_json->items[i];
+    View view;
+    std::size_t buffer_index = 0;
+    bool buffer_present = false;
+    bool offset_present = false;
+    bool length_present = false;
+    if (!member_uint(view_json, "buffer", 0, buffer_index, error,
+                     "bufferViews[" + std::to_string(i) + "]",
+                     buffer_present)) {
+      return false;
+    }
+    if (!buffer_present) {
+      return fail_asset(
+          error,
+          "bufferViews[" + std::to_string(i) + "] is missing buffer");
+    }
+    if (!member_uint(view_json, "byteOffset", 0, view.byte_offset, error,
+                     "bufferViews[" + std::to_string(i) + "]",
+                     offset_present) ||
+        !member_uint(view_json, "byteLength", 0, view.byte_length, error,
+                     "bufferViews[" + std::to_string(i) + "]",
+                     length_present)) {
+      return false;
+    }
+    if (!length_present) {
+      return fail_asset(
+          error, "bufferViews[" + std::to_string(i) +
+                     "] is missing byteLength");
+    }
+    if (buffer_index >= sources.size()) {
+      return fail_asset(
+          error, "bufferViews[" + std::to_string(i) + "].buffer " +
+                     std::to_string(buffer_index) +
+                     " is out of range (declared " +
+                     std::to_string(sources.size()) + " buffers)");
+    }
+    bool stride_present = false;
+    std::size_t stride = 0;
+    if (!member_uint(view_json, "byteStride", 0, stride, error,
+                     "bufferViews[" + std::to_string(i) + "]", stride_present)) {
+      return false;
+    }
+    view.buffer_index = buffer_index;
+    view.has_stride = stride_present;
+    view.byte_stride = stride;
+    if (stride_present &&
+        (stride < 4U || stride % 4U != 0U)) {
+      return fail_asset(
+          error, "bufferViews[" + std::to_string(i) +
+                     "].byteStride must be a multiple of 4 (was " +
+                     std::to_string(stride) + ")");
+    }
+    // Whole-view range must fit inside the referenced buffer.
+    if (view.byte_offset > sources[buffer_index].size ||
+        view.byte_length > sources[buffer_index].size - view.byte_offset) {
+      return fail_asset(
+          error, "bufferViews[" + std::to_string(i) +
+                     "] range exceeds buffers[" + std::to_string(buffer_index) +
+                     "] (size " +
+                     std::to_string(sources[buffer_index].size) + ")");
+    }
+    views.push_back(view);
+  }
+
+  // ------------------------------------------------------------- accessors
+  accessors.reserve(accessors_json->items.size());
+  for (std::size_t i = 0; i < accessors_json->items.size(); ++i) {
+    AccessorInfo info;
+    if (!parse_accessor(accessors_json->items[i], views, info, error,
+                        "accessors[" + std::to_string(i) + "]")) {
+      return false;
+    }
+    accessors.push_back(info);
+  }
+  return true;
+}
+
 }  // namespace omnicpp::asset::gltf_detail
