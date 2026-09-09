@@ -11,6 +11,7 @@
 //!
 //! Controls: ESC closes; the camera slowly orbits automatically.
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -34,6 +35,7 @@
 #include "engine/render/scene_camera.hpp"
 #include "engine/render/vulkan_surface.hpp"
 #include "engine/render/vulkan_swapchain.hpp"
+#include "telemetry.hpp"
 
 using SceneMatrix = omnicpp::render::SceneMatrix;
 
@@ -168,8 +170,24 @@ struct ViewportApp {
   VkSurfaceKHR surface{VK_NULL_HANDLE};
 
   // Animation state.
-  float time{0.0f};
+  float time{0.0f};       //!< sim clock, advanced by run_config.fixed_dt
   float walk_time{0.0f};  //!< wraps at the 1 s walk-cycle duration
+
+  // Observability: env-configured telemetry + GPU-side frame capture.
+  viewport::RunConfig run_config{};
+  viewport::TelemetryLogger telemetry;
+  viewport::FrameCapture capture;
+  bool telemetry_enabled{false};
+  std::uint32_t frame_index{0};
+  std::uint32_t captures_done{0};
+  //! Scene times actually recorded by the last window frame (the capture
+  //! re-records exactly these so the captured image matches what was shown).
+  float last_recorded_time{0.0f};
+  float last_recorded_walk{0.0f};
+  //! Wall time of the last scene recording (scene-callback scope only).
+  double last_record_us{0.0};
+  std::chrono::steady_clock::time_point frame_started{};
+  double fps_smoothed{0.0};
 
   [[nodiscard]] bool initialize();
   void run();
@@ -683,18 +701,19 @@ bool setup_scene(ViewportApp& app) {
   return true;
 }
 
-//! Per-frame scene record callback installed on the renderer. Runs inside
-//! the render pass; rebuilds object transforms from the animation clock and
-//! the orbiting camera, then delegates to record_pbr_scene.
-bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
-                     std::uint32_t height, void* user_data) {
-  auto& app = *static_cast<ViewportApp*>(user_data);
-
-  const float t = app.time;
-  // Camera closer-in when the mannequin scene is active.
-  const float orbit_radius = app.has_mannequin ? 3.2f : 6.5f;
-  const float eye[3] = {orbit_radius * std::cos(t * 0.25f),
-                        app.has_mannequin ? 1.6f : 3.2f,
+//! Build the scene description for sim time `t` / walk phase `walk_t` and
+//! record it into a begun render pass. Pure: mutates nothing on `app`, so
+//! the window path and the capture path can record the identical scene.
+bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
+                       float t, float walk_t, std::uint32_t width,
+                       std::uint32_t height) {
+  const float orbit_radius = std::isnan(app.run_config.camera_radius)
+                                 ? (app.has_mannequin ? 3.2f : 6.5f)
+                                 : app.run_config.camera_radius;
+  const float height_default = std::isnan(app.run_config.camera_height)
+                                   ? (app.has_mannequin ? 1.6f : 3.2f)
+                                   : app.run_config.camera_height;
+  const float eye[3] = {orbit_radius * std::cos(t * 0.25f), height_default,
                         orbit_radius * std::sin(t * 0.25f)};
   const float target[3] = {0.0f, app.has_mannequin ? 0.9f : 0.8f, 0.0f};
   const float up[3] = {0.0f, 1.0f, 0.0f};
@@ -717,12 +736,7 @@ bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
   if (app.has_mannequin) {
     // Walking mannequin at the origin: skinned pipeline, pose sampled from
     // the walk cycle, bones uploaded before recording.
-    update_mannequin_pose(app, app.walk_time);
-    app.walk_time += 1.0f / 60.0f;
-    if (app.walk_time >
-        app.mannequin.animations[0].duration) {
-      app.walk_time -= app.mannequin.animations[0].duration;
-    }
+    update_mannequin_pose(app, walk_t);
     for (auto& buffers : app.mannequin_meshes) {
       omnicpp::render::ScenePbrObject part;
       part.mesh = &buffers.mesh;
@@ -764,6 +778,34 @@ bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
       .is_ok();
 }
 
+//! Renderer hook: advance the clock (the one sanctioned mutation) and record
+//! the window's scene for this frame.
+bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
+                     std::uint32_t height, void* user_data) {
+  auto& app = *static_cast<ViewportApp*>(user_data);
+  const float recorded_time = app.time;
+  const float recorded_walk = app.walk_time;
+  const auto record_start = std::chrono::steady_clock::now();
+  const bool ok = record_scene_into(command_buffer, app, recorded_time,
+                                    recorded_walk, width, height);
+  app.last_record_us =
+      std::chrono::duration<double, std::micro>(
+          std::chrono::steady_clock::now() - record_start)
+          .count();
+  // Stash the recorded times for the capture path, then advance (the window
+  // owns the animation clock; the walk phase only exists with a mannequin).
+  app.last_recorded_time = recorded_time;
+  app.last_recorded_walk = recorded_walk;
+  if (!app.mannequin.animations.empty()) {
+    app.walk_time += app.run_config.fixed_dt;
+    const float duration = app.mannequin.animations[0].duration;
+    if (duration > 0.0f && app.walk_time > duration) {
+      app.walk_time -= duration;
+    }
+  }
+  return ok;
+}
+
 }  // namespace
 
 // ============================================================================
@@ -771,6 +813,7 @@ bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
 // ============================================================================
 
 bool ViewportApp::initialize() {
+  run_config = viewport::RunConfig::from_environment();
   if (!setup_window(*this)) return false;
   setup_wm_delete_protocol(*this);
 
@@ -836,6 +879,37 @@ bool ViewportApp::initialize() {
     return false;
   }
   renderer.set_scene_record_callback(record_scene_cb, this);
+
+  // ------------------------------------------------------------------------
+  // Observability: telemetry log + GPU-side frame capture.
+  // ------------------------------------------------------------------------
+  if (!run_config.telemetry_dir.empty()) {
+    const std::size_t joints = has_mannequin
+                                   ? mannequin.skins[0].joints.size()
+                                   : 0U;
+    telemetry_enabled = telemetry.open(
+        run_config.telemetry_dir, run_config,
+        context.device_properties().name, kWidth, kHeight,
+        scene.objects.capacity(), joints, has_mannequin);
+    if (!telemetry_enabled) {
+      std::fprintf(stderr, "viewport: cannot open telemetry dir %s\n",
+                   run_config.telemetry_dir.c_str());
+    } else {
+      telemetry.log_event("init", context.device_properties().name);
+    }
+  }
+  if (run_config.capture_every != 0U) {
+    const VkFormat depth_format =
+        omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+            context.physical_device());
+    if (!capture.initialize(
+            context.device(), allocator, render_pass.render_pass(),
+            swapchain.image_format(), depth_format, kWidth, kHeight,
+            context.queue_families().graphics_family)) {
+      std::fprintf(stderr, "viewport: frame capture initialization failed\n");
+      return false;
+    }
+  }
   return true;
 }
 
@@ -843,7 +917,9 @@ void ViewportApp::run() {
   std::printf(
       "viewport: %s — ESC or window close to quit\n",
       context.device_properties().name.c_str());
+  time = run_config.start_time;
   while (poll_events(*this)) {
+    const auto frame_start = std::chrono::steady_clock::now();
     auto image = renderer.begin_frame();
     if (!image.is_ok()) continue;
     if (!renderer
@@ -859,12 +935,71 @@ void ViewportApp::run() {
       std::fprintf(stderr, "viewport: frame presentation failed\n");
       break;
     }
-    time += 1.0f / 60.0f;  // vsync-paced animation clock
+
+    // GPU-side capture: re-record the exact scene just displayed into the
+    // capture targets and pull color+depth to the host.
+    std::string capture_name;
+    if (run_config.capture_every != 0U &&
+        captures_done < run_config.capture_limit &&
+        (frame_index + 1U) % run_config.capture_every == 0U &&
+        telemetry_enabled) {
+      const bool captured = capture.capture(
+          context.graphics_queue(), [&](VkCommandBuffer cmd) {
+            return record_scene_into(cmd, *this, last_recorded_time,
+                                     last_recorded_walk, kWidth, kHeight);
+          });
+      if (captured) {
+        if (capture.save(frame_index + 1U, run_config.telemetry_dir,
+                         capture_name)) {
+          ++captures_done;
+        } else {
+          std::fprintf(stderr, "viewport: capture save failed\n");
+        }
+      } else {
+        std::fprintf(stderr, "viewport: capture recording failed\n");
+      }
+    }
+
+    // Telemetry for the frame just presented.
+    const auto frame_end = std::chrono::steady_clock::now();
+    const double total_us =
+        std::chrono::duration<double, std::micro>(frame_end - frame_start)
+            .count();
+    const double instantaneous_fps = total_us > 0.0 ? 1e6 / total_us : 0.0;
+    fps_smoothed = fps_smoothed == 0.0
+                       ? instantaneous_fps
+                       : 0.9 * fps_smoothed + 0.1 * instantaneous_fps;
+    if (telemetry_enabled) {
+      std::size_t drawn = 0;
+      for (const auto& object : scene.objects) {
+        if (object.mesh != nullptr && object.mesh->is_drawable()) ++drawn;
+      }
+      const bool skinned = scene.bone_set != VK_NULL_HANDLE;
+      telemetry.log_frame(
+          frame_index + 1U, time, last_recorded_walk,
+          scene.camera_position[0], scene.camera_position[1],
+          scene.camera_position[2], scene.objects.size(), drawn, skinned,
+          last_record_us, total_us, static_cast<float>(fps_smoothed),
+          capture_name);
+      if (run_config.max_frames != 0U &&
+          frame_index + 1U >= run_config.max_frames) {
+        telemetry.log_event("exit", "max_frames reached");
+        telemetry.flush();
+        break;
+      }
+      telemetry.flush();
+    }
+
+    time += run_config.fixed_dt;  // deterministic animation clock
+    ++frame_index;
   }
   renderer.wait_idle();
 }
 
 void ViewportApp::shutdown() {
+  renderer.wait_idle();
+  capture.cleanup(context.device(), &allocator);
+  telemetry.flush();
   renderer.cleanup(context.device());
   skinned_pipeline.cleanup(context.device());
   pbr_pipeline.cleanup(context.device());
