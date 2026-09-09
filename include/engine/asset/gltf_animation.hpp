@@ -151,6 +151,20 @@ import_gltf_animation_document(
     std::size_t bin_len, std::string* error_detail = nullptr,
     const ExternalFileLoader* loader = nullptr);
 
+//! Blend two node poses component-wise: rotation slerp (shortest arc,
+//! normalizing the result), translation/scale lerp. `alpha` 0 = fully `a`,
+//! 1 = fully `b`; values outside [0,1] are clamped.
+void blend_pose(const GltfSkinNode& a, const GltfSkinNode& b, float alpha,
+                GltfSkinNode& out) noexcept;
+
+//! Sample `clip` at `time` into a pose copy of `base`, blending against the
+//! base pose with weight `alpha` (component-wise; components the clip does
+//! not drive keep the base values). Convenience for cross-fades:
+//!   pose = base; sample_blend(doc, clip, t, pose, alpha);
+void sample_clip_blended(const GltfAnimationDocument& document,
+                         const GltfAnimationImport& clip, float time,
+                         float alpha, std::vector<GltfSkinNode>& pose);
+
 //! Compose local TRS into a column-major matrix (translation * rotation *
 //! scale).
 [[nodiscard]] GltfTransform gltf_local_matrix(const GltfSkinNode& node) noexcept;

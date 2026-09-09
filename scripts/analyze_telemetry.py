@@ -124,7 +124,18 @@ def analyze(manifest, frames, events, telemetry_dir, expect_skinned,
 
     print("== Animation ==")
     walk_times = [f["walk_t"] for f in frames]
+    blends = [f.get("blend", 0.0) for f in frames]
     if manifest["has_mannequin"]:
+        if any(abs(b) > 1e-6 for b in blends):
+            # Cross-fade run: weight must reach both extremes (full walk and
+            # full idle) and stay within [0, 1].
+            check(all(-1e-4 <= b <= 1.0 + 1e-4 for b in blends),
+                  "cross-fade weight stays in [0, 1]",
+                  f"min {min(blends):.4f} max {max(blends):.4f}")
+            check(any(abs(b - 1.0) < 0.01 for b in blends),
+                  "cross-fade reaches full idle")
+            check(any(abs(b) < 0.01 for b in blends),
+                  "cross-fade returns to full walk")
         duration = walk_duration  # walk-cycle length of the loaded model
         wraps = 0
         for prev, curr in zip(walk_times, walk_times[1:]):

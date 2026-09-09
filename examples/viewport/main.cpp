@@ -186,6 +186,8 @@ struct ViewportApp {
   float last_recorded_walk{0.0f};
   //! Wall time of the last scene recording (scene-callback scope only).
   double last_record_us{0.0};
+  //! Idle-clip weight used by the last recorded pose (telemetry).
+  float last_idle_weight{0.0f};
   std::chrono::steady_clock::time_point frame_started{};
   double fps_smoothed{0.0};
 
@@ -788,8 +790,37 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
 
   if (app.has_mannequin) {
     // Walking mannequin at the origin: skinned pipeline, pose sampled from
-    // the walk cycle, bones uploaded before recording.
-    update_mannequin_pose(app, walk_t);
+    // the walk cycle (optionally cross-faded to idle), bones uploaded before
+    // recording.
+    if (app.run_config.crossfade_period > 0.0f &&
+        app.mannequin.animations.size() >= 2U) {
+      // walk <-> idle cycle: fade out over the first half, back over the
+      // second. The walk clock pauses while idle dominates (feet planted).
+      const float period = app.run_config.crossfade_period;
+      const float phase = std::fmod(t, 2.0f * period);
+      float idle_weight;
+      if (phase < period) {
+        idle_weight = phase / period;  // walk -> idle
+      } else {
+        idle_weight = 2.0f - phase / period;  // idle -> walk
+      }
+      app.last_idle_weight = idle_weight;
+      const bool idle_dominates = idle_weight > 0.5f;
+      const float prev_walk = app.walk_time;
+      update_mannequin_pose(app, walk_t);
+      if (idle_dominates) {
+        // Blend the idle clip over the walk pose by the excess weight.
+        std::vector<omnicpp::asset::GltfSkinNode> pose = app.mannequin.nodes;
+        omnicpp::asset::sample_clip_blended(
+            app.mannequin, app.mannequin.animations[1], walk_t,
+            idle_weight, pose);
+        app.mannequin.nodes = pose;
+      }
+      if (idle_dominates) app.walk_time = prev_walk;  // pause walk clock
+    } else {
+      app.last_idle_weight = 0.0f;
+      update_mannequin_pose(app, walk_t);
+    }
     for (auto& buffers : app.mannequin_meshes) {
       omnicpp::render::ScenePbrObject part;
       part.mesh = &buffers.mesh;
@@ -1033,7 +1064,7 @@ void ViewportApp::run() {
           scene.camera_position[0], scene.camera_position[1],
           scene.camera_position[2], scene.objects.size(), drawn, skinned,
           last_record_us, total_us, static_cast<float>(fps_smoothed),
-          capture_name);
+          capture_name, last_idle_weight);
       if (run_config.max_frames != 0U &&
           frame_index + 1U >= run_config.max_frames) {
         telemetry.log_event("exit", "max_frames reached");

@@ -1104,4 +1104,51 @@ void sample_gltf_channel(const GltfSampler& sampler, float time,
   }
 }
 
+void blend_pose(const GltfSkinNode& a, const GltfSkinNode& b, float alpha,
+                GltfSkinNode& out) noexcept {
+  const float t = std::min(std::max(alpha, 0.0f), 1.0f);
+  for (int i = 0; i < 3; ++i) {
+    out.translation[i] =
+        a.translation[i] + t * (b.translation[i] - a.translation[i]);
+    out.scale[i] = a.scale[i] + t * (b.scale[i] - a.scale[i]);
+  }
+  slerp_rotation(a.rotation, b.rotation, t, out.rotation);
+}
+
+void sample_clip_blended(const GltfAnimationDocument& document,
+                         const GltfAnimationImport& clip, float time,
+                         float alpha, std::vector<GltfSkinNode>& pose) {
+  if (pose.size() != document.nodes.size()) pose.resize(document.nodes.size());
+  // Snapshot the base pose, sample the clip into a scratch copy, then blend
+  // per node so driven components interpolate against the true base.
+  const std::vector<GltfSkinNode> base = pose;
+  std::vector<GltfSkinNode> sampled = pose;
+  for (const auto& channel : clip.channels) {
+    float out[4];
+    sample_gltf_channel(clip.samplers[channel.sampler], time, out);
+    auto& node = sampled[channel.target_node];
+    switch (channel.path) {
+      case GltfChannel::Path::Translation:
+        node.translation[0] = out[0];
+        node.translation[1] = out[1];
+        node.translation[2] = out[2];
+        break;
+      case GltfChannel::Path::Rotation:
+        node.rotation[0] = out[0];
+        node.rotation[1] = out[1];
+        node.rotation[2] = out[2];
+        node.rotation[3] = out[3];
+        break;
+      case GltfChannel::Path::Scale:
+        node.scale[0] = out[0];
+        node.scale[1] = out[1];
+        node.scale[2] = out[2];
+        break;
+    }
+  }
+  for (std::size_t i = 0; i < pose.size(); ++i) {
+    blend_pose(base[i], sampled[i], alpha, pose[i]);
+  }
+}
+
 }  // namespace omnicpp::asset

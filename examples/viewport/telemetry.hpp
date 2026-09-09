@@ -26,6 +26,8 @@
 //!   OMNICPP_CAMERA_HEIGHT   orbit height override (nan = scene default)
 //!   OMNICPP_MODEL           skeletal document name in the asset dir
 //!                           (default: mannequin; e.g. CesiumMan)
+//!   OMNICPP_CROSSFADE       walk<->idle cross-fade period in seconds
+//!                           (0 = off; cycles walk -> fade -> idle -> fade)
 
 #pragma once
 
@@ -58,6 +60,7 @@ struct RunConfig {
   float start_time{0.0f};
   float camera_radius{std::nanf("")};  //!< nan = scene default
   float camera_height{std::nanf("")};
+  float crossfade_period{0.0f};       //!< 0 = walk only
 
   [[nodiscard]] static RunConfig from_environment() {
     RunConfig config;
@@ -85,6 +88,10 @@ struct RunConfig {
     }
     if (const char* height = std::getenv("OMNICPP_CAMERA_HEIGHT")) {
       config.camera_height = static_cast<float>(std::atof(height));
+    }
+    if (const char* crossfade = std::getenv("OMNICPP_CROSSFADE")) {
+      const float parsed = static_cast<float>(std::atof(crossfade));
+      if (parsed > 0.0f) config.crossfade_period = parsed;
     }
     return config;
   }
@@ -129,24 +136,26 @@ class TelemetryLogger {
   }
 
   //! One JSON line per frame. `capture_file` is the PPM basename captured
-  //! this frame, or "" when none.
+  //! this frame, or "" when none. `blend` is the idle-clip cross-fade weight
+  //! (0 = full walk, 1 = full idle; 0 when blending is disabled).
   void log_frame(std::uint32_t frame, float sim_time, float walk_time,
                  float eye_x, float eye_y, float eye_z, std::size_t objects,
                  std::size_t drawn_objects, bool skinned_pipeline,
                  double record_us, double total_us, float fps,
-                 const std::string& capture_file) {
+                 const std::string& capture_file, float blend) {
     if (file_ == nullptr) return;
     std::fprintf(file_,
                  "{\"type\":\"frame\",\"frame\":%u,\"t\":%.6f,"
                  "\"walk_t\":%.6f,\"eye\":[%.4f,%.4f,%.4f],"
                  "\"objects\":%zu,\"drawn\":%zu,\"skinned\":%s,"
                  "\"record_us\":%.1f,\"total_us\":%.1f,\"fps\":%.2f,"
-                 "\"capture\":\"%s\"}\n",
+                 "\"capture\":\"%s\",\"blend\":%.4f}\n",
                  frame, static_cast<double>(sim_time),
                  static_cast<double>(walk_time), static_cast<double>(eye_x),
                  static_cast<double>(eye_y), static_cast<double>(eye_z),
                  objects, drawn_objects, skinned_pipeline ? "true" : "false",
-                 record_us, total_us, fps, capture_file.c_str());
+                 record_us, total_us, fps, capture_file.c_str(),
+                 static_cast<double>(blend));
   }
 
   void log_event(const std::string& event, const std::string& detail) {

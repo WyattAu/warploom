@@ -513,11 +513,54 @@
      }
     }
    ]
+  },
+  {
+   "name": "idle",
+   "samplers": [
+    {
+     "input": 60,
+     "output": 61,
+     "interpolation": "LINEAR"
+    },
+    {
+     "input": 62,
+     "output": 63,
+     "interpolation": "LINEAR"
+    },
+    {
+     "input": 64,
+     "output": 65,
+     "interpolation": "LINEAR"
+    }
+   ],
+   "channels": [
+    {
+     "sampler": 0,
+     "target": {
+      "node": 2,
+      "path": "scale"
+     }
+    },
+    {
+     "sampler": 1,
+     "target": {
+      "node": 5,
+      "path": "rotation"
+     }
+    },
+    {
+     "sampler": 2,
+     "target": {
+      "node": 8,
+      "path": "rotation"
+     }
+    }
+   ]
   }
  ],
  "buffers": [
   {
-   "byteLength": 12408,
+   "byteLength": 12576,
    "uri": "mannequin.bin"
   }
  ],
@@ -821,6 +864,36 @@
    "buffer": 0,
    "byteOffset": 12328,
    "byteLength": 80
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 12408,
+   "byteLength": 12
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 12420,
+   "byteLength": 36
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 12456,
+   "byteLength": 12
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 12468,
+   "byteLength": 48
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 12516,
+   "byteLength": 12
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 12528,
+   "byteLength": 48
   }
  ],
  "accessors": [
@@ -1272,6 +1345,42 @@
    "bufferView": 59,
    "componentType": 5126,
    "count": 5,
+   "type": "VEC4"
+  },
+  {
+   "bufferView": 60,
+   "componentType": 5126,
+   "count": 3,
+   "type": "SCALAR"
+  },
+  {
+   "bufferView": 61,
+   "componentType": 5126,
+   "count": 3,
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 62,
+   "componentType": 5126,
+   "count": 3,
+   "type": "SCALAR"
+  },
+  {
+   "bufferView": 63,
+   "componentType": 5126,
+   "count": 3,
+   "type": "VEC4"
+  },
+  {
+   "bufferView": 64,
+   "componentType": 5126,
+   "count": 3,
+   "type": "SCALAR"
+  },
+  {
+   "bufferView": 65,
+   "componentType": 5126,
+   "count": 3,
    "type": "VEC4"
   }
  ]

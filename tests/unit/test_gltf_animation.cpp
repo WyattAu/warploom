@@ -8,7 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
-#include <cstdint>
+#include <algorithm>\n#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -208,9 +208,12 @@ TEST(GltfAnimation, MannequinImportsWithSkinAndAnimation) {
   ASSERT_EQ(doc.skins.size(), 1U);
   EXPECT_EQ(doc.skins[0].joints.size(), 15U);
   EXPECT_EQ(doc.skins[0].inverse_bind_matrices.size(), 15U);
-  EXPECT_EQ(doc.animations.size(), 1U);
+  // Two clips: walk (7 channels) + idle breathing (3 channels).
+  ASSERT_EQ(doc.animations.size(), 2U);
   EXPECT_EQ(doc.animations[0].channels.size(), 7U);
   EXPECT_NEAR(doc.animations[0].duration, 1.0f, 1e-6f);
+  EXPECT_EQ(doc.animations[1].channels.size(), 3U);
+  EXPECT_NEAR(doc.animations[1].duration, 1.0f, 1e-6f);
   // 9 mesh nodes: 15 joint nodes + 9 mesh nodes.
   ASSERT_EQ(doc.nodes.size(), 24U);
   std::size_t mesh_nodes = 0;
@@ -742,6 +745,117 @@ TEST(GltfAnimation, MatrixNodeWithShearIsRejected) {
   EXPECT_NE(error.find("shear"), std::string::npos) << error;
 }
 
+
+TEST(GltfAnimation, BlendPoseEndpointsAndMidpoint) {
+  // Endpoints are exact; the midpoint of a 90-degree rotation pair is the
+  // 45-degree quaternion, and translation/scale blend linearly.
+  omnicpp::asset::GltfSkinNode a{};
+  a.translation[1] = 1.0F;
+  a.scale[2] = 2.0F;
+  // Identity rotation.
+  const float qa[4] = {0.0F, 0.0F, 0.0F, 1.0F};
+  std::copy(qa, qa + 4, a.rotation);
+
+  omnicpp::asset::GltfSkinNode b{};
+  b.translation[1] = 3.0F;
+  b.scale[2] = 4.0F;
+  // 90 degrees about X.
+  const float qb[4] = {std::sqrt(0.5F), 0.0F, 0.0F, std::sqrt(0.5F)};
+  std::copy(qb, qb + 4, b.rotation);
+
+  omnicpp::asset::GltfSkinNode out{};
+  omnicpp::asset::blend_pose(a, b, 0.0F, out);
+  EXPECT_FLOAT_EQ(out.translation[1], 1.0F);
+  EXPECT_FLOAT_EQ(out.scale[2], 2.0F);
+  EXPECT_FLOAT_EQ(out.rotation[3], 1.0F);
+
+  omnicpp::asset::blend_pose(a, b, 1.0F, out);
+  EXPECT_FLOAT_EQ(out.translation[1], 3.0F);
+  EXPECT_FLOAT_EQ(out.rotation[0], qb[0]);
+
+  omnicpp::asset::blend_pose(a, b, 0.5F, out);
+  EXPECT_FLOAT_EQ(out.translation[1], 2.0F);
+  EXPECT_FLOAT_EQ(out.scale[2], 3.0F);
+  // Midpoint rotation: 45 degrees about X, unit norm.
+  const float norm = std::sqrt(out.rotation[0] * out.rotation[0] +
+                               out.rotation[3] * out.rotation[3]);
+  EXPECT_NEAR(norm, 1.0F, 1e-6F);
+  EXPECT_NEAR(out.rotation[0], 0.3826834F, 1e-5F);
+  EXPECT_NEAR(out.rotation[3], 0.9238795F, 1e-5F);
+
+  // Alpha clamps outside [0,1].
+  omnicpp::asset::blend_pose(a, b, -1.0F, out);
+  EXPECT_FLOAT_EQ(out.translation[1], 1.0F);
+  omnicpp::asset::blend_pose(a, b, 2.0F, out);
+  EXPECT_FLOAT_EQ(out.translation[1], 3.0F);
+}
+
+TEST(GltfAnimation, CrossFadeWalkToIdleOnMannequin) {
+  const Mannequin m = load_mannequin();
+  ASSERT_FALSE(m.json.empty());
+  std::string error;
+  auto imported = omnicpp::asset::import_gltf_animation_document(
+      m.json.data(), m.json.size(),
+      reinterpret_cast<const std::uint8_t*>(m.bin.data()), m.bin.size(),
+      &error);
+  ASSERT_TRUE(imported.is_ok()) << error;
+  auto doc = std::move(imported).value();
+  ASSERT_EQ(doc.animations.size(), 2U);
+  const auto& walk = doc.animations[0];
+  const auto& idle = doc.animations[1];
+
+  // alpha = 0 keeps the base (rest) pose; alpha = 1 is exactly the clip.
+  // The chest is sampled at t = 0.5 (its scale keyframe trough; t = 0.25 is
+  // the exact keyframe midpoint, where the breath is 1.0 by construction).
+  std::vector<omnicpp::asset::GltfSkinNode> rest = doc.nodes;
+  std::vector<omnicpp::asset::GltfSkinNode> idle_full = rest;
+  omnicpp::asset::sample_clip_blended(doc, idle, 0.5F, 1.0F, idle_full);
+  std::vector<omnicpp::asset::GltfSkinNode> half = rest;
+  omnicpp::asset::sample_clip_blended(doc, idle, 0.5F, 0.5F, half);
+
+  // Idle drives the chest scale (node 2): the half fade must land strictly
+  // between rest (1.0) and the idle pose on that component.
+  const std::size_t chest = 2U;
+  const float rest_scale = 1.0F;
+  const float idle_scale = idle_full[chest].scale[1];
+  EXPECT_NE(idle_scale, rest_scale);
+  const float half_scale = half[chest].scale[1];
+  EXPECT_NEAR(half_scale, 0.5F * (rest_scale + idle_scale), 1e-6F);
+
+  // Idle drives arm rotations (nodes 5 and 8): blending moves them too.
+  // Arms peak at t = 0.25 (sin(pi/2) = 1), so sample those there.
+  std::vector<omnicpp::asset::GltfSkinNode> arms_in = rest;
+  omnicpp::asset::sample_clip_blended(doc, idle, 0.25F, 1.0F, arms_in);
+  std::vector<omnicpp::asset::GltfSkinNode> arms_half = rest;
+  omnicpp::asset::sample_clip_blended(doc, idle, 0.25F, 0.5F, arms_half);
+  const float arm_rest = doc.nodes[5].rotation[0];
+  const float arm_idle = arms_in[5].rotation[0];
+  EXPECT_NE(arm_rest, arm_idle);
+  EXPECT_NEAR(arms_half[5].rotation[0],
+              0.5F * (arm_rest + arm_idle), 1e-6F);
+
+  // Walk at a keyframe, blended fully in, must equal direct channel
+  // sampling (the determinism contract carries through blending).
+  std::vector<omnicpp::asset::GltfSkinNode> walk_full = rest;
+  omnicpp::asset::sample_clip_blended(doc, walk, 0.25F, 1.0F, walk_full);
+  omnicpp::asset::GltfAnimationDocument direct = doc;
+  apply_pose(direct, walk, 0.25F);
+  for (std::size_t i = 0; i < walk_full.size(); ++i) {
+    EXPECT_NEAR(walk_full[i].rotation[0], direct.nodes[i].rotation[0], 1e-6F);
+    EXPECT_NEAR(walk_full[i].rotation[3], direct.nodes[i].rotation[3], 1e-6F);
+  }
+
+  // The walk cycle must move at least the 4 leg joints.
+  std::size_t moved = 0;
+  for (std::size_t i = 0; i < walk_full.size(); ++i) {
+    if (std::abs(walk_full[i].rotation[0] - doc.nodes[i].rotation[0]) >
+        1e-5F) {
+      ++moved;
+    }
+  }
+  EXPECT_GE(moved, 4U);
+}
+
 TEST(GltfAnimation, GlbContainerImportsIdenticallyToJson) {
   const Mannequin json_asset = load_mannequin();
   ASSERT_FALSE(json_asset.json.empty());
@@ -835,10 +949,13 @@ TEST(GltfAnimation, GlbContainerRejectsMalformedContainers) {
   // document's declared byteLength so only the BIN-chunk check can catch it.
   {
     std::string tweaked = json_asset.json;
-    const std::size_t length_pos = tweaked.find("\"byteLength\": 12408");
-    ASSERT_NE(length_pos, std::string::npos);
-    tweaked.replace(length_pos, std::string("\"byteLength\": 12408").size(),
-                    "\"byteLength\": 12400");
+    const std::string length_key =
+        "\"byteLength\": " + std::to_string(json_asset.bin.size());
+    const std::size_t length_pos = tweaked.find(length_key);
+    ASSERT_NE(length_pos, std::string::npos) << length_key;
+    tweaked.replace(length_pos, length_key.size(),
+                    "\"byteLength\": " +
+                        std::to_string(json_asset.bin.size() - 8U));
     const std::vector<char> broken = pack_glb(tweaked, json_asset.bin);
     std::string error;
     const auto imported = omnicpp::asset::import_gltf_animation_document(

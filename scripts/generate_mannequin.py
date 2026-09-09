@@ -375,6 +375,49 @@ animation = {
 }
 
 # ---------------------------------------------------------------------------
+# Idle animation (1 s): breathing chest + gentle arm sway. Deliberately
+# touches different node components than walk (chest scale, small arm sway)
+# so cross-fading the two clips exercises per-component blending.
+# ---------------------------------------------------------------------------
+
+idle_samplers = []
+idle_channels = []
+
+
+def add_idle_channel(node, path, times, values):
+    stride = len(values[0])
+    in_view = push(floats(times))
+    in_acc = add_accessor(in_view, 5126, len(times), "SCALAR")
+    out_view = push(floats([c for v in values for c in v]))
+    out_acc = add_accessor(out_view, 5126, len(values),
+                           "VEC4" if stride == 4 else "VEC3")
+    idle_samplers.append({"input": in_acc, "output": out_acc,
+                          "interpolation": "LINEAR"})
+    idle_channels.append({"sampler": len(idle_samplers) - 1,
+                          "target": {"node": node, "path": path}})
+
+
+IDLE_KEYS = [0.0, 0.5, 1.0]
+IDLE_SCALE = 0.008  # subtle breath amplitude
+
+# Chest breathes: scale 1 +/- amplitude on y/z, translation constant.
+add_idle_channel(2, "scale", IDLE_KEYS,
+                 [[1.0 + IDLE_SCALE, 1.0 + IDLE_SCALE, 1.0 + IDLE_SCALE],
+                  [1.0 - IDLE_SCALE, 1.0 - IDLE_SCALE, 1.0 - IDLE_SCALE],
+                  [1.0 + IDLE_SCALE, 1.0 + IDLE_SCALE, 1.0 + IDLE_SCALE]])
+# Gentle arm sway (a tenth of the walk amplitude).
+add_idle_channel(5, "rotation", IDLE_KEYS,
+                 [xrot(-0.04 * math.sin(2 * math.pi * t)) for t in IDLE_KEYS])
+add_idle_channel(8, "rotation", IDLE_KEYS,
+                 [xrot(0.04 * math.sin(2 * math.pi * t)) for t in IDLE_KEYS])
+
+idle_animation = {
+    "name": "idle",
+    "samplers": idle_samplers,
+    "channels": idle_channels,
+}
+
+# ---------------------------------------------------------------------------
 # Assemble nodes/document.
 # ---------------------------------------------------------------------------
 
@@ -395,7 +438,7 @@ document = {
     "meshes": meshes,
     "skins": [skin],
     "materials": materials,
-    "animations": [animation],
+    "animations": [animation, idle_animation],
     "buffers": [{"byteLength": len(bin_data), "uri": "mannequin.bin"}],
     "bufferViews": buffer_views,
     "accessors": accessors,
