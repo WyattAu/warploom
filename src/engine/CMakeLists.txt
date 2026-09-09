@@ -9,6 +9,7 @@ add_library(omnicpp_runtime SHARED
     core/engine.cpp
     core/input_state.cpp
     core/input_translators.cpp
+    render/vulkan_ibl_baker.cpp
     asset/gltf_importer.cpp
     asset/gltf_animation.cpp
     asset/image_decode.cpp

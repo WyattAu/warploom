@@ -338,6 +338,11 @@ struct VulkanPbrScene {
   //! Descriptor-set index the main pass binds shadow_set at. Must match the
   //! pipeline's fragment stage; 0 means default (4).
   std::uint32_t shadow_set_slot{0U};
+  //! Descriptor-set index the main pass binds ibl_set at. Must match the
+  //! pipeline's fragment stage; 0 means default (3). The composed
+  //! pbr_full variant (IBL + shadow + skinning in one layout) keeps bones
+  //! at 3 and relocates the IBL resources to 5 via this field.
+  std::uint32_t ibl_set_slot{0U};
   //! Shadow-map extent for graph-driven recording (0 = target-provided).
   std::uint32_t shadow_width{0U};
   std::uint32_t shadow_height{0U};

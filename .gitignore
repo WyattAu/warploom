@@ -128,3 +128,4 @@ tests/.cache/
 .vscode/launch.json
 .vscode/tasks.json
 *.code-workspace
+fossilize.*.foz

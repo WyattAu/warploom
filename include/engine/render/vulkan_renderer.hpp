@@ -331,6 +331,21 @@ public:
     scene_record_user_data_ = user_data;
   }
 
+  //! Optional pre-pass hook: invoked with the raw frame command buffer
+  //! BEFORE the main render pass begins. This is where an application
+  //! records independent earlier passes (e.g. the shadow-map depth pre-pass
+  //! through a graph, or compute) that the main pass then consumes. The
+  //! hook owns its own render-pass begin/end; returning false fails the
+  //! frame.
+  using FramePrePassCallback = bool (*)(VkCommandBuffer command_buffer,
+                                        std::uint32_t width,
+                                        std::uint32_t height, void* user_data);
+  void set_frame_pre_pass_callback(FramePrePassCallback callback,
+                                   void* user_data = nullptr) noexcept {
+    frame_pre_pass_callback_ = callback;
+    frame_pre_pass_user_data_ = user_data;
+  }
+
   //! Install the application-owned H-Z recorder used after the depth pass.
   void set_hiz_record_callback(HiZRecordCallback callback, void* user_data = nullptr) noexcept {
     hiz_record_callback_ = callback;
@@ -408,6 +423,8 @@ private:
   VkPipeline pipeline_{VK_NULL_HANDLE};
   SceneRecordCallback scene_record_callback_{nullptr};
   void* scene_record_user_data_{nullptr};
+  FramePrePassCallback frame_pre_pass_callback_{nullptr};
+  void* frame_pre_pass_user_data_{nullptr};
   const VulkanSwapchain* swapchain_{nullptr};
   const VulkanRenderPass* render_pass_resource_{nullptr};
   std::vector<FrameResources> frames_;

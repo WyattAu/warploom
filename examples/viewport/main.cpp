@@ -31,6 +31,7 @@
 #include "engine/core/input_translators.hpp"
 #include "engine/render/vulkan_context.hpp"
 #include "engine/render/vulkan_descriptors.hpp"
+#include "engine/render/vulkan_ibl_baker.hpp"
 #include "engine/render/vulkan_memory_allocator.hpp"
 #include "engine/render/vulkan_render_pass.hpp"
 #include "engine/render/vulkan_renderer.hpp"
@@ -122,6 +123,20 @@ SceneMatrix multiply(const SceneMatrix& a, const SceneMatrix& b) {
   return out;
 }
 
+//! Orthographic projection matching the proven shadow test's convention
+//! (row-diagonal m[0]/m[5], GL z-remap m[10] = 1/(zn-zf), m[14] = zn/(zn-zf)).
+SceneMatrix make_ortho(float l, float r, float b, float t, float zn,
+                       float zf) {
+  SceneMatrix m = omnicpp::render::scene_identity_matrix();
+  m[0] = 2.0f / (r - l);
+  m[5] = 2.0f / (t - b);
+  m[10] = 1.0f / (zn - zf);
+  m[12] = -(r + l) / (r - l);
+  m[13] = -(t + b) / (t - b);
+  m[14] = zn / (zn - zf);
+  return m;
+}
+
 // ============================================================================
 // Viewport state
 // ============================================================================
@@ -138,6 +153,27 @@ struct ViewportApp {
   // Scene resources.
   omnicpp::render::VulkanPipeline pbr_pipeline;
   omnicpp::render::VulkanPipeline skinned_pipeline;
+  //! Composed full-lighting pipelines (pbr_full.frag: IBL set 5 + shadow
+  //! set 4 + optional bones set 3). Built in setup_lighting; when ready,
+  //! they replace the basic pipelines in the recorded scene.
+  omnicpp::render::VulkanPipeline full_pipeline;
+  omnicpp::render::VulkanPipeline full_skinned_pipeline;
+  //! True when the composed lighting stack initialized (graceful fallback:
+  //! false keeps the basic pbr_scene path and no shadow map).
+  bool lighting_ready{false};
+  //! Forced legacy path (OMNICPP_LEGACY_LIGHTING=1) for A/B proofs.
+  bool legacy_lighting{false};
+  //! Diagnostic toggle: composed shading with the shadow term removed
+  //! (OMNICPP_NO_SHADOW=1). The pixel diff vs the composed run is then the
+  //! exact shadow footprint.
+  bool no_shadow{false};
+  //! Diagnostic: dump the raw shadow map (kShadowRes^2 float32) after a
+  //! frame (OMNICPP_DUMP_SHADOW=<frame>). Makes the depth-only pre-pass
+  //! directly observable instead of inferred.
+  bool dump_shadow{false};
+  std::uint32_t dump_shadow_frame{0};
+  VkBuffer dump_shadow_buffer{VK_NULL_HANDLE};
+  omnicpp::render::Allocation dump_shadow_allocation{};
   VkDescriptorSetLayout mesh_layout{VK_NULL_HANDLE};
   VkDescriptorSetLayout textures_layout{VK_NULL_HANDLE};
   VkDescriptorSetLayout material_layout{VK_NULL_HANDLE};
@@ -161,6 +197,40 @@ struct ViewportApp {
   // is unavailable and the scene renders cubes only.
   omnicpp::asset::GltfAnimationDocument mannequin;
   bool has_mannequin{false};
+
+  // --- Full lighting (C1): composed PBR pipeline + IBL + shadow map. ------
+  //! Set-5 IBL layout for the composed pbr_full variant (the baker's set
+  //! views/samplers are written into a viewport-owned set at slot 5).
+  VkDescriptorSetLayout ibl5_layout{VK_NULL_HANDLE};
+  VkDescriptorSet ibl5_set{VK_NULL_HANDLE};
+  //! Engine-side GPU bake: analytic sky -> prefiltered/irradiance/LUT.
+  omnicpp::render::VulkanIblBaker ibl_baker;
+  //! Shadow resources: D32 image (depth+sampled usage), depth/sample views,
+  //! compare sampler, 64-byte light-VP UBO + set-4 descriptor, depth-only
+  //! render pass + framebuffer, static and skinned depth-only pipelines.
+  static constexpr std::uint32_t kShadowRes = 2048U;
+  VkImage shadow_image{VK_NULL_HANDLE};
+  omnicpp::render::Allocation shadow_memory{};
+  VkImageView shadow_depth_view{VK_NULL_HANDLE};
+  VkImageView shadow_sample_view{VK_NULL_HANDLE};
+  VkSampler shadow_sampler{VK_NULL_HANDLE};
+  //! Neutral 1x1 depth image for OMNICPP_NO_SHADOW: the composed fragment
+  //! stage statically uses set 4, so it must stay bound (UB otherwise) — a
+  //! cleared-to-1.0 map makes every PCF comparison pass (fully lit).
+  VkImage neutral_shadow_image{VK_NULL_HANDLE};
+  omnicpp::render::Allocation neutral_shadow_memory{};
+  VkImageView neutral_shadow_sample_view{VK_NULL_HANDLE};
+  VkDescriptorSet neutral_shadow_set{VK_NULL_HANDLE};
+  VkRenderPass shadow_render_pass{VK_NULL_HANDLE};
+  VkFramebuffer shadow_framebuffer{VK_NULL_HANDLE};
+  VkDescriptorSetLayout shadow_layout{VK_NULL_HANDLE};
+  VkDescriptorSet shadow_set{VK_NULL_HANDLE};
+  omnicpp::render::Allocation shadow_ubo_allocation{};
+  omnicpp::render::VulkanPipeline shadow_pipeline_static;
+  omnicpp::render::VulkanPipeline shadow_pipeline_skinned;
+  //! Sun direction (normalized, toward the sun) shared by the shadow VP,
+  //! the IBL bake, and telemetry.
+  std::array<float, 3> sun_direction{0.45f, 0.7f, 0.55f};
 
   std::vector<omnicpp::render::ScenePbrObject> objects;
   omnicpp::render::VulkanPbrScene scene;
@@ -827,6 +897,474 @@ bool setup_scene(ViewportApp& app) {
   return true;
 }
 
+//! Build the composed full-lighting stack: IBL bake from the analytic sky,
+//! shadow-map resources (depth image, render pass, UBO, descriptor set),
+//! the composed pbr_full pipelines (static + skinned), and the depth-only
+//! shadow pipelines. Everything degrades gracefully: on failure the viewport
+//! falls back to the basic pbr_scene path (no IBL/shadow), which keeps the
+//! cubes-only mode and CI environments without the new shaders working.
+bool setup_lighting(ViewportApp& app) {
+  // A/B: the legacy flag leaves the composed path unbuilt (lighting_ready
+  // stays false so record_scene_into selects the legacy pipelines and never
+  // registers the shadow pre-pass).
+  if (app.legacy_lighting) return false;  // A/B selection, not a failure
+  VkDevice dev = app.context.device();
+  const std::uint32_t queue_family =
+      static_cast<std::uint32_t>(app.context.queue_families().graphics_family);
+  const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
+  const std::string shader_dir =
+      shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
+  std::string bake_error;
+
+  // --- 1. IBL bake from the analytic sky. --------------------------------
+  if (!app.ibl_baker.initialize(dev, app.context.graphics_queue(),
+                                queue_family, app.allocator, app.descriptors,
+                                shader_dir, bake_error)) {
+    std::fprintf(stderr, "viewport: IBL bake unavailable (%s); legacy path\n",
+                 bake_error.c_str());
+    std::fprintf(stderr, "viewport: setup_lighting failed at line 925\n"); return false;
+  }
+  omnicpp::render::IblBakeParams bake_params{};
+  bake_params.sun_direction = app.sun_direction;
+  if (!app.ibl_baker.bake(bake_params)) {
+    std::fprintf(stderr, "viewport: IBL bake failed; legacy path\n");
+    std::fprintf(stderr, "viewport: setup_lighting failed at line 931\n"); return false;
+  }
+
+  // Set 5 IBL layout (bindings at 5.x for pbr_full.frag) written from the
+  // baker's baked images.
+  const std::vector<omnicpp::render::ReflectedBinding> ibl5_bindings = {
+      {5U, 0U, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+       VK_SHADER_STAGE_FRAGMENT_BIT},
+      {5U, 1U, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+       VK_SHADER_STAGE_FRAGMENT_BIT},
+      {5U, 2U, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+       VK_SHADER_STAGE_FRAGMENT_BIT}};
+  auto ibl5_layout = app.descriptors.create_layout(ibl5_bindings, 1U);
+  if (!ibl5_layout.is_ok()) { std::fprintf(stderr, "viewport: setup_lighting failed at line 944\n"); return false; }
+  app.ibl5_layout = ibl5_layout.value();
+  auto ibl5_set = app.descriptors.allocate_set(app.ibl5_layout);
+  if (!ibl5_set.is_ok()) { std::fprintf(stderr, "viewport: setup_lighting failed at line 947\n"); return false; }
+  app.ibl5_set = ibl5_set.value();
+  if (!app.descriptors
+           .write_image(app.ibl5_set, 0U,
+                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                        app.ibl_baker.cube_sampler(),
+                        app.ibl_baker.prefiltered_cube_view(),
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
+           .is_ok() ||
+      !app.descriptors
+           .write_image(app.ibl5_set, 1U,
+                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                        app.ibl_baker.flat_sampler(),
+                        app.ibl_baker.irradiance_cube_view(),
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
+           .is_ok() ||
+      !app.descriptors
+           .write_image(app.ibl5_set, 2U,
+                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                        app.ibl_baker.flat_sampler(),
+                        app.ibl_baker.brdf_lut_view(),
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
+           .is_ok()) {
+    std::fprintf(stderr, "viewport: setup_lighting failed at line 970\n"); return false;
+  }
+
+  // --- 2. Shadow-map resources. ------------------------------------------
+  VkImageCreateInfo si{};
+  si.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  si.imageType = VK_IMAGE_TYPE_2D;
+  si.format = VK_FORMAT_D32_SFLOAT;
+  si.extent = {ViewportApp::kShadowRes, ViewportApp::kShadowRes, 1U};
+  si.mipLevels = 1U;
+  si.arrayLayers = 1U;
+  si.samples = VK_SAMPLE_COUNT_1_BIT;
+  si.tiling = VK_IMAGE_TILING_OPTIMAL;
+  si.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+             VK_IMAGE_USAGE_SAMPLED_BIT |
+             VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+             VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  if (vkCreateImage(dev, &si, nullptr, &app.shadow_image) != VK_SUCCESS) {
+    std::fprintf(stderr, "viewport: setup_lighting failed at line 986\n"); return false;
+  }
+  auto shadow_mem = app.allocator.bind_image(
+      app.shadow_image, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  if (!shadow_mem.is_ok()) { std::fprintf(stderr, "viewport: setup_lighting failed at line 990\n"); return false; }
+  app.shadow_memory = shadow_mem.value();
+  VkImageViewCreateInfo dvi{};
+  dvi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  dvi.image = app.shadow_image;
+  dvi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  dvi.format = VK_FORMAT_D32_SFLOAT;
+  dvi.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 1U, 0U, 1U};
+  if (vkCreateImageView(dev, &dvi, nullptr, &app.shadow_depth_view) !=
+          VK_SUCCESS ||
+      vkCreateImageView(dev, &dvi, nullptr, &app.shadow_sample_view) !=
+          VK_SUCCESS) {
+    std::fprintf(stderr, "viewport: setup_lighting failed at line 1002\n"); return false;
+  }
+  // Compare-enabled sampler (the fragment stage declares sampler2DShadow in
+  // pbr_shadow-style PCF paths; manual comparisons are not used here).
+  VkSamplerCreateInfo sp{};
+  sp.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  sp.magFilter = VK_FILTER_LINEAR;
+  sp.minFilter = VK_FILTER_LINEAR;
+  sp.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+  sp.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+  sp.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+  sp.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+  sp.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+  sp.compareEnable = VK_TRUE;
+  sp.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+  if (vkCreateSampler(dev, &sp, nullptr, &app.shadow_sampler) != VK_SUCCESS) {
+    std::fprintf(stderr, "viewport: setup_lighting failed at line 1018\n"); return false;
+  }
+
+  // Depth-only render pass (clear -> store, final DEPTH_READ for sampling).
+  VkAttachmentDescription ad{};
+  ad.format = VK_FORMAT_D32_SFLOAT;
+  ad.samples = VK_SAMPLE_COUNT_1_BIT;
+  ad.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  ad.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  ad.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  ad.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  ad.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  ad.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+  VkAttachmentReference dr{0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+  VkSubpassDescription sd{};
+  sd.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+  sd.colorAttachmentCount = 0;
+  sd.pDepthStencilAttachment = &dr;
+  VkSubpassDependency dep{};
+  dep.srcSubpass = VK_SUBPASS_EXTERNAL;
+  dep.dstSubpass = 0;
+  dep.srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+  dep.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+  dep.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  dep.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  VkRenderPassCreateInfo rpci{};
+  rpci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+  rpci.attachmentCount = 1;
+  rpci.pAttachments = &ad;
+  rpci.subpassCount = 1;
+  rpci.pSubpasses = &sd;
+  rpci.dependencyCount = 1;
+  rpci.pDependencies = &dep;
+  if (vkCreateRenderPass(dev, &rpci, nullptr, &app.shadow_render_pass) !=
+      VK_SUCCESS) {
+    std::fprintf(stderr, "viewport: setup_lighting failed at line 1053\n"); return false;
+  }
+  VkFramebufferCreateInfo fbi{};
+  fbi.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+  fbi.renderPass = app.shadow_render_pass;
+  fbi.attachmentCount = 1;
+  fbi.pAttachments = &app.shadow_depth_view;
+  fbi.width = ViewportApp::kShadowRes;
+  fbi.height = ViewportApp::kShadowRes;
+  fbi.layers = 1U;
+  if (vkCreateFramebuffer(dev, &fbi, nullptr, &app.shadow_framebuffer) !=
+      VK_SUCCESS) {
+    std::fprintf(stderr, "viewport: setup_lighting failed at line 1065\n"); return false;
+  }
+
+  // Shadow UBO (light VP) + set-4 descriptor (UBO + depth sampler).
+  auto ubo = app.allocator.create_buffer(
+      64U, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (!ubo.is_ok()) { std::fprintf(stderr, "viewport: setup_lighting failed at line 1073\n"); return false; }
+  app.shadow_ubo_allocation = ubo.value();
+  const std::vector<omnicpp::render::ReflectedBinding> shadow_bindings = {
+      {4U, 0U, 1U, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+       VK_SHADER_STAGE_FRAGMENT_BIT},
+      {4U, 1U, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+       VK_SHADER_STAGE_FRAGMENT_BIT}};
+  auto shadow_layout = app.descriptors.create_layout(shadow_bindings, 2U);
+  if (!shadow_layout.is_ok()) { std::fprintf(stderr, "viewport: setup_lighting failed at line 1081\n"); return false; }
+  app.shadow_layout = shadow_layout.value();
+  auto shadow_set = app.descriptors.allocate_set(app.shadow_layout);
+  if (!shadow_set.is_ok()) { std::fprintf(stderr, "viewport: setup_lighting failed at line 1084\n"); return false; }
+  app.shadow_set = shadow_set.value();
+  if (!app.descriptors
+           .write_buffer(app.shadow_set, 0U, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                         app.shadow_ubo_allocation.buffer, 0U, 64U)
+           .is_ok() ||
+      !app.descriptors
+           .write_image(app.shadow_set, 1U,
+                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                        app.shadow_sampler, app.shadow_sample_view,
+                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, 0U)
+           .is_ok()) {
+    std::fprintf(stderr, "viewport: setup_lighting failed at line 1096\n"); return false;
+  }
+
+  // --- 2b. Neutral shadow set (OMNICPP_NO_SHADOW). -----------------------
+  // pbr_full.frag statically uses set 4, so it must remain bound even when
+  // shadows are disabled — an unbound-but-used set is undefined behaviour.
+  // A 1x1 depth image cleared to 1.0 makes every PCF comparison pass.
+  {
+    VkImageCreateInfo ni = si;
+    ni.extent = {1U, 1U, 1U};
+    if (vkCreateImage(dev, &ni, nullptr, &app.neutral_shadow_image) !=
+        VK_SUCCESS) {
+      std::fprintf(stderr, "viewport: setup_lighting failed at line 1108\n"); return false;
+    }
+    auto nmem = app.allocator.bind_image(
+        app.neutral_shadow_image, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (!nmem.is_ok()) { std::fprintf(stderr, "viewport: setup_lighting failed at line 1112\n"); return false; }
+    app.neutral_shadow_memory = nmem.value();
+    VkImageViewCreateInfo ndvi = dvi;
+    ndvi.image = app.neutral_shadow_image;
+    if (vkCreateImageView(dev, &ndvi, nullptr,
+                          &app.neutral_shadow_sample_view) != VK_SUCCESS) {
+      std::fprintf(stderr, "viewport: setup_lighting failed at line 1118\n"); return false;
+    }
+    auto neutral_set = app.descriptors.allocate_set(app.shadow_layout);
+    if (!neutral_set.is_ok()) { std::fprintf(stderr, "viewport: setup_lighting failed at line 1121\n"); return false; }
+    app.neutral_shadow_set = neutral_set.value();
+    if (!app.descriptors
+             .write_buffer(app.neutral_shadow_set, 0U,
+                           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                           app.shadow_ubo_allocation.buffer, 0U, 64U)
+             .is_ok() ||
+        !app.descriptors
+             .write_image(app.neutral_shadow_set, 1U,
+                          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                          app.shadow_sampler, app.neutral_shadow_sample_view,
+                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, 0U)
+             .is_ok()) {
+      std::fprintf(stderr, "viewport: setup_lighting failed at line 1134\n"); return false;
+    }
+    // Clear the 1x1 map to depth 1.0 (fully far = fully lit) once, on the
+    // graphics queue, then leave it in the sampled layout permanently.
+    auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+        dev, queue_family);
+    if (!pool.is_ok()) { std::fprintf(stderr, "viewport: setup_lighting failed at line 1140\n"); return false; }
+    auto cb = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        dev, pool.value());
+    if (!cb.is_ok()) {
+      vkDestroyCommandPool(dev, pool.value(), nullptr);
+      std::fprintf(stderr, "viewport: setup_lighting failed at line 1145\n"); return false;
+    }
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    vkBeginCommandBuffer(cb.value(), &bi);
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = app.neutral_shadow_image;
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 1U, 0U, 1U};
+    vkCmdPipelineBarrier(cb.value(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &barrier);
+    VkClearDepthStencilValue cd{1.0f, 0U};
+    VkImageSubresourceRange range = {
+        VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 1U, 0U, 1U};
+    vkCmdClearDepthStencilImage(cb.value(), app.neutral_shadow_image,
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cd, 1,
+                                &range);
+    VkImageMemoryBarrier to_sample = barrier;
+    to_sample.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_sample.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    to_sample.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_sample.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier(cb.value(), VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &to_sample);
+    vkEndCommandBuffer(cb.value());
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1U;
+    submit.pCommandBuffers = &cb.value();
+    vkQueueSubmit(app.context.graphics_queue(), 1U, &submit, VK_NULL_HANDLE);
+    vkQueueWaitIdle(app.context.graphics_queue());
+    vkDestroyCommandPool(dev, pool.value(), nullptr);
+  }
+
+  // --- 3. Composed pipelines (pbr_full.frag). ----------------------------
+  // pbr_full.frag declares sets 0,1,2,4,5; the skinned vertex stage adds
+  // set 3. Both variants share one 6-entry layout array: the static one
+  // simply never touches the bone layout declared at position 3 (an unused
+  // declared set is legal; an undeclared gap is not).
+  const VkDescriptorSetLayout full_layouts[6] = {
+      app.mesh_layout, app.textures_layout, app.material_layout,
+      app.bone_layout, app.shadow_layout, app.ibl5_layout};
+  const VkPushConstantRange push_range{
+      static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT |
+                                      VK_SHADER_STAGE_FRAGMENT_BIT),
+      0U, 160U};
+
+  if (!app.full_pipeline
+           .load_shader_stage_file(dev, shader_dir + "/pbr_scene.vert.spv",
+                                   "vertex")
+           .is_ok() ||
+      !app.full_pipeline
+           .load_shader_stage_file(dev, shader_dir + "/pbr_full.frag.spv",
+                                   "fragment")
+           .is_ok() ||
+      !app.full_pipeline
+           .create_pipeline_layout(dev, full_layouts, 6U, &push_range)
+           .is_ok() ||
+      !app.full_pipeline
+           .create_graphics_pipeline(dev, app.render_pass.render_pass(),
+                                     app.swapchain.image_format(),
+                                     app.full_pipeline.pipeline_layout(),
+                                     /*depth_test=*/true, /*depth_write=*/true,
+                                     /*cull=*/false)
+           .is_ok()) {
+    std::fprintf(stderr, "viewport: composed static pipeline failed\n");
+    std::fprintf(stderr, "viewport: setup_lighting failed at line 1219\n"); return false;
+  }
+  if (!app.full_skinned_pipeline
+           .load_shader_stage_file(dev, shader_dir + "/skinned_scene.vert.spv",
+                                   "vertex")
+           .is_ok() ||
+      !app.full_skinned_pipeline
+           .load_shader_stage_file(dev, shader_dir + "/pbr_full.frag.spv",
+                                   "fragment")
+           .is_ok() ||
+      !app.full_skinned_pipeline
+           .create_pipeline_layout(dev, full_layouts, 6U, &push_range)
+           .is_ok() ||
+      !app.full_skinned_pipeline
+           .create_graphics_pipeline(dev, app.render_pass.render_pass(),
+                                     app.swapchain.image_format(),
+                                     app.full_skinned_pipeline.pipeline_layout(),
+                                     /*depth_test=*/true, /*depth_write=*/true,
+                                     /*cull=*/false)
+           .is_ok()) {
+    std::fprintf(stderr, "viewport: composed skinned pipeline failed\n");
+    std::fprintf(stderr, "viewport: setup_lighting failed at line 1240\n"); return false;
+  }
+
+  // --- 4. Shadow-casting pipelines (depth-only). -------------------------
+  const VkDescriptorSetLayout solo_mesh[1] = {app.mesh_layout};
+  const VkPushConstantRange shadow_push{VK_SHADER_STAGE_VERTEX_BIT, 0U, 128U};
+  if (!app.shadow_pipeline_static
+           .load_shader_stage_file(dev, shader_dir + "/shadow.vert.spv",
+                                   "vertex")
+           .is_ok() ||
+      !app.shadow_pipeline_static
+           .load_shader_stage_file(dev, shader_dir + "/shadow.frag.spv",
+                                   "fragment")
+           .is_ok() ||
+      !app.shadow_pipeline_static
+           .create_pipeline_layout(dev, solo_mesh, 1U, &shadow_push)
+           .is_ok() ||
+      !app.shadow_pipeline_static
+           .create_graphics_pipeline(dev, app.shadow_render_pass,
+                                     VK_FORMAT_D32_SFLOAT,
+                                     app.shadow_pipeline_static.pipeline_layout(),
+                                     /*depth_test=*/true,
+                                     /*depth_write=*/true, /*cull=*/false)
+           .is_ok()) {
+    std::fprintf(stderr, "viewport: static shadow pipeline failed\n");
+    std::fprintf(stderr, "viewport: setup_lighting failed at line 1265\n"); return false;
+  }
+  if (app.has_mannequin) {
+    // shadow_skinned.vert declares bones at set 3, so the layout mirrors
+    // the skinned_scene pipeline's first four slots (sets 1/2 unused).
+    const VkDescriptorSetLayout skinned_solo[4] = {
+        app.mesh_layout, app.textures_layout, app.material_layout,
+        app.bone_layout};
+    if (!app.shadow_pipeline_skinned
+             .load_shader_stage_file(dev,
+                                     shader_dir + "/shadow_skinned.vert.spv",
+                                     "vertex")
+             .is_ok() ||
+        !app.shadow_pipeline_skinned
+             .load_shader_stage_file(dev, shader_dir + "/shadow.frag.spv",
+                                     "fragment")
+             .is_ok() ||
+        !app.shadow_pipeline_skinned
+             .create_pipeline_layout(dev, skinned_solo, 4U, &shadow_push)
+             .is_ok() ||
+        !app.shadow_pipeline_skinned
+             .create_graphics_pipeline(dev, app.shadow_render_pass,
+                                       VK_FORMAT_D32_SFLOAT,
+                                       app.shadow_pipeline_skinned.pipeline_layout(),
+                                       /*depth_test=*/true,
+                                       /*depth_write=*/true, /*cull=*/false)
+             .is_ok()) {
+      std::fprintf(stderr, "viewport: skinned shadow pipeline failed\n");
+      std::fprintf(stderr, "viewport: setup_lighting failed at line 1293\n"); return false;
+    }
+  }
+  return true;
+}
+
+//! Renderer pre-pass hook: renders the shadow map (static + skinned objects
+//! in one depth-only pass) before the main render pass. The main pass then
+//! samples it via scene.shadow_set with the SAME light VP the pre-pass used
+//! (stashed in scene.shadow_light_vp inside record_scene_into, which runs
+//! first within the frame).
+bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
+                        std::uint32_t height, void* user_data) {
+  auto& app = *static_cast<ViewportApp*>(user_data);
+  if (!app.lighting_ready) return true;  // nothing to pre-render
+  (void)width;
+  (void)height;
+
+  VkClearValue shadow_clear{};
+  shadow_clear.depthStencil = {1.0f, 0U};
+  VkRenderPassBeginInfo rpb{};
+  rpb.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  rpb.renderPass = app.shadow_render_pass;
+  rpb.framebuffer = app.shadow_framebuffer;
+  rpb.renderArea.extent = {ViewportApp::kShadowRes, ViewportApp::kShadowRes};
+  rpb.clearValueCount = 1;
+  rpb.pClearValues = &shadow_clear;
+  vkCmdBeginRenderPass(command_buffer, &rpb, VK_SUBPASS_CONTENTS_INLINE);
+
+  VkViewport viewport{};
+  viewport.width = static_cast<float>(ViewportApp::kShadowRes);
+  viewport.height = static_cast<float>(ViewportApp::kShadowRes);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+  vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+  VkRect2D scissor{};
+  scissor.extent = {ViewportApp::kShadowRes, ViewportApp::kShadowRes};
+  vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+
+  struct ShadowPush {
+    omnicpp::render::SceneMatrix light_vp;
+    omnicpp::render::SceneMatrix model;
+  } push{};
+  push.light_vp = app.scene.shadow_light_vp;
+
+  for (const auto& object : app.scene.objects) {
+    if (object.mesh == nullptr || !object.mesh->is_drawable()) continue;
+    const bool skinned = app.has_mannequin &&
+                         object.mesh != &app.ground.mesh;
+    const omnicpp::render::VulkanPipeline& pipe =
+        skinned ? app.shadow_pipeline_skinned : app.shadow_pipeline_static;
+    push.model = object.model;
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      pipe.pipeline());
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipe.pipeline_layout(), 0, 1,
+                            &object.mesh->descriptor_set, 0, nullptr);
+    if (skinned) {
+      vkCmdBindDescriptorSets(command_buffer,
+                              VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              pipe.pipeline_layout(), 3, 1, &app.bone_set, 0,
+                              nullptr);
+    }
+    vkCmdPushConstants(command_buffer, pipe.pipeline_layout(),
+                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
+    vkCmdBindIndexBuffer(command_buffer, object.mesh->index_buffer,
+                         object.mesh->index_offset, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(command_buffer, object.mesh->index_count, 1, 0, 0, 0);
+  }
+  vkCmdEndRenderPass(command_buffer);
+  return true;
+}
+
 //! Build the scene description for sim time `t` / walk phase `walk_t` and
 //! record it into a begun render pass. Pure: mutates nothing on `app`, so
 //! the window path and the capture path can record the identical scene.
@@ -855,6 +1393,22 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
       static_cast<float>(width) / static_cast<float>(height), 0.1f, 100.0f);
   // Camera position in view conventions: the look_at eye.
   app.scene.camera_position = {eye[0], eye[1], eye[2], 1.0f};
+
+  // Light VP for the shadow pre-pass (the hook records with the same matrix
+  // stashed here) and for the fragment stage's shadow lookup. Ortho box
+  // covers the ~16-unit scene; the light eye sits 8 units along the sun
+  // direction looking at the origin.
+  const float light_eye[3] = {app.sun_direction[0] * 8.0f,
+                              app.sun_direction[1] * 8.0f,
+                              app.sun_direction[2] * 8.0f};
+  const float light_target[3] = {0.0f, 0.0f, 0.0f};
+  app.scene.shadow_light_vp = multiply(
+      make_ortho(-10.0f, 10.0f, -10.0f, 10.0f, -20.0f, 20.0f),
+      omnicpp::render::scene_camera_look_at(light_eye, light_target, up));
+  if (app.shadow_ubo_allocation.mapped != nullptr) {
+    std::memcpy(app.shadow_ubo_allocation.mapped,
+                app.scene.shadow_light_vp.data(), 64U);
+  }
 
   app.scene.objects.clear();
 
@@ -937,8 +1491,18 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
       part.material_index = 3U;
       app.scene.objects.push_back(part);
     }
-    app.scene.pipeline = app.skinned_pipeline.pipeline();
-    app.scene.pipeline_layout = app.skinned_pipeline.pipeline_layout();
+    if (app.lighting_ready) {
+      app.scene.pipeline = app.full_skinned_pipeline.pipeline();
+      app.scene.pipeline_layout =
+          app.full_skinned_pipeline.pipeline_layout();
+      app.scene.ibl_set = app.ibl5_set;
+      app.scene.ibl_set_slot = 5U;
+    } else {
+      app.scene.pipeline = app.skinned_pipeline.pipeline();
+      app.scene.pipeline_layout = app.skinned_pipeline.pipeline_layout();
+      app.scene.ibl_set = VK_NULL_HANDLE;
+      app.scene.ibl_set_slot = 0U;
+    }
     app.scene.bone_set = app.bone_set;
   } else {
     // Spinning metal cube at the origin.
@@ -959,10 +1523,37 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     rough_cube.material_index = 1U;
     app.scene.objects.push_back(rough_cube);
 
-    app.scene.pipeline = app.pbr_pipeline.pipeline();
-    app.scene.pipeline_layout = app.pbr_pipeline.pipeline_layout();
+    if (app.lighting_ready) {
+      app.scene.pipeline = app.full_pipeline.pipeline();
+      app.scene.pipeline_layout = app.full_pipeline.pipeline_layout();
+      app.scene.ibl_set = app.ibl5_set;
+      app.scene.ibl_set_slot = 5U;
+    } else {
+      app.scene.pipeline = app.pbr_pipeline.pipeline();
+      app.scene.pipeline_layout = app.pbr_pipeline.pipeline_layout();
+      app.scene.ibl_set = VK_NULL_HANDLE;
+      app.scene.ibl_set_slot = 0U;
+    }
     app.scene.bone_set = VK_NULL_HANDLE;
   }
+  // Shadow set shared by both branches (null keeps the legacy path).
+  // OMNICPP_NO_SHADOW keeps the composed pipelines (their shaders statically
+  // use set 4) but binds the neutral 1x1 cleared map: every PCF comparison
+  // passes, so the image equals composed shading with no shadow term.
+  const bool shadow_active = app.lighting_ready && !app.no_shadow;
+  app.scene.shadow_set =
+      app.lighting_ready
+          ? (shadow_active ? app.shadow_set : app.neutral_shadow_set)
+          : VK_NULL_HANDLE;
+  app.scene.shadow_set_slot = 4U;
+  app.scene.shadow_pipeline =
+      shadow_active
+          ? app.shadow_pipeline_static.pipeline()
+          : VK_NULL_HANDLE;
+  app.scene.shadow_pipeline_layout =
+      shadow_active
+          ? app.shadow_pipeline_static.pipeline_layout()
+          : VK_NULL_HANDLE;
 
   return omnicpp::render::VulkanRenderer{}
       .record_pbr_scene(command_buffer, app.scene, width, height)
@@ -1005,6 +1596,24 @@ bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
 
 bool ViewportApp::initialize() {
   run_config = viewport::RunConfig::from_environment();
+  // A/B selection must be known BEFORE setup_lighting() picks the pipeline
+  // family; the flag read later in this function only adds telemetry.
+  legacy_lighting = std::getenv("OMNICPP_LEGACY_LIGHTING") != nullptr;
+  no_shadow = std::getenv("OMNICPP_NO_SHADOW") != nullptr;
+  if (const char* ds = std::getenv("OMNICPP_DUMP_SHADOW")) {
+    dump_shadow = true;
+    dump_shadow_frame = static_cast<std::uint32_t>(std::atoi(ds));
+  }
+  // Sun direction override — scenario control for shadow proofs (two suns
+  // must move the shadow region). Normalized on read; kept above the horizon.
+  if (const char* sun = std::getenv("OMNICPP_SUN_DIRECTION")) {
+    float x = 0.0f, y = 0.0f, z = 0.0f;
+    if (std::sscanf(sun, "%f,%f,%f", &x, &y, &z) == 3 && x > 0.0f &&
+        y > 0.05f && z > 0.0f) {
+      const float len = std::sqrt(x * x + y * y + z * z);
+      sun_direction = {x / len, y / len, z / len};
+    }
+  }
   if (!setup_window(*this)) return false;
   setup_wm_delete_protocol(*this);
 
@@ -1068,6 +1677,12 @@ bool ViewportApp::initialize() {
   if (!setup_scene(*this)) {
     std::fprintf(stderr, "viewport: scene setup failed\n");
     return false;
+  }
+  // Composed full lighting (IBL + shadow map + composed PBR). Non-fatal:
+  // failure falls back to the basic pbr_scene path.
+  lighting_ready = setup_lighting(*this);
+  if (lighting_ready) {
+    renderer.set_frame_pre_pass_callback(shadow_pre_pass_cb, this);
   }
   renderer.set_scene_record_callback(record_scene_cb, this);
 
@@ -1138,6 +1753,22 @@ bool ViewportApp::initialize() {
         }
         telemetry.log_scene_clips(clips);
       }
+    }
+  }
+  if (legacy_lighting) {
+    if (telemetry_enabled) {
+      telemetry.log_event("legacy_lighting", "forced via OMNICPP_LEGACY_LIGHTING");
+    }
+  } else if (telemetry_enabled) {
+    telemetry.log_event("lighting_mode",
+                        lighting_ready ? "composed (ibl+shadow+pbr_full)"
+                                       : "legacy fallback");
+    char sun_buf[64];
+    std::snprintf(sun_buf, sizeof(sun_buf), "%.4f,%.4f,%.4f",
+                  sun_direction[0], sun_direction[1], sun_direction[2]);
+    telemetry.log_event("sun_direction", sun_buf);
+    if (no_shadow) {
+      telemetry.log_event("shadow_mode", "disabled (OMNICPP_NO_SHADOW)");
     }
   }
   if (const char* script = std::getenv("OMNICPP_INPUT_SCRIPT")) {
@@ -1303,6 +1934,90 @@ void ViewportApp::run() {
     }
 
     time += run_config.fixed_dt;  // deterministic animation clock
+    // Shadow-map dump: copy the depth-only pre-pass output to the host so
+    // the pre-pass is directly observable (occupied texels < 1.0).
+    if (dump_shadow && shadow_image != VK_NULL_HANDLE &&
+        frame_index + 1U == dump_shadow_frame &&
+        dump_shadow_buffer == VK_NULL_HANDLE) {
+      constexpr VkDeviceSize kShadowBytes = static_cast<VkDeviceSize>(
+          ViewportApp::kShadowRes * ViewportApp::kShadowRes * sizeof(float));
+      auto dump_buf = allocator.create_buffer(
+          kShadowBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+      if (dump_buf.is_ok()) {
+        dump_shadow_allocation = dump_buf.value();
+        dump_shadow_buffer = dump_shadow_allocation.buffer;
+        auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+            context.device(),
+            static_cast<std::uint32_t>(
+                context.queue_families().graphics_family));
+        if (pool.is_ok()) {
+          auto cb = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+              context.device(), pool.value());
+          if (cb.is_ok()) {
+            VkCommandBufferBeginInfo bi{};
+            bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            vkBeginCommandBuffer(cb.value(), &bi);
+            VkImageMemoryBarrier to_src{
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+            to_src.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            to_src.oldLayout =
+                VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+            to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            to_src.image = shadow_image;
+            to_src.subresourceRange = {
+                VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 1U, 0U, 1U};
+            vkCmdPipelineBarrier(
+                cb.value(), VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                &to_src);
+            VkBufferImageCopy region{};
+            region.imageSubresource = {
+                VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 0U, 1U};
+            region.imageExtent = {ViewportApp::kShadowRes,
+                                  ViewportApp::kShadowRes, 1U};
+            vkCmdCopyImageToBuffer(
+                cb.value(), shadow_image,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dump_shadow_buffer, 1,
+                &region);
+            VkImageMemoryBarrier back = to_src;
+            back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            back.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            back.newLayout =
+                VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+            vkCmdPipelineBarrier(
+                cb.value(), VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, 0, 0, nullptr, 0,
+                nullptr, 1, &back);
+            vkEndCommandBuffer(cb.value());
+            VkSubmitInfo submit{};
+            submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submit.commandBufferCount = 1U;
+            submit.pCommandBuffers = &cb.value();
+            vkQueueSubmit(context.graphics_queue(), 1U, &submit,
+                          VK_NULL_HANDLE);
+            vkQueueWaitIdle(context.graphics_queue());
+            vkDestroyCommandPool(context.device(), pool.value(), nullptr);
+            std::FILE* f =
+                std::fopen("/tmp/shadowmap.f32", "wb");
+            if (f != nullptr) {
+              std::fwrite(dump_shadow_allocation.mapped, 1,
+                          static_cast<std::size_t>(kShadowBytes), f);
+              std::fclose(f);
+              std::fprintf(stderr, "viewport: shadow map dumped\n");
+            }
+          } else {
+            vkDestroyCommandPool(context.device(), pool.value(), nullptr);
+          }
+        }
+      }
+    }
+
     ++frame_index;
   }
   renderer.wait_idle();
@@ -1313,10 +2028,56 @@ void ViewportApp::shutdown() {
   capture.cleanup(context.device(), &allocator);
   telemetry.flush();
   renderer.cleanup(context.device());
+  full_skinned_pipeline.cleanup(context.device());
+  full_pipeline.cleanup(context.device());
+  shadow_pipeline_skinned.cleanup(context.device());
+  shadow_pipeline_static.cleanup(context.device());
+  ibl_baker.cleanup(context.device());
   skinned_pipeline.cleanup(context.device());
   pbr_pipeline.cleanup(context.device());
   render_pass.cleanup(context.device());
   swapchain.cleanup(context.device());
+  // Full-lighting resources (shadow map, views, sampler, pass/fb).
+  if (shadow_framebuffer != VK_NULL_HANDLE) {
+    vkDestroyFramebuffer(context.device(), shadow_framebuffer, nullptr);
+    shadow_framebuffer = VK_NULL_HANDLE;
+  }
+  if (shadow_render_pass != VK_NULL_HANDLE) {
+    vkDestroyRenderPass(context.device(), shadow_render_pass, nullptr);
+    shadow_render_pass = VK_NULL_HANDLE;
+  }
+  if (shadow_sampler != VK_NULL_HANDLE) {
+    vkDestroySampler(context.device(), shadow_sampler, nullptr);
+    shadow_sampler = VK_NULL_HANDLE;
+  }
+  for (VkImageView* view : {&shadow_depth_view, &shadow_sample_view}) {
+    if (*view != VK_NULL_HANDLE) {
+      vkDestroyImageView(context.device(), *view, nullptr);
+      *view = VK_NULL_HANDLE;
+    }
+  }
+  if (shadow_memory.is_valid()) {
+    allocator.destroy_allocation(shadow_memory);
+  }
+  if (shadow_image != VK_NULL_HANDLE) {
+    vkDestroyImage(context.device(), shadow_image, nullptr);
+    shadow_image = VK_NULL_HANDLE;
+  }
+  if (shadow_ubo_allocation.is_valid()) {
+    allocator.destroy_allocation(shadow_ubo_allocation);
+  }
+  // Neutral shadow resources (OMNICPP_NO_SHADOW diagnostic path).
+  if (neutral_shadow_sample_view != VK_NULL_HANDLE) {
+    vkDestroyImageView(context.device(), neutral_shadow_sample_view, nullptr);
+    neutral_shadow_sample_view = VK_NULL_HANDLE;
+  }
+  if (neutral_shadow_memory.is_valid()) {
+    allocator.destroy_allocation(neutral_shadow_memory);
+  }
+  if (neutral_shadow_image != VK_NULL_HANDLE) {
+    vkDestroyImage(context.device(), neutral_shadow_image, nullptr);
+    neutral_shadow_image = VK_NULL_HANDLE;
+  }
   if (material_allocation.is_valid()) {
     allocator.destroy_allocation(material_allocation);
   }

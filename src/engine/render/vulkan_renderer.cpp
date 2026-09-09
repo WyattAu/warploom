@@ -293,10 +293,14 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
   }
   if (scene.ibl_set != VK_NULL_HANDLE) {
     // IBL variant (pbr_ibl.frag): prefiltered env cube, irradiance cube and
-    // split-sum BRDF LUT live at set 3. Non-IBL pipelines leave it null.
+    // split-sum BRDF LUT live at set 3 by default; scene.ibl_set_slot
+    // relocates them (5 for the composed pbr_full variant whose set 3 is
+    // the skinning bones). Non-IBL pipelines leave it null.
+    const std::uint32_t ibl_slot =
+        scene.ibl_set_slot != 0U ? scene.ibl_set_slot : 3U;
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            scene.pipeline_layout, 3, 1, &scene.ibl_set, 0,
-                            nullptr);
+                            scene.pipeline_layout, ibl_slot, 1, &scene.ibl_set,
+                            0, nullptr);
   }
   if (scene.shadow_set != VK_NULL_HANDLE) {
     // Shadow map sampled in the fragment stage for PCF. Slot matches the
@@ -420,9 +424,16 @@ omnicpp::core::Result<void> VulkanRenderer::record_shadow_pre_pass(
 
   // Depth-only pre-pass: light VP + model push (128 bytes), one set 0 per
   // mesh. Shadows are cast from the full-detail mesh; LOD selection and the
-  // sky do not participate.
+  // sky do not participate. When the pipeline's vertex stage is the skinned
+  // shadow variant (shadow_skinned.vert), scene.bone_set carries the joint
+  // matrices at set 3; static pipelines leave it null and nothing is bound.
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     scene.shadow_pipeline);
+  if (scene.bone_set != VK_NULL_HANDLE) {
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene.shadow_pipeline_layout, 3, 1, &scene.bone_set,
+                            0, nullptr);
+  }
   struct ShadowPush {
     SceneMatrix light_view_projection;
     SceneMatrix model;
@@ -888,6 +899,16 @@ omnicpp::core::Result<void> VulkanRenderer::record_commands(
   begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(cb, &begin_info);
+
+  // Application pre-pass hook: independent earlier passes (shadow-map depth
+  // pre-pass, compute) recorded before the main render pass. Owns its own
+  // render-pass begin/end; a false return fails the frame.
+  if (frame_pre_pass_callback_ != nullptr &&
+      !frame_pre_pass_callback_(cb, width, height, frame_pre_pass_user_data_)) {
+    (void)vkEndCommandBuffer(cb);
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::invalid_config);
+  }
 
   VkRenderPassBeginInfo rp_info{};
   rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;

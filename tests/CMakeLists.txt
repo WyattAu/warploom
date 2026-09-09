@@ -372,6 +372,22 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pbr_full.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_full.frag
+                    -o ${OMNICPP_SHADER_DIR}/pbr_full.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_full.frag
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/shadow_skinned.vert.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/shadow_skinned.vert
+                    -o ${OMNICPP_SHADER_DIR}/shadow_skinned.vert.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/shadow_skinned.vert
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/sky.vert.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/sky.vert
@@ -494,6 +510,8 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/shadow.frag.spv
                 ${OMNICPP_SHADER_DIR}/pbr_shadow.frag.spv
                 ${OMNICPP_SHADER_DIR}/pbr_ibl_shadow.frag.spv
+                ${OMNICPP_SHADER_DIR}/pbr_full.frag.spv
+                ${OMNICPP_SHADER_DIR}/shadow_skinned.vert.spv
                 ${OMNICPP_SHADER_DIR}/fullscreen.vert.spv
                 ${OMNICPP_SHADER_DIR}/tonemap_fxaa.frag.spv
                 ${OMNICPP_SHADER_DIR}/bloom_downsample.frag.spv

@@ -59,13 +59,25 @@ Khronos layer.
 
 ## What is NOT yet app-facing
 
-- **Skeletal animation in the viewport**: the whole path is now proven end
-  to end offscreen — `assets/models/mannequin.gltf` ships on disk, imports
-  with skins/animations, and its walk cycle deforms through the GPU skinned
-  pipeline (`test_gpu_mannequin`). Wiring the animated figure into the
-  windowed scene (bone upload inside the frame callback) is mechanical but
-  not yet done.
-- **Shadow/IBL/sky in the default viewport scene**: proven features whose
-  viewport composition (multi-pipeline scene assembly) is pending.
 - **GPU-driven frame in the viewport**: the renderer API exists and is
   proven; the app still uses the per-draw path.
+
+## Composed lighting (C1) — DONE
+
+The windowed viewport now renders the full composed stack by default; every
+claim below is backed by a live run under `VK_LAYER_KHRONOS_validation`
+(NVIDIA RTX 2060) with **0 VUIDs**.
+
+| Claim | Proof | Source |
+|---|---|---|
+| IBL baked from our own analytic sky | `VulkanIblBaker` one-shot compute bake (equirect -> prefiltered cube + irradiance + BRDF LUT) feeds set 5 of the composed pipeline | `src/engine/render/vulkan_ibl_baker.cpp` |
+| Shadow-mapped figure on ground | Shadow pre-pass renders depth-only into a 2048² map; `OMNICPP_DUMP_SHADOW` readback shows 45% occupied texels | `shadow_pre_pass_cb` + `shadow_skinned.vert` |
+| Shadow footprint isolated pixel-exactly | `OMNICPP_NO_SHADOW=1` binds a neutral 1×1 cleared map; diff vs composed run = **10,874 px** darkened ≥2 levels | A/B capture diff |
+| Composed vs legacy differ | 13.5% / 7.8% of pixels differ at frames 60/120; composed mean brighter (IBL ambient) | A/B capture diff |
+| A/B mode logged, not assumed | telemetry records `lighting_mode`, `sun_direction`, `shadow_mode` events | `telemetry.jsonl` |
+| Shadows follow the sun | `OMNICPP_SUN_DIRECTION` sweep: 24,696 px darken under sun B where sun A was lit | two-sun capture diff |
+| Regressions guarded | 410/410 unit tests under validation; scenario runner 13/13 + byte-identical determinism double-run | CI matrix |
+
+Diagnostic env vars (all telemetry-logged): `OMNICPP_LEGACY_LIGHTING=1`,
+`OMNICPP_NO_SHADOW=1`, `OMNICPP_SUN_DIRECTION=x,y,z`,
+`OMNICPP_DUMP_SHADOW=<frame>` (writes `/tmp/shadowmap.f32`).
