@@ -491,7 +491,7 @@ TEST(GltfAnimation, RejectsMalformedSkeletalDocuments) {
     EXPECT_NE(error.find("same node component"), std::string::npos)
         << "error was: " << error;
   }
-  // CUBICSPLINE sampler.
+  // CUBICSPLINE with a keyframe-count mismatch (output must be 3x input).
   {
     error.clear();
     auto r = import(R"({"asset":{"version":"2.0"},
@@ -510,7 +510,7 @@ TEST(GltfAnimation, RejectsMalformedSkeletalDocuments) {
         {"bufferView":1,"componentType":5126,"count":2,"type":"VEC3"}],
       "buffers":[{"byteLength":32,"uri":"data:application/octet-stream;base64,AAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AACAPwAAgD8="}]})");
     EXPECT_FALSE(r.is_ok());
-    EXPECT_NE(error.find("CUBICSPLINE"), std::string::npos)
+    EXPECT_NE(error.find("3x .input count"), std::string::npos)
         << "error was: " << error;
   }
   // Non-monotonic sampler input times: times [1,0], outputs zeroed.
@@ -724,4 +724,149 @@ TEST(GltfAnimation, GlbContainerRejectsMalformedContainers) {
         broken.data(), broken.size(), nullptr, 0U, &error);
     EXPECT_FALSE(imported.is_ok()) << error;
   }
+}
+
+
+
+TEST(GltfAnimation, CubicSplineTranslationHermite) {
+  // Zero end tangents: pure Hermite basis on the keyframe values.
+  const std::string json = R"glTF({"asset":{"version":"2.0"},
+ "scenes":[{"nodes":[0]}],
+ "nodes":[{"name":"a"}],
+ "meshes":[],
+ "animations":[{"samplers":[
+   {"input":0,"output":1,"interpolation":"CUBICSPLINE"}],
+  "channels":[
+   {"sampler":0,"target":{"node":0,"path":"translation"}}]}],
+ "bufferViews":[
+   {"buffer":0,"byteOffset":0,"byteLength":8},
+   {"buffer":0,"byteOffset":8,"byteLength":72}],
+ "accessors":[
+   {"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR"},
+   {"bufferView":1,"componentType":5126,"count":6,"type":"VEC3"}],
+ "buffers":[{"byteLength":80,"uri":"data:application/octet-stream;base64,AAAAAAAAgD8AAAAAAAAAAAAAAAAAACBBAACgQQAA8EEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACBCAABIQgAAcEIAAAAAAAAAAAAAAAA="}]})glTF";
+  omnicpp::asset::GltfAnimationDocument doc;
+  std::string error;
+  const auto imported = omnicpp::asset::import_gltf_animation_document(
+      json.data(), json.size(), nullptr, 0U, &error);
+  ASSERT_TRUE(imported.is_ok()) << error;
+  doc = std::move(imported).value();
+  ASSERT_EQ(doc.animations.size(), 1U);
+  const auto& sampler = doc.animations[0].samplers[0];
+  EXPECT_EQ(sampler.interpolation,
+            omnicpp::asset::GltfSamplerInterpolation::CubicSpline);
+  ASSERT_EQ(sampler.values.size(), 2U * 3U);
+  ASSERT_EQ(sampler.in_tangents.size(), 2U * 3U);
+
+  float out[4];
+  // Quarter point: h00 = 0.84375, h01 = 0.15625 (tangent terms vanish):
+  // 0.84375 * 10 + 0.15625 * 40 = 14.6875.
+  omnicpp::asset::sample_gltf_channel(sampler, 0.25F, out);
+  EXPECT_NEAR(out[0], 14.6875F, 1e-4F);
+  // Midpoint: every component is the average of the two keyframe values.
+  omnicpp::asset::sample_gltf_channel(sampler, 0.5F, out);
+  EXPECT_NEAR(out[0], 25.0F, 1e-4F);
+  EXPECT_NEAR(out[1], 35.0F, 1e-4F);
+  EXPECT_NEAR(out[2], 45.0F, 1e-4F);
+  // Exact keyframe hits are exact (determinism contract).
+  omnicpp::asset::sample_gltf_channel(sampler, 0.0F, out);
+  EXPECT_FLOAT_EQ(out[0], 10.0F);
+  omnicpp::asset::sample_gltf_channel(sampler, 1.0F, out);
+  EXPECT_FLOAT_EQ(out[2], 60.0F);
+  // Clamp outside the keyframe range.
+  omnicpp::asset::sample_gltf_channel(sampler, -1.0F, out);
+  EXPECT_FLOAT_EQ(out[1], 20.0F);
+  omnicpp::asset::sample_gltf_channel(sampler, 2.0F, out);
+  EXPECT_FLOAT_EQ(out[0], 40.0F);
+}
+
+TEST(GltfAnimation, CubicSplineTangentsSteerTheCurve) {
+  // v0 = 0 with out-tangent 1; v1 = 1 with in-tangent 1 (dt = 1).
+  const std::string json = R"glTF({"asset":{"version":"2.0"},
+ "scenes":[{"nodes":[0]}],
+ "nodes":[{"name":"a"}],
+ "meshes":[],
+ "animations":[{"samplers":[
+   {"input":0,"output":1,"interpolation":"CUBICSPLINE"}],
+  "channels":[
+   {"sampler":0,"target":{"node":0,"path":"translation"}}]}],
+ "bufferViews":[
+   {"buffer":0,"byteOffset":0,"byteLength":8},
+   {"buffer":0,"byteOffset":8,"byteLength":72}],
+ "accessors":[
+   {"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR"},
+   {"bufferView":1,"componentType":5126,"count":6,"type":"VEC3"}],
+ "buffers":[{"byteLength":80,"uri":"data:application/octet-stream;base64,AAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAAAA="}]})glTF";
+  omnicpp::asset::GltfAnimationDocument doc;
+  std::string error;
+  const auto imported = omnicpp::asset::import_gltf_animation_document(
+      json.data(), json.size(), nullptr, 0U, &error);
+  ASSERT_TRUE(imported.is_ok()) << error;
+  doc = std::move(imported).value();
+  const auto& sampler = doc.animations[0].samplers[0];
+
+  float out[4];
+  // Quarter point: h00*0 + h10*1 + h01*1 + h11*1 = 0.078125 + 0.15625 +
+  // 0.015625 = 0.25.
+  omnicpp::asset::sample_gltf_channel(sampler, 0.25F, out);
+  EXPECT_NEAR(out[0], 0.25F, 1e-4F);
+}
+
+TEST(GltfAnimation, CubicSplineRotationStaysUnit) {
+  const std::string json = R"glTF({"asset":{"version":"2.0"},
+ "scenes":[{"nodes":[0]}],
+ "nodes":[{"name":"a"}],
+ "meshes":[],
+ "animations":[{"samplers":[
+   {"input":0,"output":1,"interpolation":"CUBICSPLINE"}],
+  "channels":[
+   {"sampler":0,"target":{"node":0,"path":"rotation"}}]}],
+ "bufferViews":[
+   {"buffer":0,"byteOffset":0,"byteLength":8},
+   {"buffer":0,"byteOffset":8,"byteLength":96}],
+ "accessors":[
+   {"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR"},
+   {"bufferView":1,"componentType":5126,"count":6,"type":"VEC4"}],
+ "buffers":[{"byteLength":104,"uri":"data:application/octet-stream;base64,AAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABTvwz4AAAAAXoNsPwAAAAAAAAAAAAAAAAAAgD8="}]})glTF";
+  omnicpp::asset::GltfAnimationDocument doc;
+  std::string error;
+  const auto imported = omnicpp::asset::import_gltf_animation_document(
+      json.data(), json.size(), nullptr, 0U, &error);
+  ASSERT_TRUE(imported.is_ok()) << error;
+  doc = std::move(imported).value();
+  const auto& sampler = doc.animations[0].samplers[0];
+
+  float out[4];
+  omnicpp::asset::sample_gltf_channel(sampler, 0.5F, out);
+  const float norm = std::sqrt(out[0] * out[0] + out[1] * out[1] +
+                               out[2] * out[2] + out[3] * out[3]);
+  EXPECT_NEAR(norm, 1.0F, 1e-5F);
+  // Zero tangents: renormalized lerp = slerp = 22.5 degrees about Z.
+  EXPECT_NEAR(out[3], 0.980785F, 1e-4F);
+  EXPECT_NEAR(out[1], 0.195090F, 1e-4F);
+}
+
+TEST(GltfAnimation, CubicSplineRejectsWrongOutputCount) {
+  // Output declares 2 keyframes (not 3x the 2 input times).
+  const std::string json = R"glTF({"asset":{"version":"2.0"},
+ "scenes":[{"nodes":[0]}],
+ "nodes":[{"name":"a"}],
+ "meshes":[],
+ "animations":[{"samplers":[
+   {"input":0,"output":1,"interpolation":"CUBICSPLINE"}],
+  "channels":[
+   {"sampler":0,"target":{"node":0,"path":"translation"}}]}],
+ "bufferViews":[
+   {"buffer":0,"byteOffset":0,"byteLength":8},
+   {"buffer":0,"byteOffset":8,"byteLength":24}],
+ "accessors":[
+   {"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR"},
+   {"bufferView":1,"componentType":5126,"count":2,"type":"VEC3"}],
+ "buffers":[{"byteLength":32,"uri":"data:application/octet-stream;base64,AAAAAAAAgD8AACBBAACgQQAA8EEAACBCAABIQgAAcEI="}]})glTF";
+  std::string error;
+  const auto imported = omnicpp::asset::import_gltf_animation_document(
+      json.data(), json.size(), nullptr, 0U, &error);
+  EXPECT_FALSE(imported.is_ok());
+  EXPECT_NE(error.find("3x .input count"), std::string::npos)
+      << "error was: " << error;
 }

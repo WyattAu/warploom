@@ -73,15 +73,24 @@ struct GltfSkinImport {
 };
 
 //! Interpolation mode of one animation sampler.
-enum class GltfSamplerInterpolation { Linear, Step };
+enum class GltfSamplerInterpolation { Linear, Step, CubicSpline };
 
 //! Pre-decoded keyframes of one animation sampler. `values` holds
 //! `count * stride` floats (stride 3 for translation/scale, 4 for rotation).
+//! For CUBICSPLINE samplers `in_tangents` / `out_tangents` additionally hold
+//! `count * stride` floats each (the glTF file interleaves
+//! [in-tangent, value, out-tangent] per keyframe; the importer splits them
+//! into these three arrays).
 struct GltfSampler {
   GltfSamplerInterpolation interpolation{GltfSamplerInterpolation::Linear};
   std::vector<float> times{};
   std::vector<float> values{};
   std::size_t stride{0};  //!< floats per keyframe (3 or 4)
+  //! CUBICSPLINE only: per-keyframe in/out tangents (count * stride each);
+  //! empty for LINEAR/STEP. Sampling scales the segment's tangents by the
+  //! keyframe time delta per the glTF 2.0 spec.
+  std::vector<float> in_tangents{};
+  std::vector<float> out_tangents{};
 };
 
 //! One animation channel: sampler drives one node component over time.

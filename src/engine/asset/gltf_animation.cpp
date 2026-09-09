@@ -504,9 +504,7 @@ std::uint32_t read_joint_element(const std::vector<View>& views,
         } else if (interpolation->string == "STEP") {
           sampler.interpolation = GltfSamplerInterpolation::Step;
         } else if (interpolation->string == "CUBICSPLINE") {
-          return fail_asset(error, sampler_context +
-                                       ".interpolation CUBICSPLINE is not "
-                                       "supported (bake to LINEAR instead)");
+          sampler.interpolation = GltfSamplerInterpolation::CubicSpline;
         } else {
           return fail_asset(error, sampler_context +
                                        ".interpolation \"" +
@@ -578,15 +576,51 @@ std::uint32_t read_joint_element(const std::vector<View>& views,
         return fail_asset(error, sampler_context +
                                      ".output must be VEC3/VEC4 float32");
       }
-      if (output_info.count != input_info.count) {
+      if (sampler.interpolation == GltfSamplerInterpolation::CubicSpline) {
+        if (output_info.count != 3U * input_info.count) {
+          return fail_asset(
+              error, sampler_context +
+                         ".output count must be 3x .input count for "
+                         "CUBICSPLINE (in-tangent, value, out-tangent per "
+                         "keyframe)");
+        }
+      } else if (output_info.count != input_info.count) {
         return fail_asset(error, sampler_context +
                                      ".output count must match .input count");
       }
       sampler.stride = output_info.components;
+      if (sampler.interpolation == GltfSamplerInterpolation::CubicSpline) {
+        // CUBICSPLINE output is [a1,v1,b1, a2,v2,b2, ...]: per keyframe an
+        // in-tangent, the keyframe value, and an out-tangent, each `stride`
+        // floats. Split into three parallel arrays for sampling.
+        constexpr std::size_t kCubicLayout = 3U;
+        const std::size_t keyframe_count = input_info.count;
+        sampler.values.resize(keyframe_count * sampler.stride);
+        sampler.in_tangents.resize(keyframe_count * sampler.stride);
+        sampler.out_tangents.resize(keyframe_count * sampler.stride);
+        for (std::size_t i = 0; i < keyframe_count; ++i) {
+          float triple[3 * 16];
+          for (std::size_t part = 0; part < kCubicLayout; ++part) {
+            read_float_element(
+                views, sources, output_info,
+                i * kCubicLayout + part,
+                triple + part * sampler.stride);
+          }
+          for (std::size_t c = 0; c < sampler.stride; ++c) {
+            sampler.in_tangents[i * sampler.stride + c] =
+                triple[0 * sampler.stride + c];
+            sampler.values[i * sampler.stride + c] =
+                triple[1 * sampler.stride + c];
+            sampler.out_tangents[i * sampler.stride + c] =
+                triple[2 * sampler.stride + c];
+          }
+        }
+      } else {
       sampler.values.resize(output_info.count * sampler.stride);
       for (std::size_t i = 0; i < output_info.count; ++i) {
         read_float_element(views, sources, output_info, i,
                            sampler.values.data() + i * sampler.stride);
+      }
       }
       animation.duration =
           std::max(animation.duration, sampler.times.back());
@@ -904,15 +938,41 @@ void sample_gltf_channel(const GltfSampler& sampler, float time,
     for (std::size_t c = 0; c < stride; ++c) out[c] = sampler.values[hi * stride + c];
     return;
   }
+  const float t0 = sampler.times[lo];
+  const float t1 = sampler.times[hi];
+  const float alpha = (time - t0) / (t1 - t0);
   if (sampler.interpolation == GltfSamplerInterpolation::Step) {
     for (std::size_t c = 0; c < stride; ++c) {
       out[c] = sampler.values[lo * stride + c];
     }
     return;
   }
-  const float t0 = sampler.times[lo];
-  const float t1 = sampler.times[hi];
-  const float alpha = (time - t0) / (t1 - t0);
+  if (sampler.interpolation == GltfSamplerInterpolation::CubicSpline) {
+    // Hermite per the glTF 2.0 spec: p(t) = h00*v0 + h10*dt*a0 + h01*v1 +
+    // h11*dt*b0 with dt = t1 - t0. Rotations additionally renormalize.
+    const float dt = t1 - t0;
+    const float t2 = alpha * alpha;
+    const float t3 = t2 * alpha;
+    const float h00 = 2.0f * t3 - 3.0f * t2 + 1.0f;
+    const float h10 = t3 - 2.0f * t2 + alpha;
+    const float h01 = -2.0f * t3 + 3.0f * t2;
+    const float h11 = t3 - t2;
+    const float* v0 = sampler.values.data() + lo * stride;
+    const float* v1 = sampler.values.data() + hi * stride;
+    const float* a0 = sampler.out_tangents.data() + lo * stride;
+    const float* b0 = sampler.in_tangents.data() + hi * stride;
+    for (std::size_t c = 0; c < stride; ++c) {
+      out[c] = h00 * v0[c] + h10 * dt * a0[c] + h01 * v1[c] + h11 * dt * b0[c];
+    }
+    if (stride == 4) {
+      const float norm = std::sqrt(out[0] * out[0] + out[1] * out[1] +
+                                   out[2] * out[2] + out[3] * out[3]);
+      if (norm > 0.0f) {
+        for (std::size_t c = 0; c < 4; ++c) out[c] /= norm;
+      }
+    }
+    return;
+  }
   const float* a = sampler.values.data() + lo * stride;
   const float* b = sampler.values.data() + hi * stride;
   if (stride == 4) {
