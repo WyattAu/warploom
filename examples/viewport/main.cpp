@@ -15,11 +15,16 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
+#include <string>
 #include <vector>
 
 #include <xcb/xcb.h>
 #include <vulkan/vulkan.h>
 
+#include "engine/asset/gltf_animation.hpp"
+#include "engine/asset/gltf_importer.hpp"
 #include "engine/render/vulkan_context.hpp"
 #include "engine/render/vulkan_descriptors.hpp"
 #include "engine/render/vulkan_memory_allocator.hpp"
@@ -127,12 +132,16 @@ struct ViewportApp {
 
   // Scene resources.
   omnicpp::render::VulkanPipeline pbr_pipeline;
+  omnicpp::render::VulkanPipeline skinned_pipeline;
   VkDescriptorSetLayout mesh_layout{VK_NULL_HANDLE};
   VkDescriptorSetLayout textures_layout{VK_NULL_HANDLE};
   VkDescriptorSetLayout material_layout{VK_NULL_HANDLE};
+  VkDescriptorSetLayout bone_layout{VK_NULL_HANDLE};
   VkDescriptorSet textures_set{VK_NULL_HANDLE};
   VkDescriptorSet material_set{VK_NULL_HANDLE};
+  VkDescriptorSet bone_set{VK_NULL_HANDLE};
   omnicpp::render::Allocation material_allocation{};
+  omnicpp::render::Allocation bone_allocation{};
 
   struct MeshBuffers {
     omnicpp::render::Allocation vertex_allocation{};
@@ -141,6 +150,12 @@ struct ViewportApp {
   };
   MeshBuffers cube{};
   MeshBuffers ground{};
+  std::vector<MeshBuffers> mannequin_meshes;
+
+  // Skeletal mannequin (assets/models/mannequin.gltf); empty when the asset
+  // is unavailable and the scene renders cubes only.
+  omnicpp::asset::GltfAnimationDocument mannequin;
+  bool has_mannequin{false};
 
   std::vector<omnicpp::render::ScenePbrObject> objects;
   omnicpp::render::VulkanPbrScene scene;
@@ -154,6 +169,7 @@ struct ViewportApp {
 
   // Animation state.
   float time{0.0f};
+  float walk_time{0.0f};  //!< wraps at the 1 s walk-cycle duration
 
   [[nodiscard]] bool initialize();
   void run();
@@ -240,6 +256,249 @@ bool poll_events(ViewportApp& app) {
 }
 
 // ============================================================================
+// Mannequin: load, GPU upload, and per-frame animation sampling.
+// ============================================================================
+
+bool make_mesh(ViewportApp& app, const std::vector<float>& vertices,
+               const std::vector<std::uint32_t>& indices,
+               ViewportApp::MeshBuffers& out);
+
+//! Read a small binary file fully; false when unavailable.
+bool read_file_bytes(const std::string& path, std::string& out_text,
+                     std::vector<char>& out_bytes) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file) return false;
+  out_bytes.assign((std::istreambuf_iterator<char>(file)),
+                   std::istreambuf_iterator<char>());
+  out_text.assign(out_bytes.begin(), out_bytes.end());
+  return !out_text.empty();
+}
+
+bool setup_mannequin(ViewportApp& app) {
+  // Asset resolution: absolute/repo-relative via OMNICPP_ASSET_DIR, then a
+  // few conventional fallbacks so the binary runs from any cwd.
+  const char* asset_dir_env = std::getenv("OMNICPP_ASSET_DIR");
+  std::vector<std::string> candidates;
+  if (asset_dir_env != nullptr) candidates.emplace_back(asset_dir_env);
+  candidates.insert(candidates.end(), {"assets/models", "../assets/models",
+                                       "../../assets/models"});
+  std::string json;
+  std::vector<char> bin_bytes;
+  bool loaded = false;
+  for (const auto& dir : candidates) {
+    std::vector<char> json_bytes;
+    if (!read_file_bytes(dir + "/mannequin.gltf", json, json_bytes)) {
+      continue;
+    }
+    std::string bin_text;
+    if (!read_file_bytes(dir + "/mannequin.bin", bin_text, bin_bytes)) {
+      continue;
+    }
+    std::string import_error;
+    auto imported = omnicpp::asset::import_gltf_animation_document(
+        json_bytes.data(), json_bytes.size(),
+        reinterpret_cast<const std::uint8_t*>(bin_bytes.data()),
+        bin_bytes.size(), &import_error);
+    if (imported.is_ok()) {
+      app.mannequin = std::move(imported.value());
+      loaded = true;
+      break;
+    }
+    std::fprintf(stderr, "viewport: mannequin import failed from %s: %s\n",
+                 dir.c_str(), import_error.c_str());
+  }
+  if (!loaded) {
+    std::fprintf(stderr,
+                 "viewport: mannequin asset not found (set OMNICPP_ASSET_DIR "
+                 "to assets/models); rendering cubes only\n");
+    return true;  // non-fatal: cubes-only scene
+  }
+  if (app.mannequin.skins.empty() || app.mannequin.animations.empty()) {
+    std::fprintf(stderr, "viewport: mannequin has no skin or animation\n");
+    return true;
+  }
+
+  const VkDevice device = app.context.device();
+
+  // Bone SSBO (set 3): one 64-byte matrix per joint.
+  const std::size_t joint_count = app.mannequin.skins[0].joints.size();
+  auto bone_buffer = app.allocator.create_buffer(
+      joint_count * 64U, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (!bone_buffer.is_ok()) return false;
+  app.bone_allocation = bone_buffer.value();
+  auto bone_set = app.descriptors.allocate_set(app.bone_layout);
+  if (!bone_set.is_ok()) return false;
+  app.bone_set = bone_set.value();
+  if (!app.descriptors
+           .write_buffer(app.bone_set, 0U,
+                         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                         app.bone_allocation.buffer, 0U, VK_WHOLE_SIZE)
+           .is_ok()) {
+    return false;
+  }
+
+  // Upload each mannequin mesh: combined SSBO [static verts][joints x4 as
+  // float][weights x4] exactly as skinned_scene.vert reads it.
+  app.mannequin_meshes.resize(app.mannequin.meshes.size());
+  for (std::size_t i = 0; i < app.mannequin.meshes.size(); ++i) {
+    const auto& import = app.mannequin.meshes[i];
+    const auto& binding = app.mannequin.skin_bindings[i];
+    std::vector<float> combined = import.vertices;
+    const std::size_t vertex_count = import.vertex_count();
+    combined.reserve(combined.size() + vertex_count * 8U);
+    for (std::size_t v = 0; v < vertex_count; ++v) {
+      for (std::size_t c = 0; c < 4; ++c) {
+        combined.push_back(
+            static_cast<float>(binding.joints[v * 4U + c]));
+      }
+      for (std::size_t c = 0; c < 4; ++c) {
+        combined.push_back(binding.weights[v * 4U + c]);
+      }
+    }
+    if (!make_mesh(app, combined, import.indices,
+                   app.mannequin_meshes[i])) {
+      return false;
+    }
+  }
+
+  // Skinned pipeline (4 sets: mesh / textures / material / bones) over the
+  // swapchain render pass.
+  const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
+  const std::string shader_dir =
+      shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
+  if (!app.skinned_pipeline
+           .load_shader_stage_file(device,
+                                   shader_dir + "/skinned_scene.vert.spv",
+                                   "vertex")
+           .is_ok() ||
+      !app.skinned_pipeline
+           .load_shader_stage_file(device,
+                                   shader_dir + "/pbr_scene.frag.spv",
+                                   "fragment")
+           .is_ok()) {
+    std::fprintf(stderr, "viewport: cannot load skinned shaders from %s\n",
+                 shader_dir.c_str());
+    return false;
+  }
+  const VkDescriptorSetLayout skinned_layouts[4] = {
+      app.mesh_layout, app.textures_layout, app.material_layout,
+      app.bone_layout};
+  const VkPushConstantRange push_range{
+      static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT |
+                                      VK_SHADER_STAGE_FRAGMENT_BIT),
+      0U, 160U};
+  if (!app.skinned_pipeline
+           .create_pipeline_layout(device, skinned_layouts, 4U, &push_range)
+           .is_ok() ||
+      !app.skinned_pipeline
+           .create_graphics_pipeline(
+               device, app.render_pass.render_pass(),
+               app.swapchain.image_format(),
+               app.skinned_pipeline.pipeline_layout(), true, true, false)
+           .is_ok()) {
+    return false;
+  }
+  app.has_mannequin = true;
+  return true;
+}
+
+//! Sample the walk cycle at `time` and upload joint matrices. Computes
+//! joints = global_pose(j) * inverse_bind(j) directly (same math the GPU
+//! test cross-checks).
+void update_mannequin_pose(ViewportApp& app, float time) {
+  const auto& skin = app.mannequin.skins[0];
+  const auto& anim = app.mannequin.animations[0];
+
+  // Sample channels into node TRS.
+  for (const auto& channel : anim.channels) {
+    float out[4];
+    omnicpp::asset::sample_gltf_channel(anim.samplers[channel.sampler], time,
+                                        out);
+    auto& node = app.mannequin.nodes[channel.target_node];
+    switch (channel.path) {
+      case omnicpp::asset::GltfChannel::Path::Translation:
+        node.translation[0] = out[0];
+        node.translation[1] = out[1];
+        node.translation[2] = out[2];
+        break;
+      case omnicpp::asset::GltfChannel::Path::Rotation:
+        node.rotation[0] = out[0];
+        node.rotation[1] = out[1];
+        node.rotation[2] = out[2];
+        node.rotation[3] = out[3];
+        break;
+      case omnicpp::asset::GltfChannel::Path::Scale:
+        node.scale[0] = out[0];
+        node.scale[1] = out[1];
+        node.scale[2] = out[2];
+        break;
+    }
+  }
+
+  // Compose locals.
+  std::vector<SceneMatrix> locals(app.mannequin.nodes.size());
+  for (std::size_t i = 0; i < app.mannequin.nodes.size(); ++i) {
+    const auto& n = app.mannequin.nodes[i];
+    SceneMatrix m = omnicpp::render::scene_identity_matrix();
+    const float x = n.rotation[0];
+    const float y = n.rotation[1];
+    const float z = n.rotation[2];
+    const float w = n.rotation[3];
+    m[0] = (1.0f - 2.0f * (y * y + z * z)) * n.scale[0];
+    m[1] = 2.0f * (x * y + z * w) * n.scale[0];
+    m[2] = 2.0f * (x * z - y * w) * n.scale[0];
+    m[4] = 2.0f * (x * y - z * w) * n.scale[1];
+    m[5] = (1.0f - 2.0f * (x * x + z * z)) * n.scale[1];
+    m[6] = 2.0f * (y * z + x * w) * n.scale[1];
+    m[8] = 2.0f * (x * z + y * w) * n.scale[2];
+    m[9] = 2.0f * (y * z - x * w) * n.scale[2];
+    m[10] = (1.0f - 2.0f * (x * x + y * y)) * n.scale[2];
+    m[12] = n.translation[0];
+    m[13] = n.translation[1];
+    m[14] = n.translation[2];
+    locals[i] = m;
+  }
+
+  // Parent-before-child globals from the roots.
+  std::vector<SceneMatrix> globals(app.mannequin.nodes.size(),
+                                   omnicpp::render::scene_identity_matrix());
+  std::vector<std::uint8_t> done(app.mannequin.nodes.size(), 0);
+  std::vector<std::size_t> stack;
+  for (std::size_t root = 0; root < app.mannequin.nodes.size(); ++root) {
+    if (app.mannequin.nodes[root].parent !=
+        omnicpp::asset::kGltfNoParent) {
+      continue;
+    }
+    stack.push_back(root);
+    while (!stack.empty()) {
+      const std::size_t current = stack.back();
+      stack.pop_back();
+      if (done[current] != 0) continue;
+      const SceneMatrix& local = locals[current];
+      const std::size_t parent = app.mannequin.nodes[current].parent;
+      globals[current] =
+          parent == omnicpp::asset::kGltfNoParent
+              ? local
+              : multiply(globals[parent], local);
+      done[current] = 1;
+      for (const std::size_t child : app.mannequin.nodes[current].children) {
+        if (done[child] == 0) stack.push_back(child);
+      }
+    }
+  }
+
+  // Joint matrices: global * inverse bind, in joint order.
+  auto* bones = static_cast<SceneMatrix*>(app.bone_allocation.mapped);
+  for (std::size_t j = 0; j < skin.joints.size(); ++j) {
+    const SceneMatrix& g = globals[skin.joints[j]];
+    const SceneMatrix& ibm = skin.inverse_bind_matrices[j];
+    bones[j] = multiply(g, ibm);
+  }
+}
+
+// ============================================================================
 // Scene setup (mirrors the proven PBR harness layout)
 // ============================================================================
 
@@ -291,7 +550,8 @@ bool setup_scene(ViewportApp& app) {
   const std::vector<omnicpp::render::ReflectedBinding> mesh_bindings = {
       {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_VERTEX_BIT}};
-  auto mesh_layout = app.descriptors.create_layout(mesh_bindings, 8U);
+  // Pool sized for cubes + ground + the 9 mannequin meshes plus headroom.
+  auto mesh_layout = app.descriptors.create_layout(mesh_bindings, 32U);
   if (!mesh_layout.is_ok()) return false;
   app.mesh_layout = mesh_layout.value();
 
@@ -403,6 +663,23 @@ bool setup_scene(ViewportApp& app) {
   app.scene.texture_set = app.textures_set;
   app.scene.material_set = app.material_set;
   app.scene.objects.reserve(3);
+
+  // Fourth material slot: mannequin skin tone.
+  materials[3] = {};
+  materials[3].base_color_factor = {0.82f, 0.62f, 0.48f, 1.0f};
+  materials[3].metallic_factor = 0.0f;
+  materials[3].roughness_factor = 0.85f;
+
+  // Skinned-pipeline descriptor layouts (bone SSBO at set 3) and the
+  // mannequin itself. Non-fatal when the asset is missing.
+  const std::vector<omnicpp::render::ReflectedBinding> bone_bindings = {
+      {3U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+       VK_SHADER_STAGE_VERTEX_BIT}};
+  auto bone_layout = app.descriptors.create_layout(bone_bindings, 8U);
+  if (!bone_layout.is_ok()) return false;
+  app.bone_layout = bone_layout.value();
+  if (!setup_mannequin(app)) return false;
+
   return true;
 }
 
@@ -414,10 +691,12 @@ bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
   auto& app = *static_cast<ViewportApp*>(user_data);
 
   const float t = app.time;
-  // Orbiting camera: 6.5 units out, slowly circling, looking at the origin.
-  const float eye[3] = {6.5f * std::cos(t * 0.25f), 3.2f,
-                        6.5f * std::sin(t * 0.25f)};
-  const float target[3] = {0.0f, 0.8f, 0.0f};
+  // Camera closer-in when the mannequin scene is active.
+  const float orbit_radius = app.has_mannequin ? 3.2f : 6.5f;
+  const float eye[3] = {orbit_radius * std::cos(t * 0.25f),
+                        app.has_mannequin ? 1.6f : 3.2f,
+                        orbit_radius * std::sin(t * 0.25f)};
+  const float target[3] = {0.0f, app.has_mannequin ? 0.9f : 0.8f, 0.0f};
   const float up[3] = {0.0f, 1.0f, 0.0f};
   app.scene.camera.view_projection = omnicpp::render::scene_camera_view_projection(
       eye, target, up, 1.05f,
@@ -427,31 +706,58 @@ bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
 
   app.scene.objects.clear();
 
-  // Spinning metal cube at the origin.
-  omnicpp::render::ScenePbrObject spinner;
-  spinner.mesh = &app.cube.mesh;
-  spinner.model = multiply(translation_matrix(0.0f, 1.4f, 0.0f),
-                           rotation_y_matrix(t * 0.8f));
-  spinner.material_index = 0U;
-  app.scene.objects.push_back(spinner);
-
-  // Rough blue cube, counter-rotating beside it.
-  omnicpp::render::ScenePbrObject rough_cube;
-  rough_cube.mesh = &app.cube.mesh;
-  rough_cube.model =
-      multiply(translation_matrix(-2.4f, 1.0f, 0.6f),
-               multiply(rotation_y_matrix(-t * 0.5f),
-                        scale_matrix(0.7f, 0.7f, 0.7f)));
-  rough_cube.material_index = 1U;
-  app.scene.objects.push_back(rough_cube);
-
-  // Ground slab.
+  // Ground slab (shared backdrop for both scene variants).
   omnicpp::render::ScenePbrObject ground;
   ground.mesh = &app.ground.mesh;
   ground.model = multiply(translation_matrix(0.0f, -0.05f, 0.0f),
                           scale_matrix(8.0f, 0.1f, 8.0f));
   ground.material_index = 2U;
   app.scene.objects.push_back(ground);
+
+  if (app.has_mannequin) {
+    // Walking mannequin at the origin: skinned pipeline, pose sampled from
+    // the walk cycle, bones uploaded before recording.
+    update_mannequin_pose(app, app.walk_time);
+    app.walk_time += 1.0f / 60.0f;
+    if (app.walk_time >
+        app.mannequin.animations[0].duration) {
+      app.walk_time -= app.mannequin.animations[0].duration;
+    }
+    for (auto& buffers : app.mannequin_meshes) {
+      omnicpp::render::ScenePbrObject part;
+      part.mesh = &buffers.mesh;
+      // Bind vertices are authored around the skeleton origin, feet at the
+      // ground plane; shift so the figure stands on the slab.
+      part.model = translation_matrix(0.0f, 0.05f, 0.0f);
+      part.material_index = 3U;
+      app.scene.objects.push_back(part);
+    }
+    app.scene.pipeline = app.skinned_pipeline.pipeline();
+    app.scene.pipeline_layout = app.skinned_pipeline.pipeline_layout();
+    app.scene.bone_set = app.bone_set;
+  } else {
+    // Spinning metal cube at the origin.
+    omnicpp::render::ScenePbrObject spinner;
+    spinner.mesh = &app.cube.mesh;
+    spinner.model = multiply(translation_matrix(0.0f, 1.4f, 0.0f),
+                             rotation_y_matrix(t * 0.8f));
+    spinner.material_index = 0U;
+    app.scene.objects.push_back(spinner);
+
+    // Rough blue cube, counter-rotating beside it.
+    omnicpp::render::ScenePbrObject rough_cube;
+    rough_cube.mesh = &app.cube.mesh;
+    rough_cube.model =
+        multiply(translation_matrix(-2.4f, 1.0f, 0.6f),
+                 multiply(rotation_y_matrix(-t * 0.5f),
+                          scale_matrix(0.7f, 0.7f, 0.7f)));
+    rough_cube.material_index = 1U;
+    app.scene.objects.push_back(rough_cube);
+
+    app.scene.pipeline = app.pbr_pipeline.pipeline();
+    app.scene.pipeline_layout = app.pbr_pipeline.pipeline_layout();
+    app.scene.bone_set = VK_NULL_HANDLE;
+  }
 
   return omnicpp::render::VulkanRenderer{}
       .record_pbr_scene(command_buffer, app.scene, width, height)
@@ -560,6 +866,7 @@ void ViewportApp::run() {
 
 void ViewportApp::shutdown() {
   renderer.cleanup(context.device());
+  skinned_pipeline.cleanup(context.device());
   pbr_pipeline.cleanup(context.device());
   render_pass.cleanup(context.device());
   swapchain.cleanup(context.device());
@@ -570,6 +877,13 @@ void ViewportApp::shutdown() {
   allocator.destroy_allocation(cube.index_allocation);
   allocator.destroy_allocation(ground.vertex_allocation);
   allocator.destroy_allocation(ground.index_allocation);
+  for (auto& buffers : mannequin_meshes) {
+    allocator.destroy_allocation(buffers.vertex_allocation);
+    allocator.destroy_allocation(buffers.index_allocation);
+  }
+  if (bone_allocation.is_valid()) {
+    allocator.destroy_allocation(bone_allocation);
+  }
   descriptors.cleanup();
   allocator.cleanup();
   context.destroy_surface(surface);

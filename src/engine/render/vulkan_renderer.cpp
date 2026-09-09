@@ -309,6 +309,14 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
                             scene.pipeline_layout, shadow_slot, 1,
                             &scene.shadow_set, 0, nullptr);
   }
+  if (scene.bone_set != VK_NULL_HANDLE) {
+    // Skinned variant (skinned_scene.vert): one 64-byte joint matrix per
+    // joint at set 3. Requires the skinned 4-set pipeline layout; leaving
+    // bone_set null keeps the 3-set static-pipeline path unchanged.
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene.pipeline_layout, 3, 1, &scene.bone_set, 0,
+                            nullptr);
+  }
 
   constexpr VkShaderStageFlags kPushStages =
       static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT |

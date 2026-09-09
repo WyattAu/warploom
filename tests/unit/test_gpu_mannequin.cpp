@@ -670,4 +670,151 @@ TEST(VulkanHardware, GpuMannequinWalkCycle) {
       << "mid-stride image identical to rest pose - animation had no effect";
 }
 
+//! The viewport's exact path: record_pbr_scene with the skinned pipeline
+//! (4-set layout) and the bone set bound by the renderer itself. Rest vs
+//! mid-stride must render different, non-empty images.
+TEST(VulkanHardware, GpuMannequinThroughRecordPbrScene) {
+  const MannequinAsset asset = load_asset();
+  if (!asset.loaded) GTEST_SKIP() << "mannequin asset not found";
+
+  std::string error;
+  auto imported = omnicpp::asset::import_gltf_animation_document(
+      asset.json.data(), asset.json.size(),
+      reinterpret_cast<const std::uint8_t*>(asset.bin.data()), asset.bin.size(),
+      &error);
+  ASSERT_TRUE(imported.is_ok()) << error;
+  GltfAnimationDocument doc = std::move(imported.value());
+  const auto& anim = doc.animations[0];
+
+  MannequinHarness h;
+  if (!h.init("mannequin_record_test")) {
+    GTEST_SKIP() << "Vulkan unavailable";
+  }
+  PbrMaterialData mat{};
+  mat.base_color_factor = {0.8f, 0.6f, 0.45f, 1.0f};
+  mat.metallic_factor = 0;
+  mat.roughness_factor = 0.9f;
+  h.write_material(mat);
+  for (std::size_t i = 0; i < doc.meshes.size(); ++i) {
+    ASSERT_TRUE(h.upload_mesh(doc.meshes[i], doc.skin_bindings[i], mat));
+  }
+
+  VulkanPbrScene scene{};
+  scene.pipeline = h.pipe.pipeline();
+  scene.pipeline_layout = h.pipe.pipeline_layout();
+  scene.camera.view_projection = make_perspective(45, 1.0f, 0.1f, 100);
+  scene.camera_position = {0, 1.0f, 3.2f, 1};
+  scene.texture_set = h.tex_set;
+  scene.material_set = h.mat_set;
+  scene.bone_set = h.bone_set;  // renderer binds this at set 3
+  std::vector<ScenePbrObject> objects;
+  for (auto& gpu : h.meshes) {
+    ScenePbrObject obj{};
+    obj.mesh = &gpu.mesh;
+    obj.model = make_translation(0.0f, -0.95f, -4.0f);
+    obj.material_index = 0;
+    objects.push_back(obj);
+  }
+  scene.objects = objects;
+
+  auto pose_at = [&](float time) {
+    apply_pose(doc, anim, time);
+    std::vector<SceneMatrix> globals;
+    compute_globals(doc, globals);
+    std::vector<SceneMatrix> joints(15);
+    const auto& skin = doc.skins[0];
+    for (std::size_t j = 0; j < skin.joints.size(); ++j) {
+      const auto& g = globals[skin.joints[j]];
+      const auto& ibm = skin.inverse_bind_matrices[j];
+      SceneMatrix out{};
+      for (int c = 0; c < 4; ++c) {
+        for (int r = 0; r < 4; ++r) {
+          float sum = 0.0f;
+          for (int k = 0; k < 4; ++k) {
+            sum += g[r + 4 * k] * ibm[k + 4 * c];
+          }
+          out[r + 4 * c] = sum;
+        }
+      }
+      joints[j] = out;
+    }
+    h.write_bones(joints.data(), 15);
+  };
+
+  // record_pbr_scene records everything except the render-pass begin/end
+  // and the dynamic state, which it also sets itself; only the pass must
+  // wrap the call. Record a minimal pass around it.
+  auto render_through_record = [&]() {
+    VkDevice dev = h.ctx.device();
+    auto pr = omnicpp::render::VulkanRenderer::create_command_pool(dev, h.qf);
+    if (!pr.is_ok()) return omnicpp_test::ReadbackResult{};
+    auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        dev, pr.value());
+    if (!cr.is_ok()) {
+      vkDestroyCommandPool(dev, pr.value(), nullptr);
+      return omnicpp_test::ReadbackResult{};
+    }
+    VkCommandBuffer cb = cr.value();
+    VkFenceCreateInfo fi{};
+    fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence;
+    vkCreateFence(dev, &fi, nullptr, &fence);
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cb, &bi);
+    VkClearValue clears[2]{};
+    clears[0].color = {{0, 0, 0, 1}};
+    clears[1].depthStencil = {1.0f, 0};
+    VkRenderPassBeginInfo rpb{};
+    rpb.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rpb.renderPass = h.target.render_pass();
+    rpb.framebuffer = h.target.framebuffer();
+    rpb.renderArea.extent = {256, 256};
+    rpb.clearValueCount = 2;
+    rpb.pClearValues = clears;
+    vkCmdBeginRenderPass(cb, &rpb, VK_SUBPASS_CONTENTS_INLINE);
+    const auto recorded =
+        omnicpp::render::VulkanRenderer{}.record_pbr_scene(cb, scene, 256, 256);
+    vkCmdEndRenderPass(cb);
+    vkEndCommandBuffer(cb);
+    if (!recorded.is_ok()) {
+      vkDestroyFence(dev, fence, nullptr);
+      vkDestroyCommandPool(dev, pr.value(), nullptr);
+      ADD_FAILURE() << "record_pbr_scene failed";
+      return omnicpp_test::ReadbackResult{};
+    }
+    vkResetFences(dev, 1, &fence);
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cb;
+    vkQueueSubmit(h.ctx.graphics_queue(), 1, &si, fence);
+    vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
+    vkDestroyFence(dev, fence, nullptr);
+    vkDestroyCommandPool(dev, pr.value(), nullptr);
+    return omnicpp_test::readback_swapchain_image(
+        h.ctx.physical_device(), dev, h.ctx.graphics_queue(), h.qf,
+        h.target.image(), h.target.format(), 256, 256,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+  };
+
+  pose_at(0.0f);
+  const auto rest = render_through_record();
+  pose_at(0.25f);
+  const auto stride = render_through_record();
+
+  h.cleanup();
+
+  ASSERT_TRUE(rest.submitted);
+  ASSERT_TRUE(stride.submitted);
+  EXPECT_GT(rest.non_clear_pixels, 800U)
+      << "record_pbr_scene path: rest mannequin did not render";
+  EXPECT_GT(stride.non_clear_pixels, 800U)
+      << "record_pbr_scene path: striding mannequin did not render";
+  EXPECT_NE(rest.hash, stride.hash)
+      << "record_pbr_scene path: animation had no effect";
+}
+
 #endif  // OMNICPP_HAS_VULKAN
