@@ -30,6 +30,7 @@
 #include "engine/core/input_state.hpp"
 #include "engine/core/input_translators.hpp"
 #include "engine/core/animation_state_machine.hpp"
+#include "engine/core/physics_world.hpp"
 #include "engine/render/vulkan_context.hpp"
 #include "engine/render/vulkan_descriptors.hpp"
 #include "engine/render/vulkan_ibl_baker.hpp"
@@ -143,6 +144,11 @@ SceneMatrix make_ortho(float l, float r, float b, float t, float zn,
 // Viewport state
 // ============================================================================
 
+//! GPU-driven scene: ground slab + two cubes (payload/cull/dispatch count).
+constexpr std::uint32_t kGdObjectCount = 3U;
+//! Maximum GPU-driven instances (physics-scene cap; payload sized once).
+constexpr std::uint32_t kGdMaxInstances = 4096U;
+
 struct ViewportApp {
   // Vulkan stack.
   omnicpp::render::VulkanContext context;
@@ -180,6 +186,12 @@ struct ViewportApp {
   //! compute cull/LOD pass writes indirect draw commands and the main pass
   //! draws the whole scene with ONE vkCmdDrawIndexedIndirect — no CPU
   //! visibility, LOD, or per-draw submission inside the frame.
+  //! Physics-driven scene state (OMNICPP_PHYSICS=1): bodies stepped on the
+  //! CPU each frame; instanceCount includes them + the ground slab.
+  omnicpp::physics::PhysicsWorld physics_world;
+  std::vector<omnicpp::physics::PhysicsBody> physics_bodies;
+  std::uint32_t gd_instance_count{kGdObjectCount};
+
   bool gpu_driven{false};
   //! 11-float cube geometry through the mesh table (shared vertex/index
   //! buffers + per-mesh table slots); one slot per mesh (no LOD chain yet,
@@ -451,8 +463,6 @@ bool make_mesh(ViewportApp& app, const std::vector<float>& vertices,
 
 //! Frames of payload copies (must match the renderer's frames in flight).
 constexpr std::uint32_t kViewportMaxFramesInFlight = 2U;
-//! GPU-driven scene: ground slab + two cubes (payload/cull/dispatch count).
-constexpr std::uint32_t kGdObjectCount = 3U;
 //! Push block for the vertex-pull draw pipeline (pbr_gpu_driven.vert +
 //! pbr_gpu_driven_full.frag): 160 bytes, model/material arrive via payload.
 struct GdPush {
@@ -1043,9 +1053,10 @@ bool setup_gpu_driven(ViewportApp& app) {
               app.gd_table.index_data.data(), app.gd_table.index_bytes());
 
   // --- Payload (per-image) + indirect buffers -----------------------------
-  constexpr std::uint32_t kObjectCount = 3U;  // ground + spinner + rough
-  constexpr VkDeviceSize kPayloadBytes = (2U + 24U * kObjectCount) * 4U;
-  constexpr VkDeviceSize kDrawWords = 5U * kObjectCount + 1U;  // + counter
+  const std::uint32_t instance_count = app.gd_instance_count;
+  constexpr VkDeviceSize kPayloadBytes =
+      (2U + 24U * kGdMaxInstances) * 4U;
+  constexpr VkDeviceSize kDrawWords = 5U * kGdMaxInstances + 1U;  // + counter
   app.gd_payload_buffers.resize(kViewportMaxFramesInFlight);
   app.gd_payload_allocations.resize(kViewportMaxFramesInFlight);
   for (std::uint32_t i = 0; i < kViewportMaxFramesInFlight; ++i) {
@@ -1196,7 +1207,7 @@ bool setup_gpu_driven(ViewportApp& app) {
 //! (eye-anchored frustum planes in the cull shader's convention).
 void write_gpu_driven_payload(ViewportApp& app, std::uint32_t frame_slot,
                               float t, std::uint32_t height) {
-  constexpr std::uint32_t kObjectCount = 3U;
+  const std::uint32_t kObjectCount = app.gd_instance_count;
   auto* words = static_cast<std::uint32_t*>(
       app.gd_payload_allocations[frame_slot].mapped);
   words[0] = kObjectCount;
@@ -1225,17 +1236,38 @@ void write_gpu_driven_payload(ViewportApp& app, std::uint32_t frame_slot,
                      scale_matrix(8.0f, 0.1f, 8.0f)),
             2U, app.gd_slot_cube, {0.0f, -0.05f, 0.0f},
             0.8660254f * 8.0f);
-  write_obj(1U,
-            multiply(translation_matrix(0.0f, 1.4f, 0.0f),
-                     rotation_y_matrix(t * 0.8f)),
-            0U, app.gd_slot_cube, {0.0f, 1.4f, 0.0f},
-            0.8660254f * 1.35f);
-  write_obj(2U,
-            multiply(translation_matrix(-2.4f, 1.0f, 0.6f),
-                     multiply(rotation_y_matrix(-t * 0.5f),
-                              scale_matrix(0.7f, 0.7f, 0.7f))),
-            1U, app.gd_slot_cube, {-2.4f, 1.0f, 0.6f},
-            0.8660254f * 0.7f);
+  // Objects 1..N: physics bodies (OMNICPP_PHYSICS=1) falling/rolling on the
+  // slab, or the static spinner + rough cube. Physics transforms come straight
+  // from the stepped bodies; spheres render as scaled cubes at body positions.
+  if (!app.physics_bodies.empty()) {
+    const std::uint32_t n =
+        std::min<std::uint32_t>(
+            static_cast<std::uint32_t>(app.physics_bodies.size()),
+            kGdMaxInstances - 1U);
+    for (std::uint32_t i = 0; i < n; ++i) {
+      const auto& b = app.physics_bodies[i];
+      write_obj(1U + i,
+                multiply(translation_matrix(b.position[0], b.position[1],
+                                            b.position[2]),
+                         scale_matrix(b.radius * 0.9f, b.radius * 0.9f,
+                                      b.radius * 0.9f)),
+                (i & 1U), app.gd_slot_cube,
+                {b.position[0], b.position[1], b.position[2]},
+                b.radius * 0.8660254f * 0.9f * 1.7320508f);
+    }
+  } else {
+    write_obj(1U,
+              multiply(translation_matrix(0.0f, 1.4f, 0.0f),
+                       rotation_y_matrix(t * 0.8f)),
+              0U, app.gd_slot_cube, {0.0f, 1.4f, 0.0f},
+              0.8660254f * 1.35f);
+    write_obj(2U,
+              multiply(translation_matrix(-2.4f, 1.0f, 0.6f),
+                       multiply(rotation_y_matrix(-t * 0.5f),
+                                scale_matrix(0.7f, 0.7f, 0.7f))),
+              1U, app.gd_slot_cube, {-2.4f, 1.0f, 0.6f},
+              0.8660254f * 0.7f);
+  }
 
   // Cull push (144 bytes): word indices + 6 planes + LOD params.
   // Camera basis: computed from the SAME pure orbit formula record_scene_into
@@ -1736,7 +1768,7 @@ bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
                        VK_SHADER_STAGE_COMPUTE_BIT, 0U,
                        app.gd_cull_push_staging.size(),
                        app.gd_cull_push_staging.data());
-    vkCmdDispatch(command_buffer, (kGdObjectCount + 63U) / 64U, 1U, 1U);
+    vkCmdDispatch(command_buffer, (app.gd_instance_count + 63U) / 64U, 1U, 1U);
     VkBufferMemoryBarrier bb{};
     bb.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
     bb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -2000,7 +2032,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     vkCmdBindIndexBuffer(command_buffer, app.gd_shared_index_buffer, 0U,
                          VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexedIndirect(command_buffer, app.gd_indirect_buffer, 0U,
-                             kGdObjectCount,
+                             app.gd_instance_count,
                              sizeof(VkDrawIndexedIndirectCommand));
     return true;
   }
@@ -2146,6 +2178,35 @@ bool ViewportApp::initialize() {
     if (gd_env != nullptr && gd_env[0] == '1' && !has_mannequin &&
         setup_gpu_driven(*this)) {
       gpu_driven = true;
+      // Instance-count override: grows the payload past the static trio
+      // (benchmarks; requires OMNICPP_GPU_DRIVEN=1).
+      if (const char* count_env = std::getenv("OMNICPP_INSTANCE_COUNT")) {
+        const long parsed = std::strtol(count_env, nullptr, 10);
+        if (parsed >= 1L &&
+            parsed <= static_cast<long>(kGdMaxInstances) - 1L) {
+          gd_instance_count = static_cast<std::uint32_t>(parsed);
+        }
+      }
+      // Physics-driven scene: N falling/rolling cubes integrated on the CPU
+      // (deterministic PhysicsWorld), streamed into the payload, drawn by
+      // the same one-indirect-draw path. instanceCount = bodies + ground.
+      if (std::getenv("OMNICPP_PHYSICS") != nullptr) {
+        const std::uint32_t body_count =
+            gd_instance_count > 1U ? gd_instance_count - 1U : 3U;
+        physics_bodies.reserve(body_count);
+        for (std::uint32_t i = 0; i < body_count; ++i) {
+          omnicpp::physics::PhysicsBody b;
+          const float f = static_cast<float>(i);
+          b.position[0] = -6.0f + std::fmod(f * 0.37f, 12.0f);
+          b.position[1] = 2.0f + std::fmod(f * 0.11f, 8.0f);
+          b.position[2] = -3.0f + std::fmod(f * 0.53f, 6.0f);
+          b.radius = 0.25f + 0.2f * std::fmod(f * 0.017f, 1.0f);
+          b.restitution = 0.35f;
+          physics_bodies.push_back(b);
+          physics_world.add_body(b);
+        }
+        gd_instance_count = body_count + 1U;
+      }
     }
   }
   renderer.set_scene_record_callback(record_scene_cb, this);
@@ -2171,6 +2232,14 @@ bool ViewportApp::initialize() {
       telemetry.log_event("draw_path", gpu_driven ? "gpu_driven" : "per_draw");
       telemetry.log_event("scene_variant", has_mannequin ? "mannequin"
                                                           : "cubes");
+      if (gpu_driven) {
+        telemetry.log_event(
+            "gd_instances", std::to_string(gd_instance_count));
+      }
+      if (!physics_bodies.empty()) {
+        telemetry.log_event("physics_bodies",
+                            std::to_string(physics_bodies.size()));
+      }
     }
 #if defined(__linux__)
     // Optional gamepad: an absent device is normal (the driver no-ops and
@@ -2307,6 +2376,14 @@ void ViewportApp::run() {
     }
     input.clamp_axes();
     input.commit_tick();
+    // D2: step the physics world once per window frame (fixed dt), keeping
+    // the body vector in sync for the payload writer.
+    if (!physics_bodies.empty()) {
+      physics_world.step(run_config.fixed_dt);
+      for (std::uint32_t i = 0; i < physics_bodies.size(); ++i) {
+        physics_bodies[i] = physics_world.body(i);
+      }
+    }
     // D1: tick the animation state machine exactly once per window frame,
     // after input commit (so it sees this tick's actions) and before the
     // next frame's scene record (so the capture path sees the settled pose).
