@@ -292,9 +292,32 @@ bool read_file_bytes(const std::string& path, std::string& out_text,
   return !out_text.empty();
 }
 
+//! Extract buffers[0].uri from a glTF JSON text (both "uri" and
+//! "uri"-with-spaces forms). Returns "" when absent (embedded data: URIs are
+//! decoded inside the importer; a uri-less buffer 0 only exists in GLB).
+std::string find_buffer0_uri(const std::string& json_text) {
+  const std::size_t buffers_pos = json_text.find("\"buffers\"");
+  if (buffers_pos == std::string::npos) return "";
+  const std::size_t scan_end =
+      std::min(json_text.find(']', buffers_pos), json_text.size());
+  const std::size_t uri_key = json_text.find("\"uri\"", buffers_pos);
+  if (uri_key == std::string::npos || uri_key > scan_end) return "";
+  const std::size_t colon = json_text.find(':', uri_key + 5);
+  if (colon == std::string::npos) return "";
+  const std::size_t open = json_text.find('"', colon + 1);
+  const std::size_t close = json_text.find('"', open + 1);
+  if (open == std::string::npos || close == std::string::npos) return "";
+  return json_text.substr(open + 1, close - open - 1);
+}
+
 bool setup_mannequin(ViewportApp& app) {
-  // Asset resolution: absolute/repo-relative via OMNICPP_ASSET_DIR, then a
-  // few conventional fallbacks so the binary runs from any cwd.
+  // Asset resolution: OMNICPP_MODEL selects the skeletal glTF document
+  // (mannequin by default; may name a subdirectory, e.g. "cesiumman/
+  // CesiumMan"), resolved via OMNICPP_ASSET_DIR then conventional fallbacks.
+  // Buffer 0 and image files are resolved relative to the document's own
+  // directory, exactly as glTF URIs are specified.
+  const char* model_env = std::getenv("OMNICPP_MODEL");
+  const std::string model = model_env != nullptr ? model_env : "mannequin";
   const char* asset_dir_env = std::getenv("OMNICPP_ASSET_DIR");
   std::vector<std::string> candidates;
   if (asset_dir_env != nullptr) candidates.emplace_back(asset_dir_env);
@@ -304,25 +327,55 @@ bool setup_mannequin(ViewportApp& app) {
   std::vector<char> bin_bytes;
   bool loaded = false;
   for (const auto& dir : candidates) {
+    const std::string model_path = dir + "/" + model + ".gltf";
     std::vector<char> json_bytes;
-    if (!read_file_bytes(dir + "/mannequin.gltf", json, json_bytes)) {
+    if (!read_file_bytes(model_path, json, json_bytes)) {
       continue;
     }
-    std::string bin_text;
-    if (!read_file_bytes(dir + "/mannequin.bin", bin_text, bin_bytes)) {
-      continue;
+    const std::string model_dir =
+        model_path.substr(0, model_path.find_last_of('/'));
+
+    // Buffer 0: external file -> read from the document dir; data: URI ->
+    // the importer decodes it (pass null bytes).
+    const std::string buffer_uri = find_buffer0_uri(json);
+    if (!buffer_uri.empty() &&
+        buffer_uri.compare(0, 5, "data:") != 0) {
+      std::string bin_text;
+      if (!read_file_bytes(model_dir + "/" + buffer_uri, bin_text,
+                           bin_bytes)) {
+        continue;
+      }
+    } else {
+      bin_bytes.clear();
     }
+
+    // External images (textures) resolve relative to the document dir too.
+    const omnicpp::asset::ExternalFileLoader loader =
+        [&model_dir](const std::string& uri, std::string& load_error,
+                     std::vector<std::uint8_t>& out_bytes) {
+          std::vector<char> bytes;
+          std::string unused;
+          if (!read_file_bytes(model_dir + "/" + uri, unused, bytes)) {
+            load_error = "cannot open " + uri;
+            return false;
+          }
+          out_bytes.assign(bytes.begin(), bytes.end());
+          return true;
+        };
+
     std::string import_error;
     auto imported = omnicpp::asset::import_gltf_animation_document(
         json_bytes.data(), json_bytes.size(),
-        reinterpret_cast<const std::uint8_t*>(bin_bytes.data()),
-        bin_bytes.size(), &import_error);
+        bin_bytes.empty() ? nullptr
+                          : reinterpret_cast<const std::uint8_t*>(
+                                bin_bytes.data()),
+        bin_bytes.size(), &import_error, &loader);
     if (imported.is_ok()) {
       app.mannequin = std::move(imported.value());
       loaded = true;
       break;
     }
-    std::fprintf(stderr, "viewport: mannequin import failed from %s: %s\n",
+    std::fprintf(stderr, "viewport: model import failed from %s: %s\n",
                  dir.c_str(), import_error.c_str());
   }
   if (!loaded) {

@@ -94,6 +94,105 @@ std::uint32_t read_joint_element(const std::vector<View>& views,
   return true;
 }
 
+//! Exact matrix -> TRS decomposition for nodes a document declares with a
+//! 4x4 column-major matrix instead of TRS. Rotation via branch-free-free
+//! Shepperd's method on the largest diagonal component; uniform scale from
+//! column norms; non-uniform scale or shear is rejected (animations overwrite
+//! TRS components, so they must fully describe the transform). Negative
+//! determinant (mirrored node) is preserved by flipping the rotation axis
+//! convention: scale keeps the negative sign.
+//! Returns false with `error` set on singular or sheared matrices.
+[[nodiscard]] bool decompose_trs_matrix(const float m[16], float t[3],
+                                        float r[4], float s[3],
+                                        const std::string& context,
+                                        std::string& error) {
+  // Column vectors (column-major storage: column c starts at m[c*4]).
+  const float* cx = m;
+  const float* cy = m + 4;
+  const float* cz = m + 8;
+  const float sx = std::sqrt(cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]);
+  const float sy = std::sqrt(cy[0] * cy[0] + cy[1] * cy[1] + cy[2] * cy[2]);
+  const float sz = std::sqrt(cz[0] * cz[0] + cz[1] * cz[1] + cz[2] * cz[2]);
+  if (sx < 1e-12F || sy < 1e-12F || sz < 1e-12F) {
+    return fail_asset(error, context + " matrix is singular");
+  }
+  // Orthonormality: normalized columns must be mutually orthogonal within
+  // tolerance (shear or extreme non-uniform scale otherwise).
+  const float nx[3] = {cx[0] / sx, cx[1] / sx, cx[2] / sx};
+  const float ny[3] = {cy[0] / sy, cy[1] / sy, cy[2] / sy};
+  const float nz[3] = {cz[0] / sz, cz[1] / sz, cz[2] / sz};
+  const float tol = 1e-3F;
+  const float dot_xy = nx[0] * ny[0] + nx[1] * ny[1] + nx[2] * ny[2];
+  const float dot_xz = nx[0] * nz[0] + nx[1] * nz[1] + nx[2] * nz[2];
+  const float dot_yz = ny[0] * nz[0] + ny[1] * nz[1] + ny[2] * nz[2];
+  if (std::abs(dot_xy) > tol || std::abs(dot_xz) > tol ||
+      std::abs(dot_yz) > tol) {
+    return fail_asset(error, context + " matrix has shear or non-uniform "
+                                 "scale; skinned documents must use TRS");
+  }
+  const float det = nx[0] * (ny[1] * nz[2] - ny[2] * nz[1]) -
+                    nx[1] * (ny[0] * nz[2] - ny[2] * nz[0]) +
+                    nx[2] * (ny[0] * nz[1] - ny[1] * nz[0]);
+  // Quaternion rotation matrix (transposed rotation part), mirrored by
+  // det < 0 through a y-axis flip (standard handling of mirrored nodes).
+  float m00 = nx[0];
+  float m01 = ny[0];
+  float m02 = nz[0];
+  float m10 = nx[1];
+  float m11 = ny[1];
+  float m12 = nz[1];
+  float m20 = nx[2];
+  float m21 = ny[2];
+  float m22 = nz[2];
+  if (det < 0.0F) {
+    m01 = -m01;
+    m11 = -m11;
+    m21 = -m21;
+    s[1] = -sy;
+  } else {
+    s[1] = sy;
+  }
+  s[0] = sx;
+  s[2] = sz;
+  // Shepperd's method: largest of the four candidate diagonals.
+  const float trace = m00 + m11 + m22;
+  float qw;
+  if (trace > 0.0F) {
+    const float root = std::sqrt(trace + 1.0F);
+    qw = 0.5F * root;
+    const float k = 0.5F / root;
+    r[0] = (m21 - m12) * k;
+    r[1] = (m02 - m20) * k;
+    r[2] = (m10 - m01) * k;
+  } else if (m00 > m11 && m00 > m22) {
+    const float root = std::sqrt(1.0F + m00 - m11 - m22);
+    r[0] = 0.5F * root;
+    const float k = 0.5F / root;
+    r[1] = (m01 + m10) * k;
+    r[2] = (m02 + m20) * k;
+    qw = (m21 - m12) * k;
+  } else if (m11 > m22) {
+    const float root = std::sqrt(1.0F + m11 - m00 - m22);
+    r[1] = 0.5F * root;
+    const float k = 0.5F / root;
+    r[0] = (m01 + m10) * k;
+    r[2] = (m12 + m21) * k;
+    qw = (m02 - m20) * k;
+  } else {
+    const float root = std::sqrt(1.0F + m22 - m00 - m11);
+    r[2] = 0.5F * root;
+    const float k = 0.5F / root;
+    r[0] = (m02 + m20) * k;
+    r[1] = (m12 + m21) * k;
+    qw = (m10 - m01) * k;
+  }
+  r[3] = qw;
+  t[0] = m[12];
+  t[1] = m[13];
+  t[2] = m[14];
+  return true;
+}
+
 [[nodiscard]] bool parse_nodes(const Json& document,
                                std::vector<GltfSkinNode>& nodes,
                                std::string& error) {
@@ -108,11 +207,31 @@ std::uint32_t read_joint_element(const std::vector<View>& views,
     const std::string context = "nodes[" + std::to_string(i) + "]";
     GltfSkinNode& node = nodes[i];
 
-    if (find_member(node_json, "matrix") != nullptr) {
-      return fail_asset(
-          error, context +
-                     " declares matrix; skinned documents must drive nodes "
-                     "with TRS (animations overwrite TRS components)");
+    if (const Json* matrix = find_member(node_json, "matrix");
+        matrix != nullptr) {
+      // Matrix nodes are legal when their transform decomposes to exact TRS
+      // (real exports often author a root matrix, e.g. a Z-up fixup). Shear,
+      // singular, or non-uniform-scale matrices are rejected because TRS
+      // must fully describe the node for animation sampling.
+      if (matrix->kind != Json::Kind::Array ||
+          matrix->items.size() != 16U) {
+        return fail_asset(error,
+                          context + " matrix must be an array of 16 numbers");
+      }
+      float m[16];
+      for (std::size_t i = 0; i < 16U; ++i) {
+        double value = 0.0;
+        if (!as_real(matrix->items[i], value, error,
+                     context + "[" + std::to_string(i) + "]")) {
+          return false;
+        }
+        m[i] = static_cast<float>(value);
+      }
+      if (!decompose_trs_matrix(m, node.translation, node.rotation,
+                                node.scale, context, error)) {
+        return false;
+      }
+      node.has_trs = true;
     }
     if (const Json* name = find_member(node_json, "name");
         name != nullptr && name->kind == Json::Kind::String) {
@@ -754,7 +873,8 @@ void slerp_rotation(const float a[4], const float b[4], float t, float* out) {
 
 omnicpp::core::Result<GltfAnimationDocument> import_gltf_animation_document(
     const char* json_bytes, std::size_t json_len, const std::uint8_t* bin_bytes,
-    std::size_t bin_len, std::string* error_detail) {
+    std::size_t bin_len, std::string* error_detail,
+    const ExternalFileLoader* loader) {
   std::string error;
   GltfAnimationDocument document;
 
@@ -829,7 +949,7 @@ omnicpp::core::Result<GltfAnimationDocument> import_gltf_animation_document(
     mesh_to_slot[node.mesh_index] = document.meshes.size();
     auto imported = import_gltf_mesh(prologue.json_bytes, prologue.json_len,
                                      prologue.bin_bytes, prologue.bin_len,
-                                     node.mesh_index, &error);
+                                     node.mesh_index, &error, loader);
     if (!imported.is_ok()) return finish(false);
     document.meshes.push_back(std::move(imported.value()));
     document.skin_bindings.emplace_back();

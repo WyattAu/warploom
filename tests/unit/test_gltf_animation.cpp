@@ -428,16 +428,18 @@ TEST(GltfAnimation, RejectsMalformedSkeletalDocuments) {
         &error);
   };
 
-  // Node matrix (skinned docs must drive TRS).
+  // Singular node matrix (degenerate zero column cannot be decomposed to
+  // TRS; well-formed matrices are legal since the exact-decomposition
+  // support). The identity matrix would import fine — this one must not.
   {
     error.clear();
     auto r = import(R"({"asset":{"version":"2.0"},
       "scenes":[{"nodes":[0]}],
-      "nodes":[{"name":"n","matrix":[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]}],
+      "nodes":[{"name":"n","matrix":[0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]}],
       "meshes":[],"skins":[],
       "buffers":[],"bufferViews":[],"accessors":[]})");
     EXPECT_FALSE(r.is_ok());
-    EXPECT_NE(error.find("matrix"), std::string::npos)
+    EXPECT_NE(error.find("singular"), std::string::npos)
         << "error was: " << error;
   }
   // Skin without inverseBindMatrices.
@@ -598,6 +600,146 @@ TEST(GltfSamplerMath, StepAndExactKeyframeSemantics) {
   omnicpp::asset::sample_gltf_channel(rot, 0.5f, out);
   EXPECT_NEAR(out[0], std::sin(0.78539816f / 2.0f), 1e-6f);
   EXPECT_NEAR(out[3], std::cos(0.78539816f / 2.0f), 1e-6f);
+}
+
+
+TEST(GltfAnimation, CesiumManRealAssetImports) {
+  // Khronos sample asset: matrix root nodes (Z_UP fixup), 22-node forest,
+  // 19-joint skin, 2 s 57-channel walk cycle, external JPEG texture
+  // (repacked as PNG for the engine's baseline-only decoder).
+  std::vector<char> json_bytes;
+  ASSERT_TRUE(read_file(std::string(OMNICPP_TEST_ASSET_DIR) +
+                            "/cesiumman/CesiumMan.gltf",
+                        json_bytes).empty());
+  std::vector<char> bin_bytes;
+  ASSERT_TRUE(read_file(std::string(OMNICPP_TEST_ASSET_DIR) +
+                            "/cesiumman/CesiumMan_data.bin",
+                        bin_bytes).empty());
+  const std::string asset_dir =
+      std::string(OMNICPP_TEST_ASSET_DIR) + "/cesiumman/";
+  const omnicpp::asset::ExternalFileLoader loader =
+      [&asset_dir](const std::string& uri, std::string& load_error,
+                   std::vector<std::uint8_t>& out_bytes) {
+        std::vector<char> bytes;
+        if (!read_file(asset_dir + uri, bytes).empty()) {
+          load_error = "cannot open " + uri;
+          return false;
+        }
+        out_bytes.assign(bytes.begin(), bytes.end());
+        return true;
+      };
+
+  std::string error;
+  auto imported = omnicpp::asset::import_gltf_animation_document(
+      json_bytes.data(), json_bytes.size(),
+      reinterpret_cast<const std::uint8_t*>(bin_bytes.data()),
+      bin_bytes.size(), &error, &loader);
+  ASSERT_TRUE(imported.is_ok()) << error;
+  const auto& doc = imported.value();
+
+  EXPECT_EQ(doc.nodes.size(), 22U);
+  EXPECT_EQ(doc.meshes.size(), 1U);
+  ASSERT_EQ(doc.skins.size(), 1U);
+  EXPECT_EQ(doc.skins[0].joints.size(), 19U);
+  ASSERT_EQ(doc.animations.size(), 1U);
+  EXPECT_NEAR(doc.animations[0].duration, 2.0F, 1e-4F);
+  EXPECT_EQ(doc.animations[0].samplers.size(), 57U);
+  EXPECT_EQ(doc.animations[0].channels.size(), 57U);
+  EXPECT_EQ(doc.meshes[0].vertex_count(), 3273U);
+  EXPECT_EQ(doc.meshes[0].indices.size(), 14016U);
+  // The walk-cycle texture was repacked to PNG and is decoded.
+  ASSERT_EQ(doc.meshes[0].images.size(), 1U);
+  EXPECT_FALSE(doc.meshes[0].images[0].rgba.empty());
+
+  // Sampling the 2 s cycle at its 1 s midpoint must move joints: global
+  // joint transforms differ from rest pose for >= 3 of the 19 joints.
+  const auto rest = test_locals(doc);
+  std::vector<omnicpp::asset::GltfTransform> rest_globals;
+  omnicpp::asset::gltf_global_matrices(doc, rest, rest_globals);
+  omnicpp::asset::GltfAnimationDocument posed = doc;
+  apply_pose(posed, posed.animations[0], 1.0F);
+  const auto mid = test_locals(posed);
+  std::vector<omnicpp::asset::GltfTransform> mid_globals;
+  omnicpp::asset::gltf_global_matrices(posed, mid, mid_globals);
+  std::size_t moved = 0;
+  for (std::size_t j = 0; j < 19U; ++j) {
+    const auto& a = rest_globals[doc.skins[0].joints[j]];
+    const auto& b = mid_globals[posed.skins[0].joints[j]];
+    if (std::abs(a[12] - b[12]) > 1e-4F ||
+        std::abs(a[13] - b[13]) > 1e-4F ||
+        std::abs(a[14] - b[14]) > 1e-4F) {
+      ++moved;
+    }
+  }
+  EXPECT_GE(moved, 3U);
+}
+
+TEST(GltfAnimation, MatrixNodeDecomposesToTrs) {
+  // A document whose root node carries a 90-degree X rotation matrix must
+  // decompose to the equivalent TRS: sampling and skinning then behave as
+  // if the node had been authored in TRS form.
+  const std::string json = R"glTF({"asset":{"version":"2.0"},
+   "scenes":[{"nodes":[0]}],
+   "nodes":[
+     {"name":"root","matrix":[1,0,0,0, 0,0,1,0, 0,-1,0,0, 0,5,0,1]},
+     {"name":"child","translation":[1,2,3]}],
+   "meshes":[],
+   "animations":[{"samplers":[
+     {"input":0,"output":1}],
+    "channels":[
+     {"sampler":0,"target":{"node":1,"path":"translation"}}]}],
+   "bufferViews":[
+     {"buffer":0,"byteOffset":0,"byteLength":8},
+     {"buffer":0,"byteOffset":8,"byteLength":12}],
+   "accessors":[
+     {"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR"},
+     {"bufferView":1,"componentType":5126,"count":2,"type":"VEC3"}],
+   "buffers":[{"byteLength":32,"uri":"data:application/octet-stream;base64,AAAAAAAAgD8AAIA/AAAAQAAAQEAAAIBAAACgQAAAwEA="}]})glTF";
+  omnicpp::asset::GltfAnimationDocument doc;
+  std::string error;
+  const auto imported = omnicpp::asset::import_gltf_animation_document(
+      json.data(), json.size(), nullptr, 0U, &error);
+  ASSERT_TRUE(imported.is_ok()) << error;
+  doc = std::move(imported).value();
+
+  const auto& root = doc.nodes[0];
+  EXPECT_NEAR(root.translation[1], 5.0F, 1e-5F);
+  EXPECT_NEAR(root.scale[0], 1.0F, 1e-5F);
+  EXPECT_NEAR(root.scale[1], 1.0F, 1e-5F);
+  EXPECT_NEAR(root.scale[2], 1.0F, 1e-5F);
+  // 90-degree X rotation: (x,y,z,w) = (sqrt(0.5), 0, 0, sqrt(0.5)).
+  EXPECT_NEAR(std::abs(root.rotation[0]), 0.7071068F, 1e-5F);
+  EXPECT_NEAR(std::abs(root.rotation[3]), 0.7071068F, 1e-5F);
+  EXPECT_NEAR(root.rotation[1], 0.0F, 1e-6F);
+  EXPECT_NEAR(root.rotation[2], 0.0F, 1e-6F);
+
+  // Recomposing local TRS must reproduce the input matrix exactly.
+  const float m[16] = {1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 5, 0, 1};
+  const auto local = omnicpp::asset::gltf_local_matrix(root);
+  for (std::size_t i = 0; i < 16U; ++i) {
+    EXPECT_NEAR(local[i], m[i], 1e-5F) << "index " << i;
+  }
+}
+
+TEST(GltfAnimation, MatrixNodeWithShearIsRejected) {
+  // A sheared matrix (non-orthogonal columns) cannot be animated via TRS
+  // components and must be rejected with a diagnostic.
+  const std::string json = R"glTF({"asset":{"version":"2.0"},
+   "scenes":[{"nodes":[0]}],
+   "nodes":[
+     {"name":"sheared",
+      "matrix":[1,0,0,0, 0.6,1,0,0, 0,0,1,0, 0,0,0,1]},
+     {"name":"child"}],
+   "meshes":[],
+   "animations":[],
+   "bufferViews":[],
+   "accessors":[],
+   "buffers":[]})glTF";
+  std::string error;
+  const auto imported = omnicpp::asset::import_gltf_animation_document(
+      json.data(), json.size(), nullptr, 0U, &error);
+  EXPECT_FALSE(imported.is_ok());
+  EXPECT_NE(error.find("shear"), std::string::npos) << error;
 }
 
 TEST(GltfAnimation, GlbContainerImportsIdenticallyToJson) {

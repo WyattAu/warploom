@@ -24,6 +24,8 @@
 //!   OMNICPP_START_TIME      initial sim time in seconds (default 0)
 //!   OMNICPP_CAMERA_RADIUS   orbit radius override (nan = scene default)
 //!   OMNICPP_CAMERA_HEIGHT   orbit height override (nan = scene default)
+//!   OMNICPP_MODEL           skeletal document name in the asset dir
+//!                           (default: mannequin; e.g. CesiumMan)
 
 #pragma once
 

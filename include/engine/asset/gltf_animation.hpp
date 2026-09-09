@@ -146,10 +146,10 @@ struct GltfAnimationDocument {
  * channel targets with a `weights` path, and non-monotonic sampler input.
  */
 [[nodiscard]] omnicpp::core::Result<GltfAnimationDocument>
-import_gltf_animation_document(const char* json_bytes, std::size_t json_len,
-                               const std::uint8_t* bin_bytes,
-                               std::size_t bin_len,
-                               std::string* error_detail = nullptr);
+import_gltf_animation_document(
+    const char* json_bytes, std::size_t json_len, const std::uint8_t* bin_bytes,
+    std::size_t bin_len, std::string* error_detail = nullptr,
+    const ExternalFileLoader* loader = nullptr);
 
 //! Compose local TRS into a column-major matrix (translation * rotation *
 //! scale).

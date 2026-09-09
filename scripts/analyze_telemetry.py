@@ -62,7 +62,8 @@ def read_depth32(path, expected_count):
     return list(struct.unpack(f"<{expected_count}f", raw[: expected_count * 4]))
 
 
-def analyze(manifest, frames, events, telemetry_dir, expect_skinned):
+def analyze(manifest, frames, events, telemetry_dir, expect_skinned,
+            walk_duration=1.0):
     print("== Manifest ==")
     check(manifest is not None, "manifest line present")
     if manifest is None:
@@ -87,9 +88,9 @@ def analyze(manifest, frames, events, telemetry_dir, expect_skinned):
     print("== Scene composition ==")
     if expect_skinned:
         check(all(f["skinned"] for f in frames),
-              "every frame uses the skinned pipeline (mannequin scene)")
-        check(all(f["objects"] >= 10 for f in frames),
-              "mannequin scene draws >= 10 objects (9 parts + ground)",
+              "every frame uses the skinned pipeline (skinned scene)")
+        check(all(f["objects"] >= 2 for f in frames),
+              "skinned scene draws >= 2 objects (figure + ground)",
               f"min objects {min(f['objects'] for f in frames)}")
     else:
         check(not any(f["skinned"] for f in frames),
@@ -124,7 +125,7 @@ def analyze(manifest, frames, events, telemetry_dir, expect_skinned):
     print("== Animation ==")
     walk_times = [f["walk_t"] for f in frames]
     if manifest["has_mannequin"]:
-        duration = 1.0  # mannequin walk-cycle length
+        duration = walk_duration  # walk-cycle length of the loaded model
         wraps = 0
         for prev, curr in zip(walk_times, walk_times[1:]):
             if curr < prev:
@@ -197,13 +198,16 @@ def main():
     parser.add_argument("telemetry_dir")
     parser.add_argument("--expect-skinned", action="store_true",
                         help="assert the mannequin scene ran")
+    parser.add_argument("--walk-duration", type=float, default=1.0,
+                        help="walk-cycle duration of the loaded model")
     args = parser.parse_args()
 
     manifest, frames, events, telemetry_dir = load_run(args.telemetry_dir)
     if not frames:
         print("no frame records found")
         return 2
-    analyze(manifest, frames, events, telemetry_dir, args.expect_skinned)
+    analyze(manifest, frames, events, telemetry_dir, args.expect_skinned,
+            args.walk_duration)
 
     print(f"\n{CHECKS_PASSED} passed, {CHECKS_FAILED} failed")
     return 1 if CHECKS_FAILED else 0
