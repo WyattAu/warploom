@@ -744,7 +744,15 @@ omnicpp::core::Result<GltfAnimationDocument> import_gltf_animation_document(
     return finish(fail_asset(error, "empty glTF document"));
   }
 
-  JsonParser parser(json_bytes, json_len, error);
+  // Auto-detect the container: raw JSON or a GLB 2.0 container.
+  std::string container_json;
+  DocumentPrologue prologue;
+  if (!parse_gltf_document_prologue(json_bytes, json_len, bin_bytes, bin_len,
+                                    container_json, prologue, error)) {
+    return finish(false);
+  }
+
+  JsonParser parser(prologue.json_bytes, prologue.json_len, error);
   Json root;
   if (!parser.parse(root) || root.kind != Json::Kind::Object) {
     return finish(false);
@@ -767,9 +775,10 @@ omnicpp::core::Result<GltfAnimationDocument> import_gltf_animation_document(
   // Owns embedded data: buffers; `sources` points into it for the whole
   // import scope.
   std::vector<std::vector<std::uint8_t>> embedded_storage;
-  if (!parse_gltf_buffers_views_accessors(root, bin_bytes, bin_len, sources,
-                                          views, accessors, embedded_storage,
-                                          error)) {
+  if (!parse_gltf_buffers_views_accessors(root, prologue.bin_bytes,
+                                          prologue.bin_len, sources, views,
+                                          accessors, embedded_storage, error,
+                                          prologue.allow_uriless_buffer0)) {
     return finish(false);
   }
 
@@ -784,7 +793,8 @@ omnicpp::core::Result<GltfAnimationDocument> import_gltf_animation_document(
     }
     if (mesh_to_slot[node.mesh_index] != kNoIndex) continue;
     mesh_to_slot[node.mesh_index] = document.meshes.size();
-    auto imported = import_gltf_mesh(json_bytes, json_len, bin_bytes, bin_len,
+    auto imported = import_gltf_mesh(prologue.json_bytes, prologue.json_len,
+                                     prologue.bin_bytes, prologue.bin_len,
                                      node.mesh_index, &error);
     if (!imported.is_ok()) return finish(false);
     document.meshes.push_back(std::move(imported.value()));

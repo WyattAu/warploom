@@ -8,10 +8,12 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "engine/asset/gltf_animation.hpp"
@@ -74,6 +76,91 @@ std::vector<omnicpp::asset::GltfTransform> test_locals(
     locals[i] = omnicpp::asset::gltf_local_matrix(doc.nodes[i]);
   }
   return locals;
+}
+
+//! Hash a whole imported document (vertices, indices, skins, animations) so
+//! the GLB and glTF import paths can be compared byte-exactly.
+std::string document_fingerprint(const omnicpp::asset::GltfAnimationDocument& doc) {
+  std::size_t hash = 1469598103934665603ULL;  // FNV offset basis.
+  auto mix = [&hash](const void* data, std::size_t size) {
+    const auto* bytes = static_cast<const std::uint8_t*>(data);
+    for (std::size_t i = 0; i < size; ++i) {
+      hash ^= bytes[i];
+      hash *= 1099511628211ULL;  // FNV prime.
+    }
+  };
+  for (const auto& mesh : doc.meshes) {
+    mix(mesh.vertices.data(), mesh.vertices.size() * sizeof(float));
+    mix(mesh.indices.data(), mesh.indices.size() * sizeof(std::uint32_t));
+    mix(mesh.base_color.data(), sizeof(mesh.base_color));
+    for (const auto& prim : mesh.primitives) {
+      mix(&prim.index_count, sizeof(prim.index_count));
+      mix(prim.base_color.data(), sizeof(prim.base_color));
+    }
+  }
+  for (const auto& binding : doc.skin_bindings) {
+    mix(binding.joints.data(), binding.joints.size() * sizeof(std::uint16_t));
+    mix(binding.weights.data(), binding.weights.size() * sizeof(float));
+  }
+  for (const auto& node : doc.nodes) {
+    mix(node.name.data(), node.name.size());
+    mix(node.translation, sizeof(node.translation));
+    mix(node.rotation, sizeof(node.rotation));
+    mix(node.scale, sizeof(node.scale));
+    mix(&node.mesh_index, sizeof(node.mesh_index));
+    for (const std::size_t child : node.children) {
+      mix(&child, sizeof(child));
+    }
+  }
+  for (const auto& skin : doc.skins) {
+    mix(skin.name.data(), skin.name.size());
+    for (const auto& m : skin.inverse_bind_matrices) {
+      mix(m.data(), m.size() * sizeof(float));
+    }
+  }
+  for (const auto& anim : doc.animations) {
+    mix(anim.name.data(), anim.name.size());
+    mix(&anim.duration, sizeof(anim.duration));
+    for (const auto& sampler : anim.samplers) {
+      mix(sampler.times.data(), sampler.times.size() * sizeof(float));
+      mix(sampler.values.data(), sampler.values.size() * sizeof(float));
+    }
+    for (const auto& channel : anim.channels) {
+      mix(&channel.sampler, sizeof(channel.sampler));
+      mix(&channel.target_node, sizeof(channel.target_node));
+    }
+  }
+  return std::to_string(hash);
+}
+
+//! Pack a glTF document into a GLB 2.0 container: 12-byte header, JSON chunk
+//! (space-padded to 4 bytes), BIN chunk (zero-padded to 4 bytes).
+std::vector<char> pack_glb(std::string_view json, const std::vector<char>& bin) {
+  const auto align4 = [](std::size_t n) { return (n + 3U) & ~std::size_t{3U}; };
+  const std::size_t json_len = align4(json.size());
+  const std::size_t bin_len = align4(bin.size());
+  const std::size_t total = 12U + 8U + json_len +
+                            (bin_len != 0U ? 8U + bin_len : 0U);
+  std::vector<char> glb(total);
+  auto put32 = [&glb](std::size_t offset, std::uint32_t value) {
+    std::memcpy(glb.data() + offset, &value, 4);
+  };
+  put32(0, 0x46546C67U);          // magic "glTF"
+  put32(4, 2U);                   // version
+  put32(8, static_cast<std::uint32_t>(total));
+  put32(12, static_cast<std::uint32_t>(json_len));
+  put32(16, 0x4E4F534AU);         // "JSON"
+  std::memcpy(glb.data() + 20, json.data(), json.size());
+  for (std::size_t i = json.size(); i < json_len; ++i) {
+    glb[20 + i] = ' ';
+  }
+  std::size_t bin_offset = 20 + json_len;
+  if (bin_len != 0U) {
+    put32(bin_offset, static_cast<std::uint32_t>(bin_len));
+    put32(bin_offset + 4, 0x004E4942U);  // "BIN\0"
+    std::memcpy(glb.data() + bin_offset + 8, bin.data(), bin.size());
+  }
+  return glb;
 }
 
 void apply_pose(omnicpp::asset::GltfAnimationDocument& doc,
@@ -511,4 +598,130 @@ TEST(GltfSamplerMath, StepAndExactKeyframeSemantics) {
   omnicpp::asset::sample_gltf_channel(rot, 0.5f, out);
   EXPECT_NEAR(out[0], std::sin(0.78539816f / 2.0f), 1e-6f);
   EXPECT_NEAR(out[3], std::cos(0.78539816f / 2.0f), 1e-6f);
+}
+
+TEST(GltfAnimation, GlbContainerImportsIdenticallyToJson) {
+  const Mannequin json_asset = load_mannequin();
+  ASSERT_FALSE(json_asset.json.empty());
+
+  const std::vector<char> glb_bytes =
+      pack_glb(json_asset.json, json_asset.bin);
+
+  omnicpp::asset::GltfAnimationDocument glb_doc;
+  std::string glb_error;
+  const auto glb_import = omnicpp::asset::import_gltf_animation_document(
+      glb_bytes.data(), glb_bytes.size(), nullptr, 0U, &glb_error);
+  ASSERT_TRUE(glb_import.is_ok()) << glb_error;
+  glb_doc = std::move(glb_import).value();
+
+  omnicpp::asset::GltfAnimationDocument json_doc;
+  std::string json_error;
+  const auto json_import = omnicpp::asset::import_gltf_animation_document(
+      json_asset.json.data(), json_asset.json.size(),
+      reinterpret_cast<const std::uint8_t*>(json_asset.bin.data()),
+      json_asset.bin.size(), &json_error);
+  ASSERT_TRUE(json_import.is_ok()) << json_error;
+  json_doc = std::move(json_import).value();
+
+  // The two container formats must yield byte-identical import results.
+  EXPECT_EQ(document_fingerprint(json_doc), document_fingerprint(glb_doc));
+
+  // And the sampled walk cycle must match too: same pose at t = 0.5 s.
+  apply_pose(json_doc, json_doc.animations[0], 0.5F);
+  apply_pose(glb_doc, glb_doc.animations[0], 0.5F);
+  for (std::size_t i = 0; i < json_doc.nodes.size(); ++i) {
+    EXPECT_EQ(0, std::memcmp(json_doc.nodes[i].translation,
+                             glb_doc.nodes[i].translation,
+                             sizeof(json_doc.nodes[i].translation)));
+    EXPECT_EQ(0, std::memcmp(json_doc.nodes[i].rotation,
+                             glb_doc.nodes[i].rotation,
+                             sizeof(json_doc.nodes[i].rotation)));
+  }
+}
+
+TEST(GltfAnimation, GlbContainerRejectsMalformedContainers) {
+  const Mannequin json_asset = load_mannequin();
+  ASSERT_FALSE(json_asset.json.empty());
+
+  std::vector<char> glb = pack_glb(json_asset.json, json_asset.bin);
+
+  // Bad magic: not a GLB header and not a JSON document.
+  {
+    std::vector<char> broken = glb;
+    broken[0] = 'X';
+    std::string error;
+    const auto imported = omnicpp::asset::import_gltf_animation_document(
+        broken.data(), broken.size(), nullptr, 0U, &error);
+    EXPECT_FALSE(imported.is_ok());
+    EXPECT_NE(error.find("neither a JSON glTF document"), std::string::npos)
+        << error;
+  }
+  // Bad version.
+  {
+    std::vector<char> broken = glb;
+    std::uint32_t version = 3;
+    std::memcpy(broken.data() + 4, &version, 4);
+    std::string error;
+    const auto imported = omnicpp::asset::import_gltf_animation_document(
+        broken.data(), broken.size(), nullptr, 0U, &error);
+    EXPECT_FALSE(imported.is_ok());
+    EXPECT_NE(error.find("version"), std::string::npos) << error;
+  }
+  // Header length exceeds the data.
+  {
+    std::vector<char> broken = glb;
+    std::uint32_t length = static_cast<std::uint32_t>(broken.size()) + 100U;
+    std::memcpy(broken.data() + 8, &length, 4);
+    std::string error;
+    const auto imported = omnicpp::asset::import_gltf_animation_document(
+        broken.data(), broken.size(), nullptr, 0U, &error);
+    EXPECT_FALSE(imported.is_ok());
+    EXPECT_NE(error.find("length"), std::string::npos) << error;
+  }
+  // JSON chunk length runs past the container.
+  {
+    std::vector<char> broken = glb;
+    std::uint32_t length = 1U << 20;
+    std::memcpy(broken.data() + 12, &length, 4);
+    std::string error;
+    const auto imported = omnicpp::asset::import_gltf_animation_document(
+        broken.data(), broken.size(), nullptr, 0U, &error);
+    EXPECT_FALSE(imported.is_ok());
+    EXPECT_NE(error.find("length"), std::string::npos) << error;
+  }
+  // BIN chunk size disagrees with buffers[0].byteLength: rewrite the
+  // document's declared byteLength so only the BIN-chunk check can catch it.
+  {
+    std::string tweaked = json_asset.json;
+    const std::size_t length_pos = tweaked.find("\"byteLength\": 12408");
+    ASSERT_NE(length_pos, std::string::npos);
+    tweaked.replace(length_pos, std::string("\"byteLength\": 12408").size(),
+                    "\"byteLength\": 12400");
+    const std::vector<char> broken = pack_glb(tweaked, json_asset.bin);
+    std::string error;
+    const auto imported = omnicpp::asset::import_gltf_animation_document(
+        broken.data(), broken.size(), nullptr, 0U, &error);
+    EXPECT_FALSE(imported.is_ok());
+    // Either the GLB-specific check or the generic buffer-size check may
+    // fire first; both must name the mismatch.
+    EXPECT_TRUE(error.find("BIN chunk size") != std::string::npos ||
+                error.find("does not match declared byteLength") !=
+                    std::string::npos)
+        << error;
+  }
+  // A second URI-less buffer: only buffer 0 may be uri-less in a GLB.
+  {
+    std::string tweaked = json_asset.json;
+    const std::size_t buffers_pos = tweaked.find("\"buffers\": [");
+    ASSERT_NE(buffers_pos, std::string::npos) << tweaked.substr(0, 300);
+    const std::size_t insert_at = buffers_pos + std::string("\"buffers\": [").size();
+    // A second uri-less buffer with a nonzero byteLength: valid JSON, but
+    // only buffer 0 may omit its uri, so the import must reject it.
+    tweaked.insert(insert_at, "{ \"byteLength\" : 16 },");
+    const std::vector<char> broken = pack_glb(tweaked, json_asset.bin);
+    std::string error;
+    const auto imported = omnicpp::asset::import_gltf_animation_document(
+        broken.data(), broken.size(), nullptr, 0U, &error);
+    EXPECT_FALSE(imported.is_ok()) << error;
+  }
 }

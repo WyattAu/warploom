@@ -672,6 +672,137 @@ inline void trs_matrix(const float* translation, const float* quaternion,
   }
 }
 
+//! Parsed GLB container: the JSON chunk as a string and a view of the
+//! optional BIN chunk (pointing into the caller's buffer, which must
+//! outlive the import).
+struct GlbContents {
+  std::string json{};
+  const std::uint8_t* bin{nullptr};
+  std::size_t bin_size{0};
+};
+
+//! Parse the GLB 2.0 container (magic "glTF", version 2): a JSON chunk
+//! followed by an optional BIN chunk. Chunk lengths are validated against
+//! the container; padding bytes are not interpreted. Returns false with
+//! `error` set on any malformed container.
+[[nodiscard]] inline bool parse_glb(const std::uint8_t* data,
+                                    std::size_t size, GlbContents& out,
+                                    std::string& error) {
+  constexpr std::uint32_t kGlbMagic = 0x46546C67U;    // "glTF"
+  constexpr std::uint32_t kChunkJson = 0x4E4F534AU;   // "JSON"
+  constexpr std::uint32_t kChunkBin = 0x004E4942U;    // "BIN\0"
+  if (data == nullptr || size < 12U) {
+    return fail_asset(error, "GLB container is smaller than its header");
+  }
+  std::uint32_t magic = 0;
+  std::memcpy(&magic, data, 4);
+  if (magic != kGlbMagic) {
+    return fail_asset(error, "GLB container magic is not \"glTF\"");
+  }
+  std::uint32_t version = 0;
+  std::memcpy(&version, data + 4, 4);
+  if (version != 2U) {
+    return fail_asset(error, "GLB container version must be 2");
+  }
+  std::uint32_t declared_length = 0;
+  std::memcpy(&declared_length, data + 8, 4);
+  if (declared_length < 12U || declared_length > size) {
+    return fail_asset(error, "GLB header length exceeds the data size");
+  }
+  std::size_t cursor = 12U;
+  bool json_seen = false;
+  while (cursor < declared_length) {
+    if (declared_length - cursor < 8U) {
+      return fail_asset(error, "GLB chunk header is truncated");
+    }
+    std::uint32_t chunk_length = 0;
+    std::uint32_t chunk_type = 0;
+    std::memcpy(&chunk_length, data + cursor, 4);
+    std::memcpy(&chunk_type, data + cursor + 4, 4);
+    cursor += 8U;
+    if (chunk_length > declared_length - cursor) {
+      return fail_asset(error, "GLB chunk length exceeds the container");
+    }
+    if (chunk_type == kChunkJson) {
+      if (json_seen) {
+        return fail_asset(error, "GLB has more than one JSON chunk");
+      }
+      json_seen = true;
+      out.json.assign(reinterpret_cast<const char*>(data + cursor),
+                      chunk_length);
+    } else if (chunk_type == kChunkBin) {
+      if (out.bin != nullptr) {
+        return fail_asset(error, "GLB has more than one BIN chunk");
+      }
+      out.bin = data + cursor;
+      out.bin_size = chunk_length;
+    } else {
+      return fail_asset(error, "GLB contains an unknown chunk type");
+    }
+    cursor += chunk_length;
+  }
+  if (!json_seen) {
+    return fail_asset(error, "GLB is missing its JSON chunk");
+  }
+  return true;
+}
+
+//! Common prologue result: the JSON text to parse (owned by the caller via
+//! `container_json` when the input was a GLB), the effective BIN payload,
+//! and whether the document may reference buffer 0 without a uri.
+struct DocumentPrologue {
+  const char* json_bytes{nullptr};
+  std::size_t json_len{0};
+  const std::uint8_t* bin_bytes{nullptr};
+  std::size_t bin_len{0};
+  bool allow_uriless_buffer0{false};
+};
+
+//! Auto-detect the container: raw JSON (starts with a non-GLB byte) or a GLB
+//! 2.0 container (magic "glTF"), whose JSON chunk replaces the input text and
+//! whose BIN chunk (if any) becomes the effective buffer-0 payload. Returns
+//! false with `error` set on malformed GLB containers. `container_json` must
+//! outlive the import (it owns the GLB JSON chunk text).
+[[nodiscard]] inline bool parse_gltf_document_prologue(
+    const char* json_bytes, std::size_t json_len,
+    const std::uint8_t* bin_bytes, std::size_t bin_len,
+    std::string& container_json, DocumentPrologue& out, std::string& error) {
+  constexpr std::uint32_t kGlbMagic = 0x46546C67U;  // "glTF"
+  if (json_bytes == nullptr || json_len < 4U) {
+    return fail_asset(error, "empty glTF document");
+  }
+  // JSON documents must start with '{'; anything else is either a GLB
+  // container (magic "glTF") or garbage worth a precise diagnostic.
+  constexpr char kJsonStart = '{';
+  std::uint32_t magic = 0;
+  std::memcpy(&magic, json_bytes, 4);
+  if (magic != kGlbMagic && json_bytes[0] == kJsonStart) {
+    out.json_bytes = json_bytes;
+    out.json_len = json_len;
+    out.bin_bytes = bin_bytes;
+    out.bin_len = bin_len;
+    out.allow_uriless_buffer0 = false;
+    return true;
+  }
+  if (magic != kGlbMagic) {
+    return fail_asset(
+        error, "input is neither a JSON glTF document (must start with '{') "
+               "nor a GLB container (magic \"glTF\")");
+  }
+  GlbContents glb{};
+  if (!parse_glb(reinterpret_cast<const std::uint8_t*>(json_bytes), json_len,
+                 glb, error)) {
+    return false;
+  }
+  container_json = std::move(glb.json);
+  out.json_bytes = container_json.data();
+  out.json_len = container_json.size();
+  out.bin_bytes = glb.bin != nullptr ? glb.bin : bin_bytes;
+  out.bin_len = glb.bin != nullptr ? glb.bin_size : bin_len;
+  out.allow_uriless_buffer0 = true;
+  return true;
+}
+
 //! Shared prologue of every glTF importer: decodes the `buffers` array
 //! (external buffer 0 is served from bin_bytes / bin_len; others must be
 //! data: URIs), the `bufferViews` array (ranges proven in-bounds, strides
@@ -685,7 +816,7 @@ inline void trs_matrix(const float* translation, const float* quaternion,
     std::size_t bin_len, std::vector<BufferSource>& sources,
     std::vector<View>& views, std::vector<AccessorInfo>& accessors,
     std::vector<std::vector<std::uint8_t>>& embedded_storage,
-    std::string& error) {
+    std::string& error, bool allow_uriless_buffer0 = false) {
   const Json* buffers = find_member(document, "buffers");
   const Json* views_json = find_member(document, "bufferViews");
   const Json* accessors_json = find_member(document, "accessors");
@@ -718,9 +849,24 @@ inline void trs_matrix(const float* translation, const float* quaternion,
     const Json* uri_member = find_member(buffer_json, "uri");
     BufferSource source{};
     if (uri_member == nullptr) {
+      // GLB containers carry buffer 0 in the BIN chunk; callers pass the
+      // BIN view as bin_bytes / bin_len and set allow_uriless_buffer0.
+      if (allow_uriless_buffer0 && i == 0U) {
+        source.data = bin_bytes;
+        source.size = bin_len;
+        if (source.size != byte_length) {
+          return fail_asset(
+              error, "GLB BIN chunk size " + std::to_string(source.size) +
+                         " does not match buffers[0].byteLength " +
+                         std::to_string(byte_length));
+        }
+        sources.push_back(source);
+        continue;
+      }
       return fail_asset(
           error, "buffers[" + std::to_string(i) +
-                     "] has no uri (GLB-style buffers are not supported)");
+                     "] has no uri (GLB-style buffers are only supported "
+                     "through the *_glb entry points)");
     }
     if (uri_member->kind != Json::Kind::String) {
       return fail_asset(error, "buffers[" + std::to_string(i) +

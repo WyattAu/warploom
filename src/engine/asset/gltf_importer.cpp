@@ -41,7 +41,15 @@ omnicpp::core::Result<GltfMeshImport> import_gltf_mesh(
     return finish(fail_asset(error, "empty glTF document"));
   }
 
-  JsonParser parser(json_bytes, json_len, error);
+  // Auto-detect the container: raw JSON or a GLB 2.0 container.
+  std::string container_json;
+  DocumentPrologue prologue;
+  if (!parse_gltf_document_prologue(json_bytes, json_len, bin_bytes, bin_len,
+                                    container_json, prologue, error)) {
+    return finish(false);
+  }
+
+  JsonParser parser(prologue.json_bytes, prologue.json_len, error);
   Json document;
   if (!parser.parse(document) || document.kind != Json::Kind::Object) {
     return finish(false);
@@ -65,9 +73,10 @@ omnicpp::core::Result<GltfMeshImport> import_gltf_mesh(
   // Owns embedded data: buffers; `sources` points into it for the whole
   // import scope, so it must live as long as the decode below.
   std::vector<std::vector<std::uint8_t>> embedded_storage;
-  if (!parse_gltf_buffers_views_accessors(document, bin_bytes, bin_len,
-                                          sources, views, accessors,
-                                          embedded_storage, error)) {
+  if (!parse_gltf_buffers_views_accessors(document, prologue.bin_bytes,
+                                          prologue.bin_len, sources, views,
+                                          accessors, embedded_storage, error,
+                                          prologue.allow_uriless_buffer0)) {
     return finish(false);
   }
 
@@ -1048,7 +1057,15 @@ omnicpp::core::Result<GltfSceneImport> import_gltf_scene(
     return finish(fail_asset(error, "empty glTF document"));
   }
 
-  JsonParser parser(json_bytes, json_len, error);
+  // Auto-detect the container: raw JSON or a GLB 2.0 container.
+  std::string container_json;
+  DocumentPrologue prologue;
+  if (!parse_gltf_document_prologue(json_bytes, json_len, bin_bytes, bin_len,
+                                    container_json, prologue, error)) {
+    return finish(false);
+  }
+
+  JsonParser parser(prologue.json_bytes, prologue.json_len, error);
   Json document;
   if (!parser.parse(document) || document.kind != Json::Kind::Object) {
     return finish(false);
