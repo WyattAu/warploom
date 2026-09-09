@@ -1,0 +1,22 @@
+{
+  "name": "cesiumman_real_asset",
+  "model": "cesiumman",
+  "frames": 300,
+  "fixed_dt": 0.01666667,
+  "capture_every": 100,
+  "capture_limit": 3,
+  "input_script": [
+    {"tick": 20, "action": "zoom_in", "value": 1.0},
+    {"tick": 70, "action": "zoom_in", "value": 0.0}
+  ],
+  "expect": {
+    "skinned": true,
+    "walk_duration": 2.0,
+    "responses": [
+      {"kind": "input_consumed", "tick": 20, "action": "zoom_in", "value": 1.0},
+      {"kind": "radius_decreases_during", "action": "zoom_in",
+       "from_tick": 20, "to_tick": 70, "min_delta": 0.5}
+    ]
+  },
+  "determinism": false
+}

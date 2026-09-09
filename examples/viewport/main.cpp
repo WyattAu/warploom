@@ -26,6 +26,7 @@
 
 #include "engine/asset/gltf_animation.hpp"
 #include "engine/asset/gltf_importer.hpp"
+#include "engine/core/input_state.hpp"
 #include "engine/render/vulkan_context.hpp"
 #include "engine/render/vulkan_descriptors.hpp"
 #include "engine/render/vulkan_memory_allocator.hpp"
@@ -191,6 +192,21 @@ struct ViewportApp {
   //! Largest joint swing of the last recorded pose (telemetry pose line).
   std::string last_swing_joint;
   float last_swing_deg{0.0f};
+
+  // Input: virtual driver replays OMNICPP_INPUT_SCRIPT (JSONL by tick);
+  // the camera and cross-fade consume actions/axes so scripted runs and
+  // human play are indistinguishable downstream.
+  omnicpp::core::InputState input;
+  omnicpp::core::VirtualInputDriver virtual_input;
+  bool input_scripted{false};
+  //! Camera response accumulators driven by input actions.
+  float camera_orbit_bias{0.0f};   //!< extra rad/s from orbit_left/right
+  float camera_radius_bias{0.0f};  //!< zoom accumulator
+  //! Input-driven cross-fade: fade_toggle flips the target, current eases
+  //! toward it each frame. Nonzero target/current puts the recorder in
+  //! input-fade mode (overriding the periodic cross-fade demo).
+  float fade_target{0.0f};
+  float fade_current{0.0f};
   std::chrono::steady_clock::time_point frame_started{};
   double fps_smoothed{0.0};
 
@@ -332,7 +348,12 @@ bool setup_mannequin(ViewportApp& app) {
   std::vector<char> bin_bytes;
   bool loaded = false;
   for (const auto& dir : candidates) {
-    const std::string model_path = dir + "/" + model + ".gltf";
+    // An absolute model path is used verbatim; a bare name/subdirectory is
+    // resolved against each candidate asset directory in turn.
+    const std::string model_path =
+        (model.size() > 0 && model[0] == '/')
+            ? model + ".gltf"
+            : dir + "/" + model + ".gltf";
     std::vector<char> json_bytes;
     if (!read_file_bytes(model_path, json, json_bytes)) {
       continue;
@@ -782,14 +803,21 @@ bool setup_scene(ViewportApp& app) {
 bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
                        float t, float walk_t, std::uint32_t width,
                        std::uint32_t height) {
-  const float orbit_radius = std::isnan(app.run_config.camera_radius)
-                                 ? (app.has_mannequin ? 3.2f : 6.5f)
-                                 : app.run_config.camera_radius;
+  const float orbit_base = std::isnan(app.run_config.camera_radius)
+                               ? (app.has_mannequin ? 3.2f : 6.5f)
+                               : app.run_config.camera_radius;
   const float height_default = std::isnan(app.run_config.camera_height)
                                    ? (app.has_mannequin ? 1.6f : 3.2f)
                                    : app.run_config.camera_height;
-  const float eye[3] = {orbit_radius * std::cos(t * 0.25f), height_default,
-                        orbit_radius * std::sin(t * 0.25f)};
+  // Scripted/human input adjusts the camera: orbit_left/right add angular
+  // bias, zoom_in/out change radius at 1.5 units/s. Pure function of state
+  // so the capture path sees the same camera.
+  const float orbit_angle =
+      t * 0.25f + app.camera_orbit_bias * t;
+  const float orbit_radius =
+      std::min(std::max(orbit_base + app.camera_radius_bias, 1.2f), 12.0f);
+  const float eye[3] = {orbit_radius * std::cos(orbit_angle), height_default,
+                        orbit_radius * std::sin(orbit_angle)};
   const float target[3] = {0.0f, app.has_mannequin ? 0.9f : 0.8f, 0.0f};
   const float up[3] = {0.0f, 1.0f, 0.0f};
   app.scene.camera.view_projection = omnicpp::render::scene_camera_view_projection(
@@ -812,8 +840,37 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     // Walking mannequin at the origin: skinned pipeline, pose sampled from
     // the walk cycle (optionally cross-faded to idle), bones uploaded before
     // recording.
-    if (app.run_config.crossfade_period > 0.0f &&
-        app.mannequin.animations.size() >= 2U) {
+    //
+    // Blend selection: the scripted "fade_toggle" action takes priority once
+    // engaged (target or current nonzero). Otherwise the time-driven
+    // walk<->idle demo cycle runs when configured.
+    const bool input_fade =
+        app.fade_target != 0.0f || app.fade_current != 0.0f;
+    if (input_fade) {
+      // Ease the current weight toward the target (2.5/s -> ~0.4 s fade).
+      const float step = 2.5f * app.run_config.fixed_dt;
+      if (app.fade_current < app.fade_target) {
+        app.fade_current =
+            std::min(app.fade_current + step, app.fade_target);
+      } else if (app.fade_current > app.fade_target) {
+        app.fade_current =
+            std::max(app.fade_current - step, app.fade_target);
+      }
+      app.last_idle_weight = app.fade_current;
+      const bool idle_dominates = app.fade_current > 0.5f;
+      const float prev_walk = app.walk_time;
+      update_mannequin_pose(app, walk_t);
+      if (app.fade_current > 0.0f) {
+        // Blend the idle clip over the walk pose by the current weight.
+        std::vector<omnicpp::asset::GltfSkinNode> pose = app.mannequin.nodes;
+        omnicpp::asset::sample_clip_blended(
+            app.mannequin, app.mannequin.animations[1], walk_t,
+            app.fade_current, pose);
+        app.mannequin.nodes = pose;
+      }
+      if (idle_dominates) app.walk_time = prev_walk;  // pause walk clock
+    } else if (app.run_config.crossfade_period > 0.0f &&
+               app.mannequin.animations.size() >= 2U) {
       // walk <-> idle cycle: fade out over the first half, back over the
       // second. The walk clock pauses while idle dominates (feet planted).
       const float period = app.run_config.crossfade_period;
@@ -1037,6 +1094,19 @@ bool ViewportApp::initialize() {
       }
     }
   }
+  if (const char* script = std::getenv("OMNICPP_INPUT_SCRIPT")) {
+    std::string script_error;
+    if (virtual_input.load_script(script, script_error)) {
+      input_scripted = true;
+      if (telemetry_enabled) {
+        telemetry.log_event("input_script", script);
+      }
+    } else {
+      std::fprintf(stderr, "viewport: input script rejected: %s\n",
+                   script_error.c_str());
+      return false;
+    }
+  }
   if (run_config.capture_every != 0U) {
     const VkFormat depth_format =
         omnicpp::render::VulkanRenderPass::find_supported_depth_format(
@@ -1073,6 +1143,41 @@ void ViewportApp::run() {
     if (!renderer.end_frame().is_ok()) {
       std::fprintf(stderr, "viewport: frame presentation failed\n");
       break;
+    }
+
+    // Input tick: poll drivers (virtual script when present), let the
+    // camera respond, and log consumed events for auditability.
+    input.begin_tick();
+    if (input_scripted) virtual_input.poll(input);
+    input.clamp_axes();
+    input.commit_tick();
+    // Response: orbit_left/right (actions) and zoom_in/out (actions) move
+    // the camera; move_x/move_y axes are logged for downstream consumers.
+    if (input.action("orbit_left")) camera_orbit_bias -= 0.02f;
+    if (input.action("orbit_right")) camera_orbit_bias += 0.02f;
+    if (input.action("zoom_in")) camera_radius_bias -= 1.5f * run_config.fixed_dt;
+    if (input.action("zoom_out")) camera_radius_bias += 1.5f * run_config.fixed_dt;
+    if (input.action_pressed("fade_toggle")) {
+      fade_target = fade_target > 0.5f ? 0.0f : 1.0f;
+      if (telemetry_enabled) {
+        telemetry.log_input(frame_index, "virtual", "fade_toggle",
+                            fade_target);
+      }
+    }
+    camera_radius_bias =
+        std::min(std::max(camera_radius_bias, -3.0f), 4.0f);
+    if (telemetry_enabled) {
+      for (const char* action : {"orbit_left", "orbit_right", "zoom_in",
+                                 "zoom_out"}) {
+        if (input.action(action)) {
+          telemetry.log_input(frame_index, "virtual", action, 1.0f);
+        }
+      }
+      if (std::abs(input.axis("move_x")) > 1e-4f ||
+          std::abs(input.axis("move_y")) > 1e-4f) {
+        telemetry.log_input(frame_index, "virtual", "move",
+                            input.axis("move_x"));
+      }
     }
 
     // GPU-side capture: re-record the exact scene just displayed into the

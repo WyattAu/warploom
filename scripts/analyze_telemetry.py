@@ -77,7 +77,7 @@ def read_depth32(path, expected_count):
 
 
 def analyze(manifest, frames, events, telemetry_dir, expect_skinned,
-            walk_duration=1.0):
+            walk_duration=1.0, allow_zoom=False):
     print("== Manifest ==")
     check(manifest is not None, "manifest line present")
     if manifest is None:
@@ -116,8 +116,14 @@ def analyze(manifest, frames, events, telemetry_dir, expect_skinned,
     eyes = [f["eye"] for f in frames]
     radii = [math.hypot(e[0], e[2]) for e in eyes]
     radius_span = max(radii) - min(radii)
-    check(radius_span < 1e-2, "orbit radius constant over the run",
-          f"span {radius_span:.4f}")
+    if allow_zoom:
+        # Scripted zoom responses intentionally move the camera radius; only
+        # require that it stays a plausible orbit distance.
+        check(min(radii) > 0.5, "orbit radius stays plausible under zoom",
+              f"min {min(radii):.3f}")
+    else:
+        check(radius_span < 1e-2, "orbit radius constant over the run",
+              f"span {radius_span:.4f}")
     angles = [math.atan2(e[2], e[0]) for e in eyes]
     unwrapped = []
     for a in angles:
@@ -225,6 +231,8 @@ def main():
                         help="assert the mannequin scene ran")
     parser.add_argument("--walk-duration", type=float, default=1.0,
                         help="walk-cycle duration of the loaded model")
+    parser.add_argument("--allow-zoom", action="store_true",
+                        help="scripted zoom changes camera radius by design")
     args = parser.parse_args()
 
     (manifest, frames, events, telemetry_dir, scene_objects, skeleton,
@@ -233,7 +241,7 @@ def main():
         print("no frame records found")
         return 2
     analyze(manifest, frames, events, telemetry_dir, args.expect_skinned,
-            args.walk_duration)
+            args.walk_duration, args.allow_zoom)
 
     # Scene-structure assertions (Phase B1 data).
     print("== Scene structure ==")

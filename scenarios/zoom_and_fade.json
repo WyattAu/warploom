@@ -1,0 +1,32 @@
+{
+  "name": "zoom_and_fade",
+  "model": "mannequin",
+  "frames": 420,
+  "fixed_dt": 0.01666667,
+  "capture_every": 105,
+  "capture_limit": 4,
+  "input_script": [
+    {"tick": 30,  "action": "zoom_in",     "value": 1.0},
+    {"tick": 90,  "action": "zoom_in",     "value": 0.0},
+    {"tick": 120, "action": "fade_toggle", "value": 1.0},
+    {"tick": 126, "action": "fade_toggle", "value": 0.0},
+    {"tick": 240, "action": "fade_toggle", "value": 1.0},
+    {"tick": 246, "action": "fade_toggle", "value": 0.0}
+  ],
+  "expect": {
+    "skinned": true,
+    "walk_duration": 1.0,
+    "responses": [
+      {"kind": "input_consumed", "tick": 30,  "action": "zoom_in",     "value": 1.0},
+      {"kind": "input_consumed", "tick": 120, "action": "fade_toggle", "value": 1.0},
+      {"kind": "input_consumed", "tick": 240, "action": "fade_toggle", "value": 0.0},
+      {"kind": "radius_decreases_during", "action": "zoom_in",
+       "from_tick": 30, "to_tick": 90, "min_delta": 0.5},
+      {"kind": "blend_reaches", "after_tick": 120, "within_ticks": 40,
+       "target": 1.0, "tolerance": 0.01},
+      {"kind": "blend_reaches", "after_tick": 240, "within_ticks": 40,
+       "target": 0.0, "tolerance": 0.01}
+    ]
+  },
+  "determinism": true
+}
