@@ -541,6 +541,7 @@ add_executable(omnicpp_unit_tests
     unit/test_scene_camera.cpp
     unit/test_scene_resources.cpp
     unit/test_gltf_importer.cpp
+    unit/test_gltf_animation.cpp
     unit/test_gltf_scene.cpp
     unit/test_pbr_scene.cpp
     unit/test_pbr_ibl.cpp
@@ -563,7 +564,8 @@ target_include_directories(omnicpp_unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/includ
 if(TARGET omnicpp_test_shaders)
     add_dependencies(omnicpp_unit_tests omnicpp_test_shaders)
     target_compile_definitions(omnicpp_unit_tests PRIVATE
-        OMNICPP_TEST_SHADER_DIR=\"${OMNICPP_SHADER_DIR}\")
+        OMNICPP_TEST_SHADER_DIR=\"${OMNICPP_SHADER_DIR}\"
+        OMNICPP_TEST_ASSET_DIR=\"${CMAKE_SOURCE_DIR}/assets/models\")
 endif()
 
 add_executable(omnicpp_runtime_only_tests
