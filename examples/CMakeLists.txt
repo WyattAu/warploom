@@ -17,8 +17,9 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Simple Game Example
-add_subdirectory(simple_game)
+# Simple Game Example (requires the archived legacy engine headers; it was
+# already broken before the viewport work and cannot build in this tree)
+# add_subdirectory(simple_game)
 
 # Pong Game Example (Vulkan rendering; requires Qt6 + quill)
 if(Qt6_FOUND AND quill_FOUND)
