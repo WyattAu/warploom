@@ -83,6 +83,14 @@ public:
   //! True when descriptor indexing (bindless: runtime arrays, partially bound,
   //! update-after-bind) was negotiated and enabled on the device.
   [[nodiscard]] bool has_descriptor_indexing() const noexcept { return descriptor_indexing_enabled_; }
+  //! True when the RT extensions (VK_KHR_acceleration_structure,
+  //! VK_KHR_ray_query, VK_KHR_deferred_host_operations) and the
+  //! accelerationStructure + rayQuery device features were all negotiated
+  //! and enabled. Gates every ray-tracing code path.
+  [[nodiscard]] bool has_ray_tracing() const noexcept { return ray_tracing_enabled_; }
+  //! scratch/AS size limits from the RT properties (0 when absent).
+  [[nodiscard]] std::uint64_t max_ray_tracing_scratch() const noexcept { return as_properties_.maxGeometryCount > 0U ? 1U : 0U; }
+  [[nodiscard]] std::uint64_t max_acceleration_structure_geometry_count() const noexcept { return as_properties_.maxGeometryCount; }
   [[nodiscard]] std::uint32_t validation_warning_count() const noexcept {
     return validation_warning_count_.load(std::memory_order_relaxed);
   }
@@ -108,6 +116,21 @@ private:
   bool synchronization2_enabled_{false};
   bool timeline_semaphores_enabled_{false};
   bool descriptor_indexing_enabled_{false};
+  bool ray_tracing_enabled_{false};
+#if defined(OMNICPP_HAS_VULKAN)
+  VkPhysicalDeviceAccelerationStructurePropertiesKHR as_properties_{};
+  //! Feature-struct members for the negotiation chain (RT-capable devices).
+  VkPhysicalDeviceAccelerationStructureFeaturesKHR as_features_{};
+  VkPhysicalDeviceRayQueryFeaturesKHR ray_query_features_{};
+#endif
+  //! Probes RT extension + feature availability on `device` (no enabling).
+  static bool device_supports_ray_tracing(VkPhysicalDevice device);
+
+#if !defined(OMNICPP_HAS_VULKAN)
+  //! Opaque stand-ins keep the header compiling without Vulkan (the members
+  //! above are compiled out; the negotiation code is entirely #ifdef'd).
+  struct VkPhysicalDeviceAccelerationStructurePropertiesKHR {};
+#endif
   VkInstance instance_{nullptr};
   VkPhysicalDevice physical_device_{nullptr};
   VkDevice device_{nullptr};

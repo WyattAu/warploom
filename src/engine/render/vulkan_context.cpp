@@ -184,16 +184,30 @@ omnicpp::core::Result<void> VulkanContext::initialize(
   vulkan12_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
   VkPhysicalDeviceVulkan11Features vulkan11_features{};
   vulkan11_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+  // RT structs join the PROBE chain (tail) whenever the device has the RT
+  // extensions, so one vkGetPhysicalDeviceFeatures2 call fills them in.
+  const bool rt_extensions_present =
+      is_vulkan12 && device_supports_ray_tracing(physical_device_);
+  if (rt_extensions_present) {
+    as_features_.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    ray_query_features_.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+  }
   if (is_vulkan13 || is_vulkan12) {
     VkPhysicalDeviceFeatures2 features2{};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     features2.features = device_features;
-    // Chain: features2 -> 1.3 -> 1.2 -> 1.1.
+    // Chain: features2 -> 1.3 -> 1.2 -> 1.1 -> [AS -> rayQuery].
     if (is_vulkan13) {
       features2.pNext = &vulkan13_features;
       if (is_vulkan12) {
         vulkan13_features.pNext = &vulkan12_features;
         vulkan12_features.pNext = &vulkan11_features;
+        if (rt_extensions_present) {
+          vulkan11_features.pNext = &as_features_;
+          as_features_.pNext = &ray_query_features_;
+        }
       }
     }
     vkGetPhysicalDeviceFeatures2(physical_device_, &features2);
@@ -205,6 +219,30 @@ omnicpp::core::Result<void> VulkanContext::initialize(
     synchronization2_enabled_ = vulkan13_features.synchronization2 == VK_TRUE;
     if (synchronization2_enabled_) {
       device_extensions.push_back(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+    }
+  }
+  // Ray tracing negotiation: the probe above filled the feature structs;
+  // enable the extensions only when both features are supported.
+  ray_tracing_enabled_ = false;
+  if (rt_extensions_present) {
+    as_properties_.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
+    VkPhysicalDeviceProperties2 props2{};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = &as_properties_;
+    vkGetPhysicalDeviceProperties2(physical_device_, &props2);
+    ray_tracing_enabled_ =
+        as_features_.accelerationStructure == VK_TRUE &&
+        ray_query_features_.rayQuery == VK_TRUE &&
+        as_properties_.maxGeometryCount > 0U;
+    if (ray_tracing_enabled_) {
+      as_features_.accelerationStructure = VK_TRUE;
+      ray_query_features_.rayQuery = VK_TRUE;
+      device_extensions.push_back(
+          VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+      device_extensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+      device_extensions.push_back(
+          VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
     }
   }
   if (is_vulkan12) {
@@ -242,6 +280,13 @@ omnicpp::core::Result<void> VulkanContext::initialize(
     }
   }
   // Enable the negotiated feature structs on the device.
+  if (ray_tracing_enabled_) {
+    ray_query_features_.pNext = features_chain;
+    features_chain = reinterpret_cast<VkBaseOutStructure*>(&ray_query_features_);
+    as_features_.pNext = nullptr;  // chain: as_features -> ray_query -> rest
+    ray_query_features_.pNext = features_chain;
+    features_chain = reinterpret_cast<VkBaseOutStructure*>(&as_features_);
+  }
   if (synchronization2_enabled_) {
     vulkan13_features.pNext = features_chain;
     features_chain = reinterpret_cast<VkBaseOutStructure*>(&vulkan13_features);
@@ -540,6 +585,40 @@ void VulkanContext::record_validation_message(std::uint32_t severity,
   (void)severity;
   (void)type;
   (void)message;
+#endif
+}
+
+bool VulkanContext::device_supports_ray_tracing(VkPhysicalDevice device) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!device) return false;
+  std::uint32_t extension_count = 0;
+  if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count,
+                                           nullptr) != VK_SUCCESS) {
+    return false;
+  }
+  std::vector<VkExtensionProperties> available(extension_count);
+  if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count,
+                                           available.data()) != VK_SUCCESS) {
+    return false;
+  }
+  int found = 0;
+  for (const auto& extension : available) {
+    if (std::strcmp(extension.extensionName,
+                    VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) == 0) {
+      found |= 1;
+    } else if (std::strcmp(extension.extensionName,
+                           VK_KHR_RAY_QUERY_EXTENSION_NAME) == 0) {
+      found |= 2;
+    } else if (std::strcmp(extension.extensionName,
+                           VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) ==
+               0) {
+      found |= 4;
+    }
+  }
+  return found == 7;
+#else
+  (void)device;
+  return false;
 #endif
 }
 
