@@ -38,6 +38,7 @@
 #include <cstring>
 #include <functional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <vulkan/vulkan.h>
@@ -163,6 +164,86 @@ class TelemetryLogger {
     std::fprintf(file_, "{\"type\":\"event\",\"event\":\"%s\",\"detail\":"
                         "\"%s\"}\n",
                  sanitize(event).c_str(), sanitize(detail).c_str());
+  }
+
+  //! One line per input event consumed this frame (virtual or real driver):
+  //! the tick it applies to, the action/axis, and the value. Input flows are
+  //! thus auditable alongside the scene state they moved.
+  void log_input(std::uint64_t tick, const std::string& source,
+                 const std::string& action, float value) {
+    if (file_ == nullptr) return;
+    std::fprintf(file_,
+                 "{\"type\":\"input\",\"tick\":%llu,\"source\":\"%s\","
+                 "\"action\":\"%s\",\"value\":%.4f}\n",
+                 static_cast<unsigned long long>(tick), sanitize(source).c_str(),
+                 sanitize(action).c_str(), static_cast<double>(value));
+  }
+
+  //! Static scene manifest, written once after the manifest line: every
+  //! renderable object with its role, the skeleton, and the animation clips.
+  //! This is the machine-readable "scenery" — structure, not samples.
+  void log_scene_objects(
+      const std::vector<std::tuple<std::string, std::size_t, std::size_t>>&
+          objects) {
+    if (file_ == nullptr) return;
+    std::fputs("{\"type\":\"scene_objects\",\"objects\":[", file_);
+    for (std::size_t i = 0; i < objects.size(); ++i) {
+      std::fprintf(file_,
+                   "%s{\"name\":\"%s\",\"mesh_index\":%zu,"
+                   "\"material_index\":%zu}",
+                   i != 0U ? "," : "", std::get<0>(objects[i]).c_str(),
+                   std::get<1>(objects[i]), std::get<2>(objects[i]));
+    }
+    std::fputs("]}\n", file_);
+  }
+
+  void log_scene_skeleton(std::size_t joint_count,
+                          const std::vector<std::string>& joint_names) {
+    if (file_ == nullptr) return;
+    std::fprintf(file_, "{\"type\":\"scene_skeleton\",\"joint_count\":%zu,"
+                        "\"joints\":[",
+                 joint_count);
+    for (std::size_t i = 0; i < joint_names.size(); ++i) {
+      std::fprintf(file_, "%s\"%s\"", i != 0U ? "," : "",
+                   sanitize(joint_names[i]).c_str());
+    }
+    std::fputs("]}\n", file_);
+  }
+
+  void log_scene_clips(
+      const std::vector<std::tuple<std::string, float, std::size_t>>& clips) {
+    if (file_ == nullptr) return;
+    std::fputs("{\"type\":\"scene_clips\",\"clips\":[", file_);
+    for (std::size_t i = 0; i < clips.size(); ++i) {
+      std::fprintf(file_,
+                   "%s{\"name\":\"%s\",\"duration\":%.4f,"
+                   "\"channel_count\":%zu}",
+                   i != 0U ? "," : "", std::get<0>(clips[i]).c_str(),
+                   static_cast<double>(std::get<1>(clips[i])),
+                   std::get<2>(clips[i]));
+    }
+    std::fputs("]}\n", file_);
+  }
+
+  //! Per-frame pose summary: root translation + the joint with the largest
+  //! swing, plus engine memory stats. Bounded size regardless of skeleton.
+  void log_pose(float root_x, float root_y, float root_z,
+                const std::string& swing_joint, float swing_deg,
+                std::uint64_t allocator_used, std::uint64_t allocator_reserved,
+                std::uint32_t allocations, float walk_phase, float blend) {
+    if (file_ == nullptr) return;
+    std::fprintf(file_,
+                 "{\"type\":\"pose\",\"root\":[%.4f,%.4f,%.4f],"
+                 "\"swing_joint\":\"%s\",\"swing_deg\":%.2f,"
+                 "\"allocator_used\":%llu,\"allocator_reserved\":%llu,"
+                 "\"allocations\":%u,\"walk_phase\":%.4f,\"blend\":%.4f}\n",
+                 static_cast<double>(root_x), static_cast<double>(root_y),
+                 static_cast<double>(root_z), sanitize(swing_joint).c_str(),
+                 static_cast<double>(swing_deg),
+                 static_cast<unsigned long long>(allocator_used),
+                 static_cast<unsigned long long>(allocator_reserved),
+                 allocations, static_cast<double>(walk_phase),
+                 static_cast<double>(blend));
   }
 
   void flush() {

@@ -33,19 +33,33 @@ def load_run(telemetry_dir):
     telemetry_dir = Path(telemetry_dir)
     log_path = telemetry_dir / "telemetry.jsonl"
     manifest, frames, events = None, [], []
+    scene_objects, skeleton, clips = None, None, None
+    poses, inputs = [], []
     with open(log_path, encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
             if not line:
                 continue
             record = json.loads(line)
-            if record["type"] == "manifest":
+            kind = record["type"]
+            if kind == "manifest":
                 manifest = record
-            elif record["type"] == "frame":
+            elif kind == "frame":
                 frames.append(record)
-            elif record["type"] == "event":
+            elif kind == "event":
                 events.append(record)
-    return manifest, frames, events, telemetry_dir
+            elif kind == "scene_objects":
+                scene_objects = record
+            elif kind == "scene_skeleton":
+                skeleton = record
+            elif kind == "scene_clips":
+                clips = record
+            elif kind == "pose":
+                poses.append(record)
+            elif kind == "input":
+                inputs.append(record)
+    return (manifest, frames, events, telemetry_dir, scene_objects,
+            skeleton, clips, poses, inputs)
 
 
 def read_ppm(path):
@@ -213,12 +227,46 @@ def main():
                         help="walk-cycle duration of the loaded model")
     args = parser.parse_args()
 
-    manifest, frames, events, telemetry_dir = load_run(args.telemetry_dir)
+    (manifest, frames, events, telemetry_dir, scene_objects, skeleton,
+     clips, poses, inputs) = load_run(args.telemetry_dir)
     if not frames:
         print("no frame records found")
         return 2
     analyze(manifest, frames, events, telemetry_dir, args.expect_skinned,
             args.walk_duration)
+
+    # Scene-structure assertions (Phase B1 data).
+    print("== Scene structure ==")
+    check(scene_objects is not None, "scene_objects manifest present")
+    check(bool(scene_objects and scene_objects["objects"]),
+          "scene lists at least one object")
+    if manifest and manifest["has_mannequin"]:
+        check(skeleton is not None, "skeleton manifest present")
+        check(bool(skeleton and skeleton["joints"]), "skeleton names joints")
+        check(bool(clips and clips["clips"]), "animation clips listed")
+        check(poses is not None and len(poses) == len(frames),
+              "one pose line per frame",
+              f"{len(poses)} poses vs {len(frames)} frames")
+        if poses:
+            # Walk-phase consistency between frame and pose records.
+            mismatched = sum(
+                1 for f, p in zip(frames, poses)
+                if abs(f["walk_t"] - p["walk_phase"]) > 1e-4)
+            check(mismatched == 0, "pose walk_phase matches frame walk_t",
+                  f"{mismatched} mismatches")
+            # The largest swing joint is named once the pose moves (the
+            # bind pose has zero deviation, so early frames may be empty).
+            check(any(p["swing_joint"] for p in poses),
+                  "pose lines name a swing joint after warm-up")
+            check(sum(1 for p in poses if p["swing_joint"]) >=
+                  len(poses) // 2,
+                  "a majority of pose lines name a swing joint")
+            degs = [p["swing_deg"] for p in poses]
+            check(max(degs) > 1.0, "swing angle moves during the run",
+                  f"max {max(degs):.1f} deg")
+            # Allocator stats are stable and nonzero.
+            check(all(p["allocator_reserved"] > 0 for p in poses),
+                  "allocator telemetry populated")
 
     print(f"\n{CHECKS_PASSED} passed, {CHECKS_FAILED} failed")
     return 1 if CHECKS_FAILED else 0

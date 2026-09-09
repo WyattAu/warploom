@@ -188,6 +188,9 @@ struct ViewportApp {
   double last_record_us{0.0};
   //! Idle-clip weight used by the last recorded pose (telemetry).
   float last_idle_weight{0.0f};
+  //! Largest joint swing of the last recorded pose (telemetry pose line).
+  std::string last_swing_joint;
+  float last_swing_deg{0.0f};
   std::chrono::steady_clock::time_point frame_started{};
   double fps_smoothed{0.0};
 
@@ -564,10 +567,27 @@ void update_mannequin_pose(ViewportApp& app, float time) {
 
   // Joint matrices: global * inverse bind, in joint order.
   auto* bones = static_cast<SceneMatrix*>(app.bone_allocation.mapped);
+  std::size_t swing_index = 0;
+  float swing_max = -1.0f;
   for (std::size_t j = 0; j < skin.joints.size(); ++j) {
     const SceneMatrix& g = globals[skin.joints[j]];
     const SceneMatrix& ibm = skin.inverse_bind_matrices[j];
     bones[j] = multiply(g, ibm);
+    // Telemetry: track the joint with the largest rotation away from its
+    // bind pose (the trace of the rotation part drops to cos(2*theta) as a
+    // joint rotates by theta). Root translations don't count.
+    const float trace = g[0] + g[5] + g[10];
+    const float deviation = (3.0f - trace) * 0.5f;  // 0..2, rad^2-ish
+    if (deviation > swing_max) {
+      swing_max = deviation;
+      swing_index = j;
+    }
+  }
+  if (swing_max > 0.0f && skin.joints.size() > swing_index) {
+    app.last_swing_joint = app.mannequin.nodes[skin.joints[swing_index]].name;
+    app.last_swing_deg = std::acos(std::min(
+                        std::max((swing_max - 1.0f) * -1.0f, -1.0f), 1.0f)) *
+                        57.2958f;
   }
 }
 
@@ -981,6 +1001,41 @@ bool ViewportApp::initialize() {
     } else {
       telemetry.log_event("init", context.device_properties().name);
     }
+
+    // ----------------------------------------------------------------------
+    // Static scene manifest: readable structure of everything on screen.
+    // ----------------------------------------------------------------------
+    if (telemetry_enabled) {
+      std::vector<std::tuple<std::string, std::size_t, std::size_t>> objects;
+      objects.emplace_back("ground", 1U, 2U);
+      if (has_mannequin) {
+        for (std::size_t i = 0; i < mannequin_meshes.size(); ++i) {
+          objects.emplace_back("figure_part_" + std::to_string(i),
+                               2U + i, 3U);
+        }
+      } else {
+        objects.emplace_back("spinner_cube", 0U, 0U);
+        objects.emplace_back("rough_cube", 0U, 1U);
+      }
+      telemetry.log_scene_objects(objects);
+
+      if (has_mannequin) {
+        const auto& skin = mannequin.skins[0];
+        std::vector<std::string> joint_names;
+        joint_names.reserve(skin.joints.size());
+        for (const std::size_t joint : skin.joints) {
+          joint_names.push_back(mannequin.nodes[joint].name);
+        }
+        telemetry.log_scene_skeleton(skin.joints.size(), joint_names);
+
+        std::vector<std::tuple<std::string, float, std::size_t>> clips;
+        clips.reserve(mannequin.animations.size());
+        for (const auto& clip : mannequin.animations) {
+          clips.emplace_back(clip.name, clip.duration, clip.channels.size());
+        }
+        telemetry.log_scene_clips(clips);
+      }
+    }
   }
   if (run_config.capture_every != 0U) {
     const VkFormat depth_format =
@@ -1065,6 +1120,18 @@ void ViewportApp::run() {
           scene.camera_position[2], scene.objects.size(), drawn, skinned,
           last_record_us, total_us, static_cast<float>(fps_smoothed),
           capture_name, last_idle_weight);
+
+      // Pose summary + engine memory stats (bounded size, every frame).
+      if (has_mannequin) {
+        const auto& root_node = mannequin.nodes[0];
+        const auto stats_now = allocator.stats();
+        telemetry.log_pose(
+            root_node.translation[0], root_node.translation[1],
+            root_node.translation[2], last_swing_joint, last_swing_deg,
+            stats_now.used_bytes, stats_now.reserved_bytes,
+            stats_now.allocation_count, last_recorded_walk,
+            last_idle_weight);
+      }
       if (run_config.max_frames != 0U &&
           frame_index + 1U >= run_config.max_frames) {
         telemetry.log_event("exit", "max_frames reached");
