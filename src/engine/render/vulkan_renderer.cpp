@@ -908,7 +908,21 @@ omnicpp::core::Result<void> VulkanRenderer::record_commands(
   scissor.extent = {width, height};
   vkCmdSetScissor(cb, 0, 1, &scissor);
 
-  if (pipeline_) {
+  if (scene_record_callback_) {
+    // Application-owned scene path: the callback records whatever it owns
+    // (PBR scene, GPU-driven frame, post chains) inside this render pass.
+    if (!scene_record_callback_(cb, width, height, scene_record_user_data_)) {
+      vkCmdEndRenderPass(cb);
+      (void)vkEndCommandBuffer(cb);
+      if (pending_hiz_frame_) {
+        hiz_state_.discard_frame(pending_hiz_token_);
+        pending_hiz_frame_ = false;
+      }
+      return omnicpp::core::Result<void>::error(
+          omnicpp::core::RuntimeError::invalid_config);
+    }
+  } else if (pipeline_) {
+    // Built-in demo: three-vertex triangle (no scene callback installed).
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
     vkCmdDraw(cb, 3, 1, 0, 0);
   }

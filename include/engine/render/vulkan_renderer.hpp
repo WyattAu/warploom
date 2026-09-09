@@ -316,6 +316,21 @@ public:
   //! The pipeline must outlive any command buffer recorded with it.
   void set_pipeline(VkPipeline pipeline) noexcept { pipeline_ = pipeline; }
 
+  //! Application-owned scene recorder invoked by record_commands() INSIDE
+  //! the render pass (after viewport/scissor), replacing the built-in
+  //! three-vertex demo draw. This is the windowed-app frame hook: install it
+  //! with a callback that calls record_pbr_scene / record_pbr_frame_gpu_
+  //! driven / record_fullscreen_draw etc. When null, record_commands keeps
+  //! the built-in demo draw. The callback returns false to fail the frame.
+  using SceneRecordCallback = bool (*)(VkCommandBuffer command_buffer,
+                                       std::uint32_t width,
+                                       std::uint32_t height, void* user_data);
+  void set_scene_record_callback(SceneRecordCallback callback,
+                                 void* user_data = nullptr) noexcept {
+    scene_record_callback_ = callback;
+    scene_record_user_data_ = user_data;
+  }
+
   //! Install the application-owned H-Z recorder used after the depth pass.
   void set_hiz_record_callback(HiZRecordCallback callback, void* user_data = nullptr) noexcept {
     hiz_record_callback_ = callback;
@@ -391,6 +406,8 @@ private:
   VkRenderPass render_pass_{VK_NULL_HANDLE};
   VkPipelineLayout pipeline_layout_{VK_NULL_HANDLE};
   VkPipeline pipeline_{VK_NULL_HANDLE};
+  SceneRecordCallback scene_record_callback_{nullptr};
+  void* scene_record_user_data_{nullptr};
   const VulkanSwapchain* swapchain_{nullptr};
   const VulkanRenderPass* render_pass_resource_{nullptr};
   std::vector<FrameResources> frames_;
