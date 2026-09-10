@@ -32,6 +32,8 @@ add_library(omnicpp_runtime SHARED
     render/vulkan_render_graph.cpp
     render/vulkan_compute.cpp
     render/vulkan_hiz_pyramid.cpp
+    render/vulkan_acceleration_structure.cpp
+    render/vulkan_rt_query.cpp
     render/vulkan_parallel_recorder.cpp
 )
 set_target_properties(omnicpp_runtime PROPERTIES OUTPUT_NAME omnicpp_runtime)

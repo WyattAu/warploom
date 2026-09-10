@@ -1,0 +1,59 @@
+#version 460
+
+// ray_query_first.comp — first-contact proof for the acceleration-structure
+// builders. One invocation per pixel of an 8x8 virtual image (64 total).
+// Each ray marches along +Z from z=-4 through two box BLASes arranged as
+// TLAS instances (A: identity, custom 10; B: rotated 90 deg about Y and
+// translated x=+0.6, custom 20). A hit writes (0xFF, instanceCustomIndex+1,
+// 0xFF, 0xFF); a miss writes 0. The CPU asserts exact per-column/per-row
+// expectations, proving BLAS contents, TLAS placement, the instance
+// rotation, and per-instance custom indices in one shot.
+
+#extension GL_EXT_ray_query : require
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform accelerationStructureEXT scene_as;
+layout(set = 0, binding = 1, std430) writeonly buffer Results {
+  uvec4 pixels[];
+};
+
+layout(push_constant, std430) uniform Push {
+  uint width;
+  uint height;
+} push;
+
+void main() {
+  const uint idx = gl_GlobalInvocationID.y * push.width + gl_GlobalInvocationID.x;
+  if (gl_GlobalInvocationID.x >= push.width ||
+      gl_GlobalInvocationID.y >= push.height) {
+    return;
+  }
+
+  // Parallel +Z rays on an exact grid the CPU reproduces:
+  //   ox = -1.0 + 0.3*col  in {-1.0, -0.7, -0.4, -0.1, 0.2, 0.5, 0.8, 1.1}
+  //   oy = -0.8 + 0.2*row + 0.1 in {-0.7, -0.5, -0.3, -0.1, 0.1, 0.3, 0.5, 0.7}
+  // No ray lies on a box boundary; expectations are asserted exactly.
+  const float ox = -1.0f + 0.3f * float(gl_GlobalInvocationID.x);
+  const float oy = -0.7f + 0.2f * float(gl_GlobalInvocationID.y);
+
+  rayQueryEXT q;
+  rayQueryInitializeEXT(q, scene_as,
+                        gl_RayFlagsOpaqueEXT, 0xFFu,
+                        vec3(ox, oy, -4.0f), 0.0f,
+                        vec3(0.0f, 0.0f, 1.0f), 20.0f);
+  // Opaque geometry: candidates are auto-committed, so the proceed loop
+  // simply drains and the committed result is ready afterwards.
+  while (rayQueryProceedEXT(q)) {
+  }
+  const bool hit = rayQueryGetIntersectionTypeEXT(q, true) !=
+                   gl_RayQueryCommittedIntersectionNoneEXT;
+
+  uvec4 out_px = uvec4(0U);
+  if (hit) {
+    const uint custom =
+        rayQueryGetIntersectionInstanceCustomIndexEXT(q, true);
+    out_px = uvec4(0xFFu, custom + 1U, 0xFFu, 0xFFu);
+  }
+  pixels[idx] = out_px;
+}

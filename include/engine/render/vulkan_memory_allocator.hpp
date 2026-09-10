@@ -106,6 +106,12 @@ private:
   [[nodiscard]] std::uint32_t find_memory_type(
       std::uint32_t type_bits, VkMemoryPropertyFlags properties) const;
 
+  //! Probed at initialize(): VkPhysicalDeviceVulkan12Features::
+  //! bufferDeviceAddress. When true, every allocation carries
+  //! VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT so SHADER_DEVICE_ADDRESS buffers
+  //! are addressable (VUID 03339).
+  bool supports_buffer_device_address_{false};
+
   //! Buffer handles owned by live allocations (created by create_buffer);
   //! destroyed by cleanup() so a dropped allocator never leaks VkBuffers.
   //! Images are caller-created via bind_image and stay caller-owned.

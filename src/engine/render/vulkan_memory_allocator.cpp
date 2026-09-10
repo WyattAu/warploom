@@ -31,6 +31,19 @@ omnicpp::core::Result<void> VulkanMemoryAllocator::initialize(
   if (device_) cleanup();
   device_ = device;
   physical_device_ = physical_device;
+  // Probe bufferDeviceAddress support: when true, allocations carry
+  // VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT so SHADER_DEVICE_ADDRESS buffers
+  // are addressable (VUID 03339).
+  supports_buffer_device_address_ = false;
+  {
+    VkPhysicalDeviceVulkan12Features f12{};
+    f12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    VkPhysicalDeviceFeatures2 f2{};
+    f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    f2.pNext = &f12;
+    vkGetPhysicalDeviceFeatures2(physical_device, &f2);
+    supports_buffer_device_address_ = f12.bufferDeviceAddress == VK_TRUE;
+  }
   // Detect a dedicated COMPUTE-only family so cross-queue buffers can use
   // CONCURRENT sharing (no ownership-transfer ping-pong on handoff).
   has_dedicated_compute_ = false;
@@ -135,6 +148,17 @@ std::size_t VulkanMemoryAllocator::find_or_create_block(
   alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
   alloc_info.allocationSize = std::max(block_size, size);
   alloc_info.memoryTypeIndex = memory_type;
+
+  // Buffers created with SHADER_DEVICE_ADDRESS must be backed by memory
+  // allocated with VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT (VUID 03339). The
+  // feature-support probe keeps this consistent with the context's
+  // unconditional enablement when supported.
+  VkMemoryAllocateFlagsInfo addr_flags{};
+  addr_flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+  addr_flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+  if (supports_buffer_device_address_) {
+    alloc_info.pNext = &addr_flags;
+  }
 
   Block block;
   block.size = alloc_info.allocationSize;

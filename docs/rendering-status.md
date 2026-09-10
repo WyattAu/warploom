@@ -59,8 +59,32 @@ Khronos layer.
 
 ## What is NOT yet app-facing
 
-- **RT (ray query) in the viewport**: BLAS/TLAS build, ray-query shadows/AO,
-  and reflections are proven offscreen but not wired into the window path.
+- **RT (ray query) in the viewport**: ray queries are proven on hardware
+  (below) but not yet wired into the window path (shadows/AO, reflections).
+
+## RT acceleration structures + ray queries (E1) — GPU proof complete
+
+`VulkanAccelerationStructureBuilder` builds triangle-geometry BLASes and
+per-frame TLAS rebuilds on caller command buffers (device-local storage,
+shared scratch pool, host-coherent instance buffer, `scratchData` addressing
+per the current spec — the old scratch usage bit no longer exists). RT
+entry points are extension functions and are fetched via
+`vkGetDeviceProcAddr` (the loader does not export them). Supporting fixes
+that the proof forced into the open:
+
+- **Device feature chain**: `bufferDeviceAddress` is now enabled whenever
+  supported (not only behind RT), and the pNext chain joins the 1.2/1.3
+  structs unconditionally at their API level — previously a device without
+  sync2 or timeline semaphores would have silently dropped descriptor
+  indexing or RT bits. Also fixed a self-referential RT pNext chain bug.
+- **Allocator**: every allocation now carries
+  `VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT` when the feature is supported
+  (VUID 03339) — SHADER_DEVICE_ADDRESS buffers were previously unaddressable.
+
+| Claim | Proof | Source |
+|---|---|---|
+| BLAS/TLAS build + ray query end-to-end | 8x8 parallel-ray grid, exact per-ray expectations: 24 hits on instance A (translated), 12 on instance B (**rotated 90 deg — load-bearing**), 28 misses; committed instanceCustomIndex verified per ray; 0 VUIDs, no leaks | `test_ray_query_first_contact` |
+| SBT sizing groundwork (E3) | `VulkanRtQuery::get_properties` returns handle size / aligned raygen stride | `vulkan_rt_query.cpp` |
 
 ## GPU-driven draw path (C2) — DONE
 

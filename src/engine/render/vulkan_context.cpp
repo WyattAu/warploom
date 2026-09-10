@@ -222,8 +222,10 @@ omnicpp::core::Result<void> VulkanContext::initialize(
     }
   }
   // Ray tracing negotiation: the probe above filled the feature structs;
-  // enable the extensions only when both features are supported.
+  // enable the extensions only when both features are supported. RT also
+  // requires bufferDeviceAddress (scratch/instance/geometry addressing).
   ray_tracing_enabled_ = false;
+  bool buffer_device_address_enabled = false;
   if (rt_extensions_present) {
     as_properties_.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
@@ -231,13 +233,17 @@ omnicpp::core::Result<void> VulkanContext::initialize(
     props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     props2.pNext = &as_properties_;
     vkGetPhysicalDeviceProperties2(physical_device_, &props2);
+    buffer_device_address_enabled =
+        is_vulkan12 && vulkan12_features.bufferDeviceAddress == VK_TRUE;
     ray_tracing_enabled_ =
+        buffer_device_address_enabled &&
         as_features_.accelerationStructure == VK_TRUE &&
         ray_query_features_.rayQuery == VK_TRUE &&
         as_properties_.maxGeometryCount > 0U;
     if (ray_tracing_enabled_) {
       as_features_.accelerationStructure = VK_TRUE;
       ray_query_features_.rayQuery = VK_TRUE;
+      vulkan12_features.bufferDeviceAddress = VK_TRUE;
       device_extensions.push_back(
           VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
       device_extensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
@@ -279,24 +285,33 @@ omnicpp::core::Result<void> VulkanContext::initialize(
       vulkan11_features.shaderDrawParameters = VK_TRUE;
     }
   }
+  // bufferDeviceAddress is enabled whenever supported: RT needs it, and the
+  // allocator must set VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT on memory that
+  // backs SHADER_DEVICE_ADDRESS buffers (kept consistent with the allocator's
+  // support probe, which cannot observe per-context enablement).
+  if (is_vulkan12 && vulkan12_features.bufferDeviceAddress == VK_TRUE) {
+    vulkan12_features.bufferDeviceAddress = VK_TRUE;
+  }
   // Enable the negotiated feature structs on the device.
   if (ray_tracing_enabled_) {
+    // Chain order: as_features -> ray_query -> <rest of the enabled structs>.
+    // Build from the tail so each node's pNext points at the node below it.
     ray_query_features_.pNext = features_chain;
     features_chain = reinterpret_cast<VkBaseOutStructure*>(&ray_query_features_);
-    as_features_.pNext = nullptr;  // chain: as_features -> ray_query -> rest
-    ray_query_features_.pNext = features_chain;
+    as_features_.pNext = features_chain;
     features_chain = reinterpret_cast<VkBaseOutStructure*>(&as_features_);
   }
-  if (synchronization2_enabled_) {
+  // Join the level structs UNCONDITIONALLY when the API level is present:
+  // dropping a level (e.g. no sync2) would silently discard every feature
+  // negotiated through it (descriptor indexing, RT, bufferDeviceAddress).
+  if (is_vulkan13) {
     vulkan13_features.pNext = features_chain;
     features_chain = reinterpret_cast<VkBaseOutStructure*>(&vulkan13_features);
   }
-  if (timeline_semaphores_enabled_) {
+  if (is_vulkan12) {
     vulkan12_features.pNext = features_chain;
     features_chain = reinterpret_cast<VkBaseOutStructure*>(&vulkan12_features);
   }
-  // The 1.1 struct rides at the chain tail when any 1.2-level feature was
-  // enabled through it (shaderDrawParameters is the current consumer).
   if (is_vulkan12 && vulkan11_features.shaderDrawParameters == VK_TRUE) {
     vulkan11_features.pNext = features_chain;
     features_chain = reinterpret_cast<VkBaseOutStructure*>(&vulkan11_features);
