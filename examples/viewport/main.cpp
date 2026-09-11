@@ -305,12 +305,21 @@ struct ViewportApp {
   std::vector<RtBlas> rt_blas_cube;
   std::vector<RtBlas> rt_blas_ground;
   std::vector<RtBlas> rt_blas_mannequin;
+  //! E5 animated TLAS: per-part dominant joint index (single-joint
+  //! binding). Authored skinned vertices are already in world bind pose
+  //! (rest pose == bind pose was proven in the skinning E2E), and the
+  //! bone matrix B_j(t) = global_j(t) * IB_j maps them straight to the
+  //! posed world position — so BLASes stay STATIC and only the TLAS
+  //! instance transform (object_model * bones[j]) animates per frame.
+  std::vector<std::size_t> rt_part_joint;
   omnicpp::render::TopLevelAS rt_tlas{};
   //! Geometry scratch needed by the largest BLAS (scratch-pool sizing).
   std::uint64_t rt_blas_scratch_bytes{0};
   std::uint64_t rt_tlas_scratch_bytes{0};
   //! Per-frame TLAS instance list (rebuilt each frame from object models).
   std::vector<omnicpp::render::TlasInstance> rt_instances;
+  //! Instance count of the last build_rt_frame_tlas (telemetry/verification).
+  std::uint32_t rt_last_instance_count{0};
   VkDescriptorSetLayout rt_layout{VK_NULL_HANDLE};
   VkDescriptorSet rt_set{VK_NULL_HANDLE};
   //! Composed pipelines with the pbr_rt_full fragment stage (same 6-set
@@ -1579,6 +1588,21 @@ bool setup_rt_shadows(ViewportApp& app) {
     return false;
   }
 
+  // E5: record each part's dominant joint (single-joint binding: the
+  // first vertex's highest-weight joint — the generator binds each part
+  // to exactly one joint).
+  for (const auto& binding : app.mannequin.skin_bindings) {
+    float best_w = -1.0f;
+    std::size_t best_j = 0;
+    for (std::size_t k = 0; k < 4; ++k) {
+      const float w = binding.weights[k];
+      if (w > best_w) {
+        best_w = w;
+        best_j = binding.joints[k];
+      }
+    }
+    app.rt_part_joint.push_back(best_j);
+  }
   for (const auto& import : app.mannequin.meshes) {
     ViewportApp::RtBlas b{};
     if (!rt_build_blas(app, rt_import_triangles(import), b)) {
@@ -1790,15 +1814,32 @@ void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
     } else if (object.mesh == &app.cube.mesh) {
       push_instance(app.rt_blas_cube[0], object.model);
     } else if (!app.rt_blas_mannequin.empty()) {
-      // Mannequin parts map by mesh pointer order (mannequin_meshes[i].mesh).
+      // E5 animated TLAS: authored skinned vertices are already in world
+      // bind pose (rest pose == bind pose, proven in the skinning E2E), and
+      // the bone matrix B_j(t) = global_j(t) * IB_j maps them directly to
+      // the posed world position. Single-joint binding => the part's world
+      // transform IS object_model * bones[j]: static BLASes + animated
+      // instance transforms, no per-frame BLAS rebuild. bones were uploaded
+      // by update_mannequin_pose before the frame callback.
       for (std::size_t i = 0; i < app.mannequin_meshes.size(); ++i) {
         if (object.mesh == &app.mannequin_meshes[i].mesh) {
-          push_instance(app.rt_blas_mannequin[i], object.model);
+          const auto* bones =
+              static_cast<const SceneMatrix*>(app.bone_allocation.mapped);
+          const std::size_t j = app.rt_part_joint[i];
+          if (!app.rt_part_joint.empty() &&
+              app.bone_allocation.mapped != nullptr &&
+              j * 64U < app.bone_allocation.size) {
+            push_instance(app.rt_blas_mannequin[i],
+                          multiply(object.model, bones[j]));
+          } else {
+            push_instance(app.rt_blas_mannequin[i], object.model);
+          }
           break;
         }
       }
     }
   }
+  app.rt_last_instance_count = count;
   if (count == 0U) return;
   auto scratch = app.rt_scratch.acquire(app.allocator, app.context.device(),
                                         app.rt_tlas_scratch_bytes);
@@ -2848,7 +2889,8 @@ bool ViewportApp::initialize() {
     if (rt_mode) {
       telemetry.log_event(
           "shadow_mode",
-          "ray_query_tlas (OMNICPP_RT_MODE; pbr_rt_full, hard shadows)");
+          "ray_query_tlas (OMNICPP_RT_MODE; pbr_rt_full, hard shadows; "
+          "animated TLAS: skinned parts follow bones_j(t))");
     }
   }
   if (const char* script = std::getenv("OMNICPP_INPUT_SCRIPT")) {
