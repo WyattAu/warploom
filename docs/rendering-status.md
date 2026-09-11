@@ -86,6 +86,22 @@ that the proof forced into the open:
 | BLAS/TLAS build + ray query end-to-end | 8x8 parallel-ray grid, exact per-ray expectations: 24 hits on instance A (translated), 12 on instance B (**rotated 90 deg — load-bearing**), 28 misses; committed instanceCustomIndex verified per ray; 0 VUIDs, no leaks | `test_ray_query_first_contact` |
 | SBT sizing groundwork (E3) | `VulkanRtQuery::get_properties` returns handle size / aligned raygen stride | `vulkan_rt_query.cpp` |
 
+## Ray-query reflections (E2) — GPU proof complete
+
+`pbr_rt_reflect.frag` + `tests/unit/test_rt_reflections.cpp` (commit 4729b1a):
+one ray query along reflect(-V, N) per fragment on top of the Cook-Torrance
+path; hits shade from a per-instance color SSBO indexed by
+instanceCustomIndex (same indexing as the TLAS build), misses fall to a dim
+sky constant. Reflection weight is Schlick-driven (grazing angles reflect
+more). Verified on hardware under validation.
+
+| Claim | Proof | Source |
+|---|---|---|
+| Mirror shows the reflected cube | virtual image B'=(0,-1,-3) of a cube B=(0,0,-3) over a y=-0.5 slab; the pixel at project(B') reads red-dominant (r−max(g,b) > 0.06), CPU-verified segment/AABB ground truth before the GPU render | `test_rt_reflections` |
+| Direct material path sanity | direct cube view red-dominant | `test_rt_reflections` |
+| Control point | reflected ray at Q misses everything; pixel channels neutral within 0.05 | `test_rt_reflections` |
+| Probe y-convention lesson | the projection matrix already carries the Vulkan y-flip (m[5]=-f), so pixel row maps directly from NDC (no second GL-style flip). The env-gated 16px-cell classification map (OMNICPP_RT_REFLECT_DEBUG) exposed the double-flip by matching every silhouette edge to analytic predictions before assertions ran | debug block in `test_rt_reflections.cpp` |
+
 ## Ray-query shadows A/B vs PCF (E1 final) — GPU proof complete
 
 One scene rendered twice through `record_pbr_frame`, differing only in the
