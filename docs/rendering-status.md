@@ -86,6 +86,20 @@ that the proof forced into the open:
 | BLAS/TLAS build + ray query end-to-end | 8x8 parallel-ray grid, exact per-ray expectations: 24 hits on instance A (translated), 12 on instance B (**rotated 90 deg — load-bearing**), 28 misses; committed instanceCustomIndex verified per ray; 0 VUIDs, no leaks | `test_ray_query_first_contact` |
 | SBT sizing groundwork (E3) | `VulkanRtQuery::get_properties` returns handle size / aligned raygen stride | `vulkan_rt_query.cpp` |
 
+## Ray-query shadows A/B vs PCF (E1 final) — GPU proof complete
+
+One scene rendered twice through `record_pbr_frame`, differing only in the
+shadow mechanism: path A = 1024² depth map + PCF (`pbr_shadow.frag`), path B
+= ray query against a scene TLAS (`pbr_rt_shadow.frag`). Verified on hardware
+under validation, 0 VUIDs.
+
+| Claim | Proof | Source |
+|---|---|---|
+| RT shadows ≡ PCF shadows | near face lit with byte-identical shading on both paths; far cube hard-shadowed on both (inside the occluder's light column, analytically derived); exact non-clear-pixel parity (1199 == 1199) | `test_rt_shadows` |
+| Camera-ray tracer as ground truth | 64×64 parallel-ray compute tracer confirms which TLAS instance each image row hits, plus per-hit world positions | `rt_shadows_a_vs_b.comp` |
+| Vulkan depth convention fixed | all four shadow-sampling shaders remapped z with the GL window-depth convention (`*0.5+0.5`); Vulkan stores NDC z directly, so every lookup landed ~0.5 deeper and shadowed everything. Invisible to earlier tests because they only counted non-clear pixels. Fixed in `pbr_shadow/pbr_full/pbr_gpu_driven_full/pbr_ibl_shadow.frag` | A/B test assertions on shadow *values* |
+| Slope-scaled shadow bias | pre-pass sets dynamic `vkCmdSetDepthBias` (const 8, slope 128); the constant factor is nearly inert for D32 (scaled by ~2⁻²³), the slope does the work | `vulkan_pipeline.cpp` + `record_shadow_pre_pass` |
+
 ## GPU-driven draw path (C2) — DONE
 
 `OMNICPP_GPU_DRIVEN=1` (cubes scene) moves the entire visibility/LOD/draw
