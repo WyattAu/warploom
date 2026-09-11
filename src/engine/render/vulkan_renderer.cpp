@@ -350,6 +350,16 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
                             scene.pipeline_layout, shadow_slot, 1,
                             &scene.shadow_set, 0, nullptr);
   }
+  if (scene.rt_set != VK_NULL_HANDLE) {
+    // Ray-query shadow variant (pbr_rt_full.frag): set 4 is the scene TLAS
+    // the fragment stage traces occlusion rays against. Slot matches the
+    // pipeline variant; scene.rt_set_slot == 0 keeps the default (4).
+    const std::uint32_t rt_slot =
+        scene.rt_set_slot != 0U ? scene.rt_set_slot : 4U;
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene.pipeline_layout, rt_slot, 1, &scene.rt_set,
+                            0, nullptr);
+  }
   if (scene.bone_set != VK_NULL_HANDLE) {
     // Skinned variant (skinned_scene.vert): one 64-byte joint matrix per
     // joint at set 3. Requires the skinned 4-set pipeline layout; leaving

@@ -343,6 +343,15 @@ struct VulkanPbrScene {
   //! pbr_full variant (IBL + shadow + skinning in one layout) keeps bones
   //! at 3 and relocates the IBL resources to 5 via this field.
   std::uint32_t ibl_set_slot{0U};
+  //! Set 4 (default) scene TLAS for the ray-query shadow variant
+  //! (pbr_rt_full.frag): the fragment stage traces one occlusion ray per
+  //! pixel instead of PCF-sampling a shadow map. Bound when non-null; when
+  //! the RT set is active the application clears shadow_pipeline so the
+  //! shadow pre-pass is not scheduled (the TLAS replaces the depth map).
+  VkDescriptorSet rt_set{VK_NULL_HANDLE};
+  //! Descriptor-set index the main pass binds rt_set at. Must match the
+  //! pipeline's fragment stage; 0 means default (4).
+  std::uint32_t rt_set_slot{0U};
   //! Shadow-map extent for graph-driven recording (0 = target-provided).
   std::uint32_t shadow_width{0U};
   std::uint32_t shadow_height{0U};

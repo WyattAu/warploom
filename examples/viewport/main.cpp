@@ -32,6 +32,7 @@
 #include "engine/core/animation_state_machine.hpp"
 #include "engine/core/physics_world.hpp"
 #include "engine/render/vulkan_context.hpp"
+#include "engine/render/vulkan_acceleration_structure.hpp"
 #include "engine/render/vulkan_descriptors.hpp"
 #include "engine/render/vulkan_ibl_baker.hpp"
 #include "engine/render/vulkan_memory_allocator.hpp"
@@ -283,6 +284,40 @@ struct ViewportApp {
   //! the IBL bake, and telemetry.
   std::array<float, 3> sun_direction{0.45f, 0.7f, 0.55f};
 
+  // --- RT mode (OMNICPP_RT_MODE=1): hard ray-query shadows. --------------
+  //! The scene TLAS replaces the shadow map entirely: the composed fragment
+  //! stage traces one occlusion ray per pixel (pbr_rt_full.frag, set 4),
+  //! the shadow pre-pass and depth map are skipped, and BLASes are built
+  //! once at startup from bind-pose geometry (TLAS instance transforms are
+  //! the per-frame object models, so rigid objects animate exactly; the
+  //! skinned mannequin approximates its walk at instance granularity).
+  bool rt_mode{false};
+  omnicpp::render::VulkanAccelerationStructureBuilder rt_builder;
+  omnicpp::render::VulkanScratchPool rt_scratch;
+  struct RtBlas {
+    omnicpp::render::BottomLevelAS as{};
+    //! Geometry feeding the build (must stay alive for rebuilds).
+    omnicpp::render::Allocation geometry{};
+    omnicpp::render::BlasBuildInput input{};
+  };
+  //! One BLAS per scene mesh (cube, ground, each mannequin part), ordered
+  //! like the scene-draw objects they correspond to.
+  std::vector<RtBlas> rt_blas_cube;
+  std::vector<RtBlas> rt_blas_ground;
+  std::vector<RtBlas> rt_blas_mannequin;
+  omnicpp::render::TopLevelAS rt_tlas{};
+  //! Geometry scratch needed by the largest BLAS (scratch-pool sizing).
+  std::uint64_t rt_blas_scratch_bytes{0};
+  std::uint64_t rt_tlas_scratch_bytes{0};
+  //! Per-frame TLAS instance list (rebuilt each frame from object models).
+  std::vector<omnicpp::render::TlasInstance> rt_instances;
+  VkDescriptorSetLayout rt_layout{VK_NULL_HANDLE};
+  VkDescriptorSet rt_set{VK_NULL_HANDLE};
+  //! Composed pipelines with the pbr_rt_full fragment stage (same 6-set
+  //! layout shape as the PCF family; set 4 layout is the TLAS).
+  omnicpp::render::VulkanPipeline rt_full_pipeline;
+  omnicpp::render::VulkanPipeline rt_full_skinned_pipeline;
+
   std::vector<omnicpp::render::ScenePbrObject> objects;
   omnicpp::render::VulkanPbrScene scene;
 
@@ -351,6 +386,26 @@ struct ViewportApp {
   [[nodiscard]] bool initialize();
   void run();
   void shutdown();
+};
+
+//! Free-function RT-shadow helpers (defined near setup_lighting).
+bool setup_rt_shadows(ViewportApp& app);
+void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer);
+void destroy_rt_shadows(ViewportApp& app);
+
+//! Bind-pose unit cube (half-extent 1) in BLAS build-input layout: 12
+//! triangles x 9 floats, canonical quad indices per face.
+constexpr std::array<float, 8U * 3U> kRtCubePositions = {
+    -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1,   // +z face
+    -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1, -1,  // -z face
+};
+constexpr std::array<std::uint32_t, 36U> kRtCubeIndices = {
+    0, 1, 2, 0, 2, 3,        // +z
+    4, 5, 6, 4, 6, 7,        // -z
+    1, 7, 6, 1, 6, 2,        // +x
+    4, 0, 3, 4, 3, 5,        // -x
+    3, 2, 6, 3, 6, 5,        // +y
+    4, 7, 1, 4, 1, 0,        // -y
 };
 
 // ============================================================================
@@ -509,6 +564,12 @@ bool setup_mannequin(ViewportApp& app) {
   // CesiumMan"), resolved via OMNICPP_ASSET_DIR then conventional fallbacks.
   // Buffer 0 and image files are resolved relative to the document's own
   // directory, exactly as glTF URIs are specified.
+  // OMNICPP_NO_MODEL forces the cubes-only scene (A/B harness hook).
+  if (std::getenv("OMNICPP_NO_MODEL") != nullptr) {
+    std::fprintf(stderr,
+                 "viewport: OMNICPP_NO_MODEL set; rendering cubes only\n");
+    return true;  // non-fatal: cubes-only scene
+  }
   const char* model_env = std::getenv("OMNICPP_MODEL");
   const std::string model = model_env != nullptr ? model_env : "mannequin";
   const char* asset_dir_env = std::getenv("OMNICPP_ASSET_DIR");
@@ -1349,6 +1410,433 @@ void write_gpu_driven_payload(ViewportApp& app, std::uint32_t frame_slot,
 //! shadow pipelines. Everything degrades gracefully: on failure the viewport
 //! falls back to the basic pbr_scene path (no IBL/shadow), which keeps the
 //! cubes-only mode and CI environments without the new shaders working.
+// ============================================================================
+// RT mode (OMNICPP_RT_MODE=1): hard ray-query shadows against a scene TLAS.
+// ============================================================================
+
+std::uint64_t rt_device_address(const ViewportApp& app, VkBuffer buffer) {
+  VkBufferDeviceAddressInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  info.buffer = buffer;
+  return static_cast<std::uint64_t>(
+      vkGetBufferDeviceAddress(app.context.device(), &info));
+}
+
+//! Extract bind-pose triangle positions (9 floats per triangle, BLAS build
+//! input layout) from an indexed glTF import (positions only, bind pose).
+std::vector<float> rt_import_triangles(
+    const omnicpp::asset::GltfMeshImport& import) {
+  std::vector<float> triangles;
+  triangles.reserve(import.indices.size() * 3U);
+  for (const std::uint32_t idx : import.indices) {
+    const float* v = &import.vertices[static_cast<std::size_t>(idx) * 3U];
+    triangles.push_back(v[0]);
+    triangles.push_back(v[1]);
+    triangles.push_back(v[2]);
+  }
+  return triangles;
+}
+
+//! Build one BLAS from bind-pose triangle positions; the geometry buffer is
+//! retained in `out` so the build input stays valid for the recorded build.
+bool rt_build_blas(ViewportApp& app, const std::vector<float>& triangles,
+                   ViewportApp::RtBlas& out) {
+  if (triangles.empty()) return false;
+  auto geom = app.allocator.create_buffer(
+      triangles.size() * sizeof(float),
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (!geom.is_ok()) return false;
+  std::memcpy(geom.value().mapped, triangles.data(),
+              triangles.size() * sizeof(float));
+
+  omnicpp::render::BlasBuildInput input{};
+  input.vertex_buffer_address = rt_device_address(app, geom.value().buffer);
+  input.triangle_count = triangles.size() / 9U;
+  input.max_vertex = static_cast<std::uint32_t>(triangles.size() / 3U - 1U);
+  if (input.vertex_buffer_address == 0U) return false;
+
+  const auto sizes = omnicpp::render::VulkanAccelerationStructureBuilder::
+      query_blas_sizes(app.context.device(), input);
+  auto blas = app.rt_builder.create_blas(app.context.device(), app.allocator,
+                                         input);
+  if (!blas.is_ok()) return false;
+  out.as = blas.value();
+  out.geometry = geom.value();
+  out.input = input;
+  app.rt_blas_scratch_bytes =
+      std::max(app.rt_blas_scratch_bytes, sizes.buildScratchSize);
+  return true;
+}
+
+bool setup_rt_shadows(ViewportApp& app) {
+  VkDevice dev = app.context.device();
+  if (!app.context.has_ray_tracing()) {
+    std::fprintf(stderr, "viewport: RT mode requested but device lacks "
+                         "VK_KHR_acceleration_structure/ray_query\n");
+    return false;
+  }
+  const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
+  const std::string shader_dir =
+      shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
+
+  // --- 1. Composed RT pipelines (same 6-set layout shape as the PCF
+  //        family; set 4 is the TLAS layout). ----------------------------
+  const std::vector<omnicpp::render::ReflectedBinding> rt_bindings = {
+      {4U, 0U, 1U, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
+       VK_SHADER_STAGE_FRAGMENT_BIT}};
+  auto rt_layout = app.descriptors.create_layout(rt_bindings, 1U);
+  if (!rt_layout.is_ok()) {
+    std::fprintf(stderr, "viewport: RT: create_layout failed\n");
+    return false;
+  }
+  app.rt_layout = rt_layout.value();
+
+  const VkDescriptorSetLayout rt_layouts[6] = {
+      app.mesh_layout, app.textures_layout, app.material_layout,
+      app.bone_layout, app.rt_layout, app.ibl5_layout};
+  const VkPushConstantRange push_range{
+      static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT |
+                                      VK_SHADER_STAGE_FRAGMENT_BIT),
+      0U, 160U};
+  if (!app.rt_full_pipeline
+           .load_shader_stage_file(dev, shader_dir + "/pbr_scene.vert.spv",
+                                   "vertex")
+           .is_ok() ||
+      !app.rt_full_pipeline
+           .load_shader_stage_file(dev, shader_dir + "/pbr_rt_full.frag.spv",
+                                   "fragment")
+           .is_ok() ||
+      !app.rt_full_pipeline
+           .create_pipeline_layout(dev, rt_layouts, 6U, &push_range)
+           .is_ok() ||
+      !app.rt_full_pipeline
+           .create_graphics_pipeline(dev, app.render_pass.render_pass(),
+                                     app.swapchain.image_format(),
+                                     app.rt_full_pipeline.pipeline_layout(),
+                                     /*depth_test=*/true, /*depth_write=*/true,
+                                     /*cull=*/true)
+           .is_ok()) {
+    std::fprintf(stderr, "viewport: RT composed pipeline failed\n");
+    return false;
+  }
+  if (app.has_mannequin &&
+      (!app.rt_full_skinned_pipeline
+               .load_shader_stage_file(dev,
+                                       shader_dir + "/skinned_scene.vert.spv",
+                                       "vertex")
+               .is_ok() ||
+       !app.rt_full_skinned_pipeline
+               .load_shader_stage_file(dev,
+                                       shader_dir + "/pbr_rt_full.frag.spv",
+                                       "fragment")
+               .is_ok() ||
+       !app.rt_full_skinned_pipeline
+               .create_pipeline_layout(dev, rt_layouts, 6U, &push_range)
+               .is_ok() ||
+       !app.rt_full_skinned_pipeline
+               .create_graphics_pipeline(dev, app.render_pass.render_pass(),
+                                         app.swapchain.image_format(),
+                                         app.rt_full_skinned_pipeline
+                                             .pipeline_layout(),
+                                         /*depth_test=*/true,
+                                         /*depth_write=*/true, /*cull=*/true)
+               .is_ok())) {
+    std::fprintf(stderr, "viewport: RT composed skinned pipeline failed\n");
+    return false;
+  }
+
+  // --- 2. TLAS descriptor (set 4 for both RT pipelines). ----------------
+  auto rt_set = app.descriptors.allocate_set(app.rt_layout);
+  if (!rt_set.is_ok()) {
+    std::fprintf(stderr, "viewport: RT: allocate_set failed\n");
+    return false;
+  }
+  app.rt_set = rt_set.value();
+
+  // --- 3. BLASes from bind-pose geometry. -------------------------------
+  // Cube + ground share the canonical quad-indexed unit cube (12 tris);
+  // mannequin parts are indexed glTF meshes (positions only, bind pose).
+  auto build_cube_blas = [&](std::vector<ViewportApp::RtBlas>& out) {
+    std::vector<float> tris;
+    tris.reserve(12U * 9U);
+    for (const std::uint32_t idx : kRtCubeIndices) {
+      for (int c = 0; c < 3; ++c) {
+        tris.push_back(kRtCubePositions[idx * 3U + c]);
+      }
+    }
+    ViewportApp::RtBlas b{};
+    return rt_build_blas(app, tris, b) && (out.push_back(b), true);
+  };
+  if (!build_cube_blas(app.rt_blas_cube)) {
+    std::fprintf(stderr, "viewport: RT: cube BLAS failed\n");
+    return false;
+  }
+  if (!build_cube_blas(app.rt_blas_ground)) {
+    std::fprintf(stderr, "viewport: RT: ground BLAS failed\n");
+    return false;
+  }
+
+  for (const auto& import : app.mannequin.meshes) {
+    ViewportApp::RtBlas b{};
+    if (!rt_build_blas(app, rt_import_triangles(import), b)) {
+      std::fprintf(stderr, "viewport: RT: mannequin BLAS failed\n");
+      return false;
+    }
+    app.rt_blas_mannequin.push_back(b);
+  }
+
+  // --- 4. TLAS storage (capacity = worst-case instance count). ----------
+  const std::uint32_t tlas_capacity = 2U + app.mannequin_meshes.size();
+  auto tlas = app.rt_builder.create_tlas(dev, app.allocator, tlas_capacity);
+  if (!tlas.is_ok()) {
+    std::fprintf(stderr, "viewport: RT: create_tlas failed\n");
+    return false;
+  }
+  app.rt_tlas = tlas.value();
+  const auto tlas_sizes = omnicpp::render::VulkanAccelerationStructureBuilder::
+      query_tlas_sizes(dev, tlas_capacity);
+  app.rt_tlas_scratch_bytes = tlas_sizes.buildScratchSize;
+  app.rt_instances.resize(tlas_capacity);
+
+  // --- 5. Scratch pool (largest single build) + one-time BLAS builds. ---
+  auto scratch = app.rt_scratch.acquire(app.allocator, dev,
+                                        std::max(app.rt_blas_scratch_bytes,
+                                                 app.rt_tlas_scratch_bytes));
+  if (!scratch.is_ok()) {
+    std::fprintf(stderr, "viewport: RT: scratch acquire failed\n");
+    return false;
+  }
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+      dev, static_cast<std::uint32_t>(
+               app.context.queue_families().graphics_family));
+  if (!pool.is_ok()) {
+    std::fprintf(stderr, "viewport: RT: command pool failed\n");
+    return false;
+  }
+  auto cb = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      dev, pool.value());
+  if (!cb.is_ok()) {
+    vkDestroyCommandPool(dev, pool.value(), nullptr);
+    std::fprintf(stderr, "viewport: RT: command buffer failed\n");
+    return false;
+  }
+  VkCommandBufferBeginInfo bi{};
+  bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(cb.value(), &bi);
+  // One-time BLAS builds (order: build -> AS-write barrier -> next build).
+  bool build_failed = false;
+  auto build_one = [&](ViewportApp::RtBlas& b) {
+    if (!app.rt_builder
+             .cmd_build_blas(cb.value(), dev, b.as, b.input, scratch.value())
+             .is_ok()) {
+      return false;
+    }
+    VkMemoryBarrier mb{};
+    mb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    mb.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    mb.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
+                       VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    vkCmdPipelineBarrier(
+        cb.value(), VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+        VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 1, &mb, 0,
+        nullptr, 0, nullptr);
+    return true;
+  };
+  for (auto& b : app.rt_blas_cube) {
+    if (!build_one(b)) { build_failed = true; break; }
+  }
+  if (!build_failed) {
+    for (auto& b : app.rt_blas_ground) {
+      if (!build_one(b)) { build_failed = true; break; }
+    }
+  }
+  if (!build_failed) {
+    for (auto& b : app.rt_blas_mannequin) {
+      if (!build_one(b)) { build_failed = true; break; }
+    }
+  }
+  if (build_failed) {
+    vkEndCommandBuffer(cb.value());
+    vkDestroyCommandPool(dev, pool.value(), nullptr);
+    std::fprintf(stderr, "viewport: RT: BLAS build record failed\n");
+    return false;
+  }
+  vkEndCommandBuffer(cb.value());
+  {
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1U;
+    submit.pCommandBuffers = &cb.value();
+    vkQueueSubmit(app.context.graphics_queue(), 1U, &submit, VK_NULL_HANDLE);
+    vkQueueWaitIdle(app.context.graphics_queue());
+  }
+  vkDestroyCommandPool(dev, pool.value(), nullptr);
+
+  // --- 6. Bind the TLAS into set 4. --------------------------------------
+  if (!app.descriptors
+           .write_acceleration_structure(
+               app.rt_set, 0U, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
+               app.rt_tlas.handle, 0U)
+           .is_ok()) {
+    std::fprintf(stderr, "viewport: RT: write AS descriptor failed\n");
+    return false;
+  }
+
+  // --- 7. Initial empty TLAS build so frame 0 ray queries hit a valid
+  //        structure (the first frame's pre-pass fills real instances;
+  //        frame 0 shades fully lit, one-frame latency like the shadow
+  //        map). ---------------------------------------------------------
+  auto pool0 = omnicpp::render::VulkanRenderer::create_command_pool(
+      dev, static_cast<std::uint32_t>(
+               app.context.queue_families().graphics_family));
+  if (!pool0.is_ok()) {
+    std::fprintf(stderr, "viewport: RT: pool0 failed\n");
+    return false;
+  }
+  auto cb0 = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      dev, pool0.value());
+  if (!cb0.is_ok()) {
+    vkDestroyCommandPool(dev, pool0.value(), nullptr);
+    std::fprintf(stderr, "viewport: RT: cb0 failed\n");
+    return false;
+  }
+  VkCommandBufferBeginInfo bi0{};
+  bi0.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  bi0.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(cb0.value(), &bi0);
+  // Seed the TLAS with the ground slab (static model) so frame 0 ray
+  // queries traverse a valid structure; the first frame's pre-pass replaces
+  // it with the real instance set (one-frame latency, like the shadow map).
+  omnicpp::render::TlasInstance seed{};
+  {
+    const SceneMatrix ground_model =
+        multiply(translation_matrix(0.0f, -0.05f, 0.0f),
+                 scale_matrix(8.0f, 0.1f, 8.0f));
+    // Same column-major -> row-major conversion as build_rt_frame_tlas.
+    for (int r = 0; r < 3; ++r) {
+      for (int c = 0; c < 3; ++c) {
+        seed.transform[r * 4 + c] = ground_model[c * 4 + r];
+      }
+      seed.transform[r * 4 + 3] = ground_model[12 + r];
+    }
+    seed.instance_custom_index = 0U;
+    seed.mask = 0xFFu;
+    seed.sbt_offset = 0U;
+    seed.flags = VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
+    seed.blas_device_address = app.rt_blas_ground[0].as.device_address;
+  }
+  if (!app.rt_builder
+           .cmd_build_tlas(cb0.value(), dev, app.rt_tlas, &seed, 1U,
+                           scratch.value())
+           .is_ok()) {
+    vkEndCommandBuffer(cb0.value());
+    vkDestroyCommandPool(dev, pool0.value(), nullptr);
+    std::fprintf(stderr, "viewport: RT: empty TLAS build failed\n");
+    return false;
+  }
+  vkEndCommandBuffer(cb0.value());
+  {
+    VkSubmitInfo submit0{};
+    submit0.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit0.commandBufferCount = 1U;
+    submit0.pCommandBuffers = &cb0.value();
+    vkQueueSubmit(app.context.graphics_queue(), 1U, &submit0, VK_NULL_HANDLE);
+    vkQueueWaitIdle(app.context.graphics_queue());
+  }
+  vkDestroyCommandPool(dev, pool0.value(), nullptr);
+  return true;
+}
+
+//! Per-frame TLAS rebuild: instance transforms are the scene objects' model
+//! matrices (extracted to 3x4 rows), written to the host instance buffer and
+//! built on the frame's command buffer in the pre-pass hook (before the main
+//! render pass). Rebuild (not refit) is preferred at our scale.
+void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
+  if (!app.rt_mode || app.rt_tlas.handle == nullptr) return;
+  // Column-major SceneMatrix -> Vulkan row-major 3x4 instance transform:
+  // element [r][c] = M(r,c) = m[c*4+r] for c in {0,1,2}, and the translation
+  // column M(r,3) = m[12+r]. (Writing m[r*4+c] instead transposes the basis
+  // and drops the translation — every instance would collapse to the
+  // origin, shadowing everything the ray can reach.)
+  const auto model_to_rows = [](const SceneMatrix& m, float* rows) {
+    for (int r = 0; r < 3; ++r) {
+      for (int c = 0; c < 3; ++c) {
+        rows[r * 4 + c] = m[c * 4 + r];
+      }
+      rows[r * 4 + 3] = m[12 + r];
+    }
+  };
+  std::uint32_t count = 0;
+  auto push_instance = [&](const ViewportApp::RtBlas& blas,
+                           const SceneMatrix& model) {
+    if (count >= app.rt_instances.size()) return;
+    auto& inst = app.rt_instances[count++];
+    model_to_rows(model, inst.transform);
+    inst.instance_custom_index = count - 1U;
+    inst.mask = 0xFFu;
+    inst.sbt_offset = 0U;
+    inst.flags =
+        VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;  // hard-shadow occluders
+    inst.blas_device_address = blas.as.device_address;
+  };
+  for (const auto& object : app.scene.objects) {
+    if (object.mesh == nullptr || !object.mesh->is_drawable()) continue;
+    if (object.mesh == &app.ground.mesh) {
+      push_instance(app.rt_blas_ground[0], object.model);
+    } else if (object.mesh == &app.cube.mesh) {
+      push_instance(app.rt_blas_cube[0], object.model);
+    } else if (!app.rt_blas_mannequin.empty()) {
+      // Mannequin parts map by mesh pointer order (mannequin_meshes[i].mesh).
+      for (std::size_t i = 0; i < app.mannequin_meshes.size(); ++i) {
+        if (object.mesh == &app.mannequin_meshes[i].mesh) {
+          push_instance(app.rt_blas_mannequin[i], object.model);
+          break;
+        }
+      }
+    }
+  }
+  if (count == 0U) return;
+  auto scratch = app.rt_scratch.acquire(app.allocator, app.context.device(),
+                                        app.rt_tlas_scratch_bytes);
+  if (!scratch.is_ok()) return;
+  if (!app.rt_builder
+           .cmd_build_tlas(command_buffer, app.context.device(), app.rt_tlas,
+                           app.rt_instances.data(), count, scratch.value())
+           .is_ok()) {
+    return;
+  }
+  // AS-write -> fragment-stage ray-query read barrier (the main render pass
+  // follows on the same command buffer).
+  VkMemoryBarrier mb{};
+  mb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+  mb.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+  mb.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+  vkCmdPipelineBarrier(command_buffer,
+                       VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &mb, 0,
+                       nullptr, 0, nullptr);
+}
+
+void destroy_rt_shadows(ViewportApp& app) {
+  VkDevice dev = app.context.device();
+  if (dev == VK_NULL_HANDLE) return;
+  auto destroy_list = [&](std::vector<ViewportApp::RtBlas>& list) {
+    for (auto& b : list) {
+      app.rt_builder.destroy_blas(dev, app.allocator, b.as);
+    }
+    list.clear();
+  };
+  destroy_list(app.rt_blas_cube);
+  destroy_list(app.rt_blas_ground);
+  destroy_list(app.rt_blas_mannequin);
+  app.rt_builder.destroy_tlas(dev, app.allocator, app.rt_tlas);
+  app.rt_scratch.cleanup(app.allocator);
+}
+
 bool setup_lighting(ViewportApp& app) {
   // A/B: the legacy flag leaves the composed path unbuilt (lighting_ready
   // stays false so record_scene_into selects the legacy pipelines and never
@@ -1790,6 +2278,17 @@ bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
   (void)width;
   (void)height;
 
+  // RT mode: rebuild the frame's TLAS (instance transforms = the scene
+  // objects' models recorded last frame — one frame of latency, exactly
+  // like the shadow map) and skip the shadow-map render pass entirely. AS
+  // builds must record outside a render pass, so this pre-pass hook is the
+  // sanctioned spot. Not combined with GPU-driven (the driven fragment is
+  // the PCF variant); gpu_driven takes precedence.
+  if (app.rt_mode && !app.gpu_driven) {
+    build_rt_frame_tlas(app, command_buffer);
+    return true;
+  }
+
   VkClearValue shadow_clear{};
   shadow_clear.depthStencil = {1.0f, 0U};
   VkRenderPassBeginInfo rpb{};
@@ -1995,6 +2494,28 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
           ? app.shadow_pipeline_static.pipeline_layout()
           : VK_NULL_HANDLE;
 
+  // RT mode (OMNICPP_RT_MODE=1): swap the composed pipelines for the
+  // pbr_rt_full family, bind the TLAS at set 4, and skip the shadow-map
+  // pre-pass (the fragment stage traces occlusion rays against the TLAS
+  // instead of PCF-sampling a depth map).
+  if (app.rt_mode && app.rt_set != VK_NULL_HANDLE) {
+    const bool skinned = app.has_mannequin;
+    app.scene.pipeline =
+        skinned ? app.rt_full_skinned_pipeline.pipeline()
+                : app.rt_full_pipeline.pipeline();
+    app.scene.pipeline_layout =
+        skinned ? app.rt_full_skinned_pipeline.pipeline_layout()
+                : app.rt_full_pipeline.pipeline_layout();
+    app.scene.rt_set = app.rt_set;
+    app.scene.rt_set_slot = 4U;
+    // No shadow-map pre-pass: the TLAS replaces the depth map.
+    app.scene.shadow_pipeline = VK_NULL_HANDLE;
+    app.scene.shadow_pipeline_layout = VK_NULL_HANDLE;
+    app.scene.shadow_set = VK_NULL_HANDLE;
+  } else {
+    app.scene.rt_set = VK_NULL_HANDLE;
+  }
+
   // GPU-driven mode: the scene description above only feeds the shadow
   // pre-pass and telemetry. The lit draw itself is ONE indirect command over
   // the mesh table — the cull/LOD compute pass (recorded in the pre-pass
@@ -2082,6 +2603,9 @@ bool ViewportApp::initialize() {
   // family; the flag read later in this function only adds telemetry.
   legacy_lighting = std::getenv("OMNICPP_LEGACY_LIGHTING") != nullptr;
   no_shadow = std::getenv("OMNICPP_NO_SHADOW") != nullptr;
+  // RT mode: hard ray-query shadows (requires composed lighting; setup
+  // happens after setup_lighting builds the IBL stack it composes on).
+  rt_mode = std::getenv("OMNICPP_RT_MODE") != nullptr;
   if (const char* ds = std::getenv("OMNICPP_DUMP_SHADOW")) {
     dump_shadow = true;
     dump_shadow_frame = static_cast<std::uint32_t>(std::atoi(ds));
@@ -2169,6 +2693,18 @@ bool ViewportApp::initialize() {
   // Composed full lighting (IBL + shadow map + composed PBR). Non-fatal:
   // failure falls back to the basic pbr_scene path.
   lighting_ready = setup_lighting(*this);
+  if (lighting_ready && rt_mode) {
+    // RT shadows replace the shadow map: same composed pipeline family,
+    // set 4 becomes the TLAS, the PCF fragment swaps for pbr_rt_full.
+    if (!setup_rt_shadows(*this)) {
+      std::fprintf(stderr, "viewport: RT shadows unavailable; PCF path\n");
+      rt_mode = false;
+    } else {
+      // Log telemetry AFTER the run starts (initialize runs pre-run); the
+      // record path reads rt_mode directly each frame.
+      std::printf("viewport: RT shadow mode active (TLAS ray queries)\n");
+    }
+  }
   if (lighting_ready) {
     renderer.set_frame_pre_pass_callback(shadow_pre_pass_cb, this);
     // GPU-driven draw path (cubes scene only): cull/LOD on the GPU, one
@@ -2176,6 +2712,7 @@ bool ViewportApp::initialize() {
     // fragment shader statically uses the shadow + IBL sets).
     const char* gd_env = std::getenv("OMNICPP_GPU_DRIVEN");
     if (gd_env != nullptr && gd_env[0] == '1' && !has_mannequin &&
+        !rt_mode &&  // GPU-driven fragment is the PCF variant; exclusive
         setup_gpu_driven(*this)) {
       gpu_driven = true;
       // Instance-count override: grows the payload past the static trio
@@ -2307,6 +2844,11 @@ bool ViewportApp::initialize() {
     telemetry.log_event("sun_direction", sun_buf);
     if (no_shadow) {
       telemetry.log_event("shadow_mode", "disabled (OMNICPP_NO_SHADOW)");
+    }
+    if (rt_mode) {
+      telemetry.log_event(
+          "shadow_mode",
+          "ray_query_tlas (OMNICPP_RT_MODE; pbr_rt_full, hard shadows)");
     }
   }
   if (const char* script = std::getenv("OMNICPP_INPUT_SCRIPT")) {
@@ -2606,9 +3148,13 @@ void ViewportApp::shutdown() {
   renderer.wait_idle();
   capture.cleanup(context.device(), &allocator);
   telemetry.flush();
+  // RT-shadow resources (AS buffers/instances/scratch) before teardown.
+  destroy_rt_shadows(*this);
   renderer.cleanup(context.device());
   gd_cull_pipeline.cleanup(context.device());
   gd_draw_pipeline.cleanup(context.device());
+  rt_full_skinned_pipeline.cleanup(context.device());
+  rt_full_pipeline.cleanup(context.device());
   full_skinned_pipeline.cleanup(context.device());
   full_pipeline.cleanup(context.device());
   shadow_pipeline_skinned.cleanup(context.device());
