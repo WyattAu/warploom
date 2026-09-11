@@ -686,7 +686,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
     ASSERT_EQ(std::fread(code.data(), 1, code.size(), f), code.size());
     std::fclose(f);
     VkShaderModuleCreateInfo mi{};
-    mi.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    mi.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     mi.codeSize = code.size();
     mi.pCode = reinterpret_cast<const std::uint32_t*>(code.data());
     ASSERT_EQ(vkCreateShaderModule(ctx.device(), &mi, nullptr, &mods[i]),
