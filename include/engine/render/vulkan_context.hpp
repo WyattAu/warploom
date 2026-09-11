@@ -88,6 +88,11 @@ public:
   //! accelerationStructure + rayQuery device features were all negotiated
   //! and enabled. Gates every ray-tracing code path.
   [[nodiscard]] bool has_ray_tracing() const noexcept { return ray_tracing_enabled_; }
+  //! True when VK_KHR_ray_tracing_pipeline + the rayTracingPipeline feature
+  //! were additionally negotiated (vkCmdTraceRaysKHR / SBT pipelines). A
+  //! superset of has_ray_tracing(): acceleration structures and ray queries
+  //! are always available when this returns true.
+  [[nodiscard]] bool has_ray_tracing_pipeline() const noexcept { return rt_pipeline_enabled_; }
   //! scratch/AS size limits from the RT properties (0 when absent).
   [[nodiscard]] std::uint64_t max_ray_tracing_scratch() const noexcept { return as_properties_.maxGeometryCount > 0U ? 1U : 0U; }
   [[nodiscard]] std::uint64_t max_acceleration_structure_geometry_count() const noexcept { return as_properties_.maxGeometryCount; }
@@ -117,14 +122,18 @@ private:
   bool timeline_semaphores_enabled_{false};
   bool descriptor_indexing_enabled_{false};
   bool ray_tracing_enabled_{false};
+  bool rt_pipeline_enabled_{false};
 #if defined(OMNICPP_HAS_VULKAN)
   VkPhysicalDeviceAccelerationStructurePropertiesKHR as_properties_{};
   //! Feature-struct members for the negotiation chain (RT-capable devices).
   VkPhysicalDeviceAccelerationStructureFeaturesKHR as_features_{};
   VkPhysicalDeviceRayQueryFeaturesKHR ray_query_features_{};
+  VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt_pipeline_features_{};
 #endif
   //! Probes RT extension + feature availability on `device` (no enabling).
   static bool device_supports_ray_tracing(VkPhysicalDevice device);
+  //! Probes VK_KHR_ray_tracing_pipeline extension presence (no enabling).
+  static bool device_supports_rt_pipeline_extension(VkPhysicalDevice device);
 
 #if !defined(OMNICPP_HAS_VULKAN)
   //! Opaque stand-ins keep the header compiling without Vulkan (the members

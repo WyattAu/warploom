@@ -1,0 +1,85 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+
+// pt_pathtrace.rgen — E3 path-tracing proof, one camera path per pixel.
+//
+// Determinism contract (mirrors the CPU simulator in test_path_tracing.cpp):
+//   - Pixel jitter varies per frame (frame-seeded PCG hash) so the temporal
+//     mean over frames is a genuine (deterministic) Monte Carlo average;
+//     interior probes predict a constant value, silhouette probes predict
+//     exact per-frame mixes.
+//   - The bounce direction in pt_pathtrace.rchit is DETERMINISTIC per
+//     (pixel, hit-instance): normalize(n + unit_sphere(hash(pixel, inst))).
+//     The CPU simulator reproduces the same float pipeline, so every probe
+//     pixel has an exact expected radiance (no statistical tolerance).
+//   - Recursion depth 2: rgen primary trace -> rchit bounce trace -> rchit
+//     returns the bounce hit color. All bouncing stays inside the two-level
+//     trace; the raygen loop stays trivial (N-bounce extension: loop here).
+//
+// Accumulation: the host clears `accum` once per pass; each frame ADDS its
+// radiance (imageLoad + add + store — one writer per pixel per frame, single
+// queue, so the fp32 accumulation order is deterministic and the CPU can
+// reproduce the exact sum). Mean = sum / K on the host (K a power of two).
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D accum;
+layout(set = 0, binding = 1, std430) readonly buffer Params {
+  vec4 cam_pos_frame;      // xyz = camera position, w = frame index
+  vec4 cam_basis_r;        // camera right (unit)
+  vec4 cam_basis_u;        // camera up (unit)
+  vec4 cam_basis_f;        // camera forward (unit)
+  uvec4 dims;              // x = width, y = height, z = mode (0 flat, 1 bounce), w = unused
+};
+layout(set = 0, binding = 3) uniform accelerationStructureEXT scene;
+
+layout(location = 0) rayPayloadEXT vec4 payload;
+
+const vec3 kSkyRadiance = vec3(0.04, 0.05, 0.08);
+const vec3 kSkyStep = vec3(0.01, 0.01, 0.01);  // per-frame drift (fp32-exact)
+
+// PCG hash (the engine's canonical deterministic hash).
+uint pcg(uint v) {
+  uint state = v * 747796405u + 2891336453u;
+  uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+  return (word >> 22u) ^ word;
+}
+
+float hash01(uvec3 seed) {
+  return float(pcg(seed.x ^ pcg(seed.y ^ pcg(seed.z))) & 0x00ffffffu) *
+         (1.0 / 16777216.0);
+}
+
+void main() {
+  const uvec2 pix = uvec2(gl_LaunchIDEXT.xy);
+  const uvec2 size = uvec2(gl_LaunchSizeEXT.xy);
+  if (pix.x >= size.x || pix.y >= size.y) return;
+
+  const uint frame = uint(cam_pos_frame.w);
+  // Per-frame jitter in [-0.5, 0.5) pixel space.
+  const float jx = hash01(uvec3(pix, frame * 2u + 0u)) - 0.5;
+  const float jy = hash01(uvec3(pix, frame * 2u + 1u)) - 0.5;
+
+  // Pinhole camera: ray through the jittered pixel. Ray space keeps y UP
+  // (basis vectors carry the convention; the CPU simulator matches).
+  const vec2 uv = (vec2(pix) + vec2(jx, jy) + 0.5) / vec2(size);
+  const vec2 ndc = uv * 2.0 - 1.0;
+  const float aspect = float(size.x) / float(size.y);
+  const vec3 dir = normalize(ndc.x * aspect * cam_basis_r.xyz -
+                             ndc.y * cam_basis_u.xyz + cam_basis_f.xyz);
+
+  payload = vec4(0.0);
+  // NOTE: this glslang's traceRayEXT intrinsic takes the payload LOCATION
+  // (0 here) as its last argument, not the payload variable.
+  traceRayEXT(scene, gl_RayFlagsOpaqueEXT, 0xffu, 0u, 0u, 0u,
+              cam_pos_frame.xyz, 0.001, dir, 1.0e30, 0);
+
+  vec3 radiance = payload.rgb;
+  if (payload.w < 0.0) {
+    // Frame-drifting sky (time-of-day): per-frame value is base + frame*step
+    // in fp32 — the host temporal mean is a NON-trivial exact constant the
+    // CPU reproduces with the same op chain (accumulation proof).
+    radiance = kSkyRadiance + float(frame) * kSkyStep;
+  }
+
+  const vec4 prev = imageLoad(accum, ivec2(pix));
+  imageStore(accum, ivec2(pix), prev + vec4(radiance, 0.0));
+}

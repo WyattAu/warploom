@@ -292,6 +292,51 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pt_pathtrace.rgen.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    --target-env=vulkan1.2
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pt_pathtrace.rgen
+                    -o ${OMNICPP_SHADER_DIR}/pt_pathtrace.rgen.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pt_pathtrace.rgen
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pt_pathtrace.rmiss.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    --target-env=vulkan1.2
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pt_pathtrace.rmiss
+                    -o ${OMNICPP_SHADER_DIR}/pt_pathtrace.rmiss.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pt_pathtrace.rmiss
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pt_pathtrace.rchit.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    --target-env=vulkan1.2
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pt_pathtrace.rchit
+                    -o ${OMNICPP_SHADER_DIR}/pt_pathtrace.rchit.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pt_pathtrace.rchit
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pt_pathtrace_leaf.rchit.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    --target-env=vulkan1.2
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pt_pathtrace_leaf.rchit
+                    -o ${OMNICPP_SHADER_DIR}/pt_pathtrace_leaf.rchit.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pt_pathtrace_leaf.rchit
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pt_pathtrace_leaf.rmiss.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    --target-env=vulkan1.2
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pt_pathtrace_leaf.rmiss
+                    -o ${OMNICPP_SHADER_DIR}/pt_pathtrace_leaf.rmiss.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pt_pathtrace_leaf.rmiss
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/ray_query_first.comp.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/ray_query_first.comp
@@ -561,6 +606,11 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/lod_select.comp.spv
                 ${OMNICPP_SHADER_DIR}/ray_query_first.comp.spv
                 ${OMNICPP_SHADER_DIR}/rt_shadows_a_vs_b.comp.spv
+                ${OMNICPP_SHADER_DIR}/pt_pathtrace.rgen.spv
+                ${OMNICPP_SHADER_DIR}/pt_pathtrace.rmiss.spv
+                ${OMNICPP_SHADER_DIR}/pt_pathtrace.rchit.spv
+                ${OMNICPP_SHADER_DIR}/pt_pathtrace_leaf.rchit.spv
+                ${OMNICPP_SHADER_DIR}/pt_pathtrace_leaf.rmiss.spv
                 ${OMNICPP_SHADER_DIR}/pbr_rt_shadow.frag.spv
                 ${OMNICPP_SHADER_DIR}/pbr_rt_reflect.frag.spv
                 ${OMNICPP_SHADER_DIR}/sky.vert.spv
@@ -584,6 +634,7 @@ add_executable(omnicpp_unit_tests
     unit/test_ray_query_first_contact.cpp
     unit/test_rt_shadows.cpp
     unit/test_rt_reflections.cpp
+    unit/test_path_tracing.cpp
     unit/test_input_state.cpp
     unit/test_input_translators.cpp
     unit/test_engine.cpp

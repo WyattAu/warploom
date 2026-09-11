@@ -193,12 +193,14 @@ omnicpp::core::Result<void> VulkanContext::initialize(
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
     ray_query_features_.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+    rt_pipeline_features_.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
   }
   if (is_vulkan13 || is_vulkan12) {
     VkPhysicalDeviceFeatures2 features2{};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     features2.features = device_features;
-    // Chain: features2 -> 1.3 -> 1.2 -> 1.1 -> [AS -> rayQuery].
+    // Chain: features2 -> 1.3 -> 1.2 -> 1.1 -> [AS -> rayQuery -> rtPipeline].
     if (is_vulkan13) {
       features2.pNext = &vulkan13_features;
       if (is_vulkan12) {
@@ -207,6 +209,7 @@ omnicpp::core::Result<void> VulkanContext::initialize(
         if (rt_extensions_present) {
           vulkan11_features.pNext = &as_features_;
           as_features_.pNext = &ray_query_features_;
+          ray_query_features_.pNext = &rt_pipeline_features_;
         }
       }
     }
@@ -225,6 +228,7 @@ omnicpp::core::Result<void> VulkanContext::initialize(
   // enable the extensions only when both features are supported. RT also
   // requires bufferDeviceAddress (scratch/instance/geometry addressing).
   ray_tracing_enabled_ = false;
+  rt_pipeline_enabled_ = false;
   bool buffer_device_address_enabled = false;
   if (rt_extensions_present) {
     as_properties_.sType =
@@ -240,6 +244,11 @@ omnicpp::core::Result<void> VulkanContext::initialize(
         as_features_.accelerationStructure == VK_TRUE &&
         ray_query_features_.rayQuery == VK_TRUE &&
         as_properties_.maxGeometryCount > 0U;
+    // Full RT pipelines (vkCmdTraceRaysKHR + SBT) additionally need the
+    // VK_KHR_ray_tracing_pipeline extension and its feature bit.
+    rt_pipeline_enabled_ =
+        ray_tracing_enabled_ && rt_pipeline_features_.rayTracingPipeline == VK_TRUE &&
+        device_supports_rt_pipeline_extension(physical_device_);
     if (ray_tracing_enabled_) {
       as_features_.accelerationStructure = VK_TRUE;
       ray_query_features_.rayQuery = VK_TRUE;
@@ -249,6 +258,11 @@ omnicpp::core::Result<void> VulkanContext::initialize(
       device_extensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
       device_extensions.push_back(
           VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+      if (rt_pipeline_enabled_) {
+        rt_pipeline_features_.rayTracingPipeline = VK_TRUE;
+        device_extensions.push_back(
+            VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+      }
     }
   }
   if (is_vulkan12) {
@@ -294,8 +308,12 @@ omnicpp::core::Result<void> VulkanContext::initialize(
   }
   // Enable the negotiated feature structs on the device.
   if (ray_tracing_enabled_) {
-    // Chain order: as_features -> ray_query -> <rest of the enabled structs>.
-    // Build from the tail so each node's pNext points at the node below it.
+    // Chain order: rt_pipeline -> ray_query -> as_features -> <rest> (built
+    // from the tail so each node's pNext points at the node below it).
+    if (rt_pipeline_enabled_) {
+      rt_pipeline_features_.pNext = features_chain;
+      features_chain = reinterpret_cast<VkBaseOutStructure*>(&rt_pipeline_features_);
+    }
     ray_query_features_.pNext = features_chain;
     features_chain = reinterpret_cast<VkBaseOutStructure*>(&ray_query_features_);
     as_features_.pNext = features_chain;
@@ -631,6 +649,32 @@ bool VulkanContext::device_supports_ray_tracing(VkPhysicalDevice device) {
     }
   }
   return found == 7;
+#else
+  (void)device;
+  return false;
+#endif
+}
+
+bool VulkanContext::device_supports_rt_pipeline_extension(VkPhysicalDevice device) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!device) return false;
+  std::uint32_t extension_count = 0;
+  if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count,
+                                           nullptr) != VK_SUCCESS) {
+    return false;
+  }
+  std::vector<VkExtensionProperties> available(extension_count);
+  if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count,
+                                           available.data()) != VK_SUCCESS) {
+    return false;
+  }
+  for (const auto& extension : available) {
+    if (std::strcmp(extension.extensionName,
+                    VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) == 0) {
+      return true;
+    }
+  }
+  return false;
 #else
   (void)device;
   return false;
