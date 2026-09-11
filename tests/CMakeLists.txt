@@ -337,6 +337,33 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pt_real.rgen.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    --target-env=vulkan1.2
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pt_real.rgen
+                    -o ${OMNICPP_SHADER_DIR}/pt_real.rgen.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pt_real.rgen
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pt_real.rmiss.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    --target-env=vulkan1.2
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pt_real.rmiss
+                    -o ${OMNICPP_SHADER_DIR}/pt_real.rmiss.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pt_real.rmiss
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pt_real.rchit.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    --target-env=vulkan1.2
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pt_real.rchit
+                    -o ${OMNICPP_SHADER_DIR}/pt_real.rchit.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pt_real.rchit
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/ray_query_first.comp.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/ray_query_first.comp
@@ -620,6 +647,9 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/pt_pathtrace.rchit.spv
                 ${OMNICPP_SHADER_DIR}/pt_pathtrace_leaf.rchit.spv
                 ${OMNICPP_SHADER_DIR}/pt_pathtrace_leaf.rmiss.spv
+                ${OMNICPP_SHADER_DIR}/pt_real.rgen.spv
+                ${OMNICPP_SHADER_DIR}/pt_real.rmiss.spv
+                ${OMNICPP_SHADER_DIR}/pt_real.rchit.spv
                 ${OMNICPP_SHADER_DIR}/pbr_rt_shadow.frag.spv
                 ${OMNICPP_SHADER_DIR}/pbr_rt_reflect.frag.spv
                 ${OMNICPP_SHADER_DIR}/sky.vert.spv
@@ -644,6 +674,7 @@ add_executable(omnicpp_unit_tests
     unit/test_rt_shadows.cpp
     unit/test_rt_reflections.cpp
     unit/test_path_tracing.cpp
+    unit/test_path_tracing_real.cpp
     unit/test_input_state.cpp
     unit/test_input_translators.cpp
     unit/test_engine.cpp

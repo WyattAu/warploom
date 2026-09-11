@@ -1,0 +1,106 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+
+// pt_real.rgen — REAL path tracing (E4): iterative N-bounce loop, per-pixel
+// RNG streams, cosine-weighted sampling, temporal accumulation.
+//
+// Production pattern: maxPipelineRayRecursionDepth = 1 (no nested traceRay);
+// the path lives in this loop. Each frame every pixel shoots ONE path with
+// up to kMaxBounces segments. Frames jitter the pixel AND reseed the RNG,
+// so the temporal mean over K frames is a genuine Monte Carlo average of K
+// independent samples (independent GPU streams; the CPU reference uses its
+// own stream — distributional agreement, not bit equality).
+//
+// Radiance contract (mirrors test_path_tracing_real.cpp):
+//   miss   -> throughput *= 1, radiance += throughput * sky(frame); break
+//   hit    -> payload = (albedo.rgb, hit=1) + (normal.rgb, t);
+//             radiance += throughput * albedo * LE (LE = 0 here: no emitters
+//             on surfaces; the sky is the only light, reached by escaping
+//             through the open ceiling);
+//             throughput *= albedo; next dir = cosine_sample(normal, rng).
+//
+// Accumulation: host clears `accum` once per pass; each frame ADDS its
+// radiance (imageLoad+add+store, deterministic single-queue order).
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D accum;
+layout(set = 0, binding = 1, std430) readonly buffer Params {
+  vec4 cam_pos_frame;      // xyz = camera position, w = frame index
+  vec4 cam_basis_r;        // camera right (unit)
+  vec4 cam_basis_u;        // camera up (unit)
+  vec4 cam_basis_f;        // camera forward (unit)
+  uvec4 dims;              // x = width, y = height, z = max bounces, w = unused
+};
+layout(set = 0, binding = 2) uniform accelerationStructureEXT scene;
+
+layout(location = 0) rayPayloadEXT vec4 payload;  // miss: w=-1; hit: (n,t)
+
+const vec3 kSkyRadiance = vec3(1.0, 1.0, 1.0);   // uniform, frame-constant
+const vec3 kAlbedo = vec3(0.8);                  // grey Lambertian walls
+const float kEps = 1.0e-3;
+
+// ---- PCG random stream (stateful, per pixel per frame) ---------------------
+
+uint pcg_advance(inout uint state) {
+  state = state * 747796405u + 2891336453u;
+  uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+  return (word >> 22u) ^ word;
+}
+
+float rand01(inout uint state) {
+  return float(pcg_advance(state) & 0x00ffffffu) * (1.0 / 16777216.0);
+}
+
+// Cosine-weighted hemisphere sample around +Z, rotated into the normal frame
+// (Duff et al. 2017 branchless ONB).
+vec3 cosine_dir(vec3 n, inout uint rng) {
+  const float r1 = rand01(rng);
+  const float r2 = rand01(rng);
+  const float phi = 6.28318530718 * r1;
+  const float s = sqrt(r2);
+  const vec3 t = vec3(s * cos(phi), s * sin(phi), sqrt(max(0.0, 1.0 - r2)));
+  const float sg = n.z < 0.0 ? -1.0 : 1.0;
+  const vec3 up = vec3(0.0, 0.0, sg);
+  const vec3 tx = normalize(cross(up - n * dot(up, n), n));
+  return normalize(tx * t.x + cross(n, tx) * t.y + n * t.z);
+}
+
+void main() {
+  const uvec2 pix = uvec2(gl_LaunchIDEXT.xy);
+  const uvec2 size = uvec2(gl_LaunchSizeEXT.xy);
+  if (pix.x >= size.x || pix.y >= size.y) return;
+
+  const uint frame = uint(cam_pos_frame.w);
+  const uint max_bounces = dims.z == 0u ? 1u : dims.z;
+
+  // Per-frame jitter in [-0.5, 0.5).
+  uint rng = pix.x + size.x * (pix.y + size.y * frame);
+  const float jx = rand01(rng) - 0.5;
+  const float jy = rand01(rng) - 0.5;
+
+  const vec2 uv = (vec2(pix) + vec2(jx, jy)) / vec2(size) * 2.0 - 1.0;
+  vec3 dir = normalize(cam_basis_r.xyz * uv.x + cam_basis_u.xyz * (-uv.y) +
+                       cam_basis_f.xyz);
+  vec3 origin = cam_pos_frame.xyz;
+
+  vec3 radiance = vec3(0.0);
+  vec3 throughput = vec3(1.0);
+
+  for (uint bounce = 0u; bounce < max_bounces; ++bounce) {
+    payload = vec4(0.0, 0.0, 0.0, -1.0);
+    traceRayEXT(scene, gl_RayFlagsOpaqueEXT, 0xffu, 0u, 0u, 0u,
+                origin, kEps, dir, 1.0e30, 0);
+    if (payload.w < 0.0) {            // miss -> sky, path ends
+      radiance += throughput * kSkyRadiance;
+      break;
+    }
+    // Hit: Lambertian (grey albedo), cosine-weighted next direction; no
+    // emitters on surfaces — the open ceiling is the only light.
+    throughput *= kAlbedo;
+    const vec3 n = normalize(payload.xyz);
+    origin = origin + dir * payload.w + n * kEps;
+    dir = cosine_dir(n, rng);
+  }
+
+  imageStore(accum, ivec2(pix), imageLoad(accum, ivec2(pix)) +
+                                  vec4(radiance, 0.0));
+}
