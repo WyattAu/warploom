@@ -1,9 +1,12 @@
-#version 450
+#version 460
 #extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_ray_query : require
 
-// pbr_shadow.frag — PBR + shadow mapping WITHOUT IBL. Same Cook-Torrance
-// direct lighting as pbr_scene.frag, with PCF shadow from set 4.
-// Sets: 0=mesh, 1=textures, 2=material, 4=shadow (no set 3 = IBL).
+// pbr_rt_shadow.frag — PBR + hard shadows WITHOUT IBL, shadow mapping's PCF
+// replaced by a ray query against a top-level acceleration structure bound
+// at set 3. The Cook-Torrance direct lighting is byte-equivalent to
+// pbr_shadow.frag; only the shadow factor differs (binary 0/1 hard shadow
+// instead of a 3x3 PCF kernel). Ground truth for the raster shadow path.
 
 layout(location = 0) in vec3 v_color;
 layout(location = 1) in vec3 v_world_normal;
@@ -31,10 +34,9 @@ layout(set = 2, binding = 0, std430) readonly buffer MaterialBuffer {
   PbrMaterial materials[];
 } mat_buf;
 
-layout(set = 3, binding = 0) uniform ShadowUBO {
-  mat4 light_vp;
-} shadow_ubo;
-layout(set = 3, binding = 1) uniform sampler2DShadow shadow_map;
+// Set 3: the scene TLAS. All scene BLAS instances carry OPAQUE flags, so
+// candidates commit automatically and the canonical drain loop suffices.
+layout(set = 3, binding = 0) uniform accelerationStructureEXT scene_as;
 
 layout(push_constant) uniform Push {
   mat4 view_projection;
@@ -58,7 +60,7 @@ const vec3 kLightColor = vec3(1.0);
 float D_GGX(float ndoth, float roughness) {
   float a  = roughness * roughness;
   float a2 = a * a;
-  float d  = ndoth * ndoth * (a2 - 1.0) + 1.0;
+  float d = ndoth * ndoth * (a2 - 1.0) + 1.0;
   return a2 / (3.14159265 * d * d + 0.0001);
 }
 
@@ -88,11 +90,21 @@ vec3 perturbNormal(vec3 n, vec2 uv, sampler2D normal_map) {
   return normalize(tbn * (texture(normal_map, uv).rgb * 2.0 - 1.0));
 }
 
-float shadowPCF(vec3 coord) {
-  if (coord.x < 0.0 || coord.x > 1.0 ||
-      coord.y < 0.0 || coord.y > 1.0 ||
-      coord.z < 0.0 || coord.z > 1.0) return 1.0;
-  return texture(shadow_map, coord);
+// Hard shadow: one opaque ray toward the light. Returns 1.0 lit, 0.0
+// occluded. The origin is nudged along the light direction and tMin is
+// positive so the shading point cannot self-intersect.
+float rtShadow(vec3 world_pos, vec3 l) {
+  rayQueryEXT rq;
+  rayQueryInitializeEXT(rq, scene_as,
+                        gl_RayFlagsOpaqueEXT, 0xFFu,
+                        world_pos + l * 0.01f, 0.001f, l, 1.0e30f);
+  // OPAQUE geometry: candidates commit automatically; drain and read.
+  while (rayQueryProceedEXT(rq)) {
+  }
+  return rayQueryGetIntersectionTypeEXT(rq, true) ==
+                 gl_RayQueryCommittedIntersectionNoneEXT
+             ? 1.0
+             : 0.0;
 }
 
 void main() {
@@ -106,7 +118,7 @@ void main() {
   if ((mat.flags & kHasMR) != 0u) {
     const vec3 mr = texture(textures[nonuniformEXT(mat.metallic_roughness_index)], v_uv).rgb;
     roughness *= mr.g;
-    metallic *= mr.b;
+    metallic  *= mr.b;
   }
   roughness = clamp(roughness, 0.04, 1.0);
   metallic = clamp(metallic, 0.0, 1.0);
@@ -130,16 +142,10 @@ void main() {
   const vec3 kd = (1.0 - F_Schlick(hdotv, f0)) * (1.0 - metallic);
   const vec3 lo = (kd * albedo / 3.14159265 + specular) * kLightColor * ndotl;
 
-  // Shadow lookup.
-  vec4 lightClipPos = shadow_ubo.light_vp * vec4(v_world_pos, 1.0);
-  // Vulkan stores NDC z directly in depth attachments (GL used window
-  // depth = NDC*0.5+0.5), so only x/y need the [0,1] remap; remapping z
-  // shifts every lookup ~0.5 deeper and shadows everything.
-  vec3 shadowCoord = lightClipPos.xyz / lightClipPos.w;
-  shadowCoord.xy = shadowCoord.xy * 0.5 + 0.5;
-  const float shadow = shadowPCF(shadowCoord);
+  // Shadow: ray query against the scene TLAS (no shadow map involved).
+  const float shadow = rtShadow(v_world_pos, l);
 
-  // Simple ambient + emissive.
+  // Simple ambient + emissive (identical to pbr_shadow.frag).
   const vec3 ambient = albedo * vec3(0.03);
   vec3 emissive = mat.emissive_factor;
   if ((mat.flags & kHasEmissive) != 0u) {

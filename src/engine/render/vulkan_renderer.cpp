@@ -466,6 +466,13 @@ omnicpp::core::Result<void> VulkanRenderer::record_shadow_pre_pass(
   // matrices at set 3; static pipelines leave it null and nothing is bound.
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     scene.shadow_pipeline);
+  // Depth bias relieves shadow-map acne: with a diagonal light the stored
+  // depth varies across a face, so unbiased fragments fail LESS_OR_EQUAL
+  // against neighboring texels and everything reads shadowed. NOTE: the
+  // constant factor is scaled by r (min representable depth delta, ~2^-23
+  // for D32), so it is nearly inert at small values; the slope factor does
+  // the real work (slope 128 covers ~45-degree faces in light UV space).
+  vkCmdSetDepthBias(command_buffer, 8.0f, 0.0f, 128.0f);
   if (scene.bone_set != VK_NULL_HANDLE) {
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             scene.shadow_pipeline_layout, 3, 1, &scene.bone_set,

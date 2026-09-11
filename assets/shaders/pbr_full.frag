@@ -176,7 +176,8 @@ void main() {
   // Shadow: world-space position -> light clip -> NDC [0,1] for depth lookup.
   vec4 lightClipPos = shadow_ubo.light_vp * vec4(v_world_pos, 1.0);
   vec3 shadowCoord = lightClipPos.xyz / lightClipPos.w;
-  shadowCoord = shadowCoord * 0.5 + 0.5;  // NDC [-1,1] -> [0,1]
+  // Vulkan depth = NDC z directly (no *0.5+0.5); x/y remap to [0,1].
+  shadowCoord.xy = shadowCoord.xy * 0.5 + 0.5;
   const float shadow = shadowPCF(shadowCoord);
 
   const vec3 lo = (diffuse + specular) * kLightColor * ndotl * shadow;

@@ -611,7 +611,39 @@ omnicpp::core::Result<void> VulkanDescriptorManager::write_image(
   return omnicpp::core::Result<void>::ok();
 #else
   (void)set; (void)binding; (void)type; (void)sampler; (void)view; (void)layout;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return omnicpp::core::Result<void>::error(
+      omnicpp::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
+omnicpp::core::Result<void> VulkanDescriptorManager::write_acceleration_structure(
+    VkDescriptorSet set, std::uint32_t binding, VkDescriptorType type,
+    VkAccelerationStructureKHR as, std::uint32_t array_element) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!device_ || !set || as == VK_NULL_HANDLE ||
+      type != VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) {
+    return omnicpp::core::Result<void>::error(
+        omnicpp::core::RuntimeError::invalid_config);
+  }
+  VkWriteDescriptorSetAccelerationStructureKHR as_info{};
+  as_info.sType =
+      VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+  as_info.accelerationStructureCount = 1;
+  as_info.pAccelerationStructures = &as;
+  VkWriteDescriptorSet write{};
+  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  write.dstSet = set;
+  write.dstBinding = binding;
+  write.dstArrayElement = array_element;
+  write.descriptorCount = 1;
+  write.descriptorType = type;
+  write.pNext = &as_info;
+  vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+  return omnicpp::core::Result<void>::ok();
+#else
+  (void)set; (void)binding; (void)type; (void)as; (void)array_element;
+  return omnicpp::core::Result<void>::error(
+      omnicpp::core::RuntimeError::vulkan_not_available);
 #endif
 }
 

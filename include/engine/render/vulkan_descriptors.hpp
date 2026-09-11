@@ -85,6 +85,13 @@ public:
       VkSampler sampler, VkImageView view, VkImageLayout layout,
       std::uint32_t array_element = 0);
 
+  //! Write one acceleration structure into `binding` of `set` (type must be
+  //! VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR). Required for ray-query
+  //! shaders that traverse a TLAS from graphics or compute stages.
+  [[nodiscard]] omnicpp::core::Result<void> write_acceleration_structure(
+      VkDescriptorSet set, std::uint32_t binding, VkDescriptorType type,
+      VkAccelerationStructureKHR as, std::uint32_t array_element = 0);
+
   [[nodiscard]] const std::vector<DescriptorSetLayoutInfo>& layouts() const noexcept {
     return layouts_;
   }

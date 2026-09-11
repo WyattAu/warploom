@@ -56,7 +56,12 @@ public:
       VkPipelineLayout pipeline_layout = VK_NULL_HANDLE,
       bool enable_depth_test = true,
       bool enable_depth_write = true,
-      bool enable_backface_cull = true);
+      bool enable_backface_cull = true,
+      //! Depth-bias slope factor (shadow-map acne relief). When nonzero the
+      //! pipeline enables depth bias and exposes it as a DYNAMIC state so the
+      //! recorder sets per-draw values with vkCmdSetDepthBias; a zero factor
+      //! leaves the pipeline bias-free and the dynamic state unregistered.
+      float depth_bias_slope = 0.0f);
 
   //! Create a compute pipeline from the "compute" stage module (load with
   //! load_shader_stage_file(device, path, "compute") first). Requires a

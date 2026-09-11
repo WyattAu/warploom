@@ -1,0 +1,68 @@
+#version 460
+#extension GL_EXT_ray_query : require
+
+// rt_shadows_a_vs_b.comp — TLAS ground-truth tracer for the RT-shadow test.
+// One invocation per ray of a 16x16 camera-ray grid. The CPU pre-fills every
+// origin with the camera eye; each invocation reconstructs its pixel ray
+// through a virtual 16x16 image 1 unit in front of the eye (matching the
+// raster camera's perspective) and writes the nearest TLAS hit.
+//
+// Payload (std430, binding 0), 8 floats per ray:
+//   [0..2] in : ray origin (camera eye)   [3] unused
+//   [4..6] out: hit world position        [7] out: instance custom index
+//
+// Binding 1: the scene TLAS. All instances are OPAQUE, so candidates commit
+// automatically and the drain loop is canonical.
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(std430, binding = 0) buffer Payload {
+  // Two vec4 per ray: [origin(3), unused] then [hit(3), custom index].
+  vec4 rays[][2];
+};
+
+layout(set = 0, binding = 1) uniform accelerationStructureEXT scene_as;
+
+layout(push_constant) uniform Push {
+  vec4 cam_right;   // xyz = right axis
+  vec4 cam_up;      // xyz = up axis, w = tan_half_fov
+  vec4 cam_fwd;     // xyz = forward axis, w = aspect
+  uvec2 dims;       // grid dimensions (16, 16)
+  uvec2 pad;
+} pc;
+
+void main() {
+  const uvec2 gid = gl_GlobalInvocationID.xy;
+  if (gid.x >= pc.dims.x || gid.y >= pc.dims.y) return;
+  const uint idx = gid.y * pc.dims.x + gid.x;
+
+  const vec3 origin = rays[idx][0].xyz;
+
+  // Pixel-plane ray through a virtual kTracerDim x kTracerDim image at
+  // distance 1.0 in front of the eye. tan_half_fov and aspect reproduce the
+  // raster camera's perspective so classification regions match the render.
+  const vec2 uv = (vec2(gid) + vec2(0.5, 0.5)) / vec2(pc.dims) * 2.0 - vec2(1.0);
+  // Pinhole dir through the virtual image plane at |z|=1: x/y scale with
+  // tan(fov/2) symmetrically (cam_fwd.w = 1.0; cam_right/up carry tan_half
+  // in .w), reproducing the raster camera's aspect-1 perspective.
+  const vec3 dir = normalize(pc.cam_fwd.xyz +
+                             uv.x * pc.cam_right.xyz * pc.cam_right.w +
+                             uv.y * pc.cam_up.xyz * pc.cam_up.w);
+
+  rayQueryEXT rq;
+  rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, 0xffU, origin,
+                        0.001f, dir, 1.0e30f);
+  while (rayQueryProceedEXT(rq)) {
+  }
+
+  const bool hit = rayQueryGetIntersectionTypeEXT(rq, true) !=
+                   gl_RayQueryCommittedIntersectionNoneEXT;
+  if (!hit) {
+    rays[idx][0] = vec4(0.0);
+    rays[idx][1] = vec4(0.0);
+    return;
+  }
+  const vec3 hit_pos =
+      origin + dir * rayQueryGetIntersectionTEXT(rq, true);
+  const uint custom = rayQueryGetIntersectionInstanceCustomIndexEXT(rq, true);
+  rays[idx][1] = vec4(hit_pos, float(custom));
+}

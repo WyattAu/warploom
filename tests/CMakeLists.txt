@@ -300,6 +300,22 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/rt_shadows_a_vs_b.comp.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/rt_shadows_a_vs_b.comp
+                    -o ${OMNICPP_SHADER_DIR}/rt_shadows_a_vs_b.comp.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/rt_shadows_a_vs_b.comp
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pbr_rt_shadow.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_rt_shadow.frag
+                    -o ${OMNICPP_SHADER_DIR}/pbr_rt_shadow.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_rt_shadow.frag
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/cull_and_draw_lod_occlude.comp.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/cull_and_draw_lod_occlude.comp
@@ -536,6 +552,8 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/skinned_scene.vert.spv
                 ${OMNICPP_SHADER_DIR}/lod_select.comp.spv
                 ${OMNICPP_SHADER_DIR}/ray_query_first.comp.spv
+                ${OMNICPP_SHADER_DIR}/rt_shadows_a_vs_b.comp.spv
+                ${OMNICPP_SHADER_DIR}/pbr_rt_shadow.frag.spv
                 ${OMNICPP_SHADER_DIR}/sky.vert.spv
                 ${OMNICPP_SHADER_DIR}/sky.frag.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
@@ -555,6 +573,7 @@ add_executable(omnicpp_unit_tests
     unit/test_physics_world.cpp
     unit/test_physics_ecs_bridge.cpp
     unit/test_ray_query_first_contact.cpp
+    unit/test_rt_shadows.cpp
     unit/test_input_state.cpp
     unit/test_input_translators.cpp
     unit/test_engine.cpp

@@ -214,7 +214,8 @@ omnicpp::core::Result<void> VulkanPipeline::create_graphics_pipeline(
     VkPipelineLayout pipeline_layout,
     bool enable_depth_test,
     bool enable_depth_write,
-    bool enable_backface_cull) {
+    bool enable_backface_cull,
+    float depth_bias_slope) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !render_pass || !vertex_shader_ || !fragment_shader_) {
     return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
@@ -274,11 +275,15 @@ omnicpp::core::Result<void> VulkanPipeline::create_graphics_pipeline(
   input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
   input_assembly.primitiveRestartEnable = VK_FALSE;
 
-  // Dynamic viewport and scissor
-  VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+  // Dynamic viewport and scissor; depth bias joins when the pipeline opts in
+  // (shadow-map pipelines set per-draw slope-scaled bias via vkCmdSetDepthBias).
+  VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT,
+                                     VK_DYNAMIC_STATE_SCISSOR,
+                                     VK_DYNAMIC_STATE_DEPTH_BIAS};
   VkPipelineDynamicStateCreateInfo dynamic_state{};
   dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-  dynamic_state.dynamicStateCount = 2;
+  dynamic_state.dynamicStateCount =
+      depth_bias_slope != 0.0f ? 3U : 2U;
   dynamic_state.pDynamicStates = dynamic_states;
 
   // Viewport (placeholder — set dynamically)
@@ -296,7 +301,10 @@ omnicpp::core::Result<void> VulkanPipeline::create_graphics_pipeline(
   rasterizer.lineWidth = 1.0f;
   rasterizer.cullMode = enable_backface_cull ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE;
   rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-  rasterizer.depthBiasEnable = VK_FALSE;
+  rasterizer.depthBiasEnable = depth_bias_slope != 0.0f ? VK_TRUE : VK_FALSE;
+  rasterizer.depthBiasConstantFactor = 2.0f;
+  rasterizer.depthBiasSlopeFactor = depth_bias_slope;
+  rasterizer.depthBiasClamp = 0.0f;
 
   // Multisampling
   VkPipelineMultisampleStateCreateInfo multisampling{};
