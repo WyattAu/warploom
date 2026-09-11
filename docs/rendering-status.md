@@ -200,3 +200,19 @@ claim below is backed by a live run under `VK_LAYER_KHRONOS_validation`
 Diagnostic env vars (all telemetry-logged): `OMNICPP_LEGACY_LIGHTING=1`,
 `OMNICPP_NO_SHADOW=1`, `OMNICPP_SUN_DIRECTION=x,y,z`,
 `OMNICPP_DUMP_SHADOW=<frame>` (writes `/tmp/shadowmap.f32`).
+
+## Ray-tracing phase 2 (E4/E5) — DONE
+
+Live-viewport RT + production path tracing; every claim validated on the
+RTX 2060 under `VK_LAYER_KHRONOS_validation` with **0 VUIDs**.
+
+| Claim | Proof | Commit |
+|---|---|---|
+| Ray-query shadows in the live viewport | `OMNICPP_RT_MODE=1` swaps pbr_rt_full (TLAS set 4) for the PCF fragment; RT vs PCF differ on 0.62% of pixels, all inside the cube/shadow band (max channel-sum 37, penumbra signature); sky/ground/geometry byte-identical | `646cfb1` |
+| Real path tracing (loop-PT, production pattern) | `pt_real.rgen`: N-bounce iterative loop, per-pixel PCG streams, cosine-weighted sampling, 64-frame accumulation in a sky-lit Lambertian room; validated against an independent fp64 MC integrator (262k samples) + byte-identical determinism + exact open-sky probe | `c9cd9b7` |
+| Driver payload-aliasing trap documented | Two `rayPayloadEXT` locations alias onto location 0 on this stack — rchit returns (normal, t); albedo lives in the raygen | `c9cd9b7` |
+| Animated TLAS | Skinned parts: TLAS instance transform = `object_model * bones_j(t)` (static BLASes, no per-frame rebuild); ground shadow motion frame30→90 matches skinned-PCF motion with **jaccard 1.000** (1606/1606 px) | `142c9c1` |
+| Full suite | 430/430 unit tests under validation | CI matrix |
+
+Diagnostic env vars added: `OMNICPP_RT_MODE=1` (ray-query shadows +
+animated TLAS), `OMNICPP_NO_MODEL=1` (cubes-only scene for exact A/Bs).
