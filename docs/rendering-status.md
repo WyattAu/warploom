@@ -86,6 +86,26 @@ that the proof forced into the open:
 | BLAS/TLAS build + ray query end-to-end | 8x8 parallel-ray grid, exact per-ray expectations: 24 hits on instance A (translated), 12 on instance B (**rotated 90 deg — load-bearing**), 28 misses; committed instanceCustomIndex verified per ray; 0 VUIDs, no leaks | `test_ray_query_first_contact` |
 | SBT sizing groundwork (E3) | `VulkanRtQuery::get_properties` returns handle size / aligned raygen stride | `vulkan_rt_query.cpp` |
 
+## Ray-tracing pipeline: SBT + vkCmdTraceRaysKHR (E3) — GPU proof complete
+
+Full RT pipeline (not ray queries): `VulkanRtPipeline` engine module creates the
+`VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR` pipeline and shader-binding table and
+dispatches `vkCmdTraceRaysKHR`. Five stages (rgen, 2×rmiss, 2×rchit) with depth
+selected via SBT record offsets / miss indices (primary → bounce-level rchit,
+nested bounce → leaf rchit), each level with its own payload. Temporal
+accumulation: the rgen imageLoads the previous sum and stores the running total;
+the frame's sky radiance drifts per frame (frame-seeded hash) so accumulation
+genuinely averages varying samples. A bit-exact CPU ray-trace simulator is the
+ground truth. Verified on RTX 2060 under validation, 0 VUIDs.
+
+| Claim | Proof | Source |
+|---|---|---|
+| SBT + traceRays execute on hardware | exact analytic probe equality (sky miss, cube front, slab top, bounce→sky, bounce→hit) between GPU radiance and the CPU simulator, at every probe | `test_path_tracing` |
+| Temporal accumulation averages | mean of K frames matches the drift-integrated CPU mean to <0.01 (drifted sky substituted on bounce-miss, matching the rchit) | `test_path_tracing` |
+| Determinism | two full accumulation passes produce bit-identical accumulators | `test_path_tracing` |
+| Device-adaptive SBT layout | engine queries real `VkPhysicalDeviceRayTracingPipelinePropertiesKHR` (this device: 64-byte `shaderGroupBaseAlignment`, not the 32 spec minimum) instead of hardcoding; 0 VUIDs | `vulkan_rt_pipeline.cpp` |
+| glslang traceRayEXT quirk | this SDK's glslang (1.4.357) takes the payload **location number** as traceRayEXT's final argument, not the variable — documented so future shaders don't rediscover it | `pt_pathtrace.rgen` |
+
 ## Ray-query reflections (E2) — GPU proof complete
 
 `pbr_rt_reflect.frag` + `tests/unit/test_rt_reflections.cpp` (commit 4729b1a):
