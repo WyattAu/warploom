@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -34,7 +35,21 @@ struct Json {
   double real{0.0};
   std::string string{};
   std::vector<Json> items{};                          // Array
-  std::vector<std::pair<std::string, Json>> members{};  // Object
+  //! Object members as a named struct: std::vector<std::pair<string, Json>>
+  //! instantiates std::pair<string, Json> while Json is still incomplete,
+  //! which Clang rejects (the P0735 vector<Incomplete> exemption does not
+  //! apply), and even a vector<Json::Member> of a forward-declared nested
+  //! struct trips the eager sizeof/alignof trait queries on Clang+libstdc++.
+  //! unique_ptr indirection is the portable shape: sizeof(unique_ptr<Member>)
+  //! is independent of Member's completeness, and Member is completed
+  //! immediately after Json so every destructor instantiation sees it.
+  struct Member;  // defined right after Json (holds a Json by value)
+  std::vector<std::unique_ptr<Member>> members{};  // Object
+};
+
+struct Json::Member {
+  std::string key;
+  Json value;
 };
 
 constexpr std::size_t kMaxJsonDepth = 96;
@@ -124,7 +139,10 @@ private:
       ++pos_;
       Json value;
       if (!parse_value(value, depth + 1)) return false;
-      out.members.emplace_back(std::move(key), std::move(value));
+      auto member = std::make_unique<Json::Member>();
+      member->key = std::move(key);
+      member->value = std::move(value);
+      out.members.push_back(std::move(member));
       skip_ws();
       if (pos_ >= size_) return fail("unterminated object");
       if (data_[pos_] == ',') {
@@ -342,7 +360,7 @@ inline const Json* find_member(const Json& object, const char* key) {
   if (object.kind != Json::Kind::Object) return nullptr;
   const std::string_view wanted{key};
   for (const auto& member : object.members) {
-    if (member.first == wanted) return &member.second;
+    if (member->key == wanted) return &member->value;
   }
   return nullptr;
 }

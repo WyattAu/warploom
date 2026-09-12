@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28...4.0)
 project(OmniCppTests VERSION 1.0.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -607,6 +607,8 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             DEPENDS
                 ${OMNICPP_SHADER_DIR}/triangle.vert.spv
                 ${OMNICPP_SHADER_DIR}/triangle.frag.spv
+                ${OMNICPP_SHADER_DIR}/scene.vert.spv
+                ${OMNICPP_SHADER_DIR}/scene.frag.spv
                 ${OMNICPP_SHADER_DIR}/ubo_triangle.frag.spv
                 ${OMNICPP_SHADER_DIR}/bindless_palette.frag.spv
                 ${OMNICPP_SHADER_DIR}/bindless_textures.frag.spv
@@ -684,6 +686,7 @@ endif()
 # ============================================================================
 
 add_executable(omnicpp_unit_tests
+    unit/test_contract.cpp
     unit/test_deterministic_runtime.cpp
     unit/test_animation_state_machine.cpp
     unit/test_physics_world.cpp
@@ -693,6 +696,7 @@ add_executable(omnicpp_unit_tests
     unit/test_rt_reflections.cpp
     unit/test_path_tracing.cpp
     unit/test_path_tracing_real.cpp
+    unit/test_control_server.cpp
     unit/test_input_state.cpp
     unit/test_input_translators.cpp
     unit/test_engine.cpp
@@ -746,7 +750,15 @@ target_include_directories(omnicpp_unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/includ
 # Asset directory for file-based tests (mannequin model); shader-dir define
 # only applies when the test shader targets exist (GPU presets).
 target_compile_definitions(omnicpp_unit_tests PRIVATE
-    OMNICPP_TEST_ASSET_DIR=\"${CMAKE_SOURCE_DIR}/assets/models\")
+    OMNICPP_TEST_ASSET_DIR=\"${CMAKE_SOURCE_DIR}/assets/models\"
+    OMNICPP_TEST_BIN_DIR=\"${CMAKE_BINARY_DIR}/bin\")
+
+# Contract-violator child binary: the violation test asserts that
+# OMNICPP_CONTRACT aborts with a diagnostic, in a process that may die.
+add_executable(omnicpp_contract_violator unit/contract_violator.cpp)
+target_link_libraries(omnicpp_contract_violator PRIVATE omnicpp_runtime)
+target_include_directories(omnicpp_contract_violator PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_dependencies(omnicpp_unit_tests omnicpp_contract_violator)
 if(TARGET omnicpp_test_shaders)
     add_dependencies(omnicpp_unit_tests omnicpp_test_shaders)
     target_compile_definitions(omnicpp_unit_tests PRIVATE

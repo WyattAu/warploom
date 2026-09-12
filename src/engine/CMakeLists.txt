@@ -8,6 +8,7 @@ cmake_minimum_required(VERSION 3.20)
 add_library(omnicpp_runtime SHARED
     core/engine.cpp
     core/input_state.cpp
+    core/control_server.cpp
     core/input_translators.cpp
     render/vulkan_ibl_baker.cpp
     asset/gltf_importer.cpp

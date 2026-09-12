@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include "engine/core/control_server.hpp"
 #include <memory>
 #include <random>
 #include <string>
@@ -152,6 +153,10 @@ SceneMatrix make_ortho(float l, float r, float b, float t, float zn,
 constexpr std::uint32_t kGdObjectCount = 3U;
 //! Maximum GPU-driven instances (physics-scene cap; payload sized once).
 constexpr std::uint32_t kGdMaxInstances = 4096U;
+
+struct ViewportApp;
+//! ControlHost over the viewport (defined after ViewportApp).
+class ViewportControlHost;
 
 struct ViewportApp {
   // Vulkan stack.
@@ -423,6 +428,23 @@ struct ViewportApp {
   viewport::TelemetryLogger telemetry;
   viewport::FrameCapture capture;
   bool telemetry_enabled{false};
+
+  // ---- M0 control channel (OMNICPP_CONTROL_SOCKET=path). -----------------
+  // Editor/automation surface: pause/step/camera/sun/cube/capture commands
+  // over a unix-socket JSONL server polled once per frame. Never blocks.
+  std::unique_ptr<ViewportControlHost> control_host;
+  std::unique_ptr<omnicpp::core::ControlServer> control_server;
+
+  bool control_paused() const noexcept { return control_paused_; }
+  bool control_paused_{false};
+  std::uint32_t control_steps_requested_{0};
+  bool control_capture_requested_{false};
+  //! Objects spawned via the control channel (persist across the per-frame
+  //! scene rebuild, which clears scene.objects every frame).
+  std::vector<omnicpp::render::ScenePbrObject> control_objects;
+  bool camera_override_{false};
+  std::array<float, 3> camera_eye_{16.0f, 14.0f, 0.0f};
+  std::array<float, 3> camera_target_{0.0f, 1.0f, 0.0f};
   std::uint32_t frame_index{0};
   std::uint32_t captures_done{0};
   //! Scene times actually recorded by the last window frame (the capture
@@ -474,11 +496,127 @@ struct ViewportApp {
   void shutdown();
 };
 
+//! ControlHost implementation over the viewport: translates protocol
+//! commands into the app's authoritative state (pause/step/camera/sun/cube)
+//! and reports it via snapshot_json. Methods run on the frame thread inside
+//! ControlServer::poll — non-blocking by construction.
+class ViewportControlHost final : public omnicpp::core::ControlHost {
+ public:
+  explicit ViewportControlHost(ViewportApp& app) : app_(app) {}
+
+  omnicpp::core::ControlReply on_control(
+      const omnicpp::core::ControlCommand& command) override {
+    using CK = omnicpp::core::ControlCommand::Kind;
+    omnicpp::core::ControlReply reply;
+    reply.ok = true;
+    switch (command.kind) {
+      case CK::Ping:
+        reply.detail = "pong";
+        break;
+      case CK::Pause:
+        app_.control_paused_ = true;
+        reply.detail = "paused";
+        break;
+      case CK::Resume:
+        app_.control_paused_ = false;
+        reply.detail = "resumed";
+        break;
+      case CK::Step:
+        app_.control_steps_requested_ +=
+            command.number_count > 0
+                ? static_cast<std::uint32_t>(command.numbers[0])
+                : 1U;
+        reply.detail = "stepped " +
+                       std::to_string(command.number_count > 0
+                                          ? static_cast<unsigned>(command.numbers[0])
+                                          : 1U);
+        break;
+      case CK::SetCamera: {
+        if (command.number_count >= 6U) {
+          app_.camera_override_ = true;
+          app_.camera_eye_ = {static_cast<float>(command.numbers[0]),
+                              static_cast<float>(command.numbers[1]),
+                              static_cast<float>(command.numbers[2])};
+          app_.camera_target_ = {static_cast<float>(command.numbers[3]),
+                                 static_cast<float>(command.numbers[4]),
+                                 static_cast<float>(command.numbers[5])};
+          reply.detail = "camera set";
+        } else {
+          reply.ok = false;
+          reply.error = "set_camera needs ex,ey,ez,tx,ty,tz";
+        }
+        break;
+      }
+      case CK::SetSun: {
+        if (command.number_count >= 3U) {
+          app_.sun_direction = {
+              static_cast<float>(command.numbers[0]),
+              static_cast<float>(command.numbers[1]),
+              static_cast<float>(command.numbers[2])};
+          reply.detail = "sun set";
+        } else {
+          reply.ok = false;
+          reply.error = "set_sun needs x,y,z";
+        }
+        break;
+      }      case CK::SpawnCube: {
+        // Prove the command path reaches the authoritative scene: add a
+        // static cube (identity skin slot) at the requested position. Held
+        // in control_objects — the record path clears scene.objects each
+        // frame and re-appends these after the built-in scene lists.
+        omnicpp::render::ScenePbrObject obj;
+        obj.mesh = &app_.cube.mesh;
+        const float s = command.number_count > 3U
+                            ? static_cast<float>(command.numbers[3])
+                            : 1.0f;
+        obj.model = multiply(translation_matrix(
+                                 static_cast<float>(command.numbers[0]),
+                                 static_cast<float>(command.numbers[1]),
+                                 static_cast<float>(command.numbers[2])),
+                             scale_matrix(s, s, s));
+        obj.material_index = 2U;
+        obj.joint_base = 0U;
+        app_.control_objects.push_back(obj);
+        reply.detail = "cube spawned";
+        break;
+      }
+      case CK::Capture:
+        app_.control_capture_requested_ = true;
+        reply.detail = "capture scheduled";
+        break;
+      default:
+        reply.ok = false;
+        reply.error = "unhandled command";
+        break;
+    }
+    return reply;
+  }
+
+  [[nodiscard]] std::string snapshot_json() const override {
+    std::size_t drawn = 0;
+    for (const auto& object : app_.scene.objects) {
+      if (object.mesh != nullptr && object.mesh->is_drawable()) ++drawn;
+    }
+    std::string json = "{\"scene\":\"";
+    json += app_.sponza_enabled ? "city+sponza" : (app_.city_scene ? "city" : "cubes");
+    json += "\",\"paused\":";
+    json += app_.control_paused_ ? "true" : "false";
+    json += ",\"objects\":" + std::to_string(app_.scene.objects.size());
+    json += ",\"drawn\":" + std::to_string(drawn);
+    json += ",\"camera_override\":";
+    json += app_.camera_override_ ? "true" : "false";
+    json += "}";
+    return json;
+  }
+
+ private:
+  ViewportApp& app_;
+};
+
 //! Free-function RT-shadow helpers (defined near setup_lighting).
 bool setup_rt_shadows(ViewportApp& app);
 void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer);
 void destroy_rt_shadows(ViewportApp& app);
-
 //! Bind-pose unit cube (half-extent 1) in BLAS build-input layout: 12
 //! triangles x 9 floats, canonical quad indices per face.
 constexpr std::array<float, 8U * 3U> kRtCubePositions = {
@@ -3369,9 +3507,24 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     const float orbit_radius = app.sponza_enabled ? 34.0f : 16.0f;
     const float orbit_height = app.sponza_enabled ? 22.0f : 14.0f;
     const float cam_angle = t * 0.05f;
-    const float eye[3] = {orbit_radius * std::cos(cam_angle), orbit_height,
-                          orbit_radius * std::sin(cam_angle)};
-    const float target[3] = {0.0f, 1.0f, 0.0f};
+    // Control-channel override (set_camera command) replaces the orbit.
+    float eye[3];
+    float target[3];
+    if (app.camera_override_) {
+      eye[0] = app.camera_eye_[0];
+      eye[1] = app.camera_eye_[1];
+      eye[2] = app.camera_eye_[2];
+      target[0] = app.camera_target_[0];
+      target[1] = app.camera_target_[1];
+      target[2] = app.camera_target_[2];
+    } else {
+      eye[0] = orbit_radius * std::cos(cam_angle);
+      eye[1] = orbit_height;
+      eye[2] = orbit_radius * std::sin(cam_angle);
+      target[0] = 0.0f;
+      target[1] = 1.0f;
+      target[2] = 0.0f;
+    }
     const float up[3] = {0.0f, 1.0f, 0.0f};
     app.scene.camera.view_projection =
         omnicpp::render::scene_camera_view_projection(
@@ -3469,6 +3622,13 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
       app.scene.shadow_pipeline_layout =
           app.shadow_pipeline_static.pipeline_layout();
     }
+    // Control-spawned objects append after the built-in city lists so they
+    // draw with the already-selected ML pipeline (cube mesh, identity skin
+    // slot 0). The city branch returns below, so the append must happen here
+    // too — the shared append at the tail only serves the non-city scenes.
+    for (const auto& spawned : app.control_objects) {
+      app.scene.objects.push_back(spawned);
+    }
     return omnicpp::render::VulkanRenderer{}
         .record_pbr_scene(command_buffer, app.scene, width, height)
         .is_ok();
@@ -3562,6 +3722,11 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
   // OMNICPP_NO_SHADOW keeps the composed pipelines (their shaders statically
   // use set 4) but binds the neutral 1x1 cleared map: every PCF comparison
   // passes, so the image equals composed shading with no shadow term.
+  // Control-spawned objects append after the built-in scene lists so they
+  // draw with the already-selected pipeline (cube mesh, identity skin slot).
+  for (const auto& spawned : app.control_objects) {
+    app.scene.objects.push_back(spawned);
+  }
   const bool shadow_active = app.lighting_ready && !app.no_shadow;
   app.scene.shadow_set =
       app.lighting_ready
@@ -3971,7 +4136,12 @@ bool ViewportApp::initialize() {
       return false;
     }
   }
-  if (run_config.capture_every != 0U) {
+  // Capture targets exist when cadence captures are enabled OR the control
+  // channel will run (a capture command must be servable without cadence
+  // config). The server starts later, in run(), so probe the env here.
+  const bool control_requested =
+      std::getenv("OMNICPP_CONTROL_SOCKET") != nullptr;
+  if (run_config.capture_every != 0U || control_requested) {
     const VkFormat depth_format =
         omnicpp::render::VulkanRenderPass::find_supported_depth_format(
             context.physical_device());
@@ -3991,7 +4161,40 @@ void ViewportApp::run() {
       "viewport: %s — ESC or window close to quit\n",
       context.device_properties().name.c_str());
   time = run_config.start_time;
+
+  // M0 control channel: OMNICPP_CONTROL_SOCKET=<path> hosts the JSONL
+  // control server (pause/step/camera/sun/cube/capture) polled once per
+  // frame. Purely additive — unset leaves the loop unchanged.
+  if (const char* sock = std::getenv("OMNICPP_CONTROL_SOCKET"); sock != nullptr && *sock != '\0') {
+    control_host = std::make_unique<ViewportControlHost>(*this);
+    control_server = std::make_unique<omnicpp::core::ControlServer>();
+    std::string error;
+    if (control_server->start(sock, error)) {
+      std::fprintf(stderr, "viewport: control server on %s\n", sock);
+      if (telemetry_enabled) telemetry.log_event("control_socket", sock);
+    } else {
+      std::fprintf(stderr, "viewport: control server failed: %s\n",
+                   error.c_str());
+      control_server.reset();
+      control_host.reset();
+    }
+  }
+
   while (poll_events(*this)) {
+    // Control channel first: accept/read/dispatch so pause/step/camera
+    // commands apply to THIS frame's simulation and render.
+    if (control_server != nullptr) {
+      (void)control_server->poll(*control_host);
+    }
+    // Pause/step gate: paused with no pending steps skips the whole frame
+    // (no render, no clock advance); each requested step releases exactly
+    // one frame so fixed-dt semantics stay intact.
+    if (control_paused()) {
+      if (control_steps_requested_ == 0U) {
+        continue;
+      }
+      --control_steps_requested_;
+    }
     const auto frame_start = std::chrono::steady_clock::now();
     auto image = renderer.begin_frame();
     if (!image.is_ok()) continue;
@@ -4096,12 +4299,16 @@ void ViewportApp::run() {
     }
 
     // GPU-side capture: re-record the exact scene just displayed into the
-    // capture targets and pull color+depth to the host.
+    // capture targets and pull color+depth to the host. Control-channel
+    // captures (capture command) bypass the cadence but need telemetry.
     std::string capture_name;
-    if (run_config.capture_every != 0U &&
-        captures_done < run_config.capture_limit &&
-        (frame_index + 1U) % run_config.capture_every == 0U &&
-        telemetry_enabled) {
+    const bool control_capture = control_capture_requested_ && telemetry_enabled;
+    control_capture_requested_ = false;
+    if ((run_config.capture_every != 0U &&
+         captures_done < run_config.capture_limit &&
+         (frame_index + 1U) % run_config.capture_every == 0U &&
+         telemetry_enabled) ||
+        control_capture) {
       const bool captured = capture.capture(
           context.graphics_queue(), [&](VkCommandBuffer cmd) {
             return record_scene_into(cmd, *this, last_recorded_time,

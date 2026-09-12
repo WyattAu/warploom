@@ -9,7 +9,8 @@
 
 #include "engine/render/vulkan_compute.hpp"
 
-#include <cassert>
+#include "engine/core/contract.hpp"
+
 
 #ifdef OMNICPP_HAS_VULKAN
 #include <vulkan/vulkan.h>
@@ -20,7 +21,7 @@ namespace omnicpp::render {
 void cmd_signal_event(VkCommandBuffer command_buffer, VkEvent event,
                       std::uint32_t src_stage) {
 #ifdef OMNICPP_HAS_VULKAN
-  assert(event != VK_NULL_HANDLE);
+  OMNICPP_CONTRACT(event != VK_NULL_HANDLE);
   vkCmdSetEvent(command_buffer, event, src_stage);
 #endif
 }
@@ -28,7 +29,7 @@ void cmd_signal_event(VkCommandBuffer command_buffer, VkEvent event,
 void cmd_acquire_shared_image(VkCommandBuffer command_buffer, VkEvent event,
                               const QueueImageState& state) {
 #ifdef OMNICPP_HAS_VULKAN
-  assert(event != VK_NULL_HANDLE && state.image != VK_NULL_HANDLE);
+  OMNICPP_CONTRACT(event != VK_NULL_HANDLE && state.image != VK_NULL_HANDLE);
 
   // Concurrent-usage images: queue ownership transfers via RELEASE (producer
   // side) then ACQUIRE (this call). With single-queue testing the acquire
@@ -236,7 +237,7 @@ void AsyncComputeQueue::cleanup() noexcept {
 
 void AsyncComputeQueue::begin() {
 #ifdef OMNICPP_HAS_VULKAN
-  assert(device_ && pool_);
+  OMNICPP_CONTRACT(device_ && pool_);
   // Submission N (0-based) uses ring slot N % kInFlight: its own command
   // buffer and fence. A slot in use still carries submission N - kInFlight;
   // retire it before re-recording. Other slots remain in flight — that is
@@ -246,7 +247,7 @@ void AsyncComputeQueue::begin() {
   VkFence slot_fence = fences_[n % kInFlight];
   if (n >= kInFlight) {
     const VkResult waited = vkWaitForFences(device_, 1, &slot_fence, VK_TRUE, 1'000'000'000ULL);
-    assert(waited == VK_SUCCESS);
+    OMNICPP_CONTRACT(waited == VK_SUCCESS);
     (void)waited;
   }
   vkResetFences(device_, 1, &slot_fence);
@@ -261,7 +262,7 @@ void AsyncComputeQueue::begin() {
 
 void AsyncComputeQueue::record(void (*record_fn)(VkCommandBuffer, void*), void* user_data) {
 #ifdef OMNICPP_HAS_VULKAN
-  assert(recording_ && record_fn);
+  OMNICPP_CONTRACT(recording_ && record_fn);
   record_fn(buffer_, user_data);
 #else
   (void)record_fn; (void)user_data;
