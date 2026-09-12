@@ -34,6 +34,7 @@
 #include "engine/core/animation_state_machine.hpp"
 #include "engine/core/physics_world.hpp"
 #include "engine/render/vulkan_context.hpp"
+#include "engine/render/vulkan_frame_upload.hpp"
 #include "engine/render/vulkan_acceleration_structure.hpp"
 #include "engine/render/vulkan_descriptors.hpp"
 #include "engine/render/vulkan_ibl_baker.hpp"
@@ -266,6 +267,33 @@ struct ViewportApp {
     float intensity;
   };
   std::vector<CityLight> city_lights;
+
+  // --- Sponza landmark (OMNICPP_SPONZA=1, city scene) ----------------------
+  // One shared vertex/index pair; one draw per glTF primitive (SceneMesh
+  // index_offset/count slices sharing a single mesh SSBO descriptor set).
+  struct SponzaLandmark {
+    omnicpp::render::Allocation vertex_allocation{};
+    omnicpp::render::Allocation index_allocation{};
+    VkDescriptorSet mesh_set{VK_NULL_HANDLE};
+    std::vector<omnicpp::render::SceneMesh> parts;
+    std::vector<SceneMatrix> part_models;
+    std::uint32_t material_base{0U};
+  };
+  SponzaLandmark sponza;
+  bool sponza_enabled{false};
+  struct SponzaTexture {
+    VkImage image{VK_NULL_HANDLE};
+    omnicpp::render::Allocation allocation{};
+    omnicpp::render::SceneTexture scene{};
+  };
+  std::vector<SponzaTexture> sponza_textures;
+  VkSampler sponza_sampler{VK_NULL_HANDLE};
+  VkDescriptorSetLayout sponza_sampler_layout{VK_NULL_HANDLE};
+  VkDescriptorSet sponza_sampler_set{VK_NULL_HANDLE};
+  //! World-space triangles for the merged landmark BLAS.
+  std::vector<float> rt_sponza_triangles;
+  //! World-space triangle count of the merged landmark BLAS (telemetry).
+  std::uint32_t sponza_triangle_count{0U};
   VkBuffer city_lights_buffer{VK_NULL_HANDLE};
   omnicpp::render::Allocation city_lights_allocation{};
   VkDescriptorSetLayout city_lights_layout{VK_NULL_HANDLE};
@@ -349,6 +377,8 @@ struct ViewportApp {
   std::vector<RtBlas> rt_blas_cube;
   std::vector<RtBlas> rt_blas_ground;
   std::vector<RtBlas> rt_blas_mannequin;
+  //! Sponza landmark: one merged world-space BLAS, identity instance.
+  std::vector<RtBlas> rt_blas_sponza;
   //! City statics: one BLAS per CityPart (exact geometry, TLAS instance
   //! applies the part model). Indexed like city_parts.
   std::vector<RtBlas> rt_blas_city;
@@ -1013,7 +1043,7 @@ bool setup_scene(ViewportApp& app) {
   app.material_set = material_set.value();
 
   auto material_buffer = app.allocator.create_buffer(
-      96U * sizeof(omnicpp::render::PbrMaterialData),
+      256U * sizeof(omnicpp::render::PbrMaterialData),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -1029,7 +1059,8 @@ bool setup_scene(ViewportApp& app) {
   auto* materials = static_cast<omnicpp::render::PbrMaterialData*>(
       app.material_allocation.mapped);
   // 0: brushed metal cube, 1: rough dielectric cube, 2: ground, 3: skin.
-  for (int i = 0; i < 96; ++i) materials[i] = {};
+  // Slots 4+ are city-scene dynamic (Sponza imports at kSponzaMaterialBase).
+  for (int i = 0; i < 256; ++i) materials[i] = {};
   materials[0] = {};
   materials[0].base_color_factor = {0.95f, 0.35f, 0.15f, 1.0f};
   materials[0].metallic_factor = 0.9f;
@@ -1739,13 +1770,24 @@ bool setup_rt_shadows(ViewportApp& app) {
     }
     app.rt_blas_city.push_back(b);
   }
+  // Sponza landmark: one merged world-space BLAS (triangles baked in
+  // setup_sponza); identity TLAS instance per frame.
+  if (app.sponza_enabled && !app.rt_sponza_triangles.empty()) {
+    ViewportApp::RtBlas b{};
+    if (!rt_build_blas(app, app.rt_sponza_triangles, b)) {
+      std::fprintf(stderr, "viewport: RT: sponza BLAS failed\n");
+      return false;
+    }
+    app.rt_blas_sponza.push_back(b);
+  }
 
   // --- 4. TLAS storage (capacity = worst-case instance count). ----------
   // City scene: 25 buildings + 32 poles/heads + 3 ground/static + actors.
   const std::uint32_t tlas_capacity =
       2U + app.mannequin_meshes.size() +
       static_cast<std::uint32_t>(app.city_parts.size()) +
-      app.city_actor_count * app.mannequin_meshes.size() + 8U;
+      app.city_actor_count * app.mannequin_meshes.size() +
+      static_cast<std::uint32_t>(app.rt_blas_sponza.size()) + 8U;
   auto tlas = app.rt_builder.create_tlas(dev, app.allocator, tlas_capacity);
   if (!tlas.is_ok()) {
     std::fprintf(stderr, "viewport: RT: create_tlas failed\n");
@@ -1944,6 +1986,7 @@ void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
         VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;  // hard-shadow occluders
     inst.blas_device_address = blas.as.device_address;
   };
+  bool sponza_pushed = false;
   for (const auto& object : app.scene.objects) {
     if (object.mesh == nullptr || !object.mesh->is_drawable()) continue;
     if (object.mesh == &app.ground.mesh) {
@@ -1990,8 +2033,20 @@ void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
               push_instance(app.rt_blas_city[c],
                             omnicpp::render::scene_identity_matrix());
             }
+            matched = true;
             break;
           }
+        }
+      }
+      if (!matched) {
+        // Sponza landmark: ONE merged world-space BLAS covering all 103
+        // primitives, identity transform. Pushed exactly once per frame —
+        // per-object pushes would duplicate 103x and overflow the TLAS
+        // instance capacity (verified: instances truncated at 96).
+        if (!sponza_pushed && !app.rt_blas_sponza.empty()) {
+          push_instance(app.rt_blas_sponza[0],
+                        omnicpp::render::scene_identity_matrix());
+          sponza_pushed = true;
         }
       }
     }
@@ -2032,6 +2087,7 @@ void destroy_rt_shadows(ViewportApp& app) {
   destroy_list(app.rt_blas_ground);
   destroy_list(app.rt_blas_mannequin);
   destroy_list(app.rt_blas_city);
+  destroy_list(app.rt_blas_sponza);
   app.rt_builder.destroy_tlas(dev, app.allocator, app.rt_tlas);
   app.rt_scratch.cleanup(app.allocator);
   // City scene GPU resources (no-op when the city scene never ran).
@@ -2506,6 +2562,327 @@ bool setup_lighting(ViewportApp& app) {
 // object list and camera framing when active.
 // ============================================================================
 
+// ============================================================================
+// Sponza landmark (OMNICPP_SPONZA=1, city scene): whole-scene glTF import of
+// the CC0 Sponza atrium (assets/models/sponza). One shared vertex/index
+// buffer pair; one draw per glTF primitive as a SceneMesh index slice over
+// the single mesh SSBO descriptor set (SceneMesh::index_offset/count already
+// express per-primitive draws). Each primitive's material lands at
+// kSponzaMaterialBase + primitive index in the shared material SSBO; albedo
+// textures (69 external PNG/JPEG files, decoded by the importer) upload into
+// the bindless array from kSponzaTextureBase. One merged world-space BLAS
+// feeds ray-query shadows (identity TLAS instance).
+// ============================================================================
+
+constexpr std::uint32_t kSponzaMaterialBase = 64U;
+constexpr std::uint32_t kSponzaTextureBase = 8U;
+
+bool setup_sponza(ViewportApp& app) {
+  // Resolve assets/models/sponza/Sponza.gltf (+ .bin + 69 external images
+  // relative to the document dir), mirroring the mannequin loader.
+  const char* asset_dir_env = std::getenv("OMNICPP_ASSET_DIR");
+  std::vector<std::string> candidates;
+  if (asset_dir_env != nullptr) candidates.emplace_back(asset_dir_env);
+  candidates.insert(candidates.end(), {"assets/models", "../assets/models",
+                                       "../../assets/models"});
+  std::string json;
+  std::vector<char> json_bytes;
+  std::vector<char> bin_bytes;
+  std::string model_dir;
+  bool loaded = false;
+  for (const auto& dir : candidates) {
+    const std::string doc_path = dir + "/sponza/Sponza.gltf";
+    if (!read_file_bytes(doc_path, json, json_bytes)) continue;
+    model_dir = doc_path.substr(0, doc_path.find_last_of('/'));
+    const std::string buffer_uri = find_buffer0_uri(json);
+    if (!buffer_uri.empty() &&
+        buffer_uri.compare(0, 5, "data:") != 0) {
+      std::string bin_text;
+      if (!read_file_bytes(model_dir + "/" + buffer_uri, bin_text,
+                           bin_bytes)) {
+        continue;
+      }
+    } else {
+      bin_bytes.clear();
+    }
+    loaded = true;
+    break;
+  }
+  if (!loaded) {
+    std::fprintf(stderr, "viewport: sponza asset not found\n");
+    return false;
+  }
+
+  // External image files resolve relative to the document dir.
+  const omnicpp::asset::ExternalFileLoader loader =
+      [&model_dir](const std::string& uri, std::string& load_error,
+                   std::vector<std::uint8_t>& out_bytes) {
+        std::vector<char> bytes;
+        std::string unused;
+        if (!read_file_bytes(model_dir + "/" + uri, unused, bytes)) {
+          load_error = "cannot open " + uri;
+          return false;
+        }
+        out_bytes.assign(bytes.begin(), bytes.end());
+        return true;
+      };
+
+  std::string import_error;
+  auto imported = omnicpp::asset::import_gltf_scene(
+      json_bytes.data(), json_bytes.size(),
+      bin_bytes.empty()
+          ? nullptr
+          : reinterpret_cast<const std::uint8_t*>(bin_bytes.data()),
+      bin_bytes.size(), 0U, &import_error, &loader);
+  if (!imported.is_ok()) {
+    std::fprintf(stderr, "viewport: sponza import failed: %s\n",
+                 import_error.c_str());
+    return false;
+  }
+  auto& scene_import = imported.value();
+  if (scene_import.meshes.empty() || scene_import.nodes.empty()) {
+    std::fprintf(stderr, "viewport: sponza import empty\n");
+    return false;
+  }
+  const auto& mesh = scene_import.meshes[0];
+
+  auto* mats = static_cast<omnicpp::render::PbrMaterialData*>(
+      app.material_allocation.mapped);
+
+  // ---- Bindless albedo textures (one sampler; glTF baseColor is sRGB) ----
+  VkDevice dev = app.context.device();
+  const std::uint32_t queue_family = static_cast<std::uint32_t>(
+      app.context.queue_families().graphics_family);
+
+  VkSamplerCreateInfo sampler_info{};
+  sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  sampler_info.magFilter = VK_FILTER_LINEAR;
+  sampler_info.minFilter = VK_FILTER_LINEAR;
+  sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+  sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  if (vkCreateSampler(dev, &sampler_info, nullptr, &app.sponza_sampler) !=
+      VK_SUCCESS) {
+    std::fprintf(stderr, "viewport: sponza sampler failed\n");
+    return false;
+  }
+
+  app.sponza_textures.resize(mesh.images.size());
+  {
+    omnicpp::render::VulkanFrameUploadArena arena;
+    if (!arena.initialize(dev, app.context.physical_device(), queue_family,
+                          /*frame_count=*/1U,
+                          /*bytes_per_frame=*/96U << 20U)
+             .is_ok()) {
+      std::fprintf(stderr, "viewport: sponza upload arena failed\n");
+      return false;
+    }
+    if (!arena.begin_frame(0U).is_ok()) {
+      arena.cleanup();
+      return false;
+    }
+    bool upload_failed = false;
+    for (std::size_t i = 0; i < mesh.images.size() && !upload_failed; ++i) {
+      const auto& image = mesh.images[i];
+      auto& out = app.sponza_textures[i];
+      VkImageCreateInfo ii{};
+      ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+      ii.imageType = VK_IMAGE_TYPE_2D;
+      ii.format = VK_FORMAT_R8G8B8A8_SRGB;  // baseColor: hardware linearises
+      ii.extent = {image.width, image.height, 1U};
+      ii.mipLevels = 1U;
+      ii.arrayLayers = 1U;
+      ii.samples = VK_SAMPLE_COUNT_1_BIT;
+      ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+      ii.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                 VK_IMAGE_USAGE_SAMPLED_BIT;
+      ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+      if (vkCreateImage(dev, &ii, nullptr, &out.image) != VK_SUCCESS) {
+        upload_failed = true;
+        break;
+      }
+      auto memory = app.allocator.bind_image(
+          out.image, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+      if (!memory.is_ok()) {
+        upload_failed = true;
+        break;
+      }
+      out.allocation = memory.value();
+      const VkDeviceSize byte_count =
+          static_cast<VkDeviceSize>(image.width) * image.height * 4U;
+      auto span = arena.acquire(byte_count);
+      if (!span.is_ok()) {
+        upload_failed = true;
+        break;
+      }
+      std::memcpy(span.value().host_data, image.rgba.data(),
+                  static_cast<std::size_t>(byte_count));
+      arena.record_copy_image_rgba8(span.value(), out.image, image.width,
+                                    image.height);
+
+      VkImageViewCreateInfo vi{};
+      vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+      vi.image = out.image;
+      vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+      vi.format = VK_FORMAT_R8G8B8A8_SRGB;
+      vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0U, 1U, 0U, 1U};
+      if (vkCreateImageView(dev, &vi, nullptr, &out.scene.view) !=
+          VK_SUCCESS) {
+        upload_failed = true;
+        break;
+      }
+      out.scene.sampler = app.sponza_sampler;
+      out.scene.bindless_index =
+          kSponzaTextureBase + static_cast<std::uint32_t>(i);
+      if (!app.descriptors
+               .write_image(app.textures_set, 0U,
+                            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                            app.sponza_sampler, out.scene.view,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                            out.scene.bindless_index)
+               .is_ok()) {
+        upload_failed = true;
+      }
+    }
+    if (upload_failed) {
+      arena.wait_idle();
+      arena.cleanup();
+      std::fprintf(stderr, "viewport: sponza texture upload failed\n");
+      return false;
+    }
+    if (!arena.submit(app.context.graphics_queue()).is_ok()) {
+      arena.cleanup();
+      std::fprintf(stderr, "viewport: sponza texture submit failed\n");
+      return false;
+    }
+    arena.wait_idle();
+    arena.cleanup();
+  }
+
+  // ---- Shared geometry buffers + one mesh SSBO descriptor set. ----------
+  // The city ML pipeline's vertex stage (skinned_scene.vert) reads an
+  // unconditional 19-float combined stream [11 geometry][8 skin], so static
+  // geometry must carry the identity skin payload (joints=0 -> bone slot 0,
+  // weights 1,0,0,0) — the same trick as the procedural city statics.
+  std::vector<float> combined_vertices;
+  {
+    const std::size_t vertex_count = mesh.vertex_count();
+    combined_vertices.reserve(mesh.vertices.size() + vertex_count * 8U);
+    combined_vertices.insert(combined_vertices.end(), mesh.vertices.begin(),
+                             mesh.vertices.end());
+    for (std::size_t v = 0; v < vertex_count; ++v) {
+      combined_vertices.insert(combined_vertices.end(),
+                               {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
+                                0.0f});
+    }
+  }
+  const VkDeviceSize vertex_bytes =
+      static_cast<VkDeviceSize>(combined_vertices.size()) * sizeof(float);
+  const VkDeviceSize index_bytes =
+      static_cast<VkDeviceSize>(mesh.indices.size()) * sizeof(std::uint32_t);
+  auto vb = app.allocator.create_buffer(
+      vertex_bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  auto ib = app.allocator.create_buffer(
+      index_bytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (!vb.is_ok() || !ib.is_ok()) return false;
+  app.sponza.vertex_allocation = vb.value();
+  app.sponza.index_allocation = ib.value();
+  std::memcpy(app.sponza.vertex_allocation.mapped, combined_vertices.data(),
+              static_cast<std::size_t>(vertex_bytes));
+  std::memcpy(app.sponza.index_allocation.mapped, mesh.indices.data(),
+              static_cast<std::size_t>(index_bytes));
+
+  auto mesh_set = app.descriptors.allocate_set(app.mesh_layout);
+  if (!mesh_set.is_ok()) return false;
+  app.sponza.mesh_set = mesh_set.value();
+  if (!app.descriptors
+           .write_buffer(app.sponza.mesh_set, 0U,
+                         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                         app.sponza.vertex_allocation.buffer, 0U,
+                         VK_WHOLE_SIZE)
+           .is_ok()) {
+    return false;
+  }
+
+  // ---- Per-primitive SceneMesh slices + materials + BLAS triangles. ----- 
+  app.sponza.parts.resize(mesh.primitives.size());
+  app.sponza.part_models.resize(mesh.primitives.size());
+  app.sponza.material_base = kSponzaMaterialBase;
+  // glTF has no metallic/roughness factors wired through the importer; the
+  // atrium is dielectric stone.
+  for (std::size_t p = 0; p < mesh.primitives.size(); ++p) {
+    const auto& prim = mesh.primitives[p];
+    auto& part = app.sponza.parts[p];
+    part.vertex_buffer = app.sponza.vertex_allocation.buffer;
+    part.index_buffer = app.sponza.index_allocation.buffer;
+    part.descriptor_set = app.sponza.mesh_set;
+    part.index_offset =
+        static_cast<VkDeviceSize>(prim.index_offset) * sizeof(std::uint32_t);
+    part.index_count = static_cast<std::uint32_t>(prim.index_count);
+
+    auto& mat = mats[kSponzaMaterialBase + static_cast<std::uint32_t>(p)];
+    mat = {};
+    mat.base_color_factor = {prim.base_color[0], prim.base_color[1],
+                             prim.base_color[2], prim.base_color[3]};
+    mat.metallic_factor = 0.0f;
+    mat.roughness_factor = 0.9f;
+    if (prim.albedo.present &&
+        prim.albedo.image_index < mesh.images.size()) {
+      mat.flags = static_cast<std::uint32_t>(
+          omnicpp::render::PbrMaterialFlags::kHasAlbedo);
+      mat.albedo_index = app.sponza_textures[prim.albedo.image_index]
+                             .scene.bindless_index;
+    }
+  }
+
+  // Node model (column-major, scale 0.008 baked) shared by every primitive
+  // (one mesh-bearing node in the document); vertices stay LOCAL so the
+  // model belongs on both the draw and the RT bake (unlike the procedural
+  // city parts, whose triangles are pre-baked world-space).
+  if (scene_import.nodes.empty()) {
+    std::fprintf(stderr, "viewport: sponza import has no mesh node\n");
+    return false;
+  }
+  const auto& nm = scene_import.nodes[0].model;
+  app.rt_sponza_triangles.reserve(
+      static_cast<std::size_t>(mesh.indices.size()) * 3U * 3U);
+  for (std::size_t p = 0; p < mesh.primitives.size(); ++p) {
+    app.sponza.part_models[p] =
+        [&] {
+          SceneMatrix m{};
+          for (int i = 0; i < 16; ++i) m[i] = nm[i];
+          return m;
+        }();
+    const auto& prim = mesh.primitives[p];
+    for (std::size_t i = prim.index_offset;
+         i + 2U < prim.index_offset + prim.index_count; i += 3U) {
+      for (int k = 0; k < 3; ++k) {
+        // Stride 19: the combined stream is [11 geometry][8 skin] per vertex
+        // after the identity-payload append; positions lead each record.
+        const std::size_t b =
+            static_cast<std::size_t>(mesh.indices[i + k]) * 19U;
+        const float x = combined_vertices[b + 0];
+        const float y = combined_vertices[b + 1];
+        const float z = combined_vertices[b + 2];
+        app.rt_sponza_triangles.push_back(nm[0] * x + nm[4] * y +
+                                          nm[8] * z + nm[12]);
+        app.rt_sponza_triangles.push_back(nm[1] * x + nm[5] * y +
+                                          nm[9] * z + nm[13]);
+        app.rt_sponza_triangles.push_back(nm[2] * x + nm[6] * y +
+                                          nm[10] * z + nm[14]);
+      }
+    }
+  }
+  app.sponza_triangle_count = static_cast<std::uint32_t>(
+      app.rt_sponza_triangles.size() / 9U);
+  return true;
+}
+
 bool setup_city_scene(ViewportApp& app) {
   if (!app.has_mannequin || app.mannequin_meshes.empty()) {
     std::fprintf(stderr, "viewport: city scene requires the mannequin asset\n");
@@ -2767,7 +3144,7 @@ bool setup_city_scene(ViewportApp& app) {
       const SceneMatrix pole_model =
           multiply(translation_matrix(px, 2.6f, pz),
                    omnicpp::render::scene_identity_matrix());
-      if (!make_city_part(pole.first, pole.second, 11U, pole_model,
+      if (!make_city_part(pole.first, pole.second, 26U, pole_model,
                           pole_part)) {
         return false;
       }
@@ -2778,7 +3155,7 @@ bool setup_city_scene(ViewportApp& app) {
       const SceneMatrix head_model =
           multiply(translation_matrix(px, 5.35f, pz),
                    omnicpp::render::scene_identity_matrix());
-      if (!make_city_part(head.first, head.second, 12U, head_model,
+      if (!make_city_part(head.first, head.second, 27U, head_model,
                           head_part)) {
         return false;
       }
@@ -2786,15 +3163,17 @@ bool setup_city_scene(ViewportApp& app) {
       app.city_parts.push_back(std::move(head_part));
     }
   }
-  // Shared static materials: pole (11) dark steel, head (12) emissive.
-  mats[11] = {};
-  mats[11].base_color_factor = {0.16f, 0.17f, 0.19f, 1.0f};
-  mats[11].metallic_factor = 0.85f;
-  mats[11].roughness_factor = 0.45f;
-  mats[12] = {};
-  mats[12].base_color_factor = {1.0f, 0.87f, 0.6f, 1.0f};
-  mats[12].emissive_factor = {6.0f, 5.0f, 3.2f};
-  mats[12].roughness_factor = 0.6f;
+  // Shared static materials: pole (26) dark steel, head (27) emissive.
+  // Slots 10..25 belong to the 16 buildings — the old 11/12 assignment
+  // clobbered building materials 1 and 2 (slot-collision bug).
+  mats[26] = {};
+  mats[26].base_color_factor = {0.16f, 0.17f, 0.19f, 1.0f};
+  mats[26].metallic_factor = 0.85f;
+  mats[26].roughness_factor = 0.45f;
+  mats[27] = {};
+  mats[27].base_color_factor = {1.0f, 0.87f, 0.6f, 1.0f};
+  mats[27].emissive_factor = {6.0f, 5.0f, 3.2f};
+  mats[27].roughness_factor = 0.6f;
 
   // Actors: 3 walking mannequins (shared meshes, per-actor joint slices in
   // the shared bone SSBO; parts expand per actor in record_scene_into).
@@ -2803,6 +3182,15 @@ bool setup_city_scene(ViewportApp& app) {
     const float az = a == 1 ? 2.5f : (a == 0 ? -2.5f : 0.0f);
     app.city_actors.push_back({translation_matrix(ax, 0.05f, az),
                                static_cast<float>(a) * 0.37f});
+  }
+
+  // Sponza landmark (OMNICPP_SPONZA=1): CC0 atrium centred at the origin,
+  // actors walking its courtyard. Local-space vertices + per-draw model;
+  // world-space BLAS triangles were baked inside setup_sponza.
+  if (app.sponza_enabled && !setup_sponza(app)) {
+    std::fprintf(stderr,
+                 "viewport: sponza landmark setup failed; continuing without\n");
+    app.sponza_enabled = false;
   }
   return true;
 }
@@ -2975,11 +3363,14 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
   // binds the lights SSBO at set 6 (RT variant: TLAS at set 4, no shadow map).
   // ------------------------------------------------------------------------
   if (app.city_scene) {
-    // Camera: slow orbiting overview, 16 units up, 300-unit far plane for
-    // the ~100-unit street grid.
+    // Camera: slow orbiting overview. With the Sponza landmark the orbit
+    // rises ABOVE the atrium (walls reach ~11m and span |x|<=16m, so the
+    // 16m-radius street orbit would put the lens inside the walls).
+    const float orbit_radius = app.sponza_enabled ? 34.0f : 16.0f;
+    const float orbit_height = app.sponza_enabled ? 22.0f : 14.0f;
     const float cam_angle = t * 0.05f;
-    const float eye[3] = {16.0f * std::cos(cam_angle), 14.0f,
-                          16.0f * std::sin(cam_angle)};
+    const float eye[3] = {orbit_radius * std::cos(cam_angle), orbit_height,
+                          orbit_radius * std::sin(cam_angle)};
     const float target[3] = {0.0f, 1.0f, 0.0f};
     const float up[3] = {0.0f, 1.0f, 0.0f};
     app.scene.camera.view_projection =
@@ -3019,6 +3410,21 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
       obj.material_index = part.material_index;
       obj.joint_base = 0U;
       app.scene.objects.push_back(obj);
+    }
+    // Sponza landmark: one draw per primitive (index-offset slices over the
+    // shared buffers), local vertices + the node model, materials at
+    // kSponzaMaterialBase + p.
+    if (app.sponza_enabled) {
+      for (std::size_t p = 0; p < app.sponza.parts.size(); ++p) {
+        const auto& part = app.sponza.parts[p];
+        if (!part.is_drawable()) continue;
+        omnicpp::render::ScenePbrObject obj;
+        obj.mesh = &part;
+        obj.model = app.sponza.part_models[p];
+        obj.material_index = kSponzaMaterialBase + static_cast<std::uint32_t>(p);
+        obj.joint_base = 0U;  // identity bone slot (static)
+        app.scene.objects.push_back(obj);
+      }
     }
     // Actors: shared per-part meshes, per-actor model + joint slice.
     for (std::uint32_t a = 0; a < app.city_actor_count; ++a) {
@@ -3288,6 +3694,9 @@ bool ViewportApp::initialize() {
   // needs to know which fragment family to build).
   city_scene = std::getenv("OMNICPP_SCENE") != nullptr &&
                std::string_view(std::getenv("OMNICPP_SCENE")) == "city";
+  // Sponza landmark inside the city scene (CC0 asset vendored under
+  // assets/models/sponza).
+  sponza_enabled = std::getenv("OMNICPP_SPONZA") != nullptr;
   if (const char* ds = std::getenv("OMNICPP_DUMP_SHADOW")) {
     dump_shadow = true;
     dump_shadow_frame = static_cast<std::uint32_t>(std::atoi(ds));
@@ -3457,6 +3866,14 @@ bool ViewportApp::initialize() {
         telemetry.log_event("city_actors",
                             std::to_string(city_actor_count));
         telemetry.log_event("city_parts", std::to_string(city_parts.size()));
+        if (sponza_enabled) {
+          telemetry.log_event("sponza_parts",
+                              std::to_string(sponza.parts.size()));
+          telemetry.log_event("sponza_textures",
+                              std::to_string(sponza_textures.size()));
+          telemetry.log_event("sponza_rt_triangles",
+                              std::to_string(sponza_triangle_count));
+        }
       }
       if (gpu_driven) {
         telemetry.log_event(
@@ -3913,6 +4330,29 @@ void ViewportApp::shutdown() {
   }
   if (bone_allocation.is_valid()) {
     allocator.destroy_allocation(bone_allocation);
+  }
+  // Sponza landmark resources (only when OMNICPP_SPONZA=1).
+  for (auto& t : sponza_textures) {
+    if (t.scene.view != VK_NULL_HANDLE) {
+      vkDestroyImageView(context.device(), t.scene.view, nullptr);
+    }
+    if (t.allocation.is_valid()) {
+      allocator.destroy_allocation(t.allocation);
+    }
+    if (t.image != VK_NULL_HANDLE) {
+      vkDestroyImage(context.device(), t.image, nullptr);
+    }
+  }
+  sponza_textures.clear();
+  if (sponza_sampler != VK_NULL_HANDLE) {
+    vkDestroySampler(context.device(), sponza_sampler, nullptr);
+    sponza_sampler = VK_NULL_HANDLE;
+  }
+  if (sponza.vertex_allocation.is_valid()) {
+    allocator.destroy_allocation(sponza.vertex_allocation);
+  }
+  if (sponza.index_allocation.is_valid()) {
+    allocator.destroy_allocation(sponza.index_allocation);
   }
   descriptors.cleanup();
   allocator.cleanup();
