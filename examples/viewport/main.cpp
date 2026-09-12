@@ -19,7 +19,9 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <xcb/xcb.h>
@@ -245,6 +247,47 @@ struct ViewportApp {
   MeshBuffers ground{};
   std::vector<MeshBuffers> mannequin_meshes;
 
+  // --- City scene (OMNICPP_SCENE=city) --------------------------------------
+  // Static meshes (buildings, streetlights, each Sponza material-split slice)
+  // plus their material slots; the record path swaps the whole object list
+  // and camera framing for the city.
+  struct CityPart {
+    MeshBuffers buffers{};
+    std::uint32_t material_index{0U};
+    omnicpp::render::SceneMatrix model{omnicpp::render::scene_identity_matrix()};
+    //! World-space triangles (x,y,z per vertex) for exact-geometry BLASes.
+    std::vector<float> rt_triangles;
+  };
+  std::vector<CityPart> city_parts;
+  struct CityLight {
+    float pos[3];
+    float radius;
+    float color[3];
+    float intensity;
+  };
+  std::vector<CityLight> city_lights;
+  VkBuffer city_lights_buffer{VK_NULL_HANDLE};
+  omnicpp::render::Allocation city_lights_allocation{};
+  VkDescriptorSetLayout city_lights_layout{VK_NULL_HANDLE};
+  VkDescriptorSet city_lights_set{VK_NULL_HANDLE};
+  // Walking actors: per-actor world placement + walk-clock phase offset.
+  struct CityActor {
+    omnicpp::render::SceneMatrix model{omnicpp::render::scene_identity_matrix()};
+    float walk_phase{0.0f};
+  };
+  std::vector<CityActor> city_actors;
+  // Many-light composed pipelines (pbr_full_ml / pbr_rt_full_ml fragments;
+  // lights SSBO at set 6). Built in setup_lighting when city_scene is on.
+  omnicpp::render::VulkanPipeline full_ml_pipeline;
+  omnicpp::render::VulkanPipeline full_ml_skinned_pipeline;
+  omnicpp::render::VulkanPipeline rt_full_ml_pipeline;
+  omnicpp::render::VulkanPipeline rt_full_ml_skinned_pipeline;
+  // Skinning arena: slot 0 = identity bone for static meshes, actors at
+  // [1 + a * joints_per_actor, ...). One bone SSBO + one bone set serves
+  // every actor (per-object joint_base push).
+  std::uint32_t joints_per_actor{0U};
+  std::uint32_t city_actor_count{0U};
+
   // Skeletal mannequin (assets/models/mannequin.gltf); empty when the asset
   // is unavailable and the scene renders cubes only.
   omnicpp::asset::GltfAnimationDocument mannequin;
@@ -291,6 +334,7 @@ struct ViewportApp {
   //! once at startup from bind-pose geometry (TLAS instance transforms are
   //! the per-frame object models, so rigid objects animate exactly; the
   //! skinned mannequin approximates its walk at instance granularity).
+  bool city_scene{false};
   bool rt_mode{false};
   omnicpp::render::VulkanAccelerationStructureBuilder rt_builder;
   omnicpp::render::VulkanScratchPool rt_scratch;
@@ -305,6 +349,9 @@ struct ViewportApp {
   std::vector<RtBlas> rt_blas_cube;
   std::vector<RtBlas> rt_blas_ground;
   std::vector<RtBlas> rt_blas_mannequin;
+  //! City statics: one BLAS per CityPart (exact geometry, TLAS instance
+  //! applies the part model). Indexed like city_parts.
+  std::vector<RtBlas> rt_blas_city;
   //! E5 animated TLAS: per-part dominant joint index (single-joint
   //! binding). Authored skinned vertices are already in world bind pose
   //! (rest pose == bind pose was proven in the skinning E2E), and the
@@ -524,6 +571,9 @@ bool poll_events(ViewportApp& app) {
 bool make_mesh(ViewportApp& app, const std::vector<float>& vertices,
                const std::vector<std::uint32_t>& indices,
                ViewportApp::MeshBuffers& out);
+
+//! City scene (OMNICPP_SCENE=city): defined after the RT helpers.
+bool setup_city_scene(ViewportApp& app);
 
 //! Frames of payload copies (must match the renderer's frames in flight).
 constexpr std::uint32_t kViewportMaxFramesInFlight = 2U;
@@ -769,7 +819,8 @@ bool setup_mannequin(ViewportApp& app) {
 //! Sample the walk cycle at `time` and upload joint matrices. Computes
 //! joints = global_pose(j) * inverse_bind(j) directly (same math the GPU
 //! test cross-checks).
-void update_mannequin_pose(ViewportApp& app, float time) {
+void update_mannequin_pose(ViewportApp& app, float time,
+                           std::uint32_t bone_offset = 0U) {
   const auto& skin = app.mannequin.skins[0];
   const auto& anim = app.mannequin.animations[0];
 
@@ -851,14 +902,16 @@ void update_mannequin_pose(ViewportApp& app, float time) {
     }
   }
 
-  // Joint matrices: global * inverse bind, in joint order.
+  // Joint matrices: global * inverse bind, in joint order, written at
+  // bone_offset (multi-actor bone arena: actor a's slice starts at
+  // 1 + a * joints_per_actor; slot 0 is the identity bone).
   auto* bones = static_cast<SceneMatrix*>(app.bone_allocation.mapped);
   std::size_t swing_index = 0;
   float swing_max = -1.0f;
   for (std::size_t j = 0; j < skin.joints.size(); ++j) {
     const SceneMatrix& g = globals[skin.joints[j]];
     const SceneMatrix& ibm = skin.inverse_bind_matrices[j];
-    bones[j] = multiply(g, ibm);
+    bones[bone_offset + j] = multiply(g, ibm);
     // Telemetry: track the joint with the largest rotation away from its
     // bind pose (the trace of the rotation part drops to cos(2*theta) as a
     // joint rotates by theta). Root translations don't count.
@@ -929,8 +982,9 @@ bool setup_scene(ViewportApp& app) {
   const std::vector<omnicpp::render::ReflectedBinding> mesh_bindings = {
       {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_VERTEX_BIT}};
-  // Pool sized for cubes + ground + the 9 mannequin meshes plus headroom.
-  auto mesh_layout = app.descriptors.create_layout(mesh_bindings, 32U);
+  // Pool sized for cubes + ground + mannequin meshes + the city scene's
+  // static meshes (buildings, streetlights, actors).
+  auto mesh_layout = app.descriptors.create_layout(mesh_bindings, 96U);
   if (!mesh_layout.is_ok()) return false;
   app.mesh_layout = mesh_layout.value();
 
@@ -946,11 +1000,12 @@ bool setup_scene(ViewportApp& app) {
   if (!textures_set.is_ok()) return false;
   app.textures_set = textures_set.value();
 
-  // Set 2: material SSBO (4 slots).
+  // Set 2: material SSBO (city scene: 4 base slots + per-part Sponza
+  // materials; each city instance reuses its material slots).
   const std::vector<omnicpp::render::ReflectedBinding> material_bindings = {
       {2U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_FRAGMENT_BIT}};
-  auto material_layout = app.descriptors.create_layout(material_bindings, 8U);
+  auto material_layout = app.descriptors.create_layout(material_bindings, 96U);
   if (!material_layout.is_ok()) return false;
   app.material_layout = material_layout.value();
   auto material_set = app.descriptors.allocate_set(app.material_layout);
@@ -958,7 +1013,7 @@ bool setup_scene(ViewportApp& app) {
   app.material_set = material_set.value();
 
   auto material_buffer = app.allocator.create_buffer(
-      4U * sizeof(omnicpp::render::PbrMaterialData),
+      96U * sizeof(omnicpp::render::PbrMaterialData),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -973,7 +1028,8 @@ bool setup_scene(ViewportApp& app) {
   }
   auto* materials = static_cast<omnicpp::render::PbrMaterialData*>(
       app.material_allocation.mapped);
-  // 0: brushed metal cube, 1: rough dielectric cube, 2: ground, 3: spare.
+  // 0: brushed metal cube, 1: rough dielectric cube, 2: ground, 3: skin.
+  for (int i = 0; i < 96; ++i) materials[i] = {};
   materials[0] = {};
   materials[0].base_color_factor = {0.95f, 0.35f, 0.15f, 1.0f};
   materials[0].metallic_factor = 0.9f;
@@ -1058,6 +1114,14 @@ bool setup_scene(ViewportApp& app) {
   if (!bone_layout.is_ok()) return false;
   app.bone_layout = bone_layout.value();
   if (!setup_mannequin(app)) return false;
+  if (app.city_scene && !setup_city_scene(app)) {
+    std::fprintf(stderr,
+                 "viewport: city scene setup failed; single-actor scene\n");
+    app.city_scene = false;
+  }
+
+  // Set 6: dynamic point lights (many-light city variant). Created lazily
+  // when the city scene is enabled (needs the engine lights layout).
 
   return true;
 }
@@ -1557,6 +1621,59 @@ bool setup_rt_shadows(ViewportApp& app) {
     return false;
   }
 
+  // --- 1b. Many-light RT variants (OMNICPP_SCENE=city + OMNICPP_RT_MODE).
+  // Built here because app.rt_layout exists only after RT setup; same
+  // 7-set shape as the PCF-ML family with set 4 = TLAS.
+  if (app.city_scene) {
+    const VkDescriptorSetLayout ml_rt_layouts[7] = {
+        app.mesh_layout, app.textures_layout, app.material_layout,
+        app.bone_layout, app.rt_layout, app.ibl5_layout,
+        app.city_lights_layout};
+    if (!app.rt_full_ml_pipeline
+             .load_shader_stage_file(dev, shader_dir + "/pbr_scene.vert.spv",
+                                     "vertex")
+             .is_ok() ||
+        !app.rt_full_ml_pipeline
+             .load_shader_stage_file(
+                 dev, shader_dir + "/pbr_rt_full_ml.frag.spv", "fragment")
+             .is_ok() ||
+        !app.rt_full_ml_pipeline
+             .create_pipeline_layout(dev, ml_rt_layouts, 7U, &push_range)
+             .is_ok() ||
+        !app.rt_full_ml_pipeline
+             .create_graphics_pipeline(dev, app.render_pass.render_pass(),
+                                       app.swapchain.image_format(),
+                                       app.rt_full_ml_pipeline.pipeline_layout(),
+                                       true, true, true)
+             .is_ok()) {
+      std::fprintf(stderr, "viewport: RT many-light pipeline failed\n");
+      return false;
+    }
+    if (app.has_mannequin &&
+        (!app.rt_full_ml_skinned_pipeline
+                 .load_shader_stage_file(
+                     dev, shader_dir + "/skinned_scene.vert.spv", "vertex")
+                 .is_ok() ||
+         !app.rt_full_ml_skinned_pipeline
+                 .load_shader_stage_file(
+                     dev, shader_dir + "/pbr_rt_full_ml.frag.spv", "fragment")
+                 .is_ok() ||
+         !app.rt_full_ml_skinned_pipeline
+                 .create_pipeline_layout(dev, ml_rt_layouts, 7U, &push_range)
+                 .is_ok() ||
+         !app.rt_full_ml_skinned_pipeline
+                 .create_graphics_pipeline(
+                     dev, app.render_pass.render_pass(),
+                     app.swapchain.image_format(),
+                     app.rt_full_ml_skinned_pipeline.pipeline_layout(), true,
+                     true, true)
+                 .is_ok())) {
+      std::fprintf(stderr,
+                   "viewport: RT many-light skinned pipeline failed\n");
+      return false;
+    }
+  }
+
   // --- 2. TLAS descriptor (set 4 for both RT pipelines). ----------------
   auto rt_set = app.descriptors.allocate_set(app.rt_layout);
   if (!rt_set.is_ok()) {
@@ -1611,9 +1728,24 @@ bool setup_rt_shadows(ViewportApp& app) {
     }
     app.rt_blas_mannequin.push_back(b);
   }
+  // City statics: exact-geometry BLASes (buildings, poles, heads, ground),
+  // so TLAS shadows match what the depth map rasterizes. World-space
+  // triangles were precomputed at part creation (CityPart::rt_triangles).
+  for (const auto& part : app.city_parts) {
+    ViewportApp::RtBlas b{};
+    if (!rt_build_blas(app, part.rt_triangles, b)) {
+      std::fprintf(stderr, "viewport: RT: city BLAS failed\n");
+      return false;
+    }
+    app.rt_blas_city.push_back(b);
+  }
 
   // --- 4. TLAS storage (capacity = worst-case instance count). ----------
-  const std::uint32_t tlas_capacity = 2U + app.mannequin_meshes.size();
+  // City scene: 25 buildings + 32 poles/heads + 3 ground/static + actors.
+  const std::uint32_t tlas_capacity =
+      2U + app.mannequin_meshes.size() +
+      static_cast<std::uint32_t>(app.city_parts.size()) +
+      app.city_actor_count * app.mannequin_meshes.size() + 8U;
   auto tlas = app.rt_builder.create_tlas(dev, app.allocator, tlas_capacity);
   if (!tlas.is_ok()) {
     std::fprintf(stderr, "viewport: RT: create_tlas failed\n");
@@ -1680,6 +1812,11 @@ bool setup_rt_shadows(ViewportApp& app) {
   }
   if (!build_failed) {
     for (auto& b : app.rt_blas_mannequin) {
+      if (!build_one(b)) { build_failed = true; break; }
+    }
+  }
+  if (!build_failed) {
+    for (auto& b : app.rt_blas_city) {
       if (!build_one(b)) { build_failed = true; break; }
     }
   }
@@ -1813,28 +1950,48 @@ void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
       push_instance(app.rt_blas_ground[0], object.model);
     } else if (object.mesh == &app.cube.mesh) {
       push_instance(app.rt_blas_cube[0], object.model);
-    } else if (!app.rt_blas_mannequin.empty()) {
-      // E5 animated TLAS: authored skinned vertices are already in world
-      // bind pose (rest pose == bind pose, proven in the skinning E2E), and
-      // the bone matrix B_j(t) = global_j(t) * IB_j maps them directly to
-      // the posed world position. Single-joint binding => the part's world
-      // transform IS object_model * bones[j]: static BLASes + animated
-      // instance transforms, no per-frame BLAS rebuild. bones were uploaded
-      // by update_mannequin_pose before the frame callback.
-      for (std::size_t i = 0; i < app.mannequin_meshes.size(); ++i) {
-        if (object.mesh == &app.mannequin_meshes[i].mesh) {
-          const auto* bones =
-              static_cast<const SceneMatrix*>(app.bone_allocation.mapped);
-          const std::size_t j = app.rt_part_joint[i];
-          if (!app.rt_part_joint.empty() &&
-              app.bone_allocation.mapped != nullptr &&
-              j * 64U < app.bone_allocation.size) {
-            push_instance(app.rt_blas_mannequin[i],
-                          multiply(object.model, bones[j]));
-          } else {
-            push_instance(app.rt_blas_mannequin[i], object.model);
+    } else {
+      // Skinned parts (E5 animated TLAS): authored skinned vertices are
+      // already in world bind pose, and the bone matrix B_j(t) =
+      // global_j(t) * IB_j maps them directly to the posed world position.
+      // Single-joint binding => the part's world transform IS
+      // object_model * bones[j]: static BLASes + animated instance
+      // transforms, no per-frame BLAS rebuild. Multi-actor bone arena:
+      // the object's joint_base routes to its actor's slice.
+      bool matched = false;
+      if (!app.rt_blas_mannequin.empty()) {
+        for (std::size_t i = 0; i < app.mannequin_meshes.size(); ++i) {
+          if (object.mesh == &app.mannequin_meshes[i].mesh) {
+            const auto* bones =
+                static_cast<const SceneMatrix*>(app.bone_allocation.mapped);
+            const std::size_t j = app.rt_part_joint[i];
+            const std::size_t slot = object.joint_base + j;
+            if (!app.rt_part_joint.empty() &&
+                app.bone_allocation.mapped != nullptr &&
+                slot * 64U < app.bone_allocation.size) {
+              push_instance(app.rt_blas_mannequin[i],
+                            multiply(object.model, bones[slot]));
+            } else {
+              push_instance(app.rt_blas_mannequin[i], object.model);
+            }
+            matched = true;
+            break;
           }
-          break;
+        }
+      }
+      if (!matched) {
+        // City statics: exact-geometry per-part BLASes whose triangles are
+        // already WORLD-space (baked at part creation), so the instance
+        // transform must be identity — applying object.model again would
+        // double-transform every building.
+        for (std::size_t c = 0; c < app.city_parts.size(); ++c) {
+          if (object.mesh == &app.city_parts[c].buffers.mesh) {
+            if (c < app.rt_blas_city.size()) {
+              push_instance(app.rt_blas_city[c],
+                            omnicpp::render::scene_identity_matrix());
+            }
+            break;
+          }
         }
       }
     }
@@ -1874,8 +2031,18 @@ void destroy_rt_shadows(ViewportApp& app) {
   destroy_list(app.rt_blas_cube);
   destroy_list(app.rt_blas_ground);
   destroy_list(app.rt_blas_mannequin);
+  destroy_list(app.rt_blas_city);
   app.rt_builder.destroy_tlas(dev, app.allocator, app.rt_tlas);
   app.rt_scratch.cleanup(app.allocator);
+  // City scene GPU resources (no-op when the city scene never ran).
+  // Layouts (city_lights_layout) are owned by the descriptor manager and
+  // released by its cleanup.
+  if (app.city_lights_allocation.is_valid()) {
+    app.allocator.destroy_allocation(app.city_lights_allocation);
+    app.city_lights_allocation = {};
+    app.city_lights_buffer = VK_NULL_HANDLE;
+  }
+  app.city_lights_layout = VK_NULL_HANDLE;
 }
 
 bool setup_lighting(ViewportApp& app) {
@@ -2219,7 +2386,7 @@ bool setup_lighting(ViewportApp& app) {
 
   // --- 4. Shadow-casting pipelines (depth-only). -------------------------
   const VkDescriptorSetLayout solo_mesh[1] = {app.mesh_layout};
-  const VkPushConstantRange shadow_push{VK_SHADER_STAGE_VERTEX_BIT, 0U, 128U};
+  const VkPushConstantRange shadow_push{VK_SHADER_STAGE_VERTEX_BIT, 0U, 144U};
   if (!app.shadow_pipeline_static
            .load_shader_stage_file(dev, shader_dir + "/shadow.vert.spv",
                                    "vertex")
@@ -2241,6 +2408,66 @@ bool setup_lighting(ViewportApp& app) {
     std::fprintf(stderr, "viewport: static shadow pipeline failed\n");
     std::fprintf(stderr, "viewport: setup_lighting failed at line 1265\n"); return false;
   }
+  // --- 3b. Many-light city variant (OMNICPP_SCENE=city). ----------------
+  // pbr_full_ml.frag adds the point-lights SSBO at set 6; the skinned
+  // vertex stages only declare sets 0-3, so one 7-entry layout serves both
+  // static and skinned draws. Same geometry/push contract as the composed
+  // family; the record path picks the family, and the RT variants keep
+  // set 4 = TLAS when rt_mode is on.
+  if (app.city_scene) {
+    const VkDescriptorSetLayout ml_layouts[7] = {
+        app.mesh_layout, app.textures_layout, app.material_layout,
+        app.bone_layout, app.shadow_layout, app.ibl5_layout,
+        app.city_lights_layout};
+    if (!app.full_ml_pipeline
+             .load_shader_stage_file(dev, shader_dir + "/pbr_scene.vert.spv",
+                                     "vertex")
+             .is_ok() ||
+        !app.full_ml_pipeline
+             .load_shader_stage_file(dev,
+                                     shader_dir + "/pbr_full_ml.frag.spv",
+                                     "fragment")
+             .is_ok() ||
+        !app.full_ml_pipeline
+             .create_pipeline_layout(dev, ml_layouts, 7U, &push_range)
+             .is_ok() ||
+        !app.full_ml_pipeline
+             .create_graphics_pipeline(dev, app.render_pass.render_pass(),
+                                       app.swapchain.image_format(),
+                                       app.full_ml_pipeline.pipeline_layout(),
+                                       true, true, true)
+             .is_ok()) {
+      std::fprintf(stderr, "viewport: many-light pipeline failed\n");
+      return false;
+    }
+    if (app.has_mannequin &&
+        (!app.full_ml_skinned_pipeline
+                 .load_shader_stage_file(dev,
+                                         shader_dir + "/skinned_scene.vert.spv",
+                                         "vertex")
+                 .is_ok() ||
+         !app.full_ml_skinned_pipeline
+                 .load_shader_stage_file(dev,
+                                         shader_dir + "/pbr_full_ml.frag.spv",
+                                         "fragment")
+                 .is_ok() ||
+         !app.full_ml_skinned_pipeline
+                 .create_pipeline_layout(dev, ml_layouts, 7U, &push_range)
+                 .is_ok() ||
+         !app.full_ml_skinned_pipeline
+                 .create_graphics_pipeline(
+                     dev, app.render_pass.render_pass(),
+                     app.swapchain.image_format(),
+                     app.full_ml_skinned_pipeline.pipeline_layout(), true,
+                     true, true)
+                 .is_ok())) {
+      std::fprintf(stderr, "viewport: many-light skinned pipeline failed\n");
+      return false;
+    }
+    // NOTE: the RT-ML variants are built in setup_rt_shadows (they need
+    // app.rt_layout, which exists only after the TLAS setup runs).
+  }
+
   if (app.has_mannequin) {
     // shadow_skinned.vert declares bones at set 3, so the layout mirrors
     // the skinned_scene pipeline's first four slots (sets 1/2 unused).
@@ -2269,6 +2496,313 @@ bool setup_lighting(ViewportApp& app) {
       std::fprintf(stderr, "viewport: skinned shadow pipeline failed\n");
       std::fprintf(stderr, "viewport: setup_lighting failed at line 1293\n"); return false;
     }
+  }
+  return true;
+}
+
+// ============================================================================
+// City scene (OMNICPP_SCENE=city): procedural street + multiple animated
+// actors + many dynamic point lights. Replaces the single-actor scene's
+// object list and camera framing when active.
+// ============================================================================
+
+bool setup_city_scene(ViewportApp& app) {
+  if (!app.has_mannequin || app.mannequin_meshes.empty()) {
+    std::fprintf(stderr, "viewport: city scene requires the mannequin asset\n");
+    return false;
+  }
+  if (app.mannequin.skins.empty()) return false;
+  VkDevice dev = app.context.device();
+  const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
+  const std::string shader_dir =
+      shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
+
+  // ------------------------------------------------------------------
+  // Lights SSBO (set 6): 32 warm point lights along both streets.
+  // ------------------------------------------------------------------
+  app.city_lights.clear();
+  app.city_lights.reserve(32U);
+  for (int s = 0; s < 2; ++s) {
+    for (int i = 0; i < 16; ++i) {
+      ViewportApp::CityLight light{};
+      light.pos[0] = -42.0f + 5.6f * static_cast<float>(i);
+      light.pos[1] = 6.2f;
+      light.pos[2] = s == 0 ? -6.0f : 6.0f;
+      light.radius = 11.0f;
+      // Alternating sodium/cool tints, deterministic.
+      light.color[0] = (i % 2 == 0) ? 1.0f : 0.75f;
+      light.color[1] = (i % 2 == 0) ? 0.72f : 0.85f;
+      light.color[2] = (i % 2 == 0) ? 0.42f : 1.0f;
+      light.intensity = 6.0f;
+      app.city_lights.push_back(light);
+    }
+  }
+  constexpr std::size_t kLightWords = 4U + 32U * 8U;  // header + 32x2 vec4
+  auto lights_buffer = app.allocator.create_buffer(
+      kLightWords * 4U, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (!lights_buffer.is_ok()) return false;
+  app.city_lights_allocation = lights_buffer.value();
+  app.city_lights_buffer = app.city_lights_allocation.buffer;
+  auto* light_words = static_cast<std::uint32_t*>(
+      app.city_lights_allocation.mapped);
+  light_words[0] = static_cast<std::uint32_t>(app.city_lights.size());
+  light_words[1] = 0U;
+  light_words[2] = 0U;
+  light_words[3] = 0U;
+  float* light_floats = reinterpret_cast<float*>(light_words + 4U);
+  for (std::size_t i = 0; i < app.city_lights.size(); ++i) {
+    const auto& l = app.city_lights[i];
+    light_floats[i * 8U + 0] = l.pos[0];
+    light_floats[i * 8U + 1] = l.pos[1];
+    light_floats[i * 8U + 2] = l.pos[2];
+    light_floats[i * 8U + 3] = l.radius;
+    light_floats[i * 8U + 4] = l.color[0];
+    light_floats[i * 8U + 5] = l.color[1];
+    light_floats[i * 8U + 6] = l.color[2];
+    light_floats[i * 8U + 7] = l.intensity;
+  }
+
+  // Lights descriptor set (layout mirrors the engine's lights SSBO shape;
+  // binding 0, storage buffer, fragment stage).
+  const std::vector<omnicpp::render::ReflectedBinding> lights_bindings = {
+      {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+       VK_SHADER_STAGE_FRAGMENT_BIT}};
+  auto lights_layout =
+      app.descriptors.create_layout(lights_bindings, 4U);
+  if (!lights_layout.is_ok()) return false;
+  app.city_lights_layout = lights_layout.value();
+  auto lights_set = app.descriptors.allocate_set(app.city_lights_layout);
+  if (!lights_set.is_ok()) return false;
+  app.city_lights_set = lights_set.value();
+  if (!app.descriptors
+           .write_buffer(app.city_lights_set, 0U,
+                         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                         app.city_lights_buffer, 0U, VK_WHOLE_SIZE)
+           .is_ok()) {
+    return false;
+  }
+
+  // ------------------------------------------------------------------
+  // Skinning arena: slot 0 = identity bone (static meshes), actors at
+  // [1 + a * joints_per_actor). One bone SSBO serves all actors; per-object
+  // joint_base routes each draw to its actor's joint slice.
+  // ------------------------------------------------------------------
+  app.joints_per_actor =
+      static_cast<std::uint32_t>(app.mannequin.skins[0].joints.size());
+  app.city_actor_count = 3U;
+  const std::uint32_t bone_slots =
+      1U + app.city_actor_count * app.joints_per_actor;
+  // Grow the single-actor bone buffer to the multi-actor arena.
+  if (app.bone_allocation.is_valid()) {
+    app.allocator.destroy_allocation(app.bone_allocation);
+    app.bone_allocation = {};
+  }
+  auto arena = app.allocator.create_buffer(
+      static_cast<VkDeviceSize>(bone_slots) * 64U,
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (!arena.is_ok()) return false;
+  app.bone_allocation = arena.value();
+  auto bone_set = app.descriptors.allocate_set(app.bone_layout);
+  if (!bone_set.is_ok()) return false;
+  app.bone_set = bone_set.value();
+  if (!app.descriptors
+           .write_buffer(app.bone_set, 0U,
+                         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                         app.bone_allocation.buffer, 0U, VK_WHOLE_SIZE)
+           .is_ok()) {
+    return false;
+  }
+  auto* bones = static_cast<SceneMatrix*>(app.bone_allocation.mapped);
+  bones[0] = omnicpp::render::scene_identity_matrix();  // static slot
+
+  // ------------------------------------------------------------------
+  // Static geometry (identity skin payload: joints=0, weights=1,0,0,0,
+  // joint_base=0 -> bone slot 0 = identity).
+  // ------------------------------------------------------------------
+  std::mt19937 rng(20260911U);
+  auto ground_mesh = [&](float w, float d) {
+    std::vector<float> verts;
+    std::vector<std::uint32_t> idx;
+    const float uvs[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const float corners[4][3] = {{-w, 0, -d}, {w, 0, -d}, {w, 0, d}, {-w, 0, d}};
+    const std::uint32_t quad[6] = {0, 2, 1, 0, 3, 2};
+    for (int i = 0; i < 4; ++i) {
+      verts.insert(verts.end(),
+                   {corners[i][0], corners[i][1], corners[i][2],
+                    1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 0.0f, uvs[i][0], uvs[i][1]});
+    }
+    for (std::uint32_t i : quad) idx.push_back(i);
+    return std::make_pair(std::move(verts), std::move(idx));
+  };
+  auto box_mesh = [&](float sx, float sy, float sz) {
+    std::vector<float> verts;
+    std::vector<std::uint32_t> idx;
+    struct Face {
+      float n[3];
+      float c[4][3];
+    };
+    const Face faces[6] = {
+        {{0, 0, 1}, {{-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}}},
+        {{0, 0, -1}, {{-1, -1, -1}, {-1, 1, -1}, {1, 1, -1}, {1, -1, -1}}},
+        {{1, 0, 0}, {{1, -1, -1}, {1, -1, 1}, {1, 1, 1}, {1, 1, -1}}},
+        {{-1, 0, 0}, {{-1, -1, 1}, {-1, -1, -1}, {-1, 1, -1}, {-1, 1, 1}}},
+        {{0, 1, 0}, {{-1, 1, -1}, {1, 1, -1}, {1, 1, 1}, {-1, 1, 1}}},
+        {{0, -1, 0}, {{-1, -1, 1}, {-1, -1, -1}, {1, -1, -1}, {1, -1, 1}}},
+    };
+    const float uvs[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const std::uint32_t quad[6] = {0, 1, 2, 0, 2, 3};
+    for (const Face& f : faces) {
+      const std::uint32_t base =
+          static_cast<std::uint32_t>(verts.size() / 11U);
+      for (int i = 0; i < 4; ++i) {
+        verts.insert(verts.end(),
+                     {f.c[i][0] * sx, f.c[i][1] * sy, f.c[i][2] * sz,
+                      1.0f, 1.0f, 1.0f, f.n[0], f.n[1], f.n[2],
+                      uvs[i][0], uvs[i][1]});
+      }
+      for (std::uint32_t i : quad) idx.push_back(base + i);
+    }
+    return std::make_pair(std::move(verts), std::move(idx));
+  };
+  auto append_skin_identity = [](std::vector<float>& verts) {
+    const std::size_t vc = verts.size() / 11U;
+    for (std::size_t v = 0; v < vc; ++v) {
+      verts.push_back(0.0f);  // joint 0 (identity bone slot)
+      verts.push_back(0.0f);
+      verts.push_back(0.0f);
+      verts.push_back(0.0f);
+      verts.push_back(1.0f);  // weight fully on joint 0
+      verts.push_back(0.0f);
+      verts.push_back(0.0f);
+      verts.push_back(0.0f);
+    }
+  };
+
+  auto make_city_part = [&](std::vector<float> verts,
+                            const std::vector<std::uint32_t>& indices,
+                            std::uint32_t material, const SceneMatrix& model,
+                            ViewportApp::CityPart& out) {
+    append_skin_identity(verts);
+    if (!make_mesh(app, verts, indices, out.buffers)) return false;
+    out.material_index = material;
+    out.model = model;
+    return true;
+  };
+  // World-space triangles for the exact-geometry BLAS (append after model
+  // composition): the local triangle list transformed by the part model.
+  auto fill_rt_triangles = [&](const std::vector<float>& local_verts,
+                               const std::vector<std::uint32_t>& indices,
+                               const SceneMatrix& model,
+                               ViewportApp::CityPart& out) {
+    out.rt_triangles.reserve(indices.size() / 3U * 9U);
+    for (std::size_t i = 0; i + 2U < indices.size(); i += 3U) {
+      for (int k = 0; k < 3; ++k) {
+        const std::size_t b = static_cast<std::size_t>(indices[i + k]) * 11U;
+        const float x = local_verts[b + 0], y = local_verts[b + 1],
+                    z = local_verts[b + 2];
+        // SceneMatrix is column-major: world = model * (x,y,z,1).
+        out.rt_triangles.push_back(model[0] * x + model[4] * y +
+                                   model[8] * z + model[12]);
+        out.rt_triangles.push_back(model[1] * x + model[5] * y +
+                                   model[9] * z + model[13]);
+        out.rt_triangles.push_back(model[2] * x + model[6] * y +
+                                   model[10] * z + model[14]);
+      }
+    }
+  };
+
+  auto* mats = static_cast<omnicpp::render::PbrMaterialData*>(
+      app.material_allocation.mapped);
+
+  // Ground: one 100x40 slab covering the full street grid.
+  {
+    auto g = ground_mesh(50.0f, 20.0f);
+    ViewportApp::CityPart part{};
+    if (!make_city_part(g.first, g.second, 2U,
+                        omnicpp::render::scene_identity_matrix(), part)) {
+      return false;
+    }
+    fill_rt_triangles(g.first, g.second,
+                      omnicpp::render::scene_identity_matrix(), part);
+    app.city_parts.push_back(std::move(part));
+  }
+
+  // Buildings: 2 rows of 8, subdivided street grid (seeded jitter).
+  std::uniform_real_distribution<float> hue(0.0f, 1.0f);
+  for (int row = 0; row < 2; ++row) {
+    for (int i = 0; i < 8; ++i) {
+      const float bx = -42.0f + 12.0f * static_cast<float>(i);
+      const float bz = row == 0 ? -14.0f : 14.0f;
+      const float w = 4.5f + hue(rng) * 1.5f;
+      const float h = 6.0f + hue(rng) * 14.0f;
+      const float d = 4.5f + hue(rng) * 1.5f;
+      auto b = box_mesh(w, h, d);
+      ViewportApp::CityPart part{};
+      const SceneMatrix model =
+          multiply(translation_matrix(bx, h * 0.5f, bz),
+                   omnicpp::render::scene_identity_matrix());
+      if (!make_city_part(b.first, b.second,
+                          10U + static_cast<std::uint32_t>(row * 8 + i),
+                          model, part)) {
+        return false;
+      }
+      fill_rt_triangles(b.first, b.second, model, part);
+      app.city_parts.push_back(std::move(part));
+      // Building material: grey concrete with seeded hue variation.
+      mats[10U + static_cast<std::uint32_t>(row * 8 + i)] = {};
+      mats[10U + row * 8 + i].base_color_factor = {
+          0.42f + 0.18f * hue(rng), 0.44f + 0.14f * hue(rng),
+          0.48f + 0.16f * hue(rng), 1.0f};
+      mats[10U + row * 8 + i].metallic_factor = 0.0f;
+      mats[10U + row * 8 + i].roughness_factor = 0.85f;
+      // Streetlight pole + head under each building street face.
+      auto pole = box_mesh(0.12f, 5.2f, 0.12f);
+      ViewportApp::CityPart pole_part{};
+      const float px = bx + 5.0f;
+      const float pz = row == 0 ? -6.8f : 6.8f;
+      const SceneMatrix pole_model =
+          multiply(translation_matrix(px, 2.6f, pz),
+                   omnicpp::render::scene_identity_matrix());
+      if (!make_city_part(pole.first, pole.second, 11U, pole_model,
+                          pole_part)) {
+        return false;
+      }
+      fill_rt_triangles(pole.first, pole.second, pole_model, pole_part);
+      app.city_parts.push_back(std::move(pole_part));
+      auto head = box_mesh(0.7f, 0.22f, 0.35f);
+      ViewportApp::CityPart head_part{};
+      const SceneMatrix head_model =
+          multiply(translation_matrix(px, 5.35f, pz),
+                   omnicpp::render::scene_identity_matrix());
+      if (!make_city_part(head.first, head.second, 12U, head_model,
+                          head_part)) {
+        return false;
+      }
+      fill_rt_triangles(head.first, head.second, head_model, head_part);
+      app.city_parts.push_back(std::move(head_part));
+    }
+  }
+  // Shared static materials: pole (11) dark steel, head (12) emissive.
+  mats[11] = {};
+  mats[11].base_color_factor = {0.16f, 0.17f, 0.19f, 1.0f};
+  mats[11].metallic_factor = 0.85f;
+  mats[11].roughness_factor = 0.45f;
+  mats[12] = {};
+  mats[12].base_color_factor = {1.0f, 0.87f, 0.6f, 1.0f};
+  mats[12].emissive_factor = {6.0f, 5.0f, 3.2f};
+  mats[12].roughness_factor = 0.6f;
+
+  // Actors: 3 walking mannequins (shared meshes, per-actor joint slices in
+  // the shared bone SSBO; parts expand per actor in record_scene_into).
+  for (std::uint32_t a = 0; a < app.city_actor_count; ++a) {
+    const float ax = -6.0f + 6.0f * static_cast<float>(a);
+    const float az = a == 1 ? 2.5f : (a == 0 ? -2.5f : 0.0f);
+    app.city_actors.push_back({translation_matrix(ax, 0.05f, az),
+                               static_cast<float>(a) * 0.37f});
   }
   return true;
 }
@@ -2354,6 +2888,8 @@ bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
   struct ShadowPush {
     omnicpp::render::SceneMatrix light_vp;
     omnicpp::render::SceneMatrix model;
+    std::uint32_t joint_base;
+    std::uint32_t pad[3];
   } push{};
   push.light_vp = app.scene.shadow_light_vp;
 
@@ -2364,6 +2900,7 @@ bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
     const omnicpp::render::VulkanPipeline& pipe =
         skinned ? app.shadow_pipeline_skinned : app.shadow_pipeline_static;
     push.model = object.model;
+    push.joint_base = object.joint_base;
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       pipe.pipeline());
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -2431,6 +2968,105 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
   }
 
   app.scene.objects.clear();
+
+  // ------------------------------------------------------------------------
+  // City scene: street grid + 3 walking actors + 32 dynamic point lights.
+  // Own camera framing (high overview) and light box; the ML pipeline family
+  // binds the lights SSBO at set 6 (RT variant: TLAS at set 4, no shadow map).
+  // ------------------------------------------------------------------------
+  if (app.city_scene) {
+    // Camera: slow orbiting overview, 16 units up, 300-unit far plane for
+    // the ~100-unit street grid.
+    const float cam_angle = t * 0.05f;
+    const float eye[3] = {16.0f * std::cos(cam_angle), 14.0f,
+                          16.0f * std::sin(cam_angle)};
+    const float target[3] = {0.0f, 1.0f, 0.0f};
+    const float up[3] = {0.0f, 1.0f, 0.0f};
+    app.scene.camera.view_projection =
+        omnicpp::render::scene_camera_view_projection(
+            eye, target, up, 1.05f,
+            static_cast<float>(width) / static_cast<float>(height), 0.5f,
+            300.0f);
+    app.scene.camera_position = {eye[0], eye[1], eye[2], 1.0f};
+    // Sun ortho box covering the street grid.
+    const float light_eye[3] = {app.sun_direction[0] * 30.0f,
+                                app.sun_direction[1] * 30.0f,
+                                app.sun_direction[2] * 30.0f};
+    app.scene.shadow_light_vp = multiply(
+        make_ortho(-55.0f, 55.0f, -55.0f, 55.0f, -60.0f, 60.0f),
+        omnicpp::render::scene_camera_look_at(light_eye, target, up));
+    if (app.shadow_ubo_allocation.mapped != nullptr) {
+      std::memcpy(app.shadow_ubo_allocation.mapped,
+                  app.scene.shadow_light_vp.data(), 64U);
+    }
+
+    // Per-actor pose update into the shared bone arena (slot 0 = identity;
+    // actor a's joints at 1 + a * joints_per_actor). Phase offsets de-sync
+    // the walk cycles; update_mannequin_pose samples the clip at
+    // (walk_t + phase) and writes that actor's slice.
+    for (std::uint32_t a = 0; a < app.city_actor_count; ++a) {
+      update_mannequin_pose(
+          app, walk_t + app.city_actors[a].walk_phase,
+          1U + a * app.joints_per_actor);
+    }
+
+    // Static city parts: ground, buildings, poles, heads (identity payload,
+    // joint_base 0).
+    for (const auto& part : app.city_parts) {
+      omnicpp::render::ScenePbrObject obj;
+      obj.mesh = &part.buffers.mesh;
+      obj.model = part.model;
+      obj.material_index = part.material_index;
+      obj.joint_base = 0U;
+      app.scene.objects.push_back(obj);
+    }
+    // Actors: shared per-part meshes, per-actor model + joint slice.
+    for (std::uint32_t a = 0; a < app.city_actor_count; ++a) {
+      for (std::size_t i = 0; i < app.mannequin_meshes.size(); ++i) {
+        omnicpp::render::ScenePbrObject part;
+        part.mesh = &app.mannequin_meshes[i].mesh;
+        part.model = app.city_actors[a].model;
+        part.material_index = 3U;
+        part.joint_base = 1U + a * app.joints_per_actor;
+        app.scene.objects.push_back(part);
+      }
+    }
+
+    // Many-light pipeline family (skinned vertex stages for everything;
+    // static meshes carry the identity payload). RT variant swaps the
+    // fragment for the ray-query one and drops the shadow map.
+    const bool use_rt = app.rt_mode &&
+                        app.rt_full_ml_pipeline.pipeline() != VK_NULL_HANDLE;
+    app.scene.pipeline =
+        use_rt ? app.rt_full_ml_skinned_pipeline.pipeline()
+               : app.full_ml_skinned_pipeline.pipeline();
+    app.scene.pipeline_layout =
+        use_rt ? app.rt_full_ml_skinned_pipeline.pipeline_layout()
+               : app.full_ml_skinned_pipeline.pipeline_layout();
+    app.scene.bone_set = app.bone_set;
+    app.scene.ibl_set = app.ibl5_set;
+    app.scene.ibl_set_slot = 5U;
+    app.scene.lights_set = app.city_lights_set;
+    app.scene.lights_set_slot = 6U;
+    if (use_rt) {
+      app.scene.rt_set = app.rt_set;
+      app.scene.rt_set_slot = 4U;
+      app.scene.shadow_pipeline = VK_NULL_HANDLE;
+      app.scene.shadow_pipeline_layout = VK_NULL_HANDLE;
+      app.scene.shadow_set = VK_NULL_HANDLE;
+    } else {
+      app.scene.rt_set = VK_NULL_HANDLE;
+      app.scene.shadow_set = app.no_shadow ? app.neutral_shadow_set
+                                           : app.shadow_set;
+      app.scene.shadow_set_slot = 4U;
+      app.scene.shadow_pipeline = app.shadow_pipeline_static.pipeline();
+      app.scene.shadow_pipeline_layout =
+          app.shadow_pipeline_static.pipeline_layout();
+    }
+    return omnicpp::render::VulkanRenderer{}
+        .record_pbr_scene(command_buffer, app.scene, width, height)
+        .is_ok();
+  }
 
   // Ground slab (shared backdrop for both scene variants).
   omnicpp::render::ScenePbrObject ground;
@@ -2647,6 +3283,11 @@ bool ViewportApp::initialize() {
   // RT mode: hard ray-query shadows (requires composed lighting; setup
   // happens after setup_lighting builds the IBL stack it composes on).
   rt_mode = std::getenv("OMNICPP_RT_MODE") != nullptr;
+  // City scene selection (must precede setup_scene: setup_mannequin loads
+  // the actor asset, setup_city_scene builds on it, and setup_lighting
+  // needs to know which fragment family to build).
+  city_scene = std::getenv("OMNICPP_SCENE") != nullptr &&
+               std::string_view(std::getenv("OMNICPP_SCENE")) == "city";
   if (const char* ds = std::getenv("OMNICPP_DUMP_SHADOW")) {
     dump_shadow = true;
     dump_shadow_frame = static_cast<std::uint32_t>(std::atoi(ds));
@@ -2808,8 +3449,15 @@ bool ViewportApp::initialize() {
       // Self-describing runs: the analyzer and A/B tooling must never have
       // to guess which draw path or scene variant produced this file.
       telemetry.log_event("draw_path", gpu_driven ? "gpu_driven" : "per_draw");
-      telemetry.log_event("scene_variant", has_mannequin ? "mannequin"
-                                                          : "cubes");
+      telemetry.log_event("scene_variant",
+                          city_scene ? "city"
+                                     : (has_mannequin ? "mannequin" : "cubes"));
+      if (city_scene) {
+        telemetry.log_event("city_lights", std::to_string(city_lights.size()));
+        telemetry.log_event("city_actors",
+                            std::to_string(city_actor_count));
+        telemetry.log_event("city_parts", std::to_string(city_parts.size()));
+      }
       if (gpu_driven) {
         telemetry.log_event(
             "gd_instances", std::to_string(gd_instance_count));
@@ -3197,6 +3845,11 @@ void ViewportApp::shutdown() {
   gd_draw_pipeline.cleanup(context.device());
   rt_full_skinned_pipeline.cleanup(context.device());
   rt_full_pipeline.cleanup(context.device());
+  // Many-light city variants (only created when OMNICPP_SCENE=city).
+  rt_full_ml_skinned_pipeline.cleanup(context.device());
+  rt_full_ml_pipeline.cleanup(context.device());
+  full_ml_skinned_pipeline.cleanup(context.device());
+  full_ml_pipeline.cleanup(context.device());
   full_skinned_pipeline.cleanup(context.device());
   full_pipeline.cleanup(context.device());
   shadow_pipeline_skinned.cleanup(context.device());

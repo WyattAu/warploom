@@ -484,6 +484,22 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pbr_full_ml.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_full_ml.frag
+                    -o ${OMNICPP_SHADER_DIR}/pbr_full_ml.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_full_ml.frag
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/pbr_rt_full_ml.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_rt_full_ml.frag
+                    -o ${OMNICPP_SHADER_DIR}/pbr_rt_full_ml.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_rt_full_ml.frag
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/pbr_rt_full.frag.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/pbr_rt_full.frag
@@ -631,7 +647,9 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/pbr_shadow.frag.spv
                 ${OMNICPP_SHADER_DIR}/pbr_ibl_shadow.frag.spv
                 ${OMNICPP_SHADER_DIR}/pbr_full.frag.spv
+                ${OMNICPP_SHADER_DIR}/pbr_full_ml.frag.spv
                 ${OMNICPP_SHADER_DIR}/pbr_rt_full.frag.spv
+                ${OMNICPP_SHADER_DIR}/pbr_rt_full_ml.frag.spv
                 ${OMNICPP_SHADER_DIR}/pbr_gpu_driven_full.frag.spv
                 ${OMNICPP_SHADER_DIR}/shadow_skinned.vert.spv
                 ${OMNICPP_SHADER_DIR}/fullscreen.vert.spv

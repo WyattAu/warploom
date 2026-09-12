@@ -26,9 +26,9 @@ layout(push_constant) uniform Push {
   mat4 model;
   vec4 camera_position;
   uint material_index;
+  uint joint_base;
   uint pad0;
   uint pad1;
-  uint pad2;
 } pc;
 
 layout(location = 0) out vec3 v_color;
@@ -60,11 +60,15 @@ void main() {
   const vec4 weights = vec4(mesh.values[skin_base + 4u], mesh.values[skin_base + 5u],
                             mesh.values[skin_base + 6u], mesh.values[skin_base + 7u]);
 
-  // Blend bone matrices (normalized weights).
-  mat4 skin = bones_buf.bones[uint(joints.x)] * weights.x +
-              bones_buf.bones[uint(joints.y)] * weights.y +
-              bones_buf.bones[uint(joints.z)] * weights.z +
-              bones_buf.bones[uint(joints.w)] * weights.w;
+  // Blend bone matrices (normalized weights). joint_base lets multiple
+  // actors share one bone SSBO: actor a's joints start at a*joints_per_actor.
+  // Static meshes in the skinned pipeline carry an identity skin payload
+  // (joints=0, weights=1,0,0,0) and a joint_base pointing at a dedicated
+  // identity bone slot — no special case needed here.
+  mat4 skin = bones_buf.bones[pc.joint_base + uint(joints.x)] * weights.x +
+              bones_buf.bones[pc.joint_base + uint(joints.y)] * weights.y +
+              bones_buf.bones[pc.joint_base + uint(joints.z)] * weights.z +
+              bones_buf.bones[pc.joint_base + uint(joints.w)] * weights.w;
 
   const vec4 skinned_pos = skin * vec4(position, 1.0);
   const vec4 skinned_normal = skin * vec4(normal, 0.0);

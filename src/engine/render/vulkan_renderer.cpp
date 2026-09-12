@@ -310,7 +310,8 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
     SceneMatrix model;
     std::array<float, 4> camera_position;
     std::uint32_t material_index{0xffffffffU};
-    std::uint32_t pad[3]{0, 0, 0};
+    std::uint32_t joint_base{0U};
+    std::uint32_t pad[2]{0, 0};
   } push{};
   push.view_projection = scene.camera.view_projection;
   push.camera_position = scene.camera_position;
@@ -368,6 +369,15 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
                             scene.pipeline_layout, 3, 1, &scene.bone_set, 0,
                             nullptr);
   }
+  if (scene.lights_set != VK_NULL_HANDLE) {
+    // Many-light variant (pbr_full_ml / pbr_rt_full_ml): dynamic point
+    // lights SSBO at set 6 by default (scene.lights_set_slot relocates).
+    const std::uint32_t lights_slot =
+        scene.lights_set_slot != 0U ? scene.lights_set_slot : 6U;
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene.pipeline_layout, lights_slot, 1,
+                            &scene.lights_set, 0, nullptr);
+  }
 
   constexpr VkShaderStageFlags kPushStages =
       static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT |
@@ -403,6 +413,7 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
     const SceneMesh& mesh = *mesh_ptr;
     push.model = object.model;
     push.material_index = object.material_index;
+    push.joint_base = object.joint_base;
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             scene.pipeline_layout, 0, 1,
                             &mesh.descriptor_set, 0, nullptr);

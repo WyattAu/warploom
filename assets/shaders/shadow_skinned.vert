@@ -17,6 +17,7 @@ layout(set = 3, binding = 0, std430) readonly buffer BoneMatrices {
 layout(push_constant) uniform Push {
   mat4 light_vp;       // light-space view-projection (64 bytes)
   mat4 model;          // object-to-world (64 bytes)
+  uvec4 joint_base;    // x = base joint index (multi-actor shared bone SSBO)
 } pc;
 
 void main() {
@@ -33,10 +34,10 @@ void main() {
   const vec4 weights = vec4(mesh.values[skin_base + 4u], mesh.values[skin_base + 5u],
                             mesh.values[skin_base + 6u], mesh.values[skin_base + 7u]);
 
-  const mat4 skin = bones_buf.bones[uint(joints.x)] * weights.x +
-                    bones_buf.bones[uint(joints.y)] * weights.y +
-                    bones_buf.bones[uint(joints.z)] * weights.z +
-                    bones_buf.bones[uint(joints.w)] * weights.w;
+  const mat4 skin = bones_buf.bones[pc.joint_base.x + uint(joints.x)] * weights.x +
+                    bones_buf.bones[pc.joint_base.x + uint(joints.y)] * weights.y +
+                    bones_buf.bones[pc.joint_base.x + uint(joints.z)] * weights.z +
+                    bones_buf.bones[pc.joint_base.x + uint(joints.w)] * weights.w;
 
   const vec4 skinned_pos = skin * vec4(position, 1.0);
   gl_Position = pc.light_vp * pc.model * skinned_pos;

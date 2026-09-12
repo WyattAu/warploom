@@ -281,6 +281,11 @@ struct ScenePbrObject {
   SceneMatrix model{scene_identity_matrix()};
   //! Index into the material SSBO bound at set 2 (record_pbr_scene).
   std::uint32_t material_index{0xffffffffU};
+  //! Base joint index for skinned draws (skinned_scene.vert adds this to the
+  //! vertex's joint indices before sampling the bone SSBO). Lets multiple
+  //! actors share one bone buffer / bone set: actor a's joints live at
+  //! [a * joints_per_actor, ...). 0 for static objects.
+  std::uint32_t joint_base{0U};
 
   [[nodiscard]] const SceneMesh* effective_mesh() const noexcept {
     return mesh != nullptr ? mesh : &mesh_value;
@@ -361,6 +366,13 @@ struct VulkanPbrScene {
   //! pre-multiplied with the inverse bind matrix on the CPU). Bound only when
   //! the pipeline's vertex stage samples the skinning SSBO (skinned_scene.vert).
   VkDescriptorSet bone_set{VK_NULL_HANDLE};
+  //! Set 6 (default): dynamic point/spot lights SSBO for the many-light
+  //! fragment variants (pbr_full_ml.frag / pbr_rt_full_ml.frag). Word layout:
+  //! [0] = (light_count, pad, pad, pad), then 8 words per light:
+  //! pos.xyz + radius, color.rgb + intensity. Bound when non-null.
+  VkDescriptorSet lights_set{VK_NULL_HANDLE};
+  //! Descriptor-set index the main pass binds lights_set at. 0 = default (6).
+  std::uint32_t lights_set_slot{0U};
   // --- Analytic sky pass (optional) ---
   //! Full-screen sky pipeline built from sky.vert/sky.frag: 3-vertex draw,
   //! depth test LEQUAL with writes OFF, set 0 = sky-params UBO, 64-byte push.

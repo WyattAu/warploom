@@ -18,9 +18,9 @@ layout(push_constant) uniform Push {
   mat4 model;
   vec4 camera_position;
   uint material_index;
+  uint joint_base;
   uint pad0;
   uint pad1;
-  uint pad2;
 } pc;
 
 layout(location = 0) out vec3 v_color;
