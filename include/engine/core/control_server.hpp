@@ -19,6 +19,15 @@
 //!     {"cmd":"set_sun","id":6,"x":0.3,"y":0.65,"z":0.7}
 //!     {"cmd":"spawn_cube","id":7,"x":0,"y":0.5,"z":0,"size":1}
 //!     {"cmd":"capture","id":8,"frame":5}
+//!   v1.1 (M3 document query/edit):
+//!     {"cmd":"list_objects","id":9}
+//!     {"cmd":"get_object","id":10,"id":3}          (object id as "oid"? no: "id" collision — uses "oid")
+//!     {"cmd":"set_property","id":11,"object":"cube_2","key":"position","x":1,"y":2,"z":3}
+//!       numeric values: x/y/z (vec3 needs all three, number uses x)
+//!       bool/string values: "value":"true" | "value":"<text>"
+//!     {"cmd":"destroy_object","id":12,"oid":3}
+//!     {"cmd":"undo","id":13} / {"cmd":"redo","id":14}
+//!     {"cmd":"schema","id":15}
 //!   host -> client:
 //!     {"event":"welcome","protocol":1,"snapshot":<host JSON>}
 //!     {"id":1,"ok":true,"detail":"..."} | {"id":1,"ok":false,"error":"..."}
@@ -42,12 +51,27 @@ struct ControlCommand final {
     SetSun,
     SpawnCube,
     Capture,
+    // v1.1: document query/edit (M3 editor session).
+    ListObjects,
+    GetObject,
+    SetProperty,
+    DestroyObject,
+    Undo,
+    Redo,
+    Schema,
   };
 
   Kind kind{Kind::Unknown};
   std::uint64_t id{0};  // client-assigned, echoed in the reply
   double numbers[8]{};  // see kind-specific meaning in control_server.cpp
   std::uint32_t number_count{0};
+  // v1.1 string payloads (empty when unused):
+  //   GetObject/DestroyObject: numbers[0] = object id (key "oid")
+  //   SetProperty: text = object name, text2 = property key,
+  //                text3 = bool/string value (numeric values use x/y/z)
+  std::string text;
+  std::string text2;
+  std::string text3;
 };
 
 //! One protocol reply (serialized to a single JSON line).

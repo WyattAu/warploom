@@ -11,6 +11,8 @@ add_library(omnicpp_runtime SHARED
     core/control_server.cpp
     core/document.cpp
     core/property_registry.cpp
+    core/editor_session.cpp
+    ui/widget.cpp
     core/input_translators.cpp
     render/vulkan_ibl_baker.cpp
     asset/gltf_importer.cpp

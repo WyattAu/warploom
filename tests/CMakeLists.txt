@@ -703,6 +703,9 @@ add_executable(omnicpp_unit_tests
     unit/test_physics_ecs_bridge.cpp
     unit/test_control_server.cpp
     unit/test_scene_document.cpp
+    unit/test_ui_widget.cpp
+    unit/test_ui_paint_golden.cpp
+    unit/test_editor_session.cpp
     unit/test_input_state.cpp
     unit/test_input_translators.cpp
     unit/test_engine.cpp

@@ -16,6 +16,7 @@
  * - CI validation of rendering pipeline
  */
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <vector>

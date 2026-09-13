@@ -90,6 +90,13 @@ namespace {
       {"set_sun", ControlCommand::Kind::SetSun},
       {"spawn_cube", ControlCommand::Kind::SpawnCube},
       {"capture", ControlCommand::Kind::Capture},
+      {"list_objects", ControlCommand::Kind::ListObjects},
+      {"get_object", ControlCommand::Kind::GetObject},
+      {"set_property", ControlCommand::Kind::SetProperty},
+      {"destroy_object", ControlCommand::Kind::DestroyObject},
+      {"undo", ControlCommand::Kind::Undo},
+      {"redo", ControlCommand::Kind::Redo},
+      {"schema", ControlCommand::Kind::Schema},
   };
   command.kind = ControlCommand::Kind::Unknown;
   command.number_count = 0;
@@ -113,6 +120,13 @@ namespace {
       numbers[count++] = v;
     }
   };
+  // v1.1 string payloads.
+  const auto take_text = [&](const char* key, std::string& out) {
+    std::string v;
+    if (find_string_field(line, key, v)) {
+      out = std::move(v);
+    }
+  };
   switch (command.kind) {
     case ControlCommand::Kind::Step: {
       std::uint64_t ticks = 1;
@@ -134,6 +148,22 @@ namespace {
       break;
     case ControlCommand::Kind::Capture:
       take("frame");
+      break;
+    case ControlCommand::Kind::GetObject:
+    case ControlCommand::Kind::DestroyObject: {
+      std::uint64_t oid = 0;
+      if (!find_unsigned_field(line, "oid", oid)) {
+        error = "missing \"oid\" unsigned field";
+        return false;
+      }
+      numbers[count++] = static_cast<double>(oid);
+      break;
+    }
+    case ControlCommand::Kind::SetProperty:
+      take_text("object", command.text);
+      take_text("key", command.text2);
+      take_text("value", command.text3);
+      take("x"); take("y"); take("z");
       break;
     default:
       break;
