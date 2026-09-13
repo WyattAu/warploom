@@ -70,6 +70,56 @@ constexpr VkDescriptorBindingFlags
 constexpr VkDescriptorBindingFlags
     VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT = 0x00000004;
 
+//! Ray-tracing handle stand-in (headless builds): the AS write API takes a
+//! typed handle; stubbed to an opaque pointer so headers compile unchanged.
+typedef struct VkAccelerationStructureKHR_T* VkAccelerationStructureKHR;
+
+//! Pipeline shader-stage descriptor stand-in (headless builds): appears in
+//! graphics/RT pipeline create APIs; never constructed without a device.
+//! pSpecializationInfo is carried as const void* (layout-compatible).
+struct VkPipelineShaderStageCreateInfo {
+  const void* sType;
+  const void* pNext;
+  std::uint32_t flags;
+  std::uint32_t stage;
+  VkShaderModule module;
+  const char* pName;
+  const void* pSpecializationInfo;
+};
+
+//! Additional flag/enum stand-ins used by render headers in headless builds.
+using VkImageUsageFlags = std::uint32_t;
+using VkImageCreateFlags = std::uint32_t;
+using VkPipelineStageFlags = std::uint32_t;
+using VkAccessFlags = std::uint32_t;
+using VkImageViewType = std::uint32_t;
+using VkSamplerMipmapMode = std::uint32_t;
+using VkFilter = std::uint32_t;
+using VkSamplerAddressMode = std::uint32_t;
+using VkComponentMapping = std::uint32_t;
+using VkFormatFeatureFlags = std::uint32_t;
+using VkResult = std::int32_t;
+using VkQueryResultFlags = std::uint32_t;
+using VkBuildAccelerationStructureFlagsKHR = std::uint32_t;
+using VkAccelerationStructureTypeKHR = std::uint32_t;
+using VkGeometryTypeKHR = std::uint32_t;
+
+constexpr VkResult VK_SUCCESS = 0;
+constexpr VkQueryResultFlags VK_QUERY_RESULT_64_BIT = 0x00000001;
+constexpr VkQueryResultFlags VK_QUERY_RESULT_WAIT_BIT = 0x00000002;
+
+//! RT struct stand-ins (headless builds): size-queried via vkGet... paths
+//! that never execute without a device; members mirror the real Vulkan
+//! layout so code compiles unchanged.
+struct VkStructureTypePlaceholder;
+struct VkAccelerationStructureBuildSizesInfoKHR {
+  const VkStructureTypePlaceholder* sType;
+  const void* pNext;
+  std::uint64_t accelerationStructureSize;
+  std::uint64_t updateScratchSize;
+  std::uint64_t buildScratchSize;
+};
+
 using VkFormat = std::uint32_t;
 using VkImageLayout = std::uint32_t;
 using VkPresentModeKHR = std::uint32_t;

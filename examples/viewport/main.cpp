@@ -13,6 +13,8 @@
 
 #include <chrono>
 #include <cmath>
+#include <atomic>
+#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -52,6 +54,13 @@
 using SceneMatrix = omnicpp::render::SceneMatrix;
 
 namespace {
+
+//! Set on SIGTERM/SIGINT so the run loop exits through the normal shutdown
+//! path (renderer wait-idle, control-server stop + socket unlink, telemetry
+//! flush) instead of dying at the default termination handler and leaving
+//! the control socket file stale. Async-signal-safe: only an atomic store.
+std::atomic<bool> g_shutdown_requested{false};
+void handle_shutdown_signal(int) { g_shutdown_requested.store(true); }
 
 constexpr std::uint32_t kWidth = 1280U;
 constexpr std::uint32_t kHeight = 720U;
@@ -4181,6 +4190,10 @@ void ViewportApp::run() {
   }
 
   while (poll_events(*this)) {
+    if (g_shutdown_requested.load(std::memory_order_acquire)) {
+      telemetry.log_event("exit", "signal");
+      break;
+    }
     // Control channel first: accept/read/dispatch so pause/step/camera
     // commands apply to THIS frame's simulation and render.
     if (control_server != nullptr) {
@@ -4572,6 +4585,8 @@ void ViewportApp::shutdown() {
 }
 
 int main() {
+  std::signal(SIGTERM, handle_shutdown_signal);
+  std::signal(SIGINT, handle_shutdown_signal);
   ViewportApp app;
   if (!app.initialize()) {
     app.shutdown();

@@ -685,18 +685,24 @@ endif()
 # They must never depend on omnicpp_engine.
 # ============================================================================
 
+# GPU-dependent runtime tests (raw Vulkan symbols in the TU): only added
+# when Vulkan headers are available. Headless CI legs build the rest.
+set(OMNICPP_GPU_TEST_SOURCES
+    unit/test_ray_query_first_contact.cpp
+    unit/test_rt_shadows.cpp
+    unit/test_rt_reflections.cpp
+    unit/test_path_tracing.cpp
+    unit/test_path_tracing_real.cpp
+)
+
 add_executable(omnicpp_unit_tests
     unit/test_contract.cpp
     unit/test_deterministic_runtime.cpp
     unit/test_animation_state_machine.cpp
     unit/test_physics_world.cpp
     unit/test_physics_ecs_bridge.cpp
-    unit/test_ray_query_first_contact.cpp
-    unit/test_rt_shadows.cpp
-    unit/test_rt_reflections.cpp
-    unit/test_path_tracing.cpp
-    unit/test_path_tracing_real.cpp
     unit/test_control_server.cpp
+    unit/test_scene_document.cpp
     unit/test_input_state.cpp
     unit/test_input_translators.cpp
     unit/test_engine.cpp
@@ -745,6 +751,9 @@ add_executable(omnicpp_unit_tests
     unit/test_latency_telemetry.cpp
     unit/test_job_system.cpp
 )
+if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
+    target_sources(omnicpp_unit_tests PRIVATE ${OMNICPP_GPU_TEST_SOURCES})
+endif()
 target_link_libraries(omnicpp_unit_tests PRIVATE omnicpp_runtime Threads::Threads gtest gtest_main)
 target_include_directories(omnicpp_unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/include)
 # Asset directory for file-based tests (mannequin model); shader-dir define

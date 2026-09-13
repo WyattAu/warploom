@@ -32,6 +32,17 @@
       }
     },
     {
+      "name": "headless-debug-clang",
+      "displayName": "Headless Debug (Clang)",
+      "description": "Headless fallback-compiler matrix leg: C++26 on Clang exercises every non-GCC-gated path (no reflection/contracts there yet)",
+      "inherits": "headless-debug",
+      "binaryDir": "${sourceDir}/build/headless-debug-clang",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
       "name": "asan-ubsan",
       "displayName": "Address and Undefined Sanitizers",
       "description": "Headless sanitizer build",

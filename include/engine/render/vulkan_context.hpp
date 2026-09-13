@@ -94,8 +94,20 @@ public:
   //! are always available when this returns true.
   [[nodiscard]] bool has_ray_tracing_pipeline() const noexcept { return rt_pipeline_enabled_; }
   //! scratch/AS size limits from the RT properties (0 when absent).
-  [[nodiscard]] std::uint64_t max_ray_tracing_scratch() const noexcept { return as_properties_.maxGeometryCount > 0U ? 1U : 0U; }
-  [[nodiscard]] std::uint64_t max_acceleration_structure_geometry_count() const noexcept { return as_properties_.maxGeometryCount; }
+  [[nodiscard]] std::uint64_t max_ray_tracing_scratch() const noexcept {
+#if defined(OMNICPP_HAS_VULKAN)
+    return as_properties_.maxGeometryCount > 0U ? 1U : 0U;
+#else
+    return 0U;
+#endif
+  }
+  [[nodiscard]] std::uint64_t max_acceleration_structure_geometry_count() const noexcept {
+#if defined(OMNICPP_HAS_VULKAN)
+    return as_properties_.maxGeometryCount;
+#else
+    return 0U;
+#endif
+  }
   [[nodiscard]] std::uint32_t validation_warning_count() const noexcept {
     return validation_warning_count_.load(std::memory_order_relaxed);
   }

@@ -40,6 +40,30 @@ jobs:
           cat benchmark.json
 
   # ============================================================================
+  # Headless Debug (Clang) — fallback-compiler matrix leg: exercises every
+  # non-GCC-gated C++26 path (no reflection/contracts on Clang yet)
+  # ============================================================================
+  headless-debug-clang:
+    name: "Headless Debug (Clang)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang python3
+
+      - name: Configure
+        run: cmake --preset headless-debug-clang
+
+      - name: Build
+        run: cmake --build build/headless-debug-clang -j$(nproc)
+
+      - name: Test
+        run: ctest --test-dir build/headless-debug-clang --output-on-failure --timeout 120
+
+  # ============================================================================
   # Headless Release — optimized build validation
   # ============================================================================
   headless-release:

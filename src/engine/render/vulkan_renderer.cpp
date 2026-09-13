@@ -1713,6 +1713,9 @@ void VulkanRenderer::cleanup(VkDevice device) noexcept {
 }
 
 void VulkanRenderer::resolve_gpu_timestamps(std::uint32_t slot) noexcept {
+#if !defined(OMNICPP_HAS_VULKAN)
+  (void)slot;  // no query pools without a device: GPU timing stays disabled
+#else
   if (!gpu_timing_enabled_ || !gpu_timing_.available ||
       timestamp_pool_ == VK_NULL_HANDLE || timestamp_period_ns_ <= 0.0f) {
     return;
@@ -1736,6 +1739,7 @@ void VulkanRenderer::resolve_gpu_timestamps(std::uint32_t slot) noexcept {
         static_cast<double>(timestamp_period_ns_);
     ++gpu_timing_.queries_resolved;
   }
+#endif
 }
 
 omnicpp::core::Result<VkCommandPool> VulkanRenderer::create_command_pool(
