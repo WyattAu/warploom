@@ -588,6 +588,22 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/ui_quad.vert.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/ui_quad.vert
+                    -o ${OMNICPP_SHADER_DIR}/ui_quad.vert.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/ui_quad.vert
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${OMNICPP_SHADER_DIR}/ui_quad.frag.spv
+            COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
+                    ${CMAKE_SOURCE_DIR}/assets/shaders/ui_quad.frag
+                    -o ${OMNICPP_SHADER_DIR}/ui_quad.frag.spv
+            DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/ui_quad.frag
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
             COMMAND ${OMNICPP_SHADER_COMPILER} ${OMNICPP_SHADER_COMPILER_ARGS}
                     ${CMAKE_SOURCE_DIR}/assets/shaders/textured_quad.vert
@@ -674,6 +690,8 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
                 ${OMNICPP_SHADER_DIR}/pbr_rt_reflect.frag.spv
                 ${OMNICPP_SHADER_DIR}/sky.vert.spv
                 ${OMNICPP_SHADER_DIR}/sky.frag.spv
+                ${OMNICPP_SHADER_DIR}/ui_quad.vert.spv
+                ${OMNICPP_SHADER_DIR}/ui_quad.frag.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.vert.spv
                 ${OMNICPP_SHADER_DIR}/textured_quad.frag.spv
         )
@@ -693,6 +711,7 @@ set(OMNICPP_GPU_TEST_SOURCES
     unit/test_rt_reflections.cpp
     unit/test_path_tracing.cpp
     unit/test_path_tracing_real.cpp
+    unit/test_ui_gpu.cpp
 )
 
 add_executable(omnicpp_unit_tests
@@ -705,6 +724,8 @@ add_executable(omnicpp_unit_tests
     unit/test_scene_document.cpp
     unit/test_ui_widget.cpp
     unit/test_ui_paint_golden.cpp
+    unit/test_ui_glyphs.cpp
+    unit/test_ui_gpu.cpp
     unit/test_editor_session.cpp
     unit/test_input_state.cpp
     unit/test_input_translators.cpp

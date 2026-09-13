@@ -13,6 +13,7 @@ add_library(omnicpp_runtime SHARED
     core/property_registry.cpp
     core/editor_session.cpp
     ui/widget.cpp
+    ui/glyphs.cpp
     core/input_translators.cpp
     render/vulkan_ibl_baker.cpp
     asset/gltf_importer.cpp
@@ -32,6 +33,7 @@ add_library(omnicpp_runtime SHARED
     render/scene_camera.cpp
     render/vulkan_frame_upload.cpp
     render/vulkan_offscreen.cpp
+    render/vulkan_ui_renderer.cpp
     render/vulkan_memory_allocator.cpp
     render/vulkan_descriptors.cpp
     render/vulkan_render_graph.cpp
