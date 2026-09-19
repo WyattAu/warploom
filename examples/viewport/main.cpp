@@ -36,6 +36,7 @@
 #include "engine/core/input_translators.hpp"
 #include "engine/core/animation_state_machine.hpp"
 #include "engine/core/physics_world.hpp"
+#include "engine/editor/node_editor.hpp"
 #include "engine/render/vulkan_context.hpp"
 #include "engine/render/vulkan_frame_upload.hpp"
 #include "engine/render/vulkan_acceleration_structure.hpp"
@@ -49,6 +50,7 @@
 #include "engine/render/scene_camera.hpp"
 #include "engine/render/vulkan_surface.hpp"
 #include "engine/render/vulkan_swapchain.hpp"
+#include "engine/render/vulkan_ui_renderer.hpp"
 #include "telemetry.hpp"
 
 using SceneMatrix = omnicpp::render::SceneMatrix;
@@ -237,6 +239,25 @@ struct ViewportApp {
   std::vector<VkDescriptorSet> gd_draw_sets;
   omnicpp::render::VulkanPipeline gd_cull_pipeline;
   omnicpp::render::VulkanPipeline gd_draw_pipeline;
+  // --- Node editor overlay (OMNICPP_NODE_EDITOR=1) --------------------------
+  // UI paint path over the scene: graph cards, pins, bezier wires, value
+  // readouts; mouse selects/drags node cards. UI failures fail the frame.
+  bool node_editor{false};
+  omnicpp::editor::NodeGraph node_graph;
+  std::unique_ptr<omnicpp::editor::NodeEditorView> node_view;
+  omnicpp::ui::WidgetTree ui_tree;
+  omnicpp::ui::PaintList ui_paint;
+  std::uint32_t node_canvas{omnicpp::ui::kInvalidWidget};
+  omnicpp::render::VulkanUiRenderer ui_renderer;
+  // Mouse tracking (view-space pixels) for node select/drag.
+  float mouse_x{0.0f};
+  float mouse_y{0.0f};
+  float last_mouse_x{0.0f};
+  float last_mouse_y{0.0f};
+  std::uint64_t drag_node_id{0};
+  float drag_grab_dx{0.0f};
+  float drag_grab_dy{0.0f};
+  omnicpp::editor::PinRef selected_pin{};
   //! The draw pipeline's full layout (sets 0..2, 160-byte push) so the
   //! pre-pass hook can bind the compute set under the draw layout when
   //! chaining the cull dispatch ahead of the indirect draw.
@@ -739,14 +760,46 @@ bool poll_events(ViewportApp& app) {
       const auto* motion =
           reinterpret_cast<const xcb_motion_notify_event_t*>(event);
       app.kb_mouse.on_motion(motion->event_x, motion->event_y);
+      app.last_mouse_x = app.mouse_x;
+      app.last_mouse_y = app.mouse_y;
+      app.mouse_x = static_cast<float>(motion->event_x);
+      app.mouse_y = static_cast<float>(motion->event_y);
+      // Node drag: translate the grabbed card by the mouse delta.
+      if (app.node_editor && app.drag_node_id != 0U &&
+          app.node_view != nullptr) {
+        (void)app.node_view->translate(
+            app.drag_node_id, app.mouse_x - app.last_mouse_x,
+            app.mouse_y - app.last_mouse_y);
+      }
     } else if (type == XCB_BUTTON_PRESS) {
       const auto* button =
           reinterpret_cast<const xcb_button_press_event_t*>(event);
       app.kb_mouse.on_button(button->detail, true);
+      // Left press on the node canvas: grab a card (drag) or select.
+      if (app.node_editor && button->detail == 1 && app.node_view != nullptr) {
+        const auto hit = app.node_view->hit_test(app.mouse_x, app.mouse_y);
+        if (hit != 0U) {
+          app.drag_node_id = hit;
+          (void)app.node_view->select(hit);
+          float cx = 0.0F;
+          float cy = 0.0F;
+          float cw = 0.0F;
+          float ch = 0.0F;
+          if (app.node_view->node_rect(hit, cx, cy, cw, ch)) {
+            app.drag_grab_dx = app.mouse_x - cx;
+            app.drag_grab_dy = app.mouse_y - cy;
+          }
+        } else {
+          (void)app.node_view->select(0U);
+        }
+      }
     } else if (type == XCB_BUTTON_RELEASE) {
       const auto* button =
           reinterpret_cast<const xcb_button_press_event_t*>(event);
       app.kb_mouse.on_button(button->detail, false);
+      if (app.node_editor && button->detail == 1) {
+        app.drag_node_id = 0U;
+      }
     } else if (type == XCB_DESTROY_NOTIFY) {
       free(event);
       return false;
@@ -3837,6 +3890,71 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
 
 //! Renderer hook: advance the clock (the one sanctioned mutation) and record
 //! the window's scene for this frame.
+// ============================================================================
+// Node editor overlay (OMNICPP_NODE_EDITOR=1): a live graph canvas rendered
+// over the scene through the engine UI paint path.
+// ============================================================================
+
+//! Builds the demo graph (const -> add), the widget tree, and the UI
+//! renderer. False (non-fatal for the scene; overlay just stays off) when
+//! the ui_quad shaders are unavailable.
+bool setup_node_editor(ViewportApp& app) {
+  omnicpp::editor::register_builtin_node_types(app.node_graph);
+  const auto cn = app.node_graph.add_node(
+      "const_number",
+      {{"value", omnicpp::editor::NodeValue::make_number(2.0)}});
+  const auto add = app.node_graph.add_node("add", {});
+  std::string link_error;
+  if (!app.node_graph.add_link(cn, "value", add, "a", link_error)) {
+    std::fprintf(stderr, "viewport: node link failed: %s\n",
+                 link_error.c_str());
+  }
+
+  app.node_view = std::make_unique<omnicpp::editor::NodeEditorView>(
+      app.node_graph);
+  const auto canvas = app.ui_tree.add(omnicpp::ui::Widget{},
+                                      app.ui_tree.root());
+  app.node_canvas = canvas;
+  app.node_view->rebuild(app.ui_tree, canvas);
+  app.node_view->sync_widgets();
+
+  const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
+  const std::string shader_dir =
+      shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
+  return app.ui_renderer
+      .initialize(app.context.device(), app.context.physical_device(),
+                  app.render_pass.render_pass(), app.allocator, shader_dir)
+      .is_ok();
+}
+
+//! One graph evaluation per frame keeps the card readouts live.
+void tick_node_editor(ViewportApp& app) {
+  if (app.node_view == nullptr) return;
+  std::string error;
+  (void)app.node_graph.evaluate(error);
+  app.node_view->sync_widgets();
+  omnicpp::ui::compute_layout(app.ui_tree, static_cast<float>(kWidth),
+                              static_cast<float>(kHeight));
+  app.ui_paint.clear();
+  omnicpp::ui::paint(app.ui_tree, app.ui_paint);
+  app.node_view->append_wires(app.ui_paint);
+}
+
+//! Pre-pass chain when the node editor is active: the UI atlas one-time
+//! layout barrier MUST be recorded before the main render pass (layout
+//! transitions are illegal inside a pass), then the lighting pre-pass runs
+//! its own passes. Defined after shadow_pre_pass_cb (declared above it).
+bool node_editor_pre_pass_cb(VkCommandBuffer command_buffer,
+                             std::uint32_t width, std::uint32_t height,
+                             void* user_data) {
+  auto& app = *static_cast<ViewportApp*>(user_data);
+  app.ui_renderer.ensure_layout(command_buffer);
+  if (app.lighting_ready) {
+    return shadow_pre_pass_cb(command_buffer, width, height, user_data);
+  }
+  return true;
+}
+
 bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
                      std::uint32_t height, void* user_data) {
   auto& app = *static_cast<ViewportApp*>(user_data);
@@ -3849,6 +3967,15 @@ bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
       std::chrono::duration<double, std::micro>(
           std::chrono::steady_clock::now() - record_start)
           .count();
+  // Node editor overlay: same render pass, scene depth test off (the scene
+  // path disabled depth write for this pass), quads over the 3-D image.
+  if (ok && app.node_editor && app.node_view != nullptr) {
+    auto quads = app.ui_renderer.upload_paint_list(
+        app.ui_paint, static_cast<float>(width), static_cast<float>(height));
+    if (quads.is_ok() && quads.value() > 0U) {
+      app.ui_renderer.record(command_buffer, width, height, quads.value());
+    }
+  }
   // Stash the recorded times for the capture path, then advance (the window
   // owns the animation clock; the walk phase only exists with a mannequin).
   app.last_recorded_time = recorded_time;
@@ -4027,6 +4154,22 @@ bool ViewportApp::initialize() {
     }
   }
   renderer.set_scene_record_callback(record_scene_cb, this);
+
+  // Node editor overlay (OMNICPP_NODE_EDITOR=1): purely additive — setup
+  // failure leaves the plain scene (logged, not fatal). The pre-pass hook
+  // is REPLACED by the chained wrapper so the atlas barrier is recorded
+  // before the main render pass (and the lighting pre-pass still runs).
+  if (std::getenv("OMNICPP_NODE_EDITOR") != nullptr) {
+    if (setup_node_editor(*this)) {
+      node_editor = true;
+      renderer.set_frame_pre_pass_callback(node_editor_pre_pass_cb, this);
+      std::printf("viewport: node editor overlay active (drag cards with "
+                  "the mouse)\n");
+    } else {
+      std::fprintf(stderr, "viewport: node editor unavailable "
+                           "(missing ui_quad shaders?)\n");
+    }
+  }
 
   // ------------------------------------------------------------------------
   // Observability: telemetry log + GPU-side frame capture.
@@ -4240,6 +4383,11 @@ void ViewportApp::run() {
       break;
     }
 
+    // M6 node editor: evaluate + rebuild the UI paint list for this frame
+    // (cheap CPU work; the draw happens inside the scene record callback).
+    if (node_editor) {
+      tick_node_editor(*this);
+    }
     // Input tick: poll drivers (virtual script when present), let the
     // camera respond, and log consumed events for auditability.
     input.begin_tick();
@@ -4490,6 +4638,10 @@ void ViewportApp::shutdown() {
   renderer.wait_idle();
   capture.cleanup(context.device(), &allocator);
   telemetry.flush();
+  if (node_editor) {
+    ui_renderer.cleanup(context.device());
+    node_view.reset();
+  }
   // RT-shadow resources (AS buffers/instances/scratch) before teardown.
   destroy_rt_shadows(*this);
   renderer.cleanup(context.device());

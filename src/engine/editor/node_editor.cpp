@@ -15,12 +15,32 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <string>
 #include <vector>
 
 #include "engine/core/contract.hpp"
 
 namespace omnicpp::editor {
+
+std::string value_to_text(const NodeValue& value) {
+  switch (value.type) {
+    case NodeValue::Type::Number: {
+      char buf[32];
+      std::snprintf(buf, sizeof(buf), "%.4g", value.number);
+      return buf;
+    }
+    case NodeValue::Type::Bool:
+      return value.boolean ? "true" : "false";
+    case NodeValue::Type::String:
+      return value.text;
+    case NodeValue::Type::Vec3:
+      return "(" + value_to_text(NodeValue::make_number(value.vec[0])) + "," +
+             value_to_text(NodeValue::make_number(value.vec[1])) + "," +
+             value_to_text(NodeValue::make_number(value.vec[2])) + ")";
+  }
+  return "?";
+}
 
 namespace {
 
@@ -31,6 +51,23 @@ constexpr std::uint32_t kCardSelected = 0xFFFFC24BU;
 constexpr std::uint32_t kPinInColor = 0xFF5B8DEFU;
 constexpr std::uint32_t kPinOutColor = 0xFF42B883U;
 constexpr std::uint32_t kWireColor = 0xFF9AA0A6U;
+constexpr std::uint32_t kValueColor = 0xFFB5BD86U;  // readout text
+//! Bezier sampling: segments per wire + relative thickness per segment.
+constexpr int kBezierSegments = 8;
+constexpr float kBezierThickness = 2.0F;
+
+//! One cubic-bezier sample at t: horizontal control points at the x
+//! midpoint (standard node-editor S-curve).
+void bezier_point(float x0, float y0, float x1, float y1, float t, float& px,
+                  float& py) {
+  const float mx = 0.5F * (x0 + x1);
+  const float u = 1.0F - t;
+  // Cubic with P0=(x0,y0), P1=(mx,y0), P2=(mx,y1), P3=(x1,y1):
+  py = u * u * u * y0 + 3.0F * u * u * t * y0 + 3.0F * u * t * t * y1 +
+       t * t * t * y1;
+  px = u * u * u * x0 + 3.0F * u * u * t * mx + 3.0F * u * t * t * mx +
+       t * t * t * x1;
+}
 
 }  // namespace
 
@@ -147,48 +184,126 @@ void NodeEditorView::append_pins(ui::PaintList& list) const {
   }
 }
 
-void NodeEditorView::append_wires(ui::PaintList& list) const {
-  wires_.clear();
+void NodeEditorView::append_value_texts(
+    ui::PaintList& list) const {
+  for (const auto& node : graph_->nodes()) {
+    const NodeView* v = find_view(node.id);
+    const auto* type = graph_->find_type(node.type);
+    if (v == nullptr || type == nullptr) {
+      continue;
+    }
+    for (const auto& pin : type->outputs) {
+      const auto it = node.outputs.find(pin.name);
+      if (it == node.outputs.end()) {
+        continue;
+      }
+      // Readout: bottom-left of the card, one line per output pin. The
+      // fixed 56 px card fits one readout row under the type label.
+      std::string text = pin.name + "=" + value_to_text(it->second);
+      if (text.size() > 16U) {
+        text.resize(16U);  // fits 140 px minus padding at 8 px/char
+      }
+      list.texts.push_back(
+          ui::PaintText{v->x + 6.0F, v->y + kCardH - 18.0F, text,
+                        kValueColor});
+    }
+  }
+}
+
+bool NodeEditorView::link_endpoints(const GraphLink& link, float& x0,
+                                    float& y0, float& x1, float& y1) const {
+  const NodeView* from = find_view(link.from_node);
+  const NodeView* to = find_view(link.to_node);
+  const auto* from_node = graph_->find(link.from_node);
+  const auto* to_node = graph_->find(link.to_node);
+  if (from == nullptr || to == nullptr || from_node == nullptr ||
+      to_node == nullptr) {
+    return false;
+  }
+  int out_i = 0;
+  int in_i = 0;
+  if (const auto* t = graph_->find_type(from_node->type)) {
+    for (std::size_t i = 0; i < t->outputs.size(); ++i) {
+      if (t->outputs[i].name == link.from_pin) {
+        out_i = static_cast<int>(i);
+      }
+    }
+  }
+  if (const auto* t = graph_->find_type(to_node->type)) {
+    for (std::size_t i = 0; i < t->inputs.size(); ++i) {
+      if (t->inputs[i].name == link.to_pin) {
+        in_i = static_cast<int>(i);
+      }
+    }
+  }
+  x0 = from->x + kCardW;
+  y0 = from->y + pin_offset(out_i);
+  x1 = to->x;
+  y1 = to->y + pin_offset(in_i);
+  return true;
+}
+
+void NodeEditorView::emit_straight_wires(ui::PaintList& list) const {
   for (const auto& link : graph_->links()) {
-    const NodeView* from = find_view(link.from_node);
-    const NodeView* to = find_view(link.to_node);
-    if (from == nullptr || to == nullptr) {
+    float x0 = 0.0F;
+    float y0 = 0.0F;
+    float x1 = 0.0F;
+    float y1 = 0.0F;
+    if (!link_endpoints(link, x0, y0, x1, y1)) {
       continue;
     }
-    const auto* from_node = graph_->find(link.from_node);
-    const auto* to_node = graph_->find(link.to_node);
-    if (from_node == nullptr || to_node == nullptr) {
-      continue;
-    }
-    int out_i = 0;
-    int in_i = 0;
-    if (const auto* t = graph_->find_type(from_node->type)) {
-      for (std::size_t i = 0; i < t->outputs.size(); ++i) {
-        if (t->outputs[i].name == link.from_pin) {
-          out_i = static_cast<int>(i);
-        }
-      }
-    }
-    if (const auto* t = graph_->find_type(to_node->type)) {
-      for (std::size_t i = 0; i < t->inputs.size(); ++i) {
-        if (t->inputs[i].name == link.to_pin) {
-          in_i = static_cast<int>(i);
-        }
-      }
-    }
-    const float x0 = from->x + kCardW;
-    const float y0 = from->y + pin_offset(out_i);
-    const float x1 = to->x;
-    const float y1 = to->y + pin_offset(in_i);
     const float left = std::min(x0, x1);
     const float top = std::min(y0, y1);
     const float w = std::max(1.0F, std::abs(x1 - x0));
     const float h = std::max(1.0F, std::abs(y1 - y0));
-    wires_.push_back(
+    list.rects.insert(
+        list.rects.begin(),
         ui::PaintRect{left, top, w, h, kWireColor, 0x00000000U, 1.0F});
   }
-  // Wires UNDER the cards: prepend; pins OVER everything: append.
-  list.rects.insert(list.rects.begin(), wires_.begin(), wires_.end());
+}
+
+void NodeEditorView::emit_bezier_wires(ui::PaintList& list) const {
+  // Collect all segments first, then prepend in one shot so wires stay
+  // under the cards and segment order is deterministic.
+  std::vector<ui::PaintRect> segments;
+  for (const auto& link : graph_->links()) {
+    float x0 = 0.0F;
+    float y0 = 0.0F;
+    float x1 = 0.0F;
+    float y1 = 0.0F;
+    if (!link_endpoints(link, x0, y0, x1, y1)) {
+      continue;
+    }
+    float px = x0;
+    float py = y0;
+    for (int s = 1; s <= kBezierSegments; ++s) {
+      const float t = static_cast<float>(s) /
+                      static_cast<float>(kBezierSegments);
+      float nx = 0.0F;
+      float ny = 0.0F;
+      bezier_point(x0, y0, x1, y1, t, nx, ny);
+      const float left = std::min(px, nx);
+      const float top = std::min(py, ny);
+      const float w = std::max(kBezierThickness, std::abs(nx - px));
+      const float h = std::max(kBezierThickness, std::abs(ny - py));
+      segments.push_back(
+          ui::PaintRect{left, top, w, h, kWireColor, 0x00000000U, 1.0F});
+      px = nx;
+      py = ny;
+    }
+  }
+  list.rects.insert(list.rects.begin(), segments.begin(), segments.end());
+}
+
+void NodeEditorView::append_wires(ui::PaintList& list) const {
+  if (wire_style_ == WireStyle::Bezier) {
+    emit_bezier_wires(list);
+  } else {
+    emit_straight_wires(list);
+  }
+  if (show_values_) {
+    append_value_texts(list);
+  }
   append_pins(list);
 }
 
@@ -267,6 +382,31 @@ std::uint64_t NodeEditorView::hit_test(float x, float y) const {
     }
   }
   return 0U;
+}
+
+PinRef NodeEditorView::pin_at(float x, float y) const {
+  for (std::size_t i = views_.size(); i-- > 0;) {
+    const auto& v = views_[i];
+    if (x < v.x - kPinSize * 0.5F || x > v.x + kCardW + kPinSize * 0.5F ||
+        y < v.y || y >= v.y + kCardH) {
+      continue;
+    }
+    const auto* node = graph_->find(v.node_id);
+    const auto* type =
+        node != nullptr ? graph_->find_type(node->type) : nullptr;
+    if (type == nullptr) {
+      continue;
+    }
+    const bool on_input_side = x < v.x + kCardW * 0.5F;
+    const auto& pins = on_input_side ? type->inputs : type->outputs;
+    for (std::size_t p = 0; p < pins.size(); ++p) {
+      const float cy = v.y + pin_offset(static_cast<int>(p));
+      if (y >= cy - kPinSize * 0.5F && y < cy + kPinSize * 0.5F) {
+        return PinRef{v.node_id, pins[p].name, on_input_side};
+      }
+    }
+  }
+  return PinRef{};
 }
 
 std::vector<std::uint32_t> build_node_toolbar(ui::WidgetTree& tree,

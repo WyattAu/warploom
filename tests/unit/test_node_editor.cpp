@@ -301,3 +301,125 @@ TEST(NodeEditorToolbar, BuildsAddButtonsPerTypePlusUndoRedo) {
   // Type buttons come first with "+ " prefix.
   EXPECT_EQ(tree.get(buttons[0]).text.substr(0, 2), "+ ");
 }
+
+// ============================================================================
+// M6.5: bezier routing, pin hit-test, value readouts
+// ============================================================================
+
+TEST(NodeEditorWires, BezierStaysContinuousThroughMidpoint) {
+  auto g = make_graph();
+  WidgetTree tree;
+  auto view = make_view(g, tree);
+  // Bezier is the default style; force it explicitly for clarity.
+  view.set_wire_style(omnicpp::editor::WireStyle::Bezier);
+  PaintList list = full_paint(view, tree, 800.0F, 600.0F);
+
+  // Rasterize: the wire leaves node 1's right edge (x=350) and enters
+  // node 2's left edge (x=380). The mid-gap pixel (365, ~58) must carry
+  // wire color — the segments collectively bridge the gap.
+  omnicpp::render::SoftwareRasterizer rast(800, 600);
+  rast.clear(0xFF101014);
+  float z = 0.9F;
+  for (const auto& rect : list.rects) {
+    const float z0 = z;
+    const float z1 = z - 0.0005F;
+    rast.draw_triangle(rect.x, rect.y, z0, rect.color,
+                       rect.x + rect.w, rect.y, z0, rect.color,
+                       rect.x, rect.y + rect.h, z1, rect.color);
+    rast.draw_triangle(rect.x + rect.w, rect.y, z0, rect.color,
+                       rect.x + rect.w, rect.y + rect.h, z1, rect.color,
+                       rect.x, rect.y + rect.h, z1, rect.color);
+    z -= 0.001F;
+  }
+  // y=58: pin row 0 of both cards (y=40 + offset 18).
+  EXPECT_EQ(rast.get_pixel(365U, 58U) & 0x00FFFFFFU, 0x9AA0A6U)
+      << "bezier wire must cross the inter-card gap";
+}
+
+TEST(NodeEditorWires, StraightVsBezierBothDeterministic) {
+  auto g = make_graph();
+  WidgetTree tree;
+  auto view = make_view(g, tree);
+  view.set_wire_style(omnicpp::editor::WireStyle::Straight);
+  const PaintList a = full_paint(view, tree, 800.0F, 600.0F);
+  const PaintList b = full_paint(view, tree, 800.0F, 600.0F);
+  ASSERT_EQ(a.rects.size(), b.rects.size());
+  view.set_wire_style(omnicpp::editor::WireStyle::Bezier);
+  const PaintList c = full_paint(view, tree, 800.0F, 600.0F);
+  const PaintList d = full_paint(view, tree, 800.0F, 600.0F);
+  ASSERT_EQ(c.rects.size(), d.rects.size());
+  // Bezier produces MORE rects than straight (8 segments per wire).
+  EXPECT_GT(c.rects.size(), a.rects.size());
+}
+
+TEST(NodeEditorPins, PinHitTestFindsInputAndOutputSides) {
+  auto g = make_graph();
+  WidgetTree tree;
+  auto view = make_view(g, tree);
+  // Node 1 (const_number): output "value" on its right edge.
+  const auto* v1 = view.find_view(1);
+  ASSERT_NE(v1, nullptr);
+  const float out_x = v1->x + NodeEditorView::kCardW;
+  const float out_y = v1->y + 18.0F;  // pin row 0
+  auto pin = view.pin_at(out_x, out_y);
+  ASSERT_TRUE(pin.valid());
+  EXPECT_EQ(pin.node_id, 1U);
+  EXPECT_EQ(pin.pin_name, "value");
+  EXPECT_FALSE(pin.is_input);
+
+  // Node 2 (add): inputs "a" (row 0) and "b" (row 1) on the left edge.
+  const auto* v2 = view.find_view(2);
+  ASSERT_NE(v2, nullptr);
+  pin = view.pin_at(v2->x, v2->y + 18.0F + NodeEditorView::kPinH);
+  ASSERT_TRUE(pin.valid());
+  EXPECT_EQ(pin.node_id, 2U);
+  EXPECT_EQ(pin.pin_name, "b");
+  EXPECT_TRUE(pin.is_input);
+
+  // Empty space is an invalid ref.
+  EXPECT_FALSE(view.pin_at(5000.0F, 5000.0F).valid());
+}
+
+TEST(NodeEditorValues, ReadoutsAppearAfterEvaluate) {
+  auto g = make_graph();
+  WidgetTree tree;
+  auto view = make_view(g, tree);
+  view.set_show_values(true);
+  PaintList before = full_paint(view, tree, 800.0F, 600.0F);
+  // Before evaluation the readouts show the seeded zero values.
+  bool zeros_before = false;
+  for (const auto& t : before.texts) {
+    if (t.text == "value=0" || t.text == "sum=0") zeros_before = true;
+  }
+  EXPECT_TRUE(zeros_before) << "seeded outputs must read as zero";
+
+  std::string error;
+  ASSERT_TRUE(g.evaluate(error)) << error;
+  PaintList after = full_paint(view, tree, 800.0F, 600.0F);
+
+  // After evaluation: const emits 2; add shows 2+0=2 (same count, new
+  // values — readouts track evaluation, not just existence).
+  ASSERT_EQ(after.texts.size(), before.texts.size());
+  bool found_value = false;
+  bool found_sum = false;
+  for (const auto& t : after.texts) {
+    if (t.text == "value=2") found_value = true;
+    if (t.text == "sum=2") found_sum = true;
+  }
+  EXPECT_TRUE(found_value) << "const node must show its output";
+  EXPECT_TRUE(found_sum) << "add node must show the evaluated sum";
+}
+
+TEST(NodeEditorValues, ReadoutsHiddenWhenDisabled) {
+  auto g = make_graph();
+  WidgetTree tree;
+  auto view = make_view(g, tree);
+  view.set_show_values(false);
+  std::string error;
+  ASSERT_TRUE(g.evaluate(error)) << error;
+  PaintList list = full_paint(view, tree, 800.0F, 600.0F);
+  for (const auto& t : list.texts) {
+    EXPECT_EQ(t.text.find('='), std::string::npos)
+        << "no readout texts expected, found: " << t.text;
+  }
+}

@@ -30,6 +30,9 @@
 
 namespace omnicpp::editor {
 
+//! Formats a NodeValue compactly for card readouts (number/bool/string/vec3).
+[[nodiscard]] std::string value_to_text(const NodeValue& value);
+
 //! Per-node view state: canvas position (view-space pixels, top-left of
 //! the node card) and selection.
 struct NodeView final {
@@ -37,6 +40,22 @@ struct NodeView final {
   float x{0.0F};
   float y{0.0F};
   bool selected{false};
+};
+
+//! Wire routing style. Bezier approximates a horizontal cubic bezier
+//! (control points at the horizontal midpoint) with small rect segments —
+//! deterministic, renderer-agnostic, and rasterizes on every backend.
+enum class WireStyle : std::uint8_t {
+  Straight,  //!< one band per link
+  Bezier,    //!< segment-approximated horizontal S-curve
+};
+
+//! A pin reference: one named pin on one node.
+struct PinRef final {
+  std::uint64_t node_id{0};
+  std::string pin_name{};
+  bool is_input{false};
+  [[nodiscard]] bool valid() const noexcept { return node_id != 0U; }
 };
 
 //! The node editor view: owns ONLY view state (positions, selection);
@@ -60,10 +79,20 @@ class NodeEditorView final {
 
   //! Overlays wire geometry onto a paint list (after `paint(tree, ...)`).
   //! Wires render UNDER cards (prepended rects); pins render OVER
-  //! everything (appended). One wire per link, from the source node's
-  //! right edge to the target node's left edge at the linked pins'
-  //! vertical offsets.
+  //! everything (appended). Routing follows `wire_style`.
   void append_wires(ui::PaintList& list) const;
+
+  //! After `graph.evaluate()`: appends one text readout per node output
+  //! pin ("name=value") at the card bottom when value readouts are on.
+  void set_show_values(bool on) noexcept { show_values_ = on; }
+  [[nodiscard]] bool show_values() const noexcept { return show_values_; }
+
+  void set_wire_style(WireStyle style) noexcept { wire_style_ = style; }
+  [[nodiscard]] WireStyle wire_style() const noexcept { return wire_style_; }
+
+  //! Pin-level hit-test: the pin square containing (x, y), or an invalid
+  //! PinRef. Inputs sit on a card's left edge, outputs on its right.
+  [[nodiscard]] PinRef pin_at(float x, float y) const;
 
   [[nodiscard]] const std::vector<NodeView>& views() const noexcept {
     return views_;
@@ -96,11 +125,22 @@ class NodeEditorView final {
   }
   //! Emits pin squares for all nodes at their CURRENT view positions.
   void append_pins(ui::PaintList& list) const;
+  //! Emits per-output value readout texts (post-evaluate).
+  void append_value_texts(ui::PaintList& list) const;
+  //! Emits one straight band for every link.
+  void emit_straight_wires(ui::PaintList& list) const;
+  //! Emits bezier-approximated wires (8 segments per link).
+  void emit_bezier_wires(ui::PaintList& list) const;
+  //! Wire geometry endpoints for one link; false when unresolvable.
+  [[nodiscard]] bool link_endpoints(const GraphLink& link, float& x0,
+                                    float& y0, float& x1, float& y1) const;
 
   NodeGraph* graph_;
   ui::WidgetTree* tree_ref_{nullptr};  //!< set by rebuild()
   std::vector<NodeView> views_{};
   mutable std::vector<ui::PaintRect> wires_{};  //!< rebuilt by append_wires
+  WireStyle wire_style_{WireStyle::Bezier};
+  bool show_values_{true};
   std::uint32_t card_root_{ui::kInvalidWidget};  //!< rebuilt subtree root
   std::uint32_t canvas_parent_{ui::kInvalidWidget};
 };
