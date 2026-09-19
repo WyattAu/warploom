@@ -94,6 +94,14 @@ class NodeEditorView final {
   //! PinRef. Inputs sit on a card's left edge, outputs on its right.
   [[nodiscard]] PinRef pin_at(float x, float y) const;
 
+  //! Link hit-test: the graph link nearest to (x, y) within `threshold`
+  //! pixels (segment distance along the CURRENT routing), or 0. Deterministic:
+  //! ties break by lowest link index.
+  [[nodiscard]] std::size_t link_at(float x, float y,
+                                    float threshold) const;
+  //! The link list index -> GraphLink (or nullptr). For unlink commits.
+  [[nodiscard]] const GraphLink* link_at_index(std::size_t index) const;
+
   [[nodiscard]] const std::vector<NodeView>& views() const noexcept {
     return views_;
   }
@@ -134,6 +142,14 @@ class NodeEditorView final {
   [[nodiscard]] PinRef pending_pin() const { return pending_pin_; }
   [[nodiscard]] PinRef drag_source_pin() const { return drag_pin_; }
 
+  //! Test seam: exposes the private endpoint resolver to wire tests so they
+  //! compute exact geometry without duplicating layout constants.
+  [[nodiscard]] bool link_endpoints_public(const GraphLink& link, float& x0,
+                                           float& y0, float& x1,
+                                           float& y1) const {
+    return link_endpoints(link, x0, y0, x1, y1);
+  }
+
  private:
   //! Pin-center offset within a card (pin index, 0-based, top-down).
   [[nodiscard]] static float pin_offset(int index) noexcept {
@@ -154,6 +170,9 @@ class NodeEditorView final {
   //! pointer position (dashed = 3px bands with gaps; distinct from solid
   //! committed wires).
   void emit_pending_wire(ui::PaintList& list) const;
+  //! Point-to-segment distance in pixels (wire hit-testing).
+  [[nodiscard]] static float segment_distance(float px, float py, float x0,
+                                              float y0, float x1, float y1);
 
   NodeGraph* graph_;
   ui::WidgetTree* tree_ref_{nullptr};  //!< set by rebuild()
@@ -179,5 +198,26 @@ void pin_canvas(ui::WidgetTree& tree, std::uint32_t canvas);
 [[nodiscard]] std::vector<std::uint32_t> build_node_toolbar(
     ui::WidgetTree& tree, std::uint32_t toolbar_parent,
     const NodeGraph& graph);
+
+//! Toolbar action resolved from a click. `type_index` indexes the
+//! REGISTRATION-ORDER type list (same order the buttons were built in).
+enum class ToolbarAction : std::uint8_t {
+  None,
+  AddType,  //!< add a node of types_[type_index]
+  Undo,
+  Redo,
+};
+struct ToolbarHit final {
+  ToolbarAction action{ToolbarAction::None};
+  std::size_t type_index{0};
+};
+
+//! Resolves a click at (x, y) against the buttons `build_node_toolbar`
+//! created (handles in the same order). Layout must have run. Layout-built
+//! widget rects are authoritative — no duplicated geometry tables.
+[[nodiscard]] ToolbarHit hit_test_toolbar(
+    const ui::WidgetTree& tree,
+    const std::vector<std::uint32_t>& buttons, const NodeGraph& graph,
+    float x, float y);
 
 }  // namespace omnicpp::editor

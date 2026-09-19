@@ -106,6 +106,8 @@ namespace {
       {"set_node_param", ControlCommand::Kind::SetNodeParam},
       {"set_node_position", ControlCommand::Kind::SetNodePosition},
       {"get_graph", ControlCommand::Kind::GetGraph},
+      {"save_document", ControlCommand::Kind::SaveDocument},
+      {"load_document", ControlCommand::Kind::LoadDocument},
   };
   command.kind = ControlCommand::Kind::Unknown;
   command.number_count = 0;
@@ -226,6 +228,10 @@ namespace {
       break;
     }
     case ControlCommand::Kind::GetGraph:
+      break;
+    case ControlCommand::Kind::SaveDocument:
+    case ControlCommand::Kind::LoadDocument:
+      take_text("path", command.text);
       break;
     default:
       break;

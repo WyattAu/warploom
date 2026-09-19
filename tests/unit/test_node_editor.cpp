@@ -24,10 +24,13 @@
 #include <string>
 #include <vector>
 
+#include "engine/core/document.hpp"
 #include "engine/core/node_graph.hpp"
 #include "engine/editor/node_editor.hpp"
 #include "engine/render/software_rasterizer.hpp"
 #include "engine/ui/widget.hpp"
+
+namespace ed = omnicpp::editor;
 
 namespace {
 
@@ -522,4 +525,92 @@ TEST(NodeEditorLinkDrag, IncompatibleDropDoesNotResolve) {
   EXPECT_FALSE(view.pending_pin().valid());
   const PinRef resolved = view.end_link_drag(true);
   EXPECT_FALSE(resolved.valid());
+}
+
+// ============================================================================
+// M8: toolbar interaction + link hit-testing
+// ============================================================================
+
+TEST(NodeEditorToolbar, HitTestResolvesActions) {
+  auto g = make_graph();
+  WidgetTree tree;
+  const auto toolbar = tree.add(omnicpp::ui::Widget{}, tree.root());
+  const auto buttons =
+      omnicpp::editor::build_node_toolbar(tree, toolbar, g);
+  omnicpp::ui::compute_layout(tree, 800.0F, 600.0F, kMetrics);
+
+  // Click inside the FIRST type button ("+ const_number").
+  const auto& w0 = tree.get(buttons[0]);
+  auto hit = omnicpp::editor::hit_test_toolbar(tree, buttons, g,
+                                               w0.x + 2.0F, w0.y + 2.0F);
+  EXPECT_EQ(hit.action, omnicpp::editor::ToolbarAction::AddType);
+  EXPECT_EQ(hit.type_index, 0U);
+
+  // Click inside the undo button (right after the type buttons).
+  const auto& wu = tree.get(buttons[g.types().size()]);
+  hit = omnicpp::editor::hit_test_toolbar(tree, buttons, g, wu.x + 2.0F,
+                                          wu.y + 2.0F);
+  EXPECT_EQ(hit.action, omnicpp::editor::ToolbarAction::Undo);
+
+  // Click inside the redo button.
+  const auto& wr = tree.get(buttons[g.types().size() + 1U]);
+  hit = omnicpp::editor::hit_test_toolbar(tree, buttons, g, wr.x + 2.0F,
+                                          wr.y + 2.0F);
+  EXPECT_EQ(hit.action, omnicpp::editor::ToolbarAction::Redo);
+
+  // Empty space: None.
+  hit = omnicpp::editor::hit_test_toolbar(tree, buttons, g, 4000.0F, 4000.0F);
+  EXPECT_EQ(hit.action, omnicpp::editor::ToolbarAction::None);
+}
+
+TEST(NodeEditorToolbar, AddTypeActionDrivesSession) {
+  // The full toolbar loop: hit-test -> undoable session command.
+  auto g = make_graph();
+  ed::SceneDocument doc;
+  ed::register_builtin_node_types(doc.node_graph);
+  ed::CommandStack stack(doc);
+  WidgetTree tree;
+  const auto toolbar = tree.add(omnicpp::ui::Widget{}, tree.root());
+  const auto buttons =
+      omnicpp::editor::build_node_toolbar(tree, toolbar, doc.node_graph);
+  omnicpp::ui::compute_layout(tree, 800.0F, 600.0F, kMetrics);
+  const auto& w0 = tree.get(buttons[0]);
+
+  const auto hit = omnicpp::editor::hit_test_toolbar(tree, buttons, g,
+                                                     w0.x + 2.0F,
+                                                     w0.y + 2.0F);
+  ASSERT_EQ(hit.action, omnicpp::editor::ToolbarAction::AddType);
+  std::string err;
+  auto cmd = std::make_unique<ed::AddNodeCommand>(
+      doc.node_graph.types()[hit.type_index].name, 100.0, 100.0);
+  ASSERT_TRUE(stack.execute(std::move(cmd), err)) << err;
+  EXPECT_EQ(doc.node_graph.node_count(), 1U);
+  EXPECT_TRUE(stack.undo(err));
+  EXPECT_EQ(doc.node_graph.node_count(), 0U);
+}
+
+TEST(NodeEditorWires, LinkHitTestFindsNearestWithinThreshold) {
+  auto g = make_graph();
+  WidgetTree tree;
+  auto view = make_view(g, tree);
+  // The one link runs node1(right edge, row0) -> node2(left edge, row0).
+  const auto* v1 = view.find_view(1);
+  const auto* v2 = view.find_view(2);
+  ASSERT_NE(v1, nullptr);
+  ASSERT_NE(v2, nullptr);
+  float x0 = 0.0F;
+  float y0 = 0.0F;
+  float x1 = 0.0F;
+  float y1 = 0.0F;
+  omnicpp::editor::GraphLink link{1, "value", 2, "a"};
+  ASSERT_TRUE(view.link_endpoints_public(link, x0, y0, x1, y1));
+
+  // Point ON the straight midpoint.
+  const float mx = 0.5F * (x0 + x1);
+  const float my = 0.5F * (y0 + y1);
+  // Bezier midpoint may sag; sample ON the curve instead: t=0.5 through
+  // bezier_point is exactly on the path, so distance 0 for both styles.
+  EXPECT_EQ(view.link_at(mx, my, 12.0F), 0U);
+  // Far away: none.
+  EXPECT_EQ(view.link_at(5000.0F, 5000.0F, 12.0F), g.links().size());
 }

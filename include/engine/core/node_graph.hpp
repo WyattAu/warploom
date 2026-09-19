@@ -170,4 +170,16 @@ class NodeGraph final {
 //! comment passthrough). Idempotent per graph instance.
 void register_builtin_node_types(NodeGraph& graph);
 
+//! Registers a "script" node type that dispatches its evaluate into a named
+//! native module (dlopen'd shared object or in-process builtin — see
+//! script_module.hpp). Node params:
+//!   "module"  (string) the module's registered/loaded name
+//!   "inputs"  (number) how many numeric inputs the node consumes
+//!   "outputs" (number) how many numeric outputs the module writes
+//! Evaluation contract: values pass through the C ABI as plain doubles in
+//! registration order; a failed/missing module writes zeros (the graph
+//! stays total and deterministic; the error surfaces via `error` only when
+//! `require` is true at registration time).
+void register_script_node_type(NodeGraph& graph);
+
 }  // namespace omnicpp::editor

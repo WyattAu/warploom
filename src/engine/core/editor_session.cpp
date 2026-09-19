@@ -416,6 +416,47 @@ bool EditorSession::handle_edit(
       reply.detail = "node moved";
       return true;
     }
+    case CK::SaveDocument: {
+      if (command.text.empty()) {
+        reply.ok = false;
+        reply.error = "save_document needs \"path\"";
+        return true;
+      }
+      std::string error;
+      if (!doc_.save_to_file(command.text, error)) {
+        reply.ok = false;
+        reply.error = "save_document failed: " + error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "saved " + command.text;
+      return true;
+    }
+    case CK::LoadDocument: {
+      if (command.text.empty()) {
+        reply.ok = false;
+        reply.error = "load_document needs \"path\"";
+        return true;
+      }
+      SceneDocument loaded;
+      // Registry first: the parser validates node types against the target.
+      register_builtin_node_types(loaded.node_graph);
+      std::string error;
+      if (!SceneDocument::load_from_file(command.text, loaded, error)) {
+        reply.ok = false;
+        reply.error = "load_document failed: " + error;
+        return true;
+      }
+      // The document is authoritative state: loading REPLACES it and clears
+      // history (undo across a load boundary is meaningless — the stack's
+      // captured indices would not survive). Selection resets too.
+      doc_ = std::move(loaded);
+      stack_ = CommandStack(doc_);
+      selected_id_ = 0;
+      reply.ok = true;
+      reply.detail = "loaded " + command.text;
+      return true;
+    }
     case CK::Undo:
     case CK::Redo: {
       std::string error;
@@ -547,6 +588,153 @@ omnicpp::core::ControlReply EditorSession::handle_session(
       break;
   }
   return reply;
+}
+
+bool EditorSession::bind_property(std::uint64_t node_id,
+                                  std::string out_pin,
+                                  std::uint64_t object_id,
+                                  std::string property,
+                                  std::string& error) {
+  const GraphNode* node = doc_.node_graph.find(node_id);
+  if (node == nullptr) {
+    error = "bind: no node " + std::to_string(node_id);
+    return false;
+  }
+  const auto* type = doc_.node_graph.find_type(node->type);
+  bool pin_ok = false;
+  PinType pin_type = PinType::Number;
+  if (type != nullptr) {
+    for (const auto& p : type->outputs) {
+      if (p.name == out_pin) {
+        pin_type = p.type;
+        pin_ok = true;
+        break;
+      }
+    }
+  }
+  if (!pin_ok) {
+    error = "bind: node " + std::to_string(node_id) + " has no output \"" +
+            out_pin + "\"";
+    return false;
+  }
+  SceneObject* obj = doc_.find(object_id);
+  if (obj == nullptr) {
+    error = "bind: no object " + std::to_string(object_id);
+    return false;
+  }
+  // Axis-suffix form "<property>.<x|y|z>": a NUMBER pin drives one
+  // component of a VEC3 property. Validate the base property here; sync
+  // writes the single component.
+  std::string base_property = property;
+  bool axis_form = false;
+  int axis_index = -1;
+  if (property.size() >= 3U && property[property.size() - 2U] == '.') {
+    const char axis = property.back();
+    axis_index = axis == 'x' ? 0 : (axis == 'y' ? 1 : (axis == 'z' ? 2 : -1));
+    if (axis_index >= 0) {
+      axis_form = true;
+      base_property.erase(base_property.size() - 2U, 2U);
+    }
+  }
+  const auto prop_it = obj->properties.find(base_property);
+  if (prop_it == obj->properties.end()) {
+    error = "bind: object " + std::to_string(object_id) +
+            " has no property \"" + base_property + "\"";
+    return false;
+  }
+  // Type compatibility: the pin's value type must match the property's
+  // (axis form: number pin -> vec3 property component).
+  const PropValue::Type target_type =
+      axis_form ? PropValue::Type::Vec3
+                : static_cast<PropValue::Type>(pin_type);
+  if (prop_it->second.type != target_type) {
+    error = "bind: pin type mismatch for \"" + base_property + "\"";
+    return false;
+  }
+  if (axis_form && pin_type != PinType::Number) {
+    error = "bind: axis binding needs a number pin";
+    return false;
+  }
+  // One binding per base property (a property has ONE driver; the axis
+  // suffix does not create a second driver slot).
+  for (const auto& b : bindings_) {
+    std::string_view existing = b.property;
+    if (existing.size() >= 3U && existing[existing.size() - 2U] == '.') {
+      existing.remove_suffix(2U);
+    }
+    if (b.object_id == object_id && existing == base_property) {
+      error = "bind: property \"" + base_property + "\" on object " +
+              std::to_string(object_id) + " is already bound";
+      return false;
+    }
+  }
+  bindings_.push_back(
+      PropertyBinding{node_id, std::move(out_pin), object_id,
+                      std::move(property)});
+  (void)axis_index;
+  return true;
+}
+
+bool EditorSession::unbind_property(std::uint64_t object_id,
+                                    const std::string& property) {
+  for (std::size_t i = 0; i < bindings_.size(); ++i) {
+    if (bindings_[i].object_id == object_id &&
+        bindings_[i].property == property) {
+      bindings_.erase(bindings_.begin() +
+                      static_cast<std::ptrdiff_t>(i));
+      return true;
+    }
+  }
+  return false;
+}
+
+std::size_t EditorSession::sync_graph(std::string& error) {
+  if (!doc_.node_graph.evaluate(error)) {
+    return 0;
+  }
+  std::size_t applied = 0;
+  for (const auto& b : bindings_) {
+    const GraphNode* node = doc_.node_graph.find(b.node_id);
+    SceneObject* obj = doc_.find(b.object_id);
+    if (node == nullptr || obj == nullptr) {
+      continue;  // dangling binding (node/object destroyed): skipped
+    }
+    const auto value_it = node->outputs.find(b.out_pin);
+    if (value_it == node->outputs.end()) {
+      continue;
+    }
+    // Axis-suffix bindings ("<property>.<x|y|z>"): a NUMBER pin writes one
+    // component of the VEC3 property (validated at bind time).
+    if (b.property.size() >= 3U && b.property[b.property.size() - 2U] == '.') {
+      std::string base = b.property;
+      base.erase(base.size() - 2U, 2U);
+      const auto prop_it = obj->properties.find(base);
+      if (prop_it == obj->properties.end() ||
+          prop_it->second.type != PropValue::Type::Vec3 ||
+          value_it->second.type != PropValue::Type::Number) {
+        continue;
+      }
+      const char axis = b.property.back();
+      const int idx =
+          axis == 'x' ? 0 : (axis == 'y' ? 1 : (axis == 'z' ? 2 : -1));
+      if (idx < 0) {
+        continue;
+      }
+      prop_it->second.vec[idx] = value_it->second.number;
+      ++applied;
+      continue;
+    }
+    // Whole-property bindings: types must match exactly.
+    const auto prop_it = obj->properties.find(b.property);
+    if (prop_it == obj->properties.end()) {
+      continue;
+    }
+    if (prop_it->second.type == value_it->second.type) {
+      prop_it->second = value_it->second;
+      ++applied;
+    }
+  }
+  return applied;
 }
 
 std::string EditorSession::snapshot_json() const {

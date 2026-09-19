@@ -17,6 +17,7 @@
 //! GPU/renderer state — that keeps the protocol fully headless-testable.
 
 #include <string>
+#include <vector>
 
 #include "engine/core/control_server.hpp"
 #include "engine/core/document.hpp"
@@ -41,6 +42,36 @@ class EditorSession final : public omnicpp::core::ControlHost {
     return selected_id_;
   }
 
+  // -- Graph -> scene bridge (M9) -----------------------------------------
+  //! Binds one node output pin to one object property. When `sync_graph()`
+  //! runs (once per editor tick), each binding writes the pin's CURRENT
+  //! evaluated value into the object property — direct application, NOT a
+  //! command (graphs drive state every frame; undoing a driven property is
+  //! the graph's job, via node params). Rejected at bind time when object,
+  //! property, or pin does not exist or the value type mismatches.
+  struct PropertyBinding {
+    std::uint64_t node_id{0};
+    std::string out_pin{};
+    std::uint64_t object_id{0};
+    std::string property{};
+  };
+  //! Returns false + `error` when the binding is invalid (never half-bound).
+  [[nodiscard]] bool bind_property(std::uint64_t node_id,
+                                   std::string out_pin,
+                                   std::uint64_t object_id,
+                                   std::string property,
+                                   std::string& error);
+  //! Removes the binding on an object property (false when none).
+  [[nodiscard]] bool unbind_property(std::uint64_t object_id,
+                                     const std::string& property);
+  [[nodiscard]] const std::vector<PropertyBinding>& bindings() const noexcept {
+    return bindings_;
+  }
+  //! Runs the graph evaluation, then writes every binding's current pin
+  //! value into its bound object property. Returns the number of bindings
+  //! applied. Deterministic: bindings apply in insertion order.
+  [[nodiscard]] std::size_t sync_graph(std::string& error);
+
   // -- ControlHost ---------------------------------------------------------
   [[nodiscard]] omnicpp::core::ControlReply on_control(
       const omnicpp::core::ControlCommand& command) override;
@@ -61,6 +92,7 @@ class EditorSession final : public omnicpp::core::ControlHost {
   SceneDocument doc_{};
   CommandStack stack_{doc_};
   std::uint64_t selected_id_{0};
+  std::vector<PropertyBinding> bindings_{};
 };
 
 }  // namespace omnicpp::editor

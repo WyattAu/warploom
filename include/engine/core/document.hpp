@@ -68,6 +68,19 @@ struct SceneDocument final {
   //! byte offset) and leaves `out` untouched.
   [[nodiscard]] static bool from_json(std::string_view text,
                                       SceneDocument& out, std::string& error);
+
+  //! Saves byte-deterministic JSON to `path` (0600 perms). False + `error`
+  //! on failure; the file is written atomically via a temp-file rename so a
+  //! crash mid-write never corrupts an existing document.
+  [[nodiscard]] bool save_to_file(const std::string& path,
+                                  std::string& error) const;
+  //! Loads a document from `path`. On parse failure `error` carries the
+  //! parser diagnostic; on I/O failure a plain error. `out` untouched on
+  //! any failure. NOTE: node types are validated against `out`'s registry —
+  //! pre-register types before loading (the session does this for you).
+  [[nodiscard]] static bool load_from_file(const std::string& path,
+                                           SceneDocument& out,
+                                           std::string& error);
 };
 
 // ============================================================================

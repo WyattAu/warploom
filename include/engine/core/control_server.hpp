@@ -36,6 +36,9 @@
 //!     {"cmd":"set_node_param","id":20,"nid":1,"key":"value","x":7}
 //!     {"cmd":"set_node_position","id":21,"nid":2,"x":200,"y":120}
 //!     {"cmd":"get_graph","id":22}
+//!   v1.4 (M8 document persistence):
+//!     {"cmd":"save_document","id":23,"path":"scene.json"}
+//!     {"cmd":"load_document","id":24,"path":"scene.json"}
 //!   host -> client:
 //!     {"event":"welcome","protocol":1,"snapshot":<host JSON>}
 //!     {"id":1,"ok":true,"detail":"..."} | {"id":1,"ok":false,"error":"..."}
@@ -78,6 +81,9 @@ struct ControlCommand final {
     SetNodePosition,
     // v1.3 queries.
     GetGraph,
+    // v1.4: document persistence (M8) — path rides in `text`.
+    SaveDocument,
+    LoadDocument,
   };
 
   Kind kind{Kind::Unknown};

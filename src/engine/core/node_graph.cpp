@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "engine/core/contract.hpp"
+#include "engine/core/script_module.hpp"
 
 namespace omnicpp::editor {
 
@@ -71,6 +72,10 @@ const NodePinDesc* find_pin(const std::vector<NodePinDesc>& pins,
   }
   return nullptr;
 }
+
+//! Error sink for module loads inside evaluation (errors degrade to zero
+//! outputs; the scratch keeps the evaluate signature pure).
+std::string g_error_scratch;
 
 }  // namespace
 
@@ -513,6 +518,79 @@ void register_builtin_node_types(NodeGraph& graph) {
     };
     graph.register_type(std::move(t));
   }
+}
+
+void register_script_node_type(NodeGraph& graph) {
+  NodeType t;
+  t.name = "script";
+  t.doc =
+      "Dispatches into a native module (C++/Rust via the C ABI). Params: "
+      "module=<name>, inputs=<n>, outputs=<n>";
+  // Pin layout is dynamic per instance; declare one of each so the editor
+  // shows sockets. Evaluation uses the param-declared counts.
+  t.inputs = {{"in0", PinType::Number}};
+  t.outputs = {{"out0", PinType::Number}};
+  t.evaluate = [](const std::map<std::string, NodeValue>& params,
+                  const std::map<std::string, NodeValue>& inputs,
+                  std::map<std::string, NodeValue>& outputs) {
+    // Resolve the module per call (cheap string lookup; the module itself
+    // is process-cached by name inside ScriptModule's builtin/shared lists).
+    const auto mod_it = params.find("module");
+    const auto n_in_it = params.find("inputs");
+    const auto n_out_it = params.find("outputs");
+    const std::string module_name =
+        mod_it != params.end() ? mod_it->second.text : std::string();
+    const std::size_t n_in =
+        n_in_it != params.end()
+            ? static_cast<std::size_t>(n_in_it->second.number)
+            : 1U;
+    const std::size_t n_out =
+        n_out_it != params.end()
+            ? static_cast<std::size_t>(n_out_it->second.number)
+            : 1U;
+
+    // Gather inputs in pin-name order ("in0", "in1", ... — std::map's
+    // lexicographic order matches numeric order for single digits; the
+    // pin-count contract keeps graphs at 9 inputs, documented).
+    std::vector<double> in(n_in, 0.0);
+    for (std::size_t i = 0; i < n_in && i < 9U; ++i) {
+      const std::string key = "in" + std::to_string(i);
+      const auto it = inputs.find(key);
+      if (it != inputs.end() &&
+          it->second.type == NodeValue::Type::Number) {
+        in[i] = it->second.number;
+      }
+    }
+
+    // Fixed dt = 0: node evaluation is a pure function, not a per-tick
+    // simulation — the module sees a constant so replays stay exact.
+    std::vector<double> out(n_out, 0.0);
+    auto module = omnicpp::core::ScriptModule::load_builtin(module_name,
+                                                            g_error_scratch);
+    if (module == nullptr) {
+      // Unknown module: outputs stay zero (total + deterministic).
+      for (std::size_t i = 0; i < n_out; ++i) {
+        const std::string key =
+            n_out == 1U ? std::string("out0")
+                        : "out" + std::to_string(i);
+        outputs[key] = NodeValue::make_number(0.0);
+      }
+      return;
+    }
+    const std::int32_t written =
+        module->tick(0.0, in.data(), static_cast<std::uint32_t>(in.size()),
+                     out.data(), static_cast<std::uint32_t>(out.size()));
+    if (written < 0) {
+      // Module error: zeros (deterministic degradation, no exceptions).
+      std::fill(out.begin(), out.end(), 0.0);
+    }
+    for (std::size_t i = 0; i < n_out; ++i) {
+      const std::string key =
+          n_out == 1U ? std::string("out0") : "out" + std::to_string(i);
+      outputs[key] = NodeValue::make_number(i < out.size() ? out[i] : 0.0);
+    }
+  };
+  graph.register_type(std::move(t));
 }
 
 }  // namespace omnicpp::editor

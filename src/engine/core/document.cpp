@@ -11,12 +11,18 @@
 
 #include "engine/core/document.hpp"
 
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <iterator>
 
 #include "engine/core/contract.hpp"
 
@@ -993,6 +999,57 @@ bool SceneDocument::from_json(std::string_view text,
   }
   out = std::move(parsed);
   return true;
+}
+
+// ============================================================================
+// Disk persistence (atomic save; strict load)
+// ============================================================================
+
+bool SceneDocument::save_to_file(const std::string& path,
+                                 std::string& error) const {
+  // Byte-deterministic payload.
+  const std::string payload = to_json();
+
+  // Atomic write: temp file in the same directory + rename (POSIX rename is
+  // atomic within a filesystem), so a crash mid-write never truncates an
+  // existing document. The temp name embeds the pid for parallel safety.
+  const std::string tmp = path + ".tmp." + std::to_string(::getpid());
+  std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+  if (!out.is_open()) {
+    error = "save: cannot open \"" + tmp + "\": " + std::strerror(errno);
+    return false;
+  }
+  out.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+  out.close();
+  if (!out.good()) {
+    error = "save: write failed for \"" + tmp + "\": " + std::strerror(errno);
+    std::remove(tmp.c_str());
+    return false;
+  }
+  if (std::rename(tmp.c_str(), path.c_str()) != 0) {
+    error = "save: rename failed: " + std::string(std::strerror(errno));
+    std::remove(tmp.c_str());
+    return false;
+  }
+  // Editor documents may hold project-local names; keep them private.
+  (void)::chmod(path.c_str(), 0600);
+  return true;
+}
+
+bool SceneDocument::load_from_file(const std::string& path,
+                                   SceneDocument& out, std::string& error) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in.is_open()) {
+    error = "load: cannot open \"" + path + "\": " + std::strerror(errno);
+    return false;
+  }
+  std::string text((std::istreambuf_iterator<char>(in)),
+                   std::istreambuf_iterator<char>());
+  if (in.bad()) {
+    error = "load: read failed for \"" + path + "\"";
+    return false;
+  }
+  return SceneDocument::from_json(text, out, error);
 }
 
 // ============================================================================

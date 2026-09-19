@@ -9,8 +9,12 @@
 #include <cstdint>
 #include <string>
 
+#include "engine/core/control_server.hpp"
 #include "engine/core/document.hpp"
+#include "engine/core/editor_session.hpp"
 #include "engine/core/node_graph.hpp"
+#include "engine/core/property_registry.hpp"
+#include "engine/core/script_module.hpp"
 
 namespace {
 
@@ -286,3 +290,306 @@ TEST(NodeCommands, FullEditSequenceReplayIsByteDeterministic) {
 }
 
 }  // namespace
+
+// ============================================================================
+// M8: disk persistence (atomic save, strict load)
+// ============================================================================
+
+#include <sys/stat.h>
+
+#include <cstdio>
+#include <fstream>
+
+TEST(NodeDisk, SaveLoadRoundTripByteIdentical) {
+  auto doc = make_doc();
+  const auto a = doc.node_graph.add_node(
+      "const_number", {{"value", ed::NodeValue::make_number(11.0)}});
+  const auto b = doc.node_graph.add_node("add", {});
+  std::string err;
+  ASSERT_TRUE(doc.node_graph.add_link(a, "value", b, "a", err)) << err;
+  doc.node_layout.emplace(a, std::make_pair(15.0, 25.0));
+  doc.node_layout.emplace(b, std::make_pair(215.0, 25.0));
+
+  const std::string path = "/tmp/omnicpp_test_doc.json";
+  ASSERT_TRUE(doc.save_to_file(path, err)) << err;
+
+  ed::SceneDocument loaded;
+  seed_registry(loaded);
+  ASSERT_TRUE(ed::SceneDocument::load_from_file(path, loaded, err)) << err;
+  EXPECT_EQ(loaded.to_json(), doc.to_json());
+  std::remove(path.c_str());
+}
+
+TEST(NodeDisk, SaveIsAtomicAndLeavesNoTemp) {
+  auto doc = make_doc();
+  (void)doc.node_graph.add_node("const_number", {});
+  const std::string path = "/tmp/omnicpp_test_atomic.json";
+  std::string err;
+  ASSERT_TRUE(doc.save_to_file(path, err)) << err;
+  // No temp residue.
+  std::fstream probe(path + ".tmp." + std::to_string(::getpid()));
+  EXPECT_FALSE(probe.good());
+  struct stat st{};
+  ASSERT_EQ(::stat(path.c_str(), &st), 0);
+  EXPECT_TRUE(S_ISREG(st.st_mode));
+  std::remove(path.c_str());
+}
+
+TEST(NodeDisk, LoadRejectsGarbageAndMissingFiles) {
+  const std::string path = "/tmp/omnicpp_test_bad.json";
+  {
+    std::ofstream out(path, std::ios::binary);
+    out << "{\"schema_version\":99,\"junk\":true}";
+  }
+  ed::SceneDocument loaded;
+  seed_registry(loaded);
+  std::string err;
+  EXPECT_FALSE(ed::SceneDocument::load_from_file(path, loaded, err));
+  EXPECT_NE(err.find("parse error"), std::string::npos) << err;
+
+  err.clear();
+  EXPECT_FALSE(ed::SceneDocument::load_from_file(
+      "/tmp/omnicpp_definitely_missing_9x.json", loaded, err));
+  EXPECT_NE(err.find("cannot open"), std::string::npos) << err;
+  std::remove(path.c_str());
+}
+
+// ============================================================================
+// M9: script-module nodes (native C++/Rust modules as graph nodes)
+// ============================================================================
+
+#include <cmath>
+
+namespace {
+
+//! Doubles every input: outputs[0] = 2 * inputs[0] (deterministic, pure).
+std::int32_t doubler_tick(double, const double* inputs,
+                          std::uint32_t input_count, double* outputs,
+                          std::uint32_t output_capacity) noexcept {
+  if (input_count < 1U || output_capacity < 1U) {
+    return -1;
+  }
+  outputs[0] = 2.0 * inputs[0];
+  return 1;
+}
+
+const char* doubler_name() noexcept { return "test_doubler"; }
+std::int32_t doubler_abi() noexcept {
+  return omnicpp::core::kScriptModuleAbi;
+}
+
+//! Registers the doubler builtin once per process.
+void register_doubler() {
+  static const bool done = [] {
+    omnicpp::core::ScriptModuleApi api;
+    api.abi_version = &doubler_abi;
+    api.name = &doubler_name;
+    api.tick = &doubler_tick;
+    return omnicpp::core::ScriptModule::register_builtin("test_doubler", api);
+  }();
+  (void)done;
+}
+
+}  // namespace
+
+TEST(NodeScriptNodes, ScriptNodeDispatchesIntoModule) {
+  register_doubler();
+  auto doc = make_doc();
+  ed::register_script_node_type(doc.node_graph);
+
+  // const(21) -> script(doubler) : out must be 42 after evaluate.
+  const auto cn = doc.node_graph.add_node(
+      "const_number", {{"value", ed::NodeValue::make_number(21.0)}});
+  const auto sc = doc.node_graph.add_node(
+      "script", {{"module", ed::NodeValue::make_string("test_doubler")},
+                 {"inputs", ed::NodeValue::make_number(1.0)},
+                 {"outputs", ed::NodeValue::make_number(1.0)}});
+  std::string err;
+  ASSERT_TRUE(doc.node_graph.add_link(cn, "value", sc, "in0", err)) << err;
+
+  ASSERT_TRUE(doc.node_graph.evaluate(err)) << err;
+  const auto* node = doc.node_graph.find(sc);
+  ASSERT_NE(node, nullptr);
+  ASSERT_EQ(node->outputs.count("out0"), 1U);
+  EXPECT_DOUBLE_EQ(node->outputs.at("out0").number, 42.0);
+}
+
+TEST(NodeScriptNodes, ScriptNodeIsDeterministicAcrossEvaluations) {
+  register_doubler();
+  auto doc = make_doc();
+  ed::register_script_node_type(doc.node_graph);
+  const auto sc = doc.node_graph.add_node(
+      "script", {{"module", ed::NodeValue::make_string("test_doubler")},
+                 {"inputs", ed::NodeValue::make_number(1.0)},
+                 {"outputs", ed::NodeValue::make_number(1.0)}});
+  std::string err;
+  ASSERT_TRUE(doc.node_graph.evaluate(err)) << err;
+  const std::string first = doc.to_json();
+  for (int i = 0; i < 10; ++i) {
+    ASSERT_TRUE(doc.node_graph.evaluate(err)) << err;
+  }
+  // Note: to_json does not carry runtime outputs; determinism is proven by
+  // re-reading the value.
+  EXPECT_DOUBLE_EQ(doc.node_graph.find(sc)->outputs.at("out0").number, 0.0);
+  (void)first;
+}
+
+TEST(NodeScriptNodes, UnknownModuleDegradesToZeroOutputs) {
+  auto doc = make_doc();
+  ed::register_script_node_type(doc.node_graph);
+  (void)doc.node_graph.add_node(
+      "script", {{"module", ed::NodeValue::make_string("no_such_module")},
+                 {"inputs", ed::NodeValue::make_number(1.0)},
+                 {"outputs", ed::NodeValue::make_number(1.0)}});
+  std::string err;
+  // Must NOT fail the whole evaluation — the graph stays total.
+  ASSERT_TRUE(doc.node_graph.evaluate(err)) << err;
+}
+
+TEST(NodeScriptNodes, ScriptNodeSurvivesDocumentRoundTrip) {
+  register_doubler();
+  auto doc = make_doc();
+  ed::register_script_node_type(doc.node_graph);
+  (void)doc.node_graph.add_node(
+      "script", {{"module", ed::NodeValue::make_string("test_doubler")},
+                 {"inputs", ed::NodeValue::make_number(2.0)},
+                 {"outputs", ed::NodeValue::make_number(3.0)}});
+  const std::string text = doc.to_json();
+
+  ed::SceneDocument loaded;
+  ed::register_builtin_node_types(loaded.node_graph);
+  ed::register_script_node_type(loaded.node_graph);
+  std::string rt_err;
+  ASSERT_TRUE(ed::SceneDocument::from_json(text, loaded, rt_err))
+      << rt_err;
+  EXPECT_EQ(loaded.node_graph.node_count(), 1U);
+  const auto* node = loaded.node_graph.find(1U);
+  ASSERT_NE(node, nullptr);
+  EXPECT_EQ(node->params.at("module").text, "test_doubler");
+  EXPECT_DOUBLE_EQ(node->params.at("outputs").number, 3.0);
+}
+
+
+//! Spawns a cube via the session's protocol path (bridge tests).
+bool protocol_spawn(omnicpp::editor::EditorSession& session, double x,
+                    double y, double z, double size) {
+  omnicpp::core::ControlCommand c;
+  c.kind = omnicpp::core::ControlCommand::Kind::SpawnCube;
+  c.id = 7;
+  c.numbers[0] = x;
+  c.numbers[1] = y;
+  c.numbers[2] = z;
+  c.numbers[3] = size;
+  c.number_count = 4;
+  return session.on_control(c).ok;
+}
+
+// ============================================================================
+// M9: graph -> scene property bridge (session bindings)
+// ============================================================================
+
+
+TEST(NodeSceneBridge, BindAndSyncDrivesObjectProperty) {
+  ed::EditorSession session;
+  // Spawn a cube through the protocol (id 2; environment is 1).
+  const double n[4] = {1.0, 0.5, -1.0, 1.0};
+  ASSERT_TRUE(protocol_spawn(session, n[0], n[1], n[2], n[3]));
+
+  // Graph: const(3.5) -> vec3_compose? No: drive scale.x directly from the
+  // const output. const_number emits a NUMBER; cube.scale is vec3 — use the
+  // split trick: compose vec3 then bind the whole property.
+  auto& graph = session.document().node_graph;
+  const auto cn = graph.add_node(
+      "const_number", {{"value", ed::NodeValue::make_number(3.5)}});
+  const auto comp = graph.add_node(
+      "vec3_compose",
+      {{"x", ed::NodeValue::make_number(0.0)},
+       {"y", ed::NodeValue::make_number(0.0)},
+       {"z", ed::NodeValue::make_number(0.0)}});
+  std::string err;
+  ASSERT_TRUE(graph.add_link(cn, "value", comp, "x", err)) << err;
+
+  // const (number) -> cube.scale (vec3) is a TYPE MISMATCH: rejected.
+  EXPECT_FALSE(session.bind_property(cn, "value", 2U, "scale", err));
+  EXPECT_NE(err.find("mismatch"), std::string::npos) << err;
+
+  // Bind the composed vec3 output instead.
+  ASSERT_TRUE(session.bind_property(comp, "v", 2U, "scale", err)) << err;
+  ASSERT_EQ(session.bindings().size(), 1U);
+
+  const auto applied = session.sync_graph(err);
+  EXPECT_EQ(applied, 1U);
+  const auto* cube = session.document().find(2U);
+  ASSERT_NE(cube, nullptr);
+  EXPECT_DOUBLE_EQ(cube->properties.at("scale").vec[0], 3.5);
+  EXPECT_DOUBLE_EQ(cube->properties.at("scale").vec[1], 0.0);
+}
+
+TEST(NodeSceneBridge, BindValidationRejectsInvalidTargets) {
+  ed::EditorSession session;
+  auto& graph = session.document().node_graph;
+  const auto cn = graph.add_node(
+      "const_number", {{"value", ed::NodeValue::make_number(1.0)}});
+  std::string err;
+
+  // Unknown node.
+  EXPECT_FALSE(session.bind_property(999U, "value", 1U, "camera_fov", err));
+  EXPECT_NE(err.find("no node"), std::string::npos) << err;
+
+  // Unknown output pin.
+  EXPECT_FALSE(session.bind_property(cn, "bogus", 1U, "camera_fov", err));
+  EXPECT_NE(err.find("no output"), std::string::npos) << err;
+
+  // Unknown object.
+  EXPECT_FALSE(session.bind_property(cn, "value", 999U, "camera_fov", err));
+  EXPECT_NE(err.find("no object"), std::string::npos) << err;
+
+  // Unknown property.
+  EXPECT_FALSE(session.bind_property(cn, "value", 1U, "not_a_prop", err));
+  EXPECT_NE(err.find("no property"), std::string::npos) << err;
+
+  // Type mismatch: number pin -> vec3 property (sun_direction is env's
+  // vec3; camera_position does not exist on the environment type).
+  EXPECT_FALSE(session.bind_property(cn, "value", 1U, "sun_direction", err));
+  EXPECT_NE(err.find("mismatch"), std::string::npos) << err;
+
+  // Valid binding, then duplicate rejected.
+  ASSERT_TRUE(session.bind_property(cn, "value", 1U, "camera_fov", err));
+  EXPECT_FALSE(session.bind_property(cn, "value", 1U, "camera_fov", err));
+  EXPECT_NE(err.find("already bound"), std::string::npos) << err;
+}
+
+TEST(NodeSceneBridge, AxisBindingDrivesVec3ComponentFromNumberPin) {
+  ed::EditorSession session;
+  const double n[4] = {0.0, 2.0, 0.0, 1.0};
+  ASSERT_TRUE(protocol_spawn(session, n[0], n[1], n[2], n[3]));
+
+  auto& graph = session.document().node_graph;
+  const auto cn = graph.add_node(
+      "const_number", {{"value", ed::NodeValue::make_number(7.5)}});
+  std::string err;
+  // ".y" axis binding: number pin -> one component of a vec3 property.
+  ASSERT_TRUE(session.bind_property(cn, "value", 2U, "position.y", err))
+      << err;
+  const auto applied = session.sync_graph(err);
+  EXPECT_EQ(applied, 1U);
+  const auto* cube = session.document().find(2U);
+  ASSERT_NE(cube, nullptr);
+  EXPECT_DOUBLE_EQ(cube->properties.at("position").vec[1], 7.5);
+  EXPECT_DOUBLE_EQ(cube->properties.at("position").vec[0], 0.0);
+}
+
+TEST(NodeSceneBridge, DanglingBindingsAreSkippedNotFatal) {
+  ed::EditorSession session;
+  auto& graph = session.document().node_graph;
+  const auto cn = graph.add_node(
+      "const_number", {{"value", ed::NodeValue::make_number(2.0)}});
+  std::string err;
+  ASSERT_TRUE(session.bind_property(cn, "value", 1U, "camera_fov", err))
+      << err;
+  // Remove the node behind the binding.
+  ASSERT_TRUE(graph.remove_node(cn));
+  err.clear();
+  const auto applied = session.sync_graph(err);
+  EXPECT_EQ(applied, 0U);
+}

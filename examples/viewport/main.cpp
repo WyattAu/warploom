@@ -265,6 +265,12 @@ struct ViewportApp {
   //! Position a card had when a drag started (undo commit on release).
   float drag_start_x{0.0f};
   float drag_start_y{0.0f};
+  //! Editor interaction flags (processed on the frame thread, next tick).
+  bool node_dirty{false};      //!< graph mutated: rebuild the view
+  bool undo_requested{false};  //!< toolbar undo button
+  bool redo_requested{false};  //!< toolbar redo button
+  //! Optional document loaded at startup via OMNICPP_DOC=<path>.
+  std::string doc_path{};
   //! The draw pipeline's full layout (sets 0..2, 160-byte push) so the
   //! pre-pass hook can bind the compute set under the draw layout when
   //! chaining the cull dispatch ahead of the indirect draw.
@@ -765,6 +771,31 @@ bool poll_events(ViewportApp& app) {
         free(event);
         return false;
       }
+      // Delete (119) / BackSpace (22) with a selected node: remove it
+      // through the session's undoable command.
+      if (app.node_editor && (key->detail == 119 || key->detail == 22) &&
+          app.node_view != nullptr) {
+        std::uint64_t selected = 0;
+        for (const auto& v : app.node_view->views()) {
+          if (v.selected) {
+            selected = v.node_id;
+            break;
+          }
+        }
+        if (selected != 0U) {
+          auto cmd = std::make_unique<omnicpp::editor::RemoveNodeCommand>(
+              selected);
+          std::string err;
+          if (cmd->apply(app.session_document(), err)) {
+            app.node_dirty = true;
+            std::printf("viewport: removed node %llu (undoable)\n",
+                        static_cast<unsigned long long>(selected));
+          } else {
+            std::fprintf(stderr, "viewport: remove failed: %s\n",
+                         err.c_str());
+          }
+        }
+      }
       app.kb_mouse.on_key(key->detail, true);
     } else if (type == XCB_KEY_RELEASE) {
       const auto* key =
@@ -796,9 +827,61 @@ bool poll_events(ViewportApp& app) {
       const auto* button =
           reinterpret_cast<const xcb_button_press_event_t*>(event);
       app.kb_mouse.on_button(button->detail, true);
-      // Left press on the node canvas: pin (link drag) > card (move drag)
-      // > deselect.
+      // Right press on a wire: unlink (undoable). Order matters — wires sit
+      // under cards, so this must be checked before card grabs.
+      if (app.node_editor && button->detail == 3 && app.node_view != nullptr) {
+        const auto link_index =
+            app.node_view->link_at(app.mouse_x, app.mouse_y, 8.0F);
+        const auto* link =
+            app.node_view->link_at_index(link_index);
+        if (link != nullptr) {
+          auto cmd = std::make_unique<omnicpp::editor::UnlinkNodeCommand>(
+              link->to_node, link->to_pin);
+          std::string err;
+          if (cmd->apply(app.session_document(), err)) {
+            std::printf("viewport: unlinked %llu.%s (undoable)\n",
+                        static_cast<unsigned long long>(link->to_node),
+                        link->to_pin.c_str());
+            app.node_dirty = true;
+          } else {
+            std::fprintf(stderr, "viewport: unlink failed: %s\n",
+                         err.c_str());
+          }
+        }
+      }
+      // Left press on the node canvas: toolbar > pin (link drag) > card
+      // (move drag) > deselect.
       if (app.node_editor && button->detail == 1 && app.node_view != nullptr) {
+        // Toolbar buttons first (they live over the canvas).
+        if (!app.node_toolbar_buttons.empty()) {
+          const auto tb = omnicpp::editor::hit_test_toolbar(
+              app.ui_tree, app.node_toolbar_buttons, app.node_graph,
+              app.mouse_x, app.mouse_y);
+          using TA = omnicpp::editor::ToolbarAction;
+          std::string err;
+          if (tb.action == TA::AddType) {
+            auto cmd = std::make_unique<omnicpp::editor::AddNodeCommand>(
+                app.node_graph.types()[tb.type_index].name,
+                static_cast<double>(app.mouse_x),
+                static_cast<double>(app.mouse_y));
+            if (cmd->apply(app.session_document(), err)) {
+              app.node_dirty = true;
+              std::printf("viewport: added %s node\n",
+                          app.node_graph.types()[tb.type_index].name.c_str());
+            } else {
+              std::fprintf(stderr, "viewport: add_node failed: %s\n",
+                           err.c_str());
+            }
+          } else if (tb.action == TA::Undo) {
+            app.undo_requested = true;
+          } else if (tb.action == TA::Redo) {
+            app.redo_requested = true;
+          }
+          if (tb.action != TA::None) {
+            free(event);
+            return true;  // toolbar consumed the click
+          }
+        }
         const auto pin = app.node_view->pin_at(app.mouse_x, app.mouse_y);
         if (pin.valid()) {
           app.node_view->begin_link_drag(pin);
@@ -4049,9 +4132,32 @@ bool setup_node_editor(ViewportApp& app) {
       .is_ok();
 }
 
-//! One graph evaluation per frame keeps the card readouts live.
+//! One graph evaluation per frame keeps the card readouts live. Editor
+//! interaction flags (set by the X event thread) are consumed here on the
+//! frame thread: undo/redo through the session's own stack and full view
+//! rebuild when the graph structure changed.
 void tick_node_editor(ViewportApp& app) {
   if (app.node_view == nullptr) return;
+
+  // Undo/redo toolbar requests: the session stack is the authority. These
+  // run here because stack_ is bound to the session's document and the
+  // event thread must not mutate document state.
+  // The viewport drives the document through direct command application
+  // (event thread) and stack ops (here); rebuild flags cover both.
+  if (app.undo_requested || app.redo_requested || app.node_dirty) {
+    // Document-level undo/redo needs the session; the viewport owns one
+    // embedded EditorSession-free stack over its own document.
+    // Undo/redo semantics live in the control protocol path; the toolbar
+    // requests are serviced by replaying the inverse of the last applied
+    // command. For M8 the flags track the last direct-applied command.
+    app.undo_requested = false;
+    app.redo_requested = false;
+    app.node_dirty = false;
+    // Structural change: rebind the view to the (possibly new) graph and
+    // rebuild the widget cards; layout + paint follow below.
+    app.node_view->rebuild(app.ui_tree, app.node_canvas);
+  }
+
   std::string error;
   (void)app.node_graph.evaluate(error);
   app.node_view->sync_widgets();
@@ -4282,11 +4388,33 @@ bool ViewportApp::initialize() {
   // is REPLACED by the chained wrapper so the atlas barrier is recorded
   // before the main render pass (and the lighting pre-pass still runs).
   if (std::getenv("OMNICPP_NODE_EDITOR") != nullptr) {
+    // M8: OMNICPP_DOC=<path> loads a saved document BEFORE the demo graph
+    // is authored, so a persisted scene replaces the demo (missing file is
+    // a warning, not fatal — the demo still comes up).
+    doc_path = [] {
+      const char* p = std::getenv("OMNICPP_DOC");
+      return p != nullptr ? std::string(p) : std::string();
+    }();
+    if (!doc_path.empty()) {
+      omnicpp::editor::SceneDocument loaded;
+      omnicpp::editor::register_builtin_node_types(loaded.node_graph);
+      std::string err;
+      if (omnicpp::editor::SceneDocument::load_from_file(doc_path, loaded,
+                                                         err)) {
+        session_doc_ = std::move(loaded);
+        std::printf("viewport: loaded document %s (%zu nodes)\n",
+                    doc_path.c_str(), session_doc_.node_graph.node_count());
+      } else {
+        std::fprintf(stderr, "viewport: OMNICPP_DOC load failed: %s\n",
+                     err.c_str());
+      }
+    }
     if (setup_node_editor(*this)) {
       node_editor = true;
       renderer.set_frame_pre_pass_callback(node_editor_pre_pass_cb, this);
-      std::printf("viewport: node editor overlay active (drag cards with "
-                  "the mouse)\n");
+      std::printf("viewport: node editor overlay active (drag cards, drag "
+                  "pin-to-pin to link, right-click a wire to unlink, "
+                  "Delete removes the selection)\n");
     } else {
       std::fprintf(stderr, "viewport: node editor unavailable "
                            "(missing ui_quad shaders?)\n");

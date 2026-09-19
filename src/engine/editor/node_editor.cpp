@@ -476,6 +476,74 @@ PinRef NodeEditorView::pin_at(float x, float y) const {
   return PinRef{};
 }
 
+float NodeEditorView::segment_distance(float px, float py, float x0, float y0,
+                                       float x1, float y1) {
+  const float dx = x1 - x0;
+  const float dy = y1 - y0;
+  const float len2 = dx * dx + dy * dy;
+  if (len2 <= 0.0F) {
+    const float ex = px - x0;
+    const float ey = py - y0;
+    return std::sqrt(ex * ex + ey * ey);
+  }
+  float t = ((px - x0) * dx + (py - y0) * dy) / len2;
+  t = std::max(0.0F, std::min(1.0F, t));
+  const float cx = x0 + t * dx;
+  const float cy = y0 + t * dy;
+  const float ex = px - cx;
+  const float ey = py - cy;
+  return std::sqrt(ex * ex + ey * ey);
+}
+
+std::size_t NodeEditorView::link_at(float x, float y,
+                                    float threshold) const {
+  const auto& links = graph_->links();
+  float best = threshold;
+  std::size_t best_index = links.size();  // "none"
+  for (std::size_t i = 0; i < links.size(); ++i) {
+    float x0 = 0.0F;
+    float y0 = 0.0F;
+    float x1 = 0.0F;
+    float y1 = 0.0F;
+    if (!link_endpoints(links[i], x0, y0, x1, y1)) {
+      continue;
+    }
+    // Sample the CURRENT routing (bezier or straight) at midpoints so the
+    // hit-test matches what is drawn.
+    constexpr int kSamples = 12;
+    float px = x0;
+    float py = y0;
+    for (int s = 1; s <= kSamples; ++s) {
+      const float t = static_cast<float>(s) /
+                      static_cast<float>(kSamples);
+      float nx = 0.0F;
+      float ny = 0.0F;
+      if (wire_style_ == WireStyle::Bezier) {
+        bezier_point(x0, y0, x1, y1, t, nx, ny);
+      } else {
+        nx = x0 + (x1 - x0) * t;
+        ny = y0 + (y1 - y0) * t;
+      }
+      const float d = segment_distance(x, y, px, py, nx, ny);
+      if (d < best) {
+        best = d;
+        best_index = i;  // strict < keeps the LOWEST index on ties
+      }
+      px = nx;
+      py = ny;
+    }
+  }
+  return best_index;
+}
+
+const GraphLink* NodeEditorView::link_at_index(std::size_t index) const {
+  const auto& links = graph_->links();
+  if (index >= links.size()) {
+    return nullptr;
+  }
+  return &links[index];
+}
+
 void NodeEditorView::begin_link_drag(const PinRef& from) {
   drag_pin_ = from;
   pending_pin_ = PinRef{};
@@ -536,6 +604,33 @@ std::vector<std::uint32_t> build_node_toolbar(ui::WidgetTree& tree,
   redo.fixed_h = 24.0F;
   buttons.push_back(tree.add(redo, toolbar_parent));
   return buttons;
+}
+
+ToolbarHit hit_test_toolbar(const ui::WidgetTree& tree,
+                            const std::vector<std::uint32_t>& buttons,
+                            const NodeGraph& graph, float x, float y) {
+  const std::size_t type_count = graph.types().size();
+  for (std::size_t i = 0; i < buttons.size(); ++i) {
+    const auto handle = buttons[i];
+    if (handle >= tree.size()) {
+      continue;
+    }
+    const ui::Widget& w = tree.get(handle);
+    if (x < w.x || x >= w.x + w.w || y < w.y || y >= w.y + w.h) {
+      continue;
+    }
+    if (i < type_count) {
+      return ToolbarHit{ToolbarAction::AddType, i};
+    }
+    if (i == type_count) {
+      return ToolbarHit{ToolbarAction::Undo, 0};
+    }
+    if (i == type_count + 1U) {
+      return ToolbarHit{ToolbarAction::Redo, 0};
+    }
+    break;  // unknown button index: stop
+  }
+  return ToolbarHit{};
 }
 
 }  // namespace omnicpp::editor
