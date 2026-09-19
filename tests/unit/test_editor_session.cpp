@@ -20,6 +20,8 @@
 
 namespace {
 
+namespace ed = omnicpp::editor;
+
 using omnicpp::core::ControlCommand;
 using omnicpp::core::ControlReply;
 using omnicpp::editor::EditorSession;
@@ -201,7 +203,10 @@ TEST(EditorSessionQueries, SchemaDescribesRegistry) {
             std::string::npos);
   EXPECT_NE(r.detail.find("\"radius\":{\"type\":\"number\""),
             std::string::npos);
-  EXPECT_NE(r.detail.find("\"schema_version\":1"), std::string::npos);
+  EXPECT_NE(r.detail.find("\"schema_version\":" +
+                          std::to_string(
+                              omnicpp::editor::kDocumentSchemaVersion)),
+            std::string::npos);
 }
 
 // ============================================================================
@@ -278,6 +283,153 @@ TEST(EditorSessionE2E, ControlServerDrivesSession) {
   EXPECT_NE(std::string(buf).find("\"id\":7,\"ok\":true"),
             std::string::npos);
   EXPECT_NE(std::string(buf).find("cube_2"), std::string::npos);
+
+  close(client);
+  server.stop();
+}
+
+// ============================================================================
+// v1.3 node-graph protocol (M7)
+// ============================================================================
+
+TEST(EditorSessionNodes, ProtocolRoundTripAllCommands) {
+  SessionFixture f;
+
+  // add const -> add graph (positions ride in the numbers payload as
+  // x=40,y=20 and x=60,y=80).
+  const double pos0[2] = {40.0, 20.0};
+  auto r = f.send(ControlCommand::Kind::NodeAdd, pos0, 2, "const_number");
+  ASSERT_TRUE(r.ok) << r.error;
+  const double pos1[2] = {60.0, 80.0};
+  r = f.send(ControlCommand::Kind::NodeAdd, pos1, 2, "add");
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(f.session.document().node_graph.node_count(), 2U);
+
+  // Every add bumps undo depth; both are undoable.
+  EXPECT_EQ(f.session.stack().undo_count(), 3U);  // fixture cube + 2 nodes
+
+  // link const.value -> add.a
+  const double ends[2] = {1.0, 2.0};
+  r = f.send(ControlCommand::Kind::LinkNodes, ends, 2, "value", "a");
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(f.session.document().node_graph.link_count(), 1U);
+
+  // set_node_param on the const (x = 7.5).
+  const double val[2] = {1.0, 7.5};
+  r = f.send(ControlCommand::Kind::SetNodeParam, val, 2, "value");
+  ASSERT_TRUE(r.ok) << r.error;
+  const auto* node1 = f.session.document().node_graph.find(1U);
+  ASSERT_NE(node1, nullptr);
+  EXPECT_DOUBLE_EQ(node1->params.at("value").number, 7.5);
+
+  // get_graph returns machine JSON containing the link.
+  r = f.send(ControlCommand::Kind::GetGraph);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_NE(r.detail.find("\"links\""), std::string::npos);
+  EXPECT_NE(r.detail.find("const_number"), std::string::npos);
+
+  // set_node_position (undoable view state).
+  const double move[3] = {2.0, 300.0, 120.0};
+  r = f.send(ControlCommand::Kind::SetNodePosition, move, 3);
+  ASSERT_TRUE(r.ok) << r.error;
+  const auto& layout = f.session.document().node_layout;
+  ASSERT_EQ(layout.count(2U), 1U);
+  EXPECT_DOUBLE_EQ(layout.at(2U).first, 300.0);
+
+  // unlink via the target pin (the INPUT lives on node 2).
+  const double target[1] = {2.0};
+  r = f.send(ControlCommand::Kind::UnlinkNodes, target, 1, {}, "a");
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(f.session.document().node_graph.link_count(), 0U);
+
+  // Undo the unlink → link restored.
+  r = f.send(ControlCommand::Kind::Undo);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(f.session.document().node_graph.link_count(), 1U);
+
+  // remove_node 2 (drops the link), then undo restores it.
+  const double nid[1] = {2.0};
+  r = f.send(ControlCommand::Kind::NodeRemove, nid, 1);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(f.session.document().node_graph.node_count(), 1U);
+  EXPECT_EQ(f.session.document().node_graph.link_count(), 0U);
+  r = f.send(ControlCommand::Kind::Undo);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(f.session.document().node_graph.node_count(), 2U);
+  EXPECT_EQ(f.session.document().node_graph.link_count(), 1U);
+  EXPECT_EQ(f.session.document().node_graph.find(2U)->id, 2U);
+
+  // Schema validation: unknown type rejected with a precise error.
+  r = f.send(ControlCommand::Kind::NodeAdd, nullptr, 0, "not_a_type");
+  EXPECT_FALSE(r.ok);
+  EXPECT_NE(r.error.find("unknown type"), std::string::npos) << r.error;
+
+  // Link validation: type mismatch (string out -> number in impossible here;
+  // use an unknown pin).
+  const double bad_ends[2] = {1.0, 2.0};
+  r = f.send(ControlCommand::Kind::LinkNodes, bad_ends, 2, "value", "zzz");
+  EXPECT_FALSE(r.ok);
+  EXPECT_NE(r.error.find("unknown input pin"), std::string::npos)
+      << r.error;
+
+  // Snapshot exposes graph counters.
+  const std::string snap = f.session.snapshot_json();
+  EXPECT_NE(snap.find("\"nodes\":2"), std::string::npos);
+  EXPECT_NE(snap.find("\"links\":1"), std::string::npos);
+
+  // Whole-document persistence: bytes contain the graph and reload.
+  const std::string bytes = f.session.document().to_json();
+  ed::SceneDocument reloaded;
+  ed::register_builtin_node_types(reloaded.node_graph);
+  std::string parse_error;
+  ASSERT_TRUE(ed::SceneDocument::from_json(bytes, reloaded, parse_error))
+      << parse_error;
+  EXPECT_EQ(reloaded.node_graph.node_count(), 2U);
+  EXPECT_EQ(reloaded.node_graph.link_count(), 1U);
+}
+
+TEST(EditorSessionNodes, SocketDrivenNodeCommands) {
+  SessionFixture f;
+  omnicpp::core::ControlServer server;
+  const std::string path = "/tmp/omnicpp_test_editor_nodes.sock";
+  std::string error;
+  ASSERT_TRUE(server.start(path, error)) << error;
+
+  const int client = ::socket(AF_UNIX, SOCK_STREAM, 0);
+  ASSERT_GE(client, 0);
+  sockaddr_un addr{};
+  addr.sun_family = AF_UNIX;
+  std::snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path.c_str());
+  ASSERT_EQ(connect(client, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)),
+            0);
+
+  // Drain welcome.
+  server.poll(f.session);
+  char buf[4096];
+  ssize_t n = recv(client, buf, sizeof(buf) - 1, 0);
+  ASSERT_GT(n, 0);
+
+  // Drive two node adds + a link as raw JSONL.
+  const std::string lines =
+      std::string("{\"cmd\":\"add_node\",\"id\":1,\"type\":\"const_number\",") +
+      "\"x\":10,\"y\":20}\n"
+      "{\"cmd\":\"add_node\",\"id\":2,\"type\":\"add\",\"x\":200,"
+      "\"y\":20}\n"
+      "{\"cmd\":\"link_nodes\",\"id\":3,\"from\":1,\"to\":2,"
+      "\"out\":\"value\",\"in\":\"a\"}\n"
+      "{\"cmd\":\"get_graph\",\"id\":4}\n";
+  ASSERT_EQ(send(client, lines.data(), lines.size(), 0),
+            static_cast<ssize_t>(lines.size()));
+  server.poll(f.session);
+  n = recv(client, buf, sizeof(buf) - 1, MSG_DONTWAIT);
+  ASSERT_GT(n, 0);
+  buf[n] = '\0';
+  const std::string replies(buf);
+  EXPECT_NE(replies.find("\"id\":1,\"ok\":true"), std::string::npos);
+  EXPECT_NE(replies.find("\"id\":3,\"ok\":true"), std::string::npos);
+  EXPECT_NE(replies.find("\"id\":4,\"ok\":true"), std::string::npos);
+  EXPECT_EQ(f.session.document().node_graph.node_count(), 2U);
+  EXPECT_EQ(f.session.document().node_graph.link_count(), 1U);
 
   close(client);
   server.stop();

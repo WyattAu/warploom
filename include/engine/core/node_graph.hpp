@@ -29,7 +29,7 @@
 #include <string_view>
 #include <vector>
 
-#include "engine/core/document.hpp"  // PropValue as the value currency
+#include "engine/core/prop_value.hpp"  // PropValue as the value currency
 
 namespace omnicpp::editor {
 
@@ -85,8 +85,28 @@ class NodeGraph final {
   //! pin names are validated on link/eval). Returns the assigned id.
   [[nodiscard]] std::uint64_t add_node(std::string type,
                                        std::map<std::string, NodeValue> params);
+  //! Deterministic-id variant (undo/redo + document restore): re-adding a
+  //! node with its original id reproduces byte-identical state. Fails
+  //! (returns false) when the id is already taken or the type is unknown;
+  //! the graph's id cursor is moved past `id` either way so later nodes
+  //! never collide with restored ones.
+  [[nodiscard]] bool add_node_with_id(std::uint64_t id, std::string type,
+                                      std::map<std::string, NodeValue> params);
   //! Removes a node and all links touching it. False when unknown.
   [[nodiscard]] bool remove_node(std::uint64_t id);
+  //! The id the next add_node will assign (document serialization uses it).
+  [[nodiscard]] std::uint64_t peek_next_id() const noexcept {
+    return next_node_id_;
+  }
+  //! Monotonic change counter: bumps on every successful mutation. Hosts
+  //! compare it to skip redundant rebuilds; undo/redo restores it so
+  //! replays are deterministic.
+  [[nodiscard]] std::uint64_t version() const noexcept { return version_; }
+  void set_version(std::uint64_t v) noexcept { version_ = v; }
+  //! Restores the id cursor after an undone add (LIFO history guarantees
+  //! the undone node held the highest claimed id). Contract: `v` exceeds
+  //! every existing node id.
+  void restore_id_cursor(std::uint64_t v) noexcept { next_node_id_ = v; }
 
   //! Links output (from_node, from_pin) -> input (to_node, to_pin). Any
   //! existing link on the input pin is replaced. Returns false when either
@@ -110,6 +130,9 @@ class NodeGraph final {
   }
   [[nodiscard]] std::size_t link_count() const noexcept {
     return links_.size();
+  }
+  [[nodiscard]] std::vector<GraphNode>& nodes_mutable() noexcept {
+    return nodes_;
   }
   [[nodiscard]] const std::vector<GraphNode>& nodes() const noexcept {
     return nodes_;
@@ -140,6 +163,7 @@ class NodeGraph final {
   std::vector<GraphNode> nodes_{};  // id order (sorted by construction)
   std::vector<GraphLink> links_{};
   std::uint64_t next_node_id_{1};
+  std::uint64_t version_{0};
 };
 
 //! Registers the built-in node set (math constants/ops, vec compose/split,

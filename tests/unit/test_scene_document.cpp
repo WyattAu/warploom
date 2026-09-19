@@ -113,7 +113,11 @@ TEST(SceneDocument, RejectsMalformedWithByteOffset) {
   std::string error;
   EXPECT_FALSE(SceneDocument::from_json("{not json", parsed, error));
   EXPECT_NE(error.find("byte"), std::string::npos) << error;
-  EXPECT_FALSE(SceneDocument::from_json("{\"schema_version\":2}", parsed, error));
+  EXPECT_FALSE(SceneDocument::from_json(
+      ("{\"schema_version\":" +
+       std::to_string(omnicpp::editor::kDocumentSchemaVersion + 1) + "}")
+          .c_str(),
+      parsed, error));
   EXPECT_NE(error.find("newer than this build"), std::string::npos) << error;
   EXPECT_FALSE(
       SceneDocument::from_json("{\"schema_version\":1}", parsed, error));

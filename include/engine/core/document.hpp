@@ -28,51 +28,16 @@
 #include <utility>
 #include <vector>
 
+#include "engine/core/prop_value.hpp"
+#include "engine/core/node_graph.hpp"
+
+#include <cfloat>
+
 namespace omnicpp::editor {
 
 //! Current document schema. Bump on breaking changes; `from_json` refuses
 //! documents from the future.
-inline constexpr std::uint32_t kDocumentSchemaVersion = 1;
-
-//! The typed currency of the document: every property is one of these.
-struct PropValue final {
-  enum class Type : std::uint8_t { Number, Bool, String, Vec3 };
-
-  Type type{Type::Number};
-  double number{0.0};
-  bool boolean{false};
-  std::string text{};
-  double vec[3]{0.0, 0.0, 0.0};
-
-  [[nodiscard]] static PropValue make_number(double v) {
-    PropValue p;
-    p.type = Type::Number;
-    p.number = v;
-    return p;
-  }
-  [[nodiscard]] static PropValue make_bool(bool v) {
-    PropValue p;
-    p.type = Type::Bool;
-    p.boolean = v;
-    return p;
-  }
-  [[nodiscard]] static PropValue make_string(std::string v) {
-    PropValue p;
-    p.type = Type::String;
-    p.text = std::move(v);
-    return p;
-  }
-  [[nodiscard]] static PropValue make_vec3(double x, double y, double z) {
-    PropValue p;
-    p.type = Type::Vec3;
-    p.vec[0] = x;
-    p.vec[1] = y;
-    p.vec[2] = z;
-    return p;
-  }
-
-  [[nodiscard]] bool operator==(const PropValue&) const = default;
-};
+inline constexpr std::uint32_t kDocumentSchemaVersion = 2;
 
 //! One editable scene object: a registry type plus a property bag.
 struct SceneObject final {
@@ -88,6 +53,10 @@ struct SceneDocument final {
   std::uint32_t schema_version{kDocumentSchemaVersion};
   std::uint64_t next_object_id{1};  // monotonically increasing
   std::vector<SceneObject> objects{};
+  //! M7: the authored node graph (positions live in node_layout so the
+  //! graph core stays view-agnostic and object-free).
+  NodeGraph node_graph{};
+  std::map<std::uint64_t, std::pair<double, double>> node_layout{};
 
   [[nodiscard]] SceneObject* find(std::uint64_t id);
   [[nodiscard]] const SceneObject* find(std::uint64_t id) const;
@@ -195,6 +164,122 @@ class DestroyObjectCommand final : public Command {
   std::size_t index_{0};
   bool applied_{false};
   SceneObject captured_{};
+};
+
+// ============================================================================
+// Node-graph commands (M7) — same undo contract as the object commands:
+// apply + undo restores a byte-identical document serialization.
+// ============================================================================
+
+//! Adds a node of `type` at `x,y`. On apply the id is claimed from the
+//! document's graph (deterministic ascending); undo removes it and restores
+//! the id cursor so spawn+undo round-trips byte-identically.
+class AddNodeCommand final : public Command {
+ public:
+  AddNodeCommand(std::string type, double x, double y);
+
+  [[nodiscard]] bool apply(SceneDocument& doc, std::string& error) override;
+  void undo(SceneDocument& doc) override;
+  [[nodiscard]] std::string describe() const override;
+  [[nodiscard]] std::uint64_t node_id() const noexcept { return node_id_; }
+
+ private:
+  std::string type_;
+  double x_;
+  double y_;
+  std::uint64_t node_id_{0};  // claimed at apply
+  bool bumped_{false};        // next-id cursor was advanced (for undo)
+};
+
+//! Removes a node (and, via the graph, all links touching it); undo restores
+//! node + links + id cursor exactly.
+class RemoveNodeCommand final : public Command {
+ public:
+  explicit RemoveNodeCommand(std::uint64_t node_id);
+
+  [[nodiscard]] bool apply(SceneDocument& doc, std::string& error) override;
+  void undo(SceneDocument& doc) override;
+  [[nodiscard]] std::string describe() const override;
+
+ private:
+  std::uint64_t node_id_;
+  GraphNode captured_{};
+  std::vector<GraphLink> captured_links_{};
+  bool applied_{false};
+};
+
+//! Links one output pin to one input pin (the graph validates type/cycle);
+//! undo removes the link and restores any link the apply displaced on the
+//! target input pin.
+class LinkNodesCommand final : public Command {
+ public:
+  LinkNodesCommand(std::uint64_t from_node, std::string from_pin,
+                   std::uint64_t to_node, std::string to_pin);
+
+  [[nodiscard]] bool apply(SceneDocument& doc, std::string& error) override;
+  void undo(SceneDocument& doc) override;
+  [[nodiscard]] std::string describe() const override;
+
+ private:
+  std::uint64_t from_node_;
+  std::string from_pin_;
+  std::uint64_t to_node_;
+  std::string to_pin_;
+  bool had_previous_{false};
+  GraphLink previous_{};
+  bool applied_{false};
+};
+
+//! Removes the link feeding an input pin; undo re-adds it.
+class UnlinkNodeCommand final : public Command {
+ public:
+  UnlinkNodeCommand(std::uint64_t to_node, std::string to_pin);
+
+  [[nodiscard]] bool apply(SceneDocument& doc, std::string& error) override;
+  void undo(SceneDocument& doc) override;
+  [[nodiscard]] std::string describe() const override;
+
+ private:
+  std::uint64_t to_node_;
+  std::string to_pin_;
+  bool had_link_{false};
+  GraphLink captured_{};
+};
+
+//! Sets a node parameter; undo restores the previous value (or removes the
+//! key when it did not exist).
+class SetNodeParamCommand final : public Command {
+ public:
+  SetNodeParamCommand(std::uint64_t node_id, std::string key, PropValue value);
+
+  [[nodiscard]] bool apply(SceneDocument& doc, std::string& error) override;
+  void undo(SceneDocument& doc) override;
+  [[nodiscard]] std::string describe() const override;
+
+ private:
+  std::uint64_t node_id_;
+  std::string key_;
+  PropValue value_;
+  bool existed_{false};
+  PropValue old_value_{};
+};
+
+//! Moves a node's view position; undo restores the previous position (or
+//! removes the layout entry when it had none).
+class SetNodePositionCommand final : public Command {
+ public:
+  SetNodePositionCommand(std::uint64_t node_id, double x, double y);
+
+  [[nodiscard]] bool apply(SceneDocument& doc, std::string& error) override;
+  void undo(SceneDocument& doc) override;
+  [[nodiscard]] std::string describe() const override;
+
+ private:
+  std::uint64_t node_id_;
+  double x_;
+  double y_;
+  bool had_previous_{false};
+  std::pair<double, double> previous_{0.0, 0.0};
 };
 
 //! Undo/redo stack over a document. Every successful `execute` clears the

@@ -98,6 +98,14 @@ namespace {
       {"redo", ControlCommand::Kind::Redo},
       {"schema", ControlCommand::Kind::Schema},
       {"select", ControlCommand::Kind::Select},
+      // v1.3 node graph (M7).
+      {"add_node", ControlCommand::Kind::NodeAdd},
+      {"remove_node", ControlCommand::Kind::NodeRemove},
+      {"link_nodes", ControlCommand::Kind::LinkNodes},
+      {"unlink_nodes", ControlCommand::Kind::UnlinkNodes},
+      {"set_node_param", ControlCommand::Kind::SetNodeParam},
+      {"set_node_position", ControlCommand::Kind::SetNodePosition},
+      {"get_graph", ControlCommand::Kind::GetGraph},
   };
   command.kind = ControlCommand::Kind::Unknown;
   command.number_count = 0;
@@ -166,6 +174,58 @@ namespace {
       take_text("key", command.text2);
       take_text("value", command.text3);
       take("x"); take("y"); take("z");
+      break;
+    case ControlCommand::Kind::NodeAdd: {
+      take_text("type", command.text);
+      double x = 40.0;
+      double y = 40.0;
+      (void)find_number_field(line, "x", x);
+      (void)find_number_field(line, "y", y);
+      numbers[count++] = x;
+      numbers[count++] = y;
+      break;
+    }
+    case ControlCommand::Kind::NodeRemove:
+    case ControlCommand::Kind::SetNodeParam:
+    case ControlCommand::Kind::SetNodePosition: {
+      std::uint64_t nid = 0;
+      if (!find_unsigned_field(line, "nid", nid)) {
+        error = "missing \"nid\" unsigned field";
+        return false;
+      }
+      numbers[count++] = static_cast<double>(nid);
+      if (command.kind == ControlCommand::Kind::SetNodeParam) {
+        take_text("key", command.text);
+        take_text("value", command.text2);
+        take("x");
+      } else if (command.kind == ControlCommand::Kind::SetNodePosition) {
+        take("x");
+        take("y");
+      }
+      break;
+    }
+    case ControlCommand::Kind::LinkNodes:
+    case ControlCommand::Kind::UnlinkNodes: {
+      std::uint64_t from = 0;
+      std::uint64_t to = 0;
+      const bool need_from =
+          command.kind == ControlCommand::Kind::LinkNodes;
+      if (need_from && !find_unsigned_field(line, "from", from)) {
+        error = "missing \"from\" unsigned field";
+        return false;
+      }
+      if (!find_unsigned_field(line, "to", to) &&
+          !find_unsigned_field(line, "nid", to)) {
+        error = "missing \"to\" unsigned field";
+        return false;
+      }
+      if (need_from) numbers[count++] = static_cast<double>(from);
+      numbers[count++] = static_cast<double>(to);
+      take_text("out", command.text);
+      take_text("in", command.text2);
+      break;
+    }
+    case ControlCommand::Kind::GetGraph:
       break;
     default:
       break;

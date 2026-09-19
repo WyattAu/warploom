@@ -28,6 +28,14 @@
 //!     {"cmd":"destroy_object","id":12,"oid":3}
 //!     {"cmd":"undo","id":13} / {"cmd":"redo","id":14}
 //!     {"cmd":"schema","id":15}
+//!   v1.3 (M7 node graph):
+//!     {"cmd":"add_node","id":16,"type":"const_number","x":40,"y":80}
+//!     {"cmd":"remove_node","id":17,"nid":3}
+//!     {"cmd":"link_nodes","id":18,"from":1,"to":2,"out":"value","in":"a"}
+//!     {"cmd":"unlink_nodes","id":19,"nid":2,"in":"a"}
+//!     {"cmd":"set_node_param","id":20,"nid":1,"key":"value","x":7}
+//!     {"cmd":"set_node_position","id":21,"nid":2,"x":200,"y":120}
+//!     {"cmd":"get_graph","id":22}
 //!   host -> client:
 //!     {"event":"welcome","protocol":1,"snapshot":<host JSON>}
 //!     {"id":1,"ok":true,"detail":"..."} | {"id":1,"ok":false,"error":"..."}
@@ -61,6 +69,15 @@ struct ControlCommand final {
     Schema,
     // v1.2: editor selection (the host mirrors it onto editor state).
     Select,
+    // v1.3: node-graph editing (M7) — all undoable in the session.
+    NodeAdd,
+    NodeRemove,
+    LinkNodes,
+    UnlinkNodes,
+    SetNodeParam,
+    SetNodePosition,
+    // v1.3 queries.
+    GetGraph,
   };
 
   Kind kind{Kind::Unknown};
@@ -72,6 +89,16 @@ struct ControlCommand final {
   //   Select uses oid=0 to deselect)
   //   SetProperty: text = object name, text2 = property key,
   //                text3 = bool/string value (numeric values use x/y/z)
+  // v1.3 node payloads:
+  //   NodeAdd:        text = node type, numbers[0..1] = x,y (default 40,40)
+  //   NodeRemove:     numbers[0] = node id ("nid")
+  //   LinkNodes:      numbers[0] = from id, numbers[1] = to id,
+  //                   text = out pin, text2 = in pin
+  //   UnlinkNodes:    numbers[0] = to id, text = in pin
+  //   SetNodeParam:   numbers[0] = node id, text = param key, text2/text3 =
+  //                   bare value (string form; "true"/"false" = bool,
+  //                   numeric value uses x)
+  //   SetNodePosition: numbers[0] = node id, numbers[1..2] = x,y
   std::string text;
   std::string text2;
   std::string text3;

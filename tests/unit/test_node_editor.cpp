@@ -33,6 +33,7 @@ namespace {
 
 using omnicpp::editor::NodeEditorView;
 using omnicpp::editor::NodeView;
+using omnicpp::editor::PinRef;
 using omnicpp::ui::PaintList;
 using omnicpp::ui::TextMetrics;
 using omnicpp::ui::WidgetTree;
@@ -422,4 +423,103 @@ TEST(NodeEditorValues, ReadoutsHiddenWhenDisabled) {
     EXPECT_EQ(t.text.find('='), std::string::npos)
         << "no readout texts expected, found: " << t.text;
   }
+}
+
+// ============================================================================
+// M7: link-drag lifecycle with rubber-band preview
+// ============================================================================
+
+TEST(NodeEditorLinkDrag, RubberBandAppearsOnlyDuringDrag) {
+  auto g = make_graph();
+  WidgetTree tree;
+  auto view = make_view(g, tree);
+
+  // Begin drag from node 1's output pin ("value").
+  const auto* v1 = view.find_view(1);
+  ASSERT_NE(v1, nullptr);
+  const float out_x = v1->x + NodeEditorView::kCardW + 1.0F;
+  const float out_y = v1->y + 18.0F;  // first output row
+  view.begin_link_drag(view.pin_at(out_x, out_y));
+  ASSERT_TRUE(view.link_drag_active());
+
+  PaintList during = full_paint(view, tree, 800.0F, 600.0F);
+  view.update_link_drag(v1->x + 300.0F, v1->y + 120.0F);
+  during = full_paint(view, tree, 800.0F, 600.0F);
+
+  // The pending wire color appears during the drag.
+  bool pending_found = false;
+  for (const auto& r : during.rects) {
+    if (r.color == 0xFFFFC24BU) pending_found = true;
+  }
+  EXPECT_TRUE(pending_found) << "rubber band must render while dragging";
+
+  // No committed link was added.
+  EXPECT_EQ(g.link_count(), 1U);
+
+  // Cancel: the band disappears and the graph is unchanged.
+  const PinRef cancelled = view.end_link_drag(false);
+  EXPECT_FALSE(cancelled.valid());
+  EXPECT_FALSE(view.link_drag_active());
+  PaintList after_cancel = full_paint(view, tree, 800.0F, 600.0F);
+  bool pending_after = false;
+  for (const auto& r : after_cancel.rects) {
+    if (r.color == 0xFFFFC24BU) pending_after = true;
+  }
+  EXPECT_FALSE(pending_after);
+  EXPECT_EQ(g.link_count(), 1U);
+}
+
+TEST(NodeEditorLinkDrag, DropOnCompatiblePinResolvesTarget) {
+  auto g = make_graph();
+  WidgetTree tree;
+  auto view = make_view(g, tree);
+  // Node 2 ("add") has free input "b".
+  const auto* v2 = view.find_view(2);
+  ASSERT_NE(v2, nullptr);
+
+  const auto* v1 = view.find_view(1);
+  ASSERT_NE(v1, nullptr);
+  view.begin_link_drag(view.pin_at(v1->x + NodeEditorView::kCardW + 1.0F,
+                                   v1->y + 18.0F));
+  // Hover over node 2's input side, second pin row (b).
+  const float b_x = v2->x - 1.0F;
+  const float b_y = v2->y + 18.0F + NodeEditorView::kPinH;  // second row
+  view.update_link_drag(b_x, b_y);
+  const PinRef pending = view.pending_pin();
+  ASSERT_TRUE(pending.valid());
+  EXPECT_EQ(pending.node_id, 2U);
+  EXPECT_EQ(pending.pin_name, "b");
+  EXPECT_TRUE(pending.is_input);
+
+  const PinRef resolved = view.end_link_drag(true);
+  ASSERT_TRUE(resolved.valid());
+  EXPECT_EQ(resolved.node_id, 2U);
+  EXPECT_EQ(resolved.pin_name, "b");
+  EXPECT_FALSE(view.link_drag_active());
+
+  // Commit through the graph exactly as the session would.
+  std::string error;
+  ASSERT_TRUE(g.add_link(1, "value", resolved.node_id, resolved.pin_name,
+                         error))
+      << error;
+  EXPECT_EQ(g.link_count(), 2U);
+}
+
+TEST(NodeEditorLinkDrag, IncompatibleDropDoesNotResolve) {
+  auto g = make_graph();
+  WidgetTree tree;
+  auto view = make_view(g, tree);
+  const auto* v1 = view.find_view(1);
+  ASSERT_NE(v1, nullptr);
+
+  // Drag from node 1's OUTPUT and hover its own card: same-node hover must
+  // not resolve, and hovering nothing (empty canvas) must not either.
+  view.begin_link_drag(view.pin_at(v1->x + NodeEditorView::kCardW + 1.0F,
+                                   v1->y + 18.0F));
+  view.update_link_drag(v1->x + 10.0F, v1->y + 18.0F);
+  EXPECT_FALSE(view.pending_pin().valid());
+  view.update_link_drag(5000.0F, 5000.0F);
+  EXPECT_FALSE(view.pending_pin().valid());
+  const PinRef resolved = view.end_link_drag(true);
+  EXPECT_FALSE(resolved.valid());
 }

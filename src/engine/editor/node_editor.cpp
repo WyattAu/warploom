@@ -51,6 +51,7 @@ constexpr std::uint32_t kCardSelected = 0xFFFFC24BU;
 constexpr std::uint32_t kPinInColor = 0xFF5B8DEFU;
 constexpr std::uint32_t kPinOutColor = 0xFF42B883U;
 constexpr std::uint32_t kWireColor = 0xFF9AA0A6U;
+constexpr std::uint32_t kPendingWireColor = 0xFFFFC24BU;  // rubber band
 constexpr std::uint32_t kValueColor = 0xFFB5BD86U;  // readout text
 //! Bezier sampling: segments per wire + relative thickness per segment.
 constexpr int kBezierSegments = 8;
@@ -295,12 +296,78 @@ void NodeEditorView::emit_bezier_wires(ui::PaintList& list) const {
   list.rects.insert(list.rects.begin(), segments.begin(), segments.end());
 }
 
+void NodeEditorView::emit_pending_wire(ui::PaintList& list) const {
+  if (!drag_pin_.valid()) {
+    return;
+  }
+  // Source pin center.
+  const NodeView* v = find_view(drag_pin_.node_id);
+  const auto* node =
+      v != nullptr ? graph_->find(drag_pin_.node_id) : nullptr;
+  if (v == nullptr || node == nullptr) {
+    return;
+  }
+  const auto* type = graph_->find_type(node->type);
+  if (type == nullptr) {
+    return;
+  }
+  float x0 = v->x;
+  float y0 = v->y;
+  if (drag_pin_.is_input) {
+    int idx = 0;
+    for (std::size_t i = 0; i < type->inputs.size(); ++i) {
+      if (type->inputs[i].name == drag_pin_.pin_name) {
+        idx = static_cast<int>(i);
+      }
+    }
+    y0 += pin_offset(idx);
+  } else {
+    int idx = 0;
+    for (std::size_t i = 0; i < type->outputs.size(); ++i) {
+      if (type->outputs[i].name == drag_pin_.pin_name) {
+        idx = static_cast<int>(i);
+      }
+    }
+    x0 += kCardW;
+    y0 += pin_offset(idx);
+  }
+  const float x1 = drag_x_;
+  const float y1 = drag_y_;
+  // Dashed straight band: deterministic 6px dash + 4px gap pattern.
+  const float dx = x1 - x0;
+  const float dy = y1 - y0;
+  const float len = std::sqrt(dx * dx + dy * dy);
+  const float dash = 6.0F;
+  const float gap = 4.0F;
+  const float period = dash + gap;
+  const float nseg = len / period;
+  const int steps = static_cast<int>(nseg);
+  for (int s = 0; s <= steps; ++s) {
+    const float t0 = static_cast<float>(s) * period;
+    const float t1 = std::min(t0 + dash, len);
+    if (t1 <= t0) {
+      break;
+    }
+    const float ux0 = x0 + dx * (t0 / len);
+    const float uy0 = y0 + dy * (t0 / len);
+    const float ux1 = x0 + dx * (t1 / len);
+    const float uy1 = y0 + dy * (t1 / len);
+    const float left = std::min(ux0, ux1);
+    const float top = std::min(uy0, uy1);
+    const float w = std::max(kBezierThickness, std::abs(ux1 - ux0));
+    const float h = std::max(kBezierThickness, std::abs(uy1 - uy0));
+    list.rects.push_back(ui::PaintRect{left, top, w, h, kPendingWireColor,
+                                       0x00000000U, 1.0F});
+  }
+}
+
 void NodeEditorView::append_wires(ui::PaintList& list) const {
   if (wire_style_ == WireStyle::Bezier) {
     emit_bezier_wires(list);
   } else {
     emit_straight_wires(list);
   }
+  emit_pending_wire(list);
   if (show_values_) {
     append_value_texts(list);
   }
@@ -407,6 +474,37 @@ PinRef NodeEditorView::pin_at(float x, float y) const {
     }
   }
   return PinRef{};
+}
+
+void NodeEditorView::begin_link_drag(const PinRef& from) {
+  drag_pin_ = from;
+  pending_pin_ = PinRef{};
+  drag_x_ = 0.0F;
+  drag_y_ = 0.0F;
+}
+
+void NodeEditorView::update_link_drag(float x, float y) {
+  if (!drag_pin_.valid()) {
+    return;
+  }
+  drag_x_ = x;
+  drag_y_ = y;
+  // Live pin resolution: highlight target while hovering a compatible pin.
+  const PinRef hover = pin_at(x, y);
+  pending_pin_ = PinRef{};
+  if (hover.valid() && hover.is_input != drag_pin_.is_input &&
+      hover.node_id != drag_pin_.node_id) {
+    pending_pin_ = hover;
+  }
+}
+
+PinRef NodeEditorView::end_link_drag(bool commit) {
+  const PinRef resolved = commit ? pending_pin_ : PinRef{};
+  drag_pin_ = PinRef{};
+  pending_pin_ = PinRef{};
+  drag_x_ = 0.0F;
+  drag_y_ = 0.0F;
+  return resolved;
 }
 
 std::vector<std::uint32_t> build_node_toolbar(ui::WidgetTree& tree,

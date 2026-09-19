@@ -118,6 +118,22 @@ class NodeEditorView final {
   //! Ties resolve to the highest node id (deterministic).
   [[nodiscard]] std::uint64_t hit_test(float x, float y) const;
 
+  // -- Link dragging (M7) -------------------------------------------------
+  //! Begins a link drag from an output pin. Only one drag at a time.
+  void begin_link_drag(const PinRef& from);
+  //! Updates the rubber-band target (call on mouse motion during a drag).
+  void update_link_drag(float x, float y);
+  //! Ends the drag; the commit caller resolves `pending_pin` through the
+  //! session (LinkNodes) and calls this after. Cancels when `commit` is
+  //! false. Returns the pending pin (invalid PinRef when not dragging).
+  PinRef end_link_drag(bool commit);
+  [[nodiscard]] bool link_drag_active() const noexcept {
+    return drag_pin_.valid();
+  }
+  //! The pin a committed link would land on, or an invalid PinRef.
+  [[nodiscard]] PinRef pending_pin() const { return pending_pin_; }
+  [[nodiscard]] PinRef drag_source_pin() const { return drag_pin_; }
+
  private:
   //! Pin-center offset within a card (pin index, 0-based, top-down).
   [[nodiscard]] static float pin_offset(int index) noexcept {
@@ -134,6 +150,10 @@ class NodeEditorView final {
   //! Wire geometry endpoints for one link; false when unresolvable.
   [[nodiscard]] bool link_endpoints(const GraphLink& link, float& x0,
                                     float& y0, float& x1, float& y1) const;
+  //! Emits the rubber-band wire from the drag source pin to the current
+  //! pointer position (dashed = 3px bands with gaps; distinct from solid
+  //! committed wires).
+  void emit_pending_wire(ui::PaintList& list) const;
 
   NodeGraph* graph_;
   ui::WidgetTree* tree_ref_{nullptr};  //!< set by rebuild()
@@ -143,6 +163,11 @@ class NodeEditorView final {
   bool show_values_{true};
   std::uint32_t card_root_{ui::kInvalidWidget};  //!< rebuilt subtree root
   std::uint32_t canvas_parent_{ui::kInvalidWidget};
+  // Link-drag state (invalid pin = no active drag).
+  PinRef drag_pin_{};
+  PinRef pending_pin_{};
+  float drag_x_{0.0F};
+  float drag_y_{0.0F};
 };
 
 //! Switches `canvas` to absolute layout (free placement of children).

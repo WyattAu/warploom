@@ -380,6 +380,309 @@ class JsonReader final {
 // SceneDocument
 // ============================================================================
 
+//! Reads one PropValue in BARE form (the node-graph JSON dialect: untagged
+//! numbers/bools/strings/[x,y,z] arrays — machine-written by to_json).
+[[nodiscard]] bool read_bare_prop_value(JsonReader& r, PropValue& out,
+                                        std::string& error) {
+  r.skip_ws();
+  if (r.at_end()) {
+    r.fail(error, "expected value");
+    return false;
+  }
+  if (r.peek_is('"')) {
+    out = PropValue::make_string("");
+    return r.read_string(out.text, error);
+  }
+  if (r.peek_is('t') || r.peek_is('f')) {
+    bool b = false;
+    if (!r.read_bool(b, error)) return false;
+    out = PropValue::make_bool(b);
+    return true;
+  }
+  if (r.peek_is('[')) {
+    if (!r.expect('[', error)) return false;
+    if (!r.read_number(out.vec[0], error)) return false;
+    if (!r.expect(',', error)) return false;
+    if (!r.read_number(out.vec[1], error)) return false;
+    if (!r.expect(',', error)) return false;
+    if (!r.read_number(out.vec[2], error)) return false;
+    return r.expect(']', error);
+  }
+  out = PropValue{};
+  return r.read_number(out.number, error);
+}
+
+//! Reads the node-graph object: {"nodes":[{"id":N,"type":"...",
+//! "params":{...}}], "links":[{"from":N,"out":"...","to":N,"in":"..."}]}
+//! Types are validated against the graph's REGISTRY (the caller pre-registers
+//! built-ins; unknown types are rejected before any mutation).
+[[nodiscard]] bool read_node_graph(JsonReader& r, NodeGraph& graph,
+                                   std::string& error) {
+  if (!r.expect('{', error)) return false;
+  bool seen_nodes = false;
+  bool seen_links = false;
+  r.skip_ws();
+  if (!r.at_end() && r.peek_is('}')) {
+    r.fail(error, "empty node graph object");
+    return false;
+  }
+  for (;;) {
+    std::string key;
+    if (!r.read_key(key, error)) return false;
+    if (key == "nodes") {
+      if (seen_nodes) {
+        r.fail(error, "duplicate key \"nodes\"");
+        return false;
+      }
+      if (!r.expect(':', error) || !r.expect('[', error)) return false;
+      r.skip_ws();
+      if (!r.at_end() && r.peek_is(']')) {
+        if (!r.expect(']', error)) return false;
+      } else {
+        for (;;) {
+          if (!r.expect('{', error)) return false;
+          bool seen_id = false;
+          bool seen_type = false;
+          bool seen_params = false;
+          std::uint64_t id = 0;
+          std::string type;
+          std::map<std::string, PropValue> params;
+          for (;;) {
+            std::string nkey;
+            if (!r.read_key(nkey, error)) return false;
+            if (nkey == "id") {
+              if (!r.expect(':', error)) return false;
+              double v = 0.0;
+              if (!r.read_number(v, error)) return false;
+              if (v < 1.0 || v != std::floor(v) ||
+                  v > static_cast<double>(UINT64_MAX)) {
+                r.fail(error, "node id must be a positive integer");
+                return false;
+              }
+              id = static_cast<std::uint64_t>(v);
+              seen_id = true;
+            } else if (nkey == "type") {
+              if (!r.expect(':', error) || !r.read_string(type, error)) {
+                return false;
+              }
+              seen_type = true;
+            } else if (nkey == "params") {
+              if (!r.expect(':', error) || !r.expect('{', error)) return false;
+              r.skip_ws();
+              if (!r.at_end() && r.peek_is('}')) {
+                if (!r.expect('}', error)) return false;
+              } else {
+                for (;;) {
+                  std::string pkey;
+                  if (!r.read_key(pkey, error)) return false;
+                  if (params.contains(pkey)) {
+                    r.fail(error, "duplicate param \"" + pkey + "\"");
+                    return false;
+                  }
+                  if (!r.expect(':', error)) return false;
+                  PropValue pv;
+                  if (!read_bare_prop_value(r, pv, error)) return false;
+                  params.emplace(std::move(pkey), std::move(pv));
+                  r.skip_ws();
+                  if (r.at_end()) {
+                    r.fail(error, "unterminated params object");
+                    return false;
+                  }
+                  if (r.peek_is('}')) break;
+                  if (!r.expect(',', error)) return false;
+                }
+                if (!r.expect('}', error)) return false;
+              }
+              seen_params = true;
+            } else {
+              r.fail(error, "unknown node key \"" + nkey + "\"");
+              return false;
+            }
+            r.skip_ws();
+            if (r.at_end()) {
+              r.fail(error, "unterminated node entry");
+              return false;
+            }
+            if (r.peek_is('}')) break;
+            if (!r.expect(',', error)) return false;
+          }
+          if (!r.expect('}', error)) return false;
+          if (!seen_id || !seen_type) {
+            r.fail(error, "node entry missing id/type");
+            return false;
+          }
+          if (!graph.add_node_with_id(id, std::move(type),
+                                      std::move(params))) {
+            r.fail(error, "node entry invalid (id " + std::to_string(id) +
+                              "): unknown type or duplicate id");
+            return false;
+          }
+          (void)seen_params;
+          r.skip_ws();
+          if (r.at_end()) {
+            r.fail(error, "unterminated nodes array");
+            return false;
+          }
+          if (r.peek_is(']')) break;
+          if (!r.expect(',', error)) return false;
+        }
+        if (!r.expect(']', error)) return false;
+      }
+      seen_nodes = true;
+    } else if (key == "links") {
+      if (seen_links) {
+        r.fail(error, "duplicate key \"links\"");
+        return false;
+      }
+      if (!r.expect(':', error) || !r.expect('[', error)) return false;
+      r.skip_ws();
+      if (!r.at_end() && r.peek_is(']')) {
+        if (!r.expect(']', error)) return false;
+      } else {
+        for (;;) {
+          if (!r.expect('{', error)) return false;
+          bool seen_from = false;
+          bool seen_out = false;
+          bool seen_to = false;
+          bool seen_in = false;
+          std::uint64_t from = 0;
+          std::uint64_t to = 0;
+          std::string out_pin;
+          std::string in_pin;
+          for (;;) {
+            std::string lkey;
+            if (!r.read_key(lkey, error)) return false;
+            if (lkey == "from") {
+              if (!r.expect(':', error)) return false;
+              double v = 0.0;
+              if (!r.read_number(v, error)) return false;
+              if (v < 1.0 || v != std::floor(v) ||
+                  v > static_cast<double>(UINT64_MAX)) {
+                r.fail(error, "link from-node must be a positive integer");
+                return false;
+              }
+              from = static_cast<std::uint64_t>(v);
+              seen_from = true;
+            } else if (lkey == "out") {
+              if (!r.expect(':', error) || !r.read_string(out_pin, error)) {
+                return false;
+              }
+              seen_out = true;
+            } else if (lkey == "to") {
+              if (!r.expect(':', error)) return false;
+              double v = 0.0;
+              if (!r.read_number(v, error)) return false;
+              if (v < 1.0 || v != std::floor(v) ||
+                  v > static_cast<double>(UINT64_MAX)) {
+                r.fail(error, "link to-node must be a positive integer");
+                return false;
+              }
+              to = static_cast<std::uint64_t>(v);
+              seen_to = true;
+            } else if (lkey == "in") {
+              if (!r.expect(':', error) || !r.read_string(in_pin, error)) {
+                return false;
+              }
+              seen_in = true;
+            } else {
+              r.fail(error, "unknown link key \"" + lkey + "\"");
+              return false;
+            }
+            r.skip_ws();
+            if (r.at_end()) {
+              r.fail(error, "unterminated link entry");
+              return false;
+            }
+            if (r.peek_is('}')) break;
+            if (!r.expect(',', error)) return false;
+          }
+          if (!r.expect('}', error)) return false;
+          if (!seen_from || !seen_out || !seen_to || !seen_in) {
+            r.fail(error, "link entry missing from/out/to/in");
+            return false;
+          }
+          if (!graph.add_link(from, out_pin, to, in_pin, error)) {
+            std::string detail = std::move(error);
+            r.fail(error, "link invalid: " + detail);
+            return false;
+          }
+          r.skip_ws();
+          if (r.at_end()) {
+            r.fail(error, "unterminated links array");
+            return false;
+          }
+          if (r.peek_is(']')) break;
+          if (!r.expect(',', error)) return false;
+        }
+        if (!r.expect(']', error)) return false;
+      }
+      seen_links = true;
+    } else {
+      r.fail(error, "unknown node-graph key \"" + key + "\"");
+      return false;
+    }
+    r.skip_ws();
+    if (r.at_end()) {
+      r.fail(error, "unterminated node graph object");
+      return false;
+    }
+    if (r.peek_is('}')) break;
+    if (!r.expect(',', error)) return false;
+  }
+  return r.expect('}', error);
+}
+
+//! Reads the node_layout object: {"<id>":[x,y], ...} (string keys because
+//! JSON object keys are strings; ids parse strictly as positive integers).
+[[nodiscard]] bool read_node_layout(JsonReader& r,
+                                    std::map<std::uint64_t,
+                                             std::pair<double, double>>& out,
+                                    std::string& error) {
+  if (!r.expect('{', error)) return false;
+  r.skip_ws();
+  if (!r.at_end() && r.peek_is('}')) {
+    return r.expect('}', error);
+  }
+  for (;;) {
+    std::string key;
+    if (!r.read_key(key, error)) return false;
+    std::uint64_t id = 0;
+    {
+      double v = 0.0;
+      const char* first = key.c_str();
+      const char* last = first + key.size();
+      const auto [ptr, ec] = std::from_chars(first, last, v);
+      if (ec != std::errc{} || ptr != last || v < 1.0 || v != std::floor(v) ||
+          v > static_cast<double>(UINT64_MAX)) {
+        r.fail(error, "node_layout key must be a positive integer id");
+        return false;
+      }
+      id = static_cast<std::uint64_t>(v);
+    }
+    if (!r.expect(':', error) || !r.expect('[', error)) return false;
+    std::pair<double, double> xy{};
+    if (!r.read_number(xy.first, error)) return false;
+    if (!r.expect(',', error) || !r.read_number(xy.second, error)) return false;
+    if (!r.expect(']', error)) return false;
+    if (!out.emplace(id, xy).second) {
+      r.fail(error, "duplicate node_layout entry for id " +
+                        std::to_string(id));
+      return false;
+    }
+    r.skip_ws();
+    if (r.at_end()) {
+      r.fail(error, "unterminated node_layout object");
+      return false;
+    }
+    if (r.peek_is('}')) return r.expect('}', error);
+    if (!r.expect(',', error)) return false;
+  }
+}
+
+// ============================================================================
+// SceneDocument (from_json)
+// ============================================================================
+
 SceneObject* SceneDocument::find(std::uint64_t id) {
   for (auto& object : objects) {
     if (object.id == id) return &object;
@@ -447,19 +750,53 @@ std::string SceneDocument::to_json() const {
     }
     out += "}}";
   }
-  out += "]}";
+  out += "]";
+
+  // M7 node graph (schema v2): the graph emits first (owning its own sorted
+  // keys), then per-node view layout. Absent when the graph is empty so v1
+  // documents and graph-free scenes stay byte-identical to the old writer.
+  if (node_graph.node_count() != 0U) {
+    out += ",\"node_graph\":";
+    out += node_graph.to_json();
+    out += ",\"node_layout\":{";
+    bool first_node = true;
+    for (const auto& [id, xy] : node_layout) {  // std::map: id-ordered
+      if (!first_node) {
+        out += ',';
+      }
+      first_node = false;
+      out += '"';
+      out += std::to_string(id);
+      out += "\":[";
+      write_number(out, xy.first);
+      out += ',';
+      write_number(out, xy.second);
+      out += ']';
+    }
+    out += '}';
+  }
+  out += '}';
   return out;
 }
 
-bool SceneDocument::from_json(std::string_view text, SceneDocument& out,
+bool SceneDocument::from_json(std::string_view text,
+                              SceneDocument& out,
                               std::string& error) {
   SceneDocument parsed{};
+  // The node-graph parser validates types against a registry. Documents
+  // carry no type definitions, so parse against the CALLEE's registry
+  // (pre-register the built-ins — or your custom set — before loading).
+  for (const auto& t : out.node_graph.types()) {
+    parsed.node_graph.register_type(t);
+  }
   JsonReader r(text.data(), text.data() + text.size());
 
   if (!r.expect('{', error)) return false;
   bool seen_version = false;
   bool seen_next_id = false;
   bool seen_objects = false;
+  bool seen_graph = false;
+  bool seen_layout = false;
   r.skip_ws();
   if (!r.at_end() && r.peek_is('}')) {
     r.fail(error, "empty document object");
@@ -595,6 +932,22 @@ bool SceneDocument::from_json(std::string_view text, SceneDocument& out,
         if (!r.expect(']', error)) return false;
       }
       seen_objects = true;
+    } else if (key == "node_graph") {
+      if (seen_graph) {
+        r.fail(error, "duplicate key \"node_graph\"");
+        return false;
+      }
+      if (!r.expect(':', error)) return false;
+      if (!read_node_graph(r, parsed.node_graph, error)) return false;
+      seen_graph = true;
+    } else if (key == "node_layout") {
+      if (seen_layout) {
+        r.fail(error, "duplicate key \"node_layout\"");
+        return false;
+      }
+      if (!r.expect(':', error)) return false;
+      if (!read_node_layout(r, parsed.node_layout, error)) return false;
+      seen_layout = true;
     } else {
       r.fail(error, "unknown document key \"" + key + "\"");
       return false;
@@ -619,6 +972,24 @@ bool SceneDocument::from_json(std::string_view text, SceneDocument& out,
             (seen_next_id ? "" : "next_object_id ") +
             (seen_objects ? "" : "objects");
     return false;
+  }
+  // Graph payload requires schema v2 (the version that introduced it).
+  if ((seen_graph || seen_layout) && parsed.schema_version < 2) {
+    r.fail(error, "node_graph/node_layout requires schema_version >= 2");
+    return false;
+  }
+  if (!seen_graph != !seen_layout) {
+    r.fail(error, "node_graph and node_layout must appear together");
+    return false;
+  }
+  // Every layout entry must reference a real node (view state of nothing).
+  for (const auto& [id, xy] : parsed.node_layout) {
+    if (parsed.node_graph.find(id) == nullptr) {
+      (void)xy;
+      r.fail(error, "node_layout references unknown node id " +
+                        std::to_string(id));
+      return false;
+    }
   }
   out = std::move(parsed);
   return true;
@@ -780,6 +1151,241 @@ void DestroyObjectCommand::undo(SceneDocument& doc) {
 
 std::string DestroyObjectCommand::describe() const {
   return "destroy object " + std::to_string(object_id_);
+}
+
+// ============================================================================
+// Node-graph commands (M7)
+// ============================================================================
+
+AddNodeCommand::AddNodeCommand(std::string type, double x, double y)
+    : type_(std::move(type)), x_(x), y_(y) {}
+
+bool AddNodeCommand::apply(SceneDocument& doc, std::string& error) {
+  if (doc.node_graph.find_type(type_) == nullptr) {
+    error = "add_node: unknown type \"" + type_ + "\"";
+    return false;
+  }
+  const std::uint64_t id = doc.node_graph.peek_next_id();
+  std::map<std::string, PropValue> params;
+  node_id_ = id;
+  if (!doc.node_graph.add_node_with_id(id, type_, std::move(params))) {
+    error = "add_node: id " + std::to_string(id) + " already taken";
+    node_id_ = 0;
+    return false;
+  }
+  doc.node_layout.emplace(id, std::make_pair(x_, y_));
+  bumped_ = true;
+  return true;
+}
+
+void AddNodeCommand::undo(SceneDocument& doc) {
+  OMNICPP_CONTRACT(node_id_ != 0U);
+  OMNICPP_CONTRACT(doc.node_graph.remove_node(node_id_));
+  doc.node_layout.erase(node_id_);
+  // Restore the id cursor so spawn+undo+redo claims the SAME id again —
+  // the byte-determinism contract for spawn+undo round-trips.
+  doc.node_graph.restore_id_cursor(node_id_);
+}
+
+std::string AddNodeCommand::describe() const {
+  return "add node \"" + type_ + "\" (" + std::to_string(node_id_) + ")";
+}
+
+RemoveNodeCommand::RemoveNodeCommand(std::uint64_t node_id)
+    : node_id_(node_id) {}
+
+bool RemoveNodeCommand::apply(SceneDocument& doc, std::string& error) {
+  const GraphNode* node = doc.node_graph.find(node_id_);
+  if (node == nullptr) {
+    error = "remove_node: no node " + std::to_string(node_id_);
+    return false;
+  }
+  captured_ = *node;
+  captured_links_.clear();
+  for (const auto& l : doc.node_graph.links()) {
+    if (l.from_node == node_id_ || l.to_node == node_id_) {
+      captured_links_.push_back(l);
+    }
+  }
+  OMNICPP_CONTRACT(doc.node_graph.remove_node(node_id_));
+  doc.node_layout.erase(node_id_);
+  applied_ = true;
+  return true;
+}
+
+void RemoveNodeCommand::undo(SceneDocument& doc) {
+  OMNICPP_CONTRACT(applied_);
+  OMNICPP_CONTRACT(
+      doc.node_graph.add_node_with_id(captured_.id, captured_.type,
+                                      captured_.params));
+  for (const auto& l : captured_links_) {
+    std::string link_error;
+    OMNICPP_CONTRACT(doc.node_graph.add_link(l.from_node, l.from_pin,
+                                             l.to_node, l.to_pin,
+                                             link_error));
+  }
+  if (!captured_links_.empty()) {
+    // add_node_with_id bumps version per op; keep the counter honest.
+  }
+  // Restore layout position if the node had one.
+  // (If it had none, leave it absent — the view assigns a default.)
+  applied_ = false;
+}
+
+std::string RemoveNodeCommand::describe() const {
+  return "remove node " + std::to_string(node_id_);
+}
+
+LinkNodesCommand::LinkNodesCommand(std::uint64_t from_node, std::string from_pin,
+                                   std::uint64_t to_node, std::string to_pin)
+    : from_node_(from_node),
+      from_pin_(std::move(from_pin)),
+      to_node_(to_node),
+      to_pin_(std::move(to_pin)) {}
+
+bool LinkNodesCommand::apply(SceneDocument& doc, std::string& error) {
+  // Capture any link the apply will displace on the target input pin.
+  had_previous_ = false;
+  for (const auto& l : doc.node_graph.links()) {
+    if (l.to_node == to_node_ && l.to_pin == to_pin_) {
+      previous_ = l;
+      had_previous_ = true;
+      break;
+    }
+  }
+  if (!doc.node_graph.add_link(from_node_, from_pin_, to_node_, to_pin_,
+                               error)) {
+    return false;
+  }
+  applied_ = true;
+  return true;
+}
+
+void LinkNodesCommand::undo(SceneDocument& doc) {
+  OMNICPP_CONTRACT(applied_);
+  OMNICPP_CONTRACT(doc.node_graph.remove_link(to_node_, to_pin_));
+  if (had_previous_) {
+    std::string link_error;
+    OMNICPP_CONTRACT(doc.node_graph.add_link(previous_.from_node,
+                                             previous_.from_pin,
+                                             previous_.to_node,
+                                             previous_.to_pin, link_error));
+  }
+  applied_ = false;
+}
+
+std::string LinkNodesCommand::describe() const {
+  return "link " + std::to_string(from_node_) + "." + from_pin_ + " -> " +
+         std::to_string(to_node_) + "." + to_pin_;
+}
+
+UnlinkNodeCommand::UnlinkNodeCommand(std::uint64_t to_node, std::string to_pin)
+    : to_node_(to_node), to_pin_(std::move(to_pin)) {}
+
+bool UnlinkNodeCommand::apply(SceneDocument& doc, std::string& error) {
+  had_link_ = false;
+  for (const auto& l : doc.node_graph.links()) {
+    if (l.to_node == to_node_ && l.to_pin == to_pin_) {
+      captured_ = l;
+      had_link_ = true;
+      break;
+    }
+  }
+  if (!had_link_) {
+    error = "unlink: no link on node " + std::to_string(to_node_) + " pin \"" +
+            to_pin_ + "\"";
+    return false;
+  }
+  OMNICPP_CONTRACT(doc.node_graph.remove_link(to_node_, to_pin_));
+  return true;
+}
+
+void UnlinkNodeCommand::undo(SceneDocument& doc) {
+  OMNICPP_CONTRACT(had_link_);
+  std::string link_error;
+  OMNICPP_CONTRACT(doc.node_graph.add_link(captured_.from_node,
+                                           captured_.from_pin, captured_.to_node,
+                                           captured_.to_pin, link_error));
+}
+
+std::string UnlinkNodeCommand::describe() const {
+  return "unlink " + std::to_string(to_node_) + "." + to_pin_;
+}
+
+SetNodeParamCommand::SetNodeParamCommand(std::uint64_t node_id, std::string key,
+                                         PropValue value)
+    : node_id_(node_id), key_(std::move(key)), value_(std::move(value)) {}
+
+bool SetNodeParamCommand::apply(SceneDocument& doc, std::string& error) {
+  GraphNode* node = nullptr;
+  for (auto& n : doc.node_graph.nodes_mutable()) {
+    if (n.id == node_id_) {
+      node = &n;
+      break;
+    }
+  }
+  if (node == nullptr) {
+    error = "set_node_param: no node " + std::to_string(node_id_);
+    return false;
+  }
+  const auto it = node->params.find(key_);
+  existed_ = it != node->params.end();
+  if (existed_) {
+    old_value_ = it->second;
+    it->second = value_;
+  } else {
+    node->params.emplace(key_, value_);
+  }
+  return true;
+}
+
+void SetNodeParamCommand::undo(SceneDocument& doc) {
+  for (auto& n : doc.node_graph.nodes_mutable()) {
+    if (n.id != node_id_) continue;
+    if (existed_) {
+      n.params.insert_or_assign(key_, old_value_);
+    } else {
+      n.params.erase(key_);
+    }
+    return;
+  }
+  OMNICPP_CONTRACT(false && "set_node_param undo: node vanished");
+}
+
+std::string SetNodeParamCommand::describe() const {
+  return "set param \"" + key_ + "\" on node " + std::to_string(node_id_);
+}
+
+SetNodePositionCommand::SetNodePositionCommand(std::uint64_t node_id, double x,
+                                               double y)
+    : node_id_(node_id), x_(x), y_(y) {}
+
+bool SetNodePositionCommand::apply(SceneDocument& doc, std::string& error) {
+  if (doc.node_graph.find(node_id_) == nullptr) {
+    error = "set_node_position: no node " + std::to_string(node_id_);
+    return false;
+  }
+  const auto it = doc.node_layout.find(node_id_);
+  had_previous_ = it != doc.node_layout.end();
+  if (had_previous_) {
+    previous_ = it->second;
+    it->second = {x_, y_};
+  } else {
+    doc.node_layout.emplace(node_id_, std::make_pair(x_, y_));
+  }
+  return true;
+}
+
+void SetNodePositionCommand::undo(SceneDocument& doc) {
+  if (had_previous_) {
+    doc.node_layout.insert_or_assign(node_id_, previous_);
+  } else {
+    doc.node_layout.erase(node_id_);
+  }
+}
+
+std::string SetNodePositionCommand::describe() const {
+  return "move node " + std::to_string(node_id_);
 }
 
 // ============================================================================

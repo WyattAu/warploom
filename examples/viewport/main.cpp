@@ -21,6 +21,7 @@
 #include <fstream>
 #include <iterator>
 #include "engine/core/control_server.hpp"
+#include "engine/core/document.hpp"
 #include <memory>
 #include <random>
 #include <string>
@@ -249,6 +250,9 @@ struct ViewportApp {
   omnicpp::ui::PaintList ui_paint;
   std::uint32_t node_canvas{omnicpp::ui::kInvalidWidget};
   omnicpp::render::VulkanUiRenderer ui_renderer;
+  //! Toolbar buttons (per registered type, then undo/redo) + their handles.
+  std::vector<std::uint32_t> node_toolbar_buttons{};
+  std::uint32_t node_toolbar{omnicpp::ui::kInvalidWidget};
   // Mouse tracking (view-space pixels) for node select/drag.
   float mouse_x{0.0f};
   float mouse_y{0.0f};
@@ -258,6 +262,9 @@ struct ViewportApp {
   float drag_grab_dx{0.0f};
   float drag_grab_dy{0.0f};
   omnicpp::editor::PinRef selected_pin{};
+  //! Position a card had when a drag started (undo commit on release).
+  float drag_start_x{0.0f};
+  float drag_start_y{0.0f};
   //! The draw pipeline's full layout (sets 0..2, 160-byte push) so the
   //! pre-pass hook can bind the compute set under the draw layout when
   //! chaining the cull dispatch ahead of the indirect draw.
@@ -526,6 +533,13 @@ struct ViewportApp {
   [[nodiscard]] bool initialize();
   void run();
   void shutdown();
+
+  //! The app's authoritative editable document (owns the node graph the
+  //! editor view projects; graph edits go through CommandStack semantics).
+  [[nodiscard]] omnicpp::editor::SceneDocument& session_document() {
+    return session_doc_;
+  }
+  omnicpp::editor::SceneDocument session_doc_{};
 };
 
 //! ControlHost implementation over the viewport: translates protocol
@@ -771,26 +785,41 @@ bool poll_events(ViewportApp& app) {
             app.drag_node_id, app.mouse_x - app.last_mouse_x,
             app.mouse_y - app.last_mouse_y);
       }
+      // Link drag: the rubber band follows the pointer; the view resolves
+      // the hovered compatible pin (drop target highlight is the band
+      // color change upstream in the paint path).
+      if (app.node_editor && app.node_view != nullptr &&
+          app.node_view->link_drag_active()) {
+        app.node_view->update_link_drag(app.mouse_x, app.mouse_y);
+      }
     } else if (type == XCB_BUTTON_PRESS) {
       const auto* button =
           reinterpret_cast<const xcb_button_press_event_t*>(event);
       app.kb_mouse.on_button(button->detail, true);
-      // Left press on the node canvas: grab a card (drag) or select.
+      // Left press on the node canvas: pin (link drag) > card (move drag)
+      // > deselect.
       if (app.node_editor && button->detail == 1 && app.node_view != nullptr) {
-        const auto hit = app.node_view->hit_test(app.mouse_x, app.mouse_y);
-        if (hit != 0U) {
-          app.drag_node_id = hit;
-          (void)app.node_view->select(hit);
-          float cx = 0.0F;
-          float cy = 0.0F;
-          float cw = 0.0F;
-          float ch = 0.0F;
-          if (app.node_view->node_rect(hit, cx, cy, cw, ch)) {
-            app.drag_grab_dx = app.mouse_x - cx;
-            app.drag_grab_dy = app.mouse_y - cy;
-          }
+        const auto pin = app.node_view->pin_at(app.mouse_x, app.mouse_y);
+        if (pin.valid()) {
+          app.node_view->begin_link_drag(pin);
         } else {
-          (void)app.node_view->select(0U);
+          const auto hit = app.node_view->hit_test(app.mouse_x, app.mouse_y);
+          if (hit != 0U) {
+            app.drag_node_id = hit;
+            (void)app.node_view->select(hit);
+            float cx = 0.0F;
+            float cy = 0.0F;
+            float cw = 0.0F;
+            float ch = 0.0F;
+            if (app.node_view->node_rect(hit, cx, cy, cw, ch)) {
+              app.drag_grab_dx = app.mouse_x - cx;
+              app.drag_grab_dy = app.mouse_y - cy;
+              app.drag_start_x = cx;
+              app.drag_start_y = cy;
+            }
+          } else {
+            (void)app.node_view->select(0U);
+          }
         }
       }
     } else if (type == XCB_BUTTON_RELEASE) {
@@ -798,6 +827,54 @@ bool poll_events(ViewportApp& app) {
           reinterpret_cast<const xcb_button_press_event_t*>(event);
       app.kb_mouse.on_button(button->detail, false);
       if (app.node_editor && button->detail == 1) {
+        // Finish a link drag first: commit a resolved drop through the
+        // session (undoable); an unresolved drop just cancels.
+        if (app.node_view != nullptr &&
+            app.node_view->link_drag_active()) {
+          app.node_view->update_link_drag(app.mouse_x, app.mouse_y);
+          const auto drop = app.node_view->end_link_drag(true);
+          if (drop.valid()) {
+            // Source pin determines direction: output->input, or reversed.
+            const auto src = app.node_view->drag_source_pin();
+            std::string link_error;
+            omnicpp::editor::LinkNodesCommand link_cmd(
+                src.is_input ? drop.node_id : src.node_id,
+                src.is_input ? drop.pin_name : src.pin_name,
+                src.is_input ? src.node_id : drop.node_id,
+                src.is_input ? src.pin_name : drop.pin_name);
+            if (link_cmd.apply(app.session_document(), link_error)) {
+              std::printf("viewport: linked %llu.%s -> %llu.%s\n",
+                          static_cast<unsigned long long>(
+                              src.is_input ? drop.node_id : src.node_id),
+                          (src.is_input ? drop.pin_name : src.pin_name)
+                              .c_str(),
+                          static_cast<unsigned long long>(
+                              src.is_input ? src.node_id : drop.node_id),
+                          (src.is_input ? src.pin_name : drop.pin_name)
+                              .c_str());
+            } else {
+              std::fprintf(stderr, "viewport: link rejected: %s\n",
+                           link_error.c_str());
+            }
+          }
+        } else if (app.drag_node_id != 0U) {
+          // Card move finished: commit the position as ONE undoable step.
+          float cx = 0.0F;
+          float cy = 0.0F;
+          float cw = 0.0F;
+          float ch = 0.0F;
+          if (app.node_view != nullptr &&
+              app.node_view->node_rect(app.drag_node_id, cx, cy, cw, ch)) {
+            omnicpp::editor::SetNodePositionCommand move_cmd(
+                app.drag_node_id, static_cast<double>(cx),
+                static_cast<double>(cy));
+            std::string move_error;
+            if (!move_cmd.apply(app.session_document(), move_error)) {
+              std::fprintf(stderr, "viewport: position commit failed: %s\n",
+                           move_error.c_str());
+            }
+          }
+        }
         app.drag_node_id = 0U;
       }
     } else if (type == XCB_DESTROY_NOTIFY) {
@@ -3899,16 +3976,51 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
 //! renderer. False (non-fatal for the scene; overlay just stays off) when
 //! the ui_quad shaders are unavailable.
 bool setup_node_editor(ViewportApp& app) {
-  omnicpp::editor::register_builtin_node_types(app.node_graph);
-  const auto cn = app.node_graph.add_node(
-      "const_number",
-      {{"value", omnicpp::editor::NodeValue::make_number(2.0)}});
-  const auto add = app.node_graph.add_node("add", {});
-  std::string link_error;
-  if (!app.node_graph.add_link(cn, "value", add, "a", link_error)) {
-    std::fprintf(stderr, "viewport: node link failed: %s\n",
-                 link_error.c_str());
+  // The session document owns the graph + type registry (M7). The demo
+  // const -> add graph is authored through the SAME undoable commands the
+  // protocol uses, so the first undo steps are the demo's construction.
+  omnicpp::editor::register_builtin_node_types(
+      app.session_document().node_graph);
+  omnicpp::editor::SceneDocument& doc = app.session_doc_;
+  {
+    auto add_cmd = std::make_unique<omnicpp::editor::AddNodeCommand>(
+        "const_number", 60.0, 60.0);
+    std::string err;
+    if (!add_cmd->apply(doc, err)) {
+      std::fprintf(stderr, "viewport: demo node failed: %s\n", err.c_str());
+    } else {
+      const auto cn = add_cmd->node_id();
+      (void)cn;
+      omnicpp::editor::SetNodeParamCommand param(cn, "value",
+                                                 omnicpp::editor::PropValue::make_number(2.0));
+      if (!param.apply(doc, err)) {
+        std::fprintf(stderr, "viewport: demo param failed: %s\n",
+                     err.c_str());
+      }
+    }
+    (void)add_cmd.release();  // demo edits bypass the stack (no undo seed)
   }
+  {
+    auto add_cmd =
+        std::make_unique<omnicpp::editor::AddNodeCommand>("add", 320.0, 60.0);
+    std::string err;
+    if (!add_cmd->apply(doc, err)) {
+      std::fprintf(stderr, "viewport: demo node failed: %s\n", err.c_str());
+    } else {
+      const auto add_id = add_cmd->node_id();
+      const auto cn_id = add_id - 1U;
+      omnicpp::editor::LinkNodesCommand link(cn_id, "value", add_id, "a");
+      if (!link.apply(doc, err)) {
+        std::fprintf(stderr, "viewport: node link failed: %s\n",
+                     err.c_str());
+      }
+    }
+    (void)add_cmd.release();
+  }
+  app.node_graph = std::move(doc.node_graph);
+  // Put the (possibly mutated) graph back: the view reads app.node_graph;
+  // session edits re-sync below via reset.
+  doc.node_graph = app.node_graph;
 
   app.node_view = std::make_unique<omnicpp::editor::NodeEditorView>(
       app.node_graph);
@@ -3917,6 +4029,16 @@ bool setup_node_editor(ViewportApp& app) {
   app.node_canvas = canvas;
   app.node_view->rebuild(app.ui_tree, canvas);
   app.node_view->sync_widgets();
+
+  // Toolbar: one add-button per registered type + undo/redo placeholders
+  // (wired to session commands below).
+  {
+    const auto toolbar = app.ui_tree.add(omnicpp::ui::Widget{},
+                                         app.ui_tree.root());
+    app.node_toolbar = toolbar;
+    app.node_toolbar_buttons = omnicpp::editor::build_node_toolbar(
+        app.ui_tree, toolbar, app.node_graph);
+  }
 
   const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
   const std::string shader_dir =

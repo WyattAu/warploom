@@ -123,6 +123,9 @@ EditorSession::EditorSession() {
   }
   doc_.objects.push_back(std::move(env));
   doc_.next_object_id = kEnvironmentObjectId + 1;
+  // The session owns the node-type registry: the same registered set the
+  // node editor toolbar and document parser validate against.
+  register_builtin_node_types(doc_.node_graph);
 }
 
 omnicpp::core::ControlReply EditorSession::on_control(
@@ -288,6 +291,131 @@ bool EditorSession::handle_edit(
                                  : "selected object " + std::to_string(oid);
       return true;
     }
+    case CK::NodeAdd: {
+      if (command.text.empty()) {
+        reply.ok = false;
+        reply.error = "add_node needs \"type\"";
+        return true;
+      }
+      const double x = command.number_count > 1U ? command.numbers[1]
+                                                 : 40.0;
+      const double y = command.number_count > 2U ? command.numbers[2]
+                                                 : 40.0;
+      auto cmd = std::make_unique<AddNodeCommand>(command.text, x, y);
+      std::string error;
+      if (!stack_.execute(std::move(cmd), error)) {
+        reply.ok = false;
+        reply.error = "add_node failed: " + error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "added node";
+      return true;
+    }
+    case CK::NodeRemove: {
+      if (command.number_count < 1U) {
+        reply.ok = false;
+        reply.error = "remove_node needs \"nid\"";
+        return true;
+      }
+      const auto nid = static_cast<std::uint64_t>(command.numbers[0]);
+      auto cmd = std::make_unique<RemoveNodeCommand>(nid);
+      std::string error;
+      if (!stack_.execute(std::move(cmd), error)) {
+        reply.ok = false;
+        reply.error = "remove_node failed: " + error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "removed node " + std::to_string(nid);
+      return true;
+    }
+    case CK::LinkNodes: {
+      if (command.number_count < 2U || command.text.empty() ||
+          command.text2.empty()) {
+        reply.ok = false;
+        reply.error = "link_nodes needs \"from\",\"to\",\"out\",\"in\"";
+        return true;
+      }
+      const auto from = static_cast<std::uint64_t>(command.numbers[0]);
+      const auto to = static_cast<std::uint64_t>(command.numbers[1]);
+      auto cmd = std::make_unique<LinkNodesCommand>(from, command.text, to,
+                                                    command.text2);
+      std::string error;
+      if (!stack_.execute(std::move(cmd), error)) {
+        reply.ok = false;
+        reply.error = "link_nodes failed: " + error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "linked";
+      return true;
+    }
+    case CK::UnlinkNodes: {
+      if (command.number_count < 1U || command.text2.empty()) {
+        reply.ok = false;
+        reply.error = "unlink_nodes needs \"nid\" and \"in\"";
+        return true;
+      }
+      const auto to = static_cast<std::uint64_t>(command.numbers[0]);
+      auto cmd = std::make_unique<UnlinkNodeCommand>(to, command.text2);
+      std::string error;
+      if (!stack_.execute(std::move(cmd), error)) {
+        reply.ok = false;
+        reply.error = "unlink_nodes failed: " + error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "unlinked";
+      return true;
+    }
+    case CK::SetNodeParam: {
+      if (command.number_count < 1U || command.text.empty()) {
+        reply.ok = false;
+        reply.error = "set_node_param needs \"nid\" and \"key\"";
+        return true;
+      }
+      const auto nid = static_cast<std::uint64_t>(command.numbers[0]);
+      // Value currency: bare number (x), bool ("true"/"false"), or string.
+      PropValue value;
+      if (command.number_count >= 2U) {
+        value = PropValue::make_number(command.numbers[1]);
+      } else if (command.text2 == "true" || command.text2 == "false") {
+        value = PropValue::make_bool(command.text2 == "true");
+      } else {
+        value = PropValue::make_string(command.text2);
+      }
+      auto cmd =
+          std::make_unique<SetNodeParamCommand>(nid, command.text, value);
+      std::string error;
+      if (!stack_.execute(std::move(cmd), error)) {
+        reply.ok = false;
+        reply.error = "set_node_param failed: " + error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "param set";
+      return true;
+    }
+    case CK::SetNodePosition: {
+      if (command.number_count < 3U) {
+        reply.ok = false;
+        reply.error = "set_node_position needs \"nid\",\"x\",\"y\"";
+        return true;
+      }
+      const auto nid = static_cast<std::uint64_t>(command.numbers[0]);
+      auto cmd = std::make_unique<SetNodePositionCommand>(
+          nid, command.numbers[1], command.numbers[2]);
+      std::string error;
+      if (!stack_.execute(std::move(cmd), error)) {
+        reply.ok = false;
+        reply.error = "set_node_position failed: " + error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "node moved";
+      return true;
+    }
     case CK::Undo:
     case CK::Redo: {
       std::string error;
@@ -378,6 +506,11 @@ bool EditorSession::handle_query(
       reply.detail = std::move(out);
       return true;
     }
+    case CK::GetGraph: {
+      reply.ok = true;
+      reply.detail = doc_.node_graph.to_json();
+      return true;
+    }
     default:
       return false;  // Not a query; caller continues.
   }
@@ -434,6 +567,12 @@ std::string EditorSession::snapshot_json() const {
   out += std::to_string(stack_.redo_count());
   out += ",\"selected\":";
   out += std::to_string(selected_id_);
+  out += ",\"nodes\":";
+  out += std::to_string(doc_.node_graph.node_count());
+  out += ",\"links\":";
+  out += std::to_string(doc_.node_graph.link_count());
+  out += ",\"graph_version\":";
+  out += std::to_string(doc_.node_graph.version());
   out += "}";
   return out;
 }

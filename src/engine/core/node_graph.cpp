@@ -116,7 +116,36 @@ std::uint64_t NodeGraph::add_node(std::string type,
     node.outputs.emplace(pin.name, NodeValue{});
   }
   nodes_.push_back(std::move(node));
+  ++version_;
   return nodes_.back().id;
+}
+
+bool NodeGraph::add_node_with_id(std::uint64_t id, std::string type,
+                                 std::map<std::string, NodeValue> params) {
+  if (find_type(type) == nullptr || id == 0U || find(id) != nullptr) {
+    return false;
+  }
+  GraphNode node;
+  node.id = id;
+  node.type = std::move(type);
+  node.params = std::move(params);
+  const auto* t = find_type(node.type);
+  for (const auto& pin : t->inputs) {
+    node.inputs.emplace(pin.name, NodeValue{});
+  }
+  for (const auto& pin : t->outputs) {
+    node.outputs.emplace(pin.name, NodeValue{});
+  }
+  // Keep id order (the container invariant to_json relies on).
+  const auto pos = std::lower_bound(
+      nodes_.begin(), nodes_.end(), id,
+      [](const GraphNode& n, std::uint64_t key) { return n.id < key; });
+  nodes_.insert(pos, std::move(node));
+  if (id >= next_node_id_) {
+    next_node_id_ = id + 1;
+  }
+  ++version_;
+  return true;
 }
 
 bool NodeGraph::remove_node(std::uint64_t id) {
@@ -133,6 +162,7 @@ bool NodeGraph::remove_node(std::uint64_t id) {
                        return l.from_node == id || l.to_node == id;
                      }),
       links_.end());
+  ++version_;
   return true;
 }
 
@@ -209,6 +239,7 @@ bool NodeGraph::add_link(std::uint64_t from_node, std::string_view from_pin,
   remove_link(to_node, to_pin);
   links_.push_back(GraphLink{from_node, std::string(from_pin), to_node,
                              std::string(to_pin)});
+  ++version_;
   return true;
 }
 
@@ -222,6 +253,7 @@ bool NodeGraph::remove_link(std::uint64_t to_node, std::string_view to_pin) {
     return false;
   }
   links_.erase(it);
+  ++version_;
   return true;
 }
 
