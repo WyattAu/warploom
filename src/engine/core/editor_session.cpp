@@ -268,6 +268,26 @@ bool EditorSession::handle_edit(
       reply.detail = "destroyed object " + std::to_string(oid);
       return true;
     }
+    case CK::Select: {
+      // Selection is editor state, not document state: it must not enter
+      // the undo stack or the serialized document.
+      if (command.number_count < 1U) {
+        reply.ok = false;
+        reply.error = "select needs \"oid\" (0 deselects)";
+        return true;
+      }
+      const auto oid = static_cast<std::uint64_t>(command.numbers[0]);
+      if (oid != 0U && doc_.find(oid) == nullptr) {
+        reply.ok = false;
+        reply.error = "select: no object " + std::to_string(oid);
+        return true;
+      }
+      selected_id_ = oid;
+      reply.ok = true;
+      reply.detail = (oid == 0U) ? "deselected"
+                                 : "selected object " + std::to_string(oid);
+      return true;
+    }
     case CK::Undo:
     case CK::Redo: {
       std::string error;
@@ -412,6 +432,8 @@ std::string EditorSession::snapshot_json() const {
   out += std::to_string(stack_.undo_count());
   out += ",\"redo_depth\":";
   out += std::to_string(stack_.redo_count());
+  out += ",\"selected\":";
+  out += std::to_string(selected_id_);
   out += "}";
   return out;
 }

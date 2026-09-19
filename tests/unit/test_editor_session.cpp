@@ -205,6 +205,41 @@ TEST(EditorSessionQueries, SchemaDescribesRegistry) {
 }
 
 // ============================================================================
+// Selection (v1.2)
+// ============================================================================
+
+TEST(EditorSessionSelect, SetClearAndValidate) {
+  SessionFixture f;
+  // Select the spawned cube (oid 2).
+  const double oid[1] = {2.0};
+  auto r = f.send(ControlCommand::Kind::Select, oid, 1);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(f.session.selected_id(), 2U);
+  // Snapshot mirrors it.
+  EXPECT_NE(f.session.snapshot_json().find("\"selected\":2"),
+            std::string::npos);
+  // Unknown id is rejected.
+  const double missing[1] = {99.0};
+  r = f.send(ControlCommand::Kind::Select, missing, 1);
+  EXPECT_FALSE(r.ok);
+  // Deselect (oid 0) always valid.
+  const double none[1] = {0.0};
+  r = f.send(ControlCommand::Kind::Select, none, 1);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(f.session.selected_id(), 0U);
+}
+
+TEST(EditorSessionSelect, SelectIsNotDocumentState) {
+  SessionFixture f;
+  const std::string before = f.session.document().to_json();
+  const double oid[1] = {2.0};
+  ASSERT_TRUE(f.send(ControlCommand::Kind::Select, oid, 1).ok);
+  // Document bytes unchanged and undo stack untouched.
+  EXPECT_EQ(f.session.document().to_json(), before);
+  EXPECT_EQ(f.session.stack().undo_count(), 1U);  // only the fixture spawn
+}
+
+// ============================================================================
 // End-to-end through the real control server
 // ============================================================================
 

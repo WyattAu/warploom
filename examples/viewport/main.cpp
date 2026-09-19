@@ -448,6 +448,8 @@ struct ViewportApp {
   bool control_paused_{false};
   std::uint32_t control_steps_requested_{0};
   bool control_capture_requested_{false};
+  //! Editor selection mirrored from the `select` control command (0 = none).
+  std::uint64_t selected_object_id{0};
   //! Objects spawned via the control channel (persist across the per-frame
   //! scene rebuild, which clears scene.objects every frame).
   std::vector<omnicpp::render::ScenePbrObject> control_objects;
@@ -587,6 +589,19 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
         obj.joint_base = 0U;
         app_.control_objects.push_back(obj);
         reply.detail = "cube spawned";
+        break;
+      }
+      case CK::Select: {
+        // Mirror editor selection onto the render view (outline/highlight
+        // hooks read this); selection is session state, not undoable.
+        if (command.number_count >= 1U) {
+          app_.selected_object_id =
+              static_cast<std::uint64_t>(command.numbers[0]);
+          reply.detail = "selection set";
+        } else {
+          reply.ok = false;
+          reply.error = "select needs oid";
+        }
         break;
       }
       case CK::Capture:

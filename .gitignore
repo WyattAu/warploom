@@ -132,3 +132,6 @@ fossilize.*.foz
 
 # CC0 Sponza landmark — fetched via scripts/fetch_sponza.sh (~53 MB)
 assets/models/sponza/
+
+# Rust module build artifacts
+examples/rust_module/target/

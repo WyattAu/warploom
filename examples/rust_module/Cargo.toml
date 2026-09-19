@@ -1,0 +1,12 @@
+[package]
+name = "omnicpp_example_module"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "omnicpp_example_module"
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+panic = "abort"

@@ -727,6 +727,8 @@ add_executable(omnicpp_unit_tests
     unit/test_ui_glyphs.cpp
     unit/test_ui_gpu.cpp
     unit/test_editor_session.cpp
+    unit/test_node_graph.cpp
+    unit/test_script_module.cpp
     unit/test_input_state.cpp
     unit/test_input_translators.cpp
     unit/test_engine.cpp
@@ -785,6 +787,35 @@ target_include_directories(omnicpp_unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/includ
 target_compile_definitions(omnicpp_unit_tests PRIVATE
     OMNICPP_TEST_ASSET_DIR=\"${CMAKE_SOURCE_DIR}/assets/models\"
     OMNICPP_TEST_BIN_DIR=\"${CMAKE_BINARY_DIR}/bin\")
+
+# Native script-module fixtures: real shared objects exercising the dlopen
+# path of the script-module host (ok / missing-symbol / ABI-mismatch).
+add_library(test_module_ok SHARED module_fixture/test_module_ok.cpp)
+add_library(test_module_missing SHARED module_fixture/test_module_missing.cpp)
+add_library(test_module_abi SHARED module_fixture/test_module_abi.cpp)
+set_target_properties(test_module_ok test_module_missing test_module_abi PROPERTIES
+    CXX_STANDARD 23
+    POSITION_INDEPENDENT_CODE ON)
+add_dependencies(omnicpp_unit_tests test_module_ok test_module_missing test_module_abi)
+target_compile_definitions(omnicpp_unit_tests PRIVATE
+    OMNICPP_TEST_MODULE_OK="$<TARGET_FILE:test_module_ok>"
+    OMNICPP_TEST_MODULE_MISSING="$<TARGET_FILE:test_module_missing>"    OMNICPP_TEST_MODULE_ABI="$<TARGET_FILE:test_module_abi>")
+
+# Rust example module (examples/rust_module): built when cargo exists so the
+# cross-language dlopen test runs for real; the test self-skips otherwise.
+find_program(OMNICPP_CARGO_EXECUTABLE cargo)
+if(OMNICPP_CARGO_EXECUTABLE)
+    add_custom_command(
+        OUTPUT ${CMAKE_SOURCE_DIR}/examples/rust_module/target/release/libomnicpp_example_module.so
+        COMMAND ${OMNICPP_CARGO_EXECUTABLE} build --release
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/examples/rust_module
+        VERBATIM)
+    add_custom_target(omnicpp_rust_module
+        DEPENDS ${CMAKE_SOURCE_DIR}/examples/rust_module/target/release/libomnicpp_example_module.so)
+    add_dependencies(omnicpp_unit_tests omnicpp_rust_module)
+    target_compile_definitions(omnicpp_unit_tests PRIVATE
+        OMNICPP_TEST_RUST_MODULE="${CMAKE_SOURCE_DIR}/examples/rust_module/target/release/libomnicpp_example_module.so")
+endif()
 
 # Contract-violator child binary: the violation test asserts that
 # OMNICPP_CONTRACT aborts with a diagnostic, in a process that may die.

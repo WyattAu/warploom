@@ -97,6 +97,7 @@ namespace {
       {"undo", ControlCommand::Kind::Undo},
       {"redo", ControlCommand::Kind::Redo},
       {"schema", ControlCommand::Kind::Schema},
+      {"select", ControlCommand::Kind::Select},
   };
   command.kind = ControlCommand::Kind::Unknown;
   command.number_count = 0;
@@ -150,7 +151,8 @@ namespace {
       take("frame");
       break;
     case ControlCommand::Kind::GetObject:
-    case ControlCommand::Kind::DestroyObject: {
+    case ControlCommand::Kind::DestroyObject:
+    case ControlCommand::Kind::Select: {
       std::uint64_t oid = 0;
       if (!find_unsigned_field(line, "oid", oid)) {
         error = "missing \"oid\" unsigned field";

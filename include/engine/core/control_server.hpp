@@ -59,6 +59,8 @@ struct ControlCommand final {
     Undo,
     Redo,
     Schema,
+    // v1.2: editor selection (the host mirrors it onto editor state).
+    Select,
   };
 
   Kind kind{Kind::Unknown};
@@ -66,7 +68,8 @@ struct ControlCommand final {
   double numbers[8]{};  // see kind-specific meaning in control_server.cpp
   std::uint32_t number_count{0};
   // v1.1 string payloads (empty when unused):
-  //   GetObject/DestroyObject: numbers[0] = object id (key "oid")
+  //   GetObject/DestroyObject/Select: numbers[0] = object id (key "oid";
+  //   Select uses oid=0 to deselect)
   //   SetProperty: text = object name, text2 = property key,
   //                text3 = bool/string value (numeric values use x/y/z)
   std::string text;

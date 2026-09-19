@@ -35,6 +35,12 @@ class EditorSession final : public omnicpp::core::ControlHost {
     return default_registry();
   }
 
+  //! Editor selection (mirrored by hosts for outline/highlight rendering;
+  //! 0 = nothing selected). Set via the `select` protocol command.
+  [[nodiscard]] std::uint64_t selected_id() const noexcept {
+    return selected_id_;
+  }
+
   // -- ControlHost ---------------------------------------------------------
   [[nodiscard]] omnicpp::core::ControlReply on_control(
       const omnicpp::core::ControlCommand& command) override;
@@ -54,6 +60,7 @@ class EditorSession final : public omnicpp::core::ControlHost {
 
   SceneDocument doc_{};
   CommandStack stack_{doc_};
+  std::uint64_t selected_id_{0};
 };
 
 }  // namespace omnicpp::editor

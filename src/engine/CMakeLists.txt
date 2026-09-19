@@ -12,6 +12,8 @@ add_library(omnicpp_runtime SHARED
     core/document.cpp
     core/property_registry.cpp
     core/editor_session.cpp
+    core/node_graph.cpp
+    core/script_module.cpp
     ui/widget.cpp
     ui/glyphs.cpp
     core/input_translators.cpp
