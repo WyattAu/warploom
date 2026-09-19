@@ -14,6 +14,7 @@ add_library(omnicpp_runtime SHARED
     core/editor_session.cpp
     core/node_graph.cpp
     core/script_module.cpp
+    editor/node_editor.cpp
     ui/widget.cpp
     ui/glyphs.cpp
     core/input_translators.cpp
@@ -51,6 +52,21 @@ target_include_directories(omnicpp_runtime
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/../../include
 )
+
+# ============================================================================
+# Module-alias libraries (publishing units)
+#
+# omnicpp_runtime is ONE shared object (one ABI, one dlopen surface), but
+# downstream projects consume it through these alias targets so a future
+# physical split (omnicpp_core / omnicpp_ui / omnicpp_render shared
+# libraries) changes no consumer CMake. Dependency direction is enforced
+# by convention today (core has no ui/render includes) and becomes
+# link-time enforcement when the split happens.
+# ============================================================================
+
+add_library(omnicpp_core ALIAS omnicpp_runtime)
+add_library(omnicpp_ui ALIAS omnicpp_runtime)
+add_library(omnicpp_render_lib ALIAS omnicpp_runtime)
 
 # Link Vulkan if available (gracefully returns errors when absent)
 find_package(Vulkan QUIET)

@@ -117,6 +117,9 @@ class NodeGraph final {
   [[nodiscard]] const std::vector<GraphLink>& links() const noexcept {
     return links_;
   }
+  [[nodiscard]] const std::vector<NodeType>& types() const noexcept {
+    return types_;
+  }
 
   //! Byte-deterministic serialization (nodes by id, params by key order).
   [[nodiscard]] std::string to_json() const;

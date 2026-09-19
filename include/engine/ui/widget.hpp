@@ -46,8 +46,10 @@ enum class WidgetKind : std::uint8_t {
 };
 
 enum class LayoutMode : std::uint8_t {
-  Stack,  //!< children laid out along one axis (direction)
-  Flow,   //!< M3: wraps; reserved so the enum is stable
+  Stack,     //!< children laid out along one axis (direction)
+  Absolute,  //!< children keep their own x/y/w/h (free canvas placement);
+             //!< layout recurses but never repositions them
+  Flow,      //!< wraps; reserved so the enum is stable
 };
 
 enum class StackDirection : std::uint8_t { Vertical, Horizontal };

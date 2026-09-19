@@ -105,8 +105,19 @@ void measure(WidgetTree& tree, std::uint32_t handle,
 void arrange(WidgetTree& tree, std::uint32_t handle,
              const TextMetrics& metrics) {
   Widget& parent = tree.get(handle);
+  if (parent.layout == LayoutMode::Absolute) {
+    // Free canvas: children keep their authored rects; recurse only so
+    // nested stack containers still lay out their own children.
+    for (std::uint32_t c = parent.first_child; c != kInvalidWidget;
+         c = tree.get(c).next_sibling) {
+      if (tree.get(c).visible) {
+        arrange(tree, c, metrics);
+      }
+    }
+    return;
+  }
   if (parent.layout != LayoutMode::Stack) {
-    return;  // Flow is M3; nothing to arrange.
+    return;  // Flow is reserved; nothing to arrange.
   }
   const bool vertical = (parent.direction == StackDirection::Vertical);
   const float content_w = std::max(0.0F, parent.w - 2.0F * parent.padding);
