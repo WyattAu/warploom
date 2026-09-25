@@ -149,6 +149,121 @@ struct PostProcessHarness {
 
   // Post-process pipelines.
   omnicpp::render::VulkanPipeline tonemap_pipe;
+  omnicpp::render::VulkanPipeline bloom_down_pipe;
+  omnicpp::render::VulkanPipeline bloom_up_pipe;
+
+  // Half-res bloom targets (same format/layout contract as hdr_image).
+  VkImage bloom_a_image{};
+  omnicpp::render::Allocation bloom_a_mem{};
+  VkImageView bloom_a_view{};
+  VkRenderPass bloom_a_rp{};
+  VkFramebuffer bloom_a_fb{};
+  VkImage bloom_b_image{};
+  omnicpp::render::Allocation bloom_b_mem{};
+  VkImageView bloom_b_view{};
+  VkRenderPass bloom_b_rp{};
+  VkFramebuffer bloom_b_fb{};
+  VkSampler bloom_sampler{};
+  VkDescriptorSetLayout bloom_layout{};
+  VkDescriptorSet bloom_a_ds{};
+  VkDescriptorSet bloom_b_ds{};
+
+  bool create_bloom_targets(VkDevice dev) {
+    VkImageCreateInfo ii{};
+    ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    ii.extent = {128,128,1}; ii.mipLevels = ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    VkImageViewCreateInfo vi{};
+    vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1};
+    VkAttachmentDescription ad{};
+    ad.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    ad.samples = VK_SAMPLE_COUNT_1_BIT;
+    ad.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    ad.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    ad.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    ad.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkAttachmentReference ar{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription sub{};
+    sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sub.colorAttachmentCount = 1; sub.pColorAttachments = &ar;
+    VkRenderPassCreateInfo rpc{};
+    rpc.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rpc.attachmentCount = 1; rpc.pAttachments = &ad;
+    rpc.subpassCount = 1; rpc.pSubpasses = &sub;
+    VkFramebufferCreateInfo fbi{};
+    fbi.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    fbi.attachmentCount = 1; fbi.width = 128; fbi.height = 128; fbi.layers = 1;
+    if (!create_bloom_target(dev, ii, vi, rpc, fbi, bloom_a_image, &bloom_a_mem,
+                             bloom_a_view, bloom_a_rp, bloom_a_fb)) return false;
+    if (!create_bloom_target(dev, ii, vi, rpc, fbi, bloom_b_image, &bloom_b_mem,
+                             bloom_b_view, bloom_b_rp, bloom_b_fb)) return false;
+    VkSamplerCreateInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    si.magFilter = si.minFilter = VK_FILTER_LINEAR;
+    si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    if (vkCreateSampler(dev, &si, nullptr, &bloom_sampler) != VK_SUCCESS) { std::fprintf(stderr, "bloom: sampler failed\n"); return false; }
+    auto bl = desc.create_layout({{0,0,1,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT}}, 2);
+    if (!bl.is_ok()) { std::fprintf(stderr, "bloom: create_layout failed\n"); return false; }
+    bloom_layout = bl.value();
+    auto da = desc.allocate_set(bloom_layout);
+    if (!da.is_ok()) { std::fprintf(stderr, "bloom: allocate a failed\n"); return false; }
+    bloom_a_ds = da.value();
+    desc.write_image(bloom_a_ds, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                     bloom_sampler, bloom_a_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0);
+    auto db = desc.allocate_set(bloom_layout);
+    if (!db.is_ok()) { std::fprintf(stderr, "bloom: allocate b failed\n"); return false; }
+    bloom_b_ds = db.value();
+    desc.write_image(bloom_b_ds, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                     bloom_sampler, bloom_b_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0);
+    return true;
+  }
+
+  bool create_bloom_target(VkDevice dev, const VkImageCreateInfo& ii,
+                           const VkImageViewCreateInfo& vi_base,
+                           const VkRenderPassCreateInfo& rpc,
+                           const VkFramebufferCreateInfo& fbi_base,
+                           VkImage& image, omnicpp::render::Allocation* mem,
+                           VkImageView& view, VkRenderPass& rp,
+                           VkFramebuffer& fb) {
+    if (vkCreateImage(dev, &ii, nullptr, &image) != VK_SUCCESS) { std::fprintf(stderr, "bloom: vkCreateImage failed\n"); return false; }
+    auto m = alloc.bind_image(image, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (!m.is_ok()) { std::fprintf(stderr, "bloom: bind_image failed\n"); return false; }
+    if (mem) *mem = m.value();
+    VkImageViewCreateInfo vi = vi_base;
+    vi.image = image;
+    if (vkCreateImageView(dev, &vi, nullptr, &view) != VK_SUCCESS) { std::fprintf(stderr, "bloom: view failed\n"); return false; }
+    VkRenderPassCreateInfo rpci = rpc;
+    if (vkCreateRenderPass(dev, &rpci, nullptr, &rp) != VK_SUCCESS) { std::fprintf(stderr, "bloom: rp failed\n"); return false; }
+    VkFramebufferCreateInfo fbci = fbi_base;
+    fbci.renderPass = rp;
+    fbci.pAttachments = &view;
+    if (vkCreateFramebuffer(dev, &fbci, nullptr, &fb) != VK_SUCCESS) { std::fprintf(stderr, "bloom: fb failed\n"); return false; }
+    return true;
+  }
+
+  bool create_bloom_pipelines(VkRenderPass a_rp, VkRenderPass b_rp, VkFormat fmt) {
+    VkDevice dev = ctx.device();
+    std::string sd = OMNICPP_TEST_SHADER_DIR;
+    if (!bloom_down_pipe.load_shader_stage_file(dev, sd+"/fullscreen.vert.spv","vertex").is_ok() ||
+        !bloom_down_pipe.load_shader_stage_file(dev, sd+"/bloom_downsample.frag.spv","fragment").is_ok()) return false;
+    VkDescriptorSetLayout dl[1] = {bloom_layout};
+    if (!bloom_down_pipe.create_pipeline_layout(dev, dl, 1, nullptr).is_ok()) return false;
+    if (!bloom_down_pipe.create_graphics_pipeline(dev, a_rp, fmt,
+        bloom_down_pipe.pipeline_layout(), false, false, false).is_ok()) return false;
+    if (!bloom_up_pipe.load_shader_stage_file(dev, sd+"/fullscreen.vert.spv","vertex").is_ok() ||
+        !bloom_up_pipe.load_shader_stage_file(dev, sd+"/bloom_upsample.frag.spv","fragment").is_ok()) return false;
+    if (!bloom_up_pipe.create_pipeline_layout(dev, dl, 1, nullptr).is_ok()) return false;
+    if (!bloom_up_pipe.create_graphics_pipeline(dev, b_rp, fmt,
+        bloom_up_pipe.pipeline_layout(), false, false, false).is_ok()) return false;
+    return true;
+  }
 
   bool init(const char* name) {
     if (!ctx.initialize(name, true).is_ok()) return false;
@@ -388,6 +503,19 @@ struct PostProcessHarness {
   void cleanup() {
     VkDevice dev = ctx.device();
     tonemap_pipe.cleanup(dev);
+    bloom_down_pipe.cleanup(dev);
+    bloom_up_pipe.cleanup(dev);
+    if (bloom_a_rp) vkDestroyRenderPass(dev, bloom_a_rp, nullptr);
+    if (bloom_a_fb) vkDestroyFramebuffer(dev, bloom_a_fb, nullptr);
+    if (bloom_a_view) vkDestroyImageView(dev, bloom_a_view, nullptr);
+    if (bloom_a_mem.is_valid()) alloc.destroy_allocation(bloom_a_mem);
+    if (bloom_a_image) vkDestroyImage(dev, bloom_a_image, nullptr);
+    if (bloom_b_rp) vkDestroyRenderPass(dev, bloom_b_rp, nullptr);
+    if (bloom_b_fb) vkDestroyFramebuffer(dev, bloom_b_fb, nullptr);
+    if (bloom_b_view) vkDestroyImageView(dev, bloom_b_view, nullptr);
+    if (bloom_b_mem.is_valid()) alloc.destroy_allocation(bloom_b_mem);
+    if (bloom_b_image) vkDestroyImage(dev, bloom_b_image, nullptr);
+    if (bloom_sampler) vkDestroySampler(dev, bloom_sampler, nullptr);
     destroy_solid(dev, alloc, white);
     if (cube_va.is_valid()) alloc.destroy_allocation(cube_va);
     if (cube_ia.is_valid()) alloc.destroy_allocation(cube_ia);
@@ -479,6 +607,177 @@ TEST(VulkanHardware, PostProcessTonemapFxaa) {
   // Per-channel luma should be < 255 (ACES compresses to [0,1] * 255).
   const std::uint32_t peak_ch = result.peak_luma / 3U;
   EXPECT_LT(peak_ch, 255U) << "ACES tonemap failed to compress bright HDR";
+}
+
+
+// ============================================================================
+// M-R: bloom chain (bright-pass downsample -> upsample), readback-proven.
+// ============================================================================
+
+namespace {
+
+//! Runs the bloom half of the chain over the already-rendered HDR image and
+//! returns the bloom output (bloom_b, 128x128) read back.
+omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
+                                          omnicpp::render::VulkanOffscreenTarget& out) {
+  VkDevice dev = h.ctx.device();
+  auto pr = omnicpp::render::VulkanRenderer::create_command_pool(dev, h.qf);
+  if (!pr.is_ok()) return {};
+  auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(dev, pr.value());
+  if (!cr.is_ok()) { vkDestroyCommandPool(dev, pr.value(), nullptr); return {}; }
+  VkCommandBuffer cb = cr.value();
+  VkFenceCreateInfo fi{}; fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  VkFence fence; vkCreateFence(dev, &fi, nullptr, &fence);
+  VkCommandBufferBeginInfo bi{};
+  bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(cb, &bi);
+
+  omnicpp::render::VulkanRenderer frame_renderer;
+  omnicpp::render::VulkanRenderer::FullscreenPass down{};
+  down.pipeline = h.bloom_down_pipe.pipeline();
+  down.pipeline_layout = h.bloom_down_pipe.pipeline_layout();
+  down.render_pass = h.bloom_a_rp;
+  down.framebuffer = h.bloom_a_fb;
+  down.width = 128; down.height = 128;
+  VkClearValue dc[1]{};
+  dc[0].color = {{0,0,0,1}};
+  down.clear_values = dc; down.clear_value_count = 1;
+  down.samples[0] = {h.hdr_image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_IMAGE_ASPECT_COLOR_BIT};
+  down.sample_count = 1;
+  auto down_pass = frame_renderer.fullscreen_graph_pass(down);
+  down_pass.name = "bloom_down";
+  // Declare the write: bloom_a is the color attachment (graph metadata so
+  // compile_graph emits the write->sample barrier for the up pass).
+  down_pass.attachments = {omnicpp::render::color_attachment(
+      h.bloom_a_image, h.bloom_a_view, VK_FORMAT_R16G16B16A16_SFLOAT,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)};
+
+  omnicpp::render::VulkanRenderer::FullscreenPass up{};
+  up.pipeline = h.bloom_up_pipe.pipeline();
+  up.pipeline_layout = h.bloom_up_pipe.pipeline_layout();
+  up.render_pass = h.bloom_b_rp;
+  up.framebuffer = h.bloom_b_fb;
+  up.width = 128; up.height = 128;
+  up.clear_values = dc; up.clear_value_count = 1;
+  up.samples[0] = {h.bloom_a_image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                   VK_IMAGE_ASPECT_COLOR_BIT};
+  up.sample_count = 1;
+  auto up_pass = frame_renderer.fullscreen_graph_pass(up);
+  up_pass.name = "bloom_up";
+
+  struct Ctx { omnicpp::render::VulkanRenderer* self;
+               omnicpp::render::VulkanRenderer::FullscreenPass* pass;
+               VkDescriptorSet set; } dctx{&frame_renderer, &down, h.hdr_ds};
+  struct Uctx { omnicpp::render::VulkanRenderer* self;
+                omnicpp::render::VulkanRenderer::FullscreenPass* pass;
+                VkDescriptorSet set; } uctx{&frame_renderer, &up, h.bloom_a_ds};
+  down_pass.user_data = &dctx;
+  up_pass.user_data = &uctx;
+
+  const std::vector<omnicpp::render::GraphNode> nodes = {
+      omnicpp::render::GraphNode::from_render(down_pass),
+      omnicpp::render::GraphNode::from_render(up_pass),
+  };
+  const auto compiled = omnicpp::render::compile_graph(nodes);
+  omnicpp::render::execute_graph(cb, nodes, compiled,
+      [](VkCommandBuffer command_buffer, const omnicpp::render::GraphPass& p,
+         void* user_data) {
+        auto* cx = static_cast<Ctx*>(user_data);
+        (void)cx->self->record_fullscreen_draw(command_buffer, *cx->pass,
+                                               cx->set);
+      },
+      nullptr);
+  (void)uctx.set;
+
+  vkEndCommandBuffer(cb);
+  vkResetFences(dev, 1, &fence);
+  VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  si.commandBufferCount = 1; si.pCommandBuffers = &cb;
+  vkQueueSubmit(h.ctx.graphics_queue(), 1, &si, fence);
+  vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
+  vkDestroyFence(dev, fence, nullptr);
+  vkDestroyCommandPool(dev, pr.value(), nullptr);
+
+  return omnicpp_test::readback_swapchain_image(
+      h.ctx.physical_device(), dev, h.ctx.graphics_queue(), h.qf,
+      h.bloom_b_image, VK_FORMAT_R16G16B16A16_SFLOAT, 128, 128,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
+}  // namespace
+
+TEST(VulkanHardware, BloomExtractsAndSpreadsBrightEnergy) {
+  PostProcessHarness h;
+  if (!h.init("bloom_test")) GTEST_SKIP() << "Vulkan unavailable";
+  if (!h.create_bloom_targets(h.ctx.device())) {
+    h.cleanup(); GTEST_SKIP() << "Bloom targets failed";
+  }
+
+  // Out target + pipelines: same contract as the tonemap test.
+  omnicpp::render::VulkanOffscreenTarget out;
+  if (!out.create(h.ctx.device(), h.ctx.physical_device(), VK_FORMAT_B8G8R8A8_UNORM, 256, 256, &h.alloc).is_ok() ||
+      !out.create_depth(h.ctx.device(), h.ctx.physical_device(), VK_FORMAT_D32_SFLOAT).is_ok() ||
+      !out.create_render_pass(h.ctx.device()).is_ok() ||
+      !out.create_framebuffer(h.ctx.device()).is_ok()) {
+    h.cleanup(); GTEST_SKIP() << "Out target failed";
+  }
+  if (!h.create_tonemap_pipeline(out.render_pass(), out.format()) ||
+      !h.create_bloom_pipelines(h.bloom_a_rp, h.bloom_b_rp,
+                                VK_FORMAT_R16G16B16A16_SFLOAT)) {
+    h.cleanup(); out.cleanup(h.ctx.device());
+    GTEST_SKIP() << "Bloom pipelines failed";
+  }
+  omnicpp::render::VulkanPipeline scene_pipe;
+  std::string sd = OMNICPP_TEST_SHADER_DIR;
+  if (!scene_pipe.load_shader_stage_file(h.ctx.device(), sd+"/pbr_scene.vert.spv","vertex").is_ok() ||
+      !scene_pipe.load_shader_stage_file(h.ctx.device(), sd+"/pbr_scene.frag.spv","fragment").is_ok()) {
+    h.cleanup(); out.cleanup(h.ctx.device()); GTEST_SKIP() << "Scene pipeline failed";
+  }
+  VkDescriptorSetLayout sl[3] = {h.mesh_layout, h.tex_layout, h.mat_layout};
+  VkPushConstantRange pr{VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT, 0, 160};
+  if (!scene_pipe.create_pipeline_layout(h.ctx.device(), sl, 3, &pr).is_ok() ||
+      !scene_pipe.create_graphics_pipeline(h.ctx.device(), h.hdr_rp, VK_FORMAT_R16G16B16A16_SFLOAT,
+          scene_pipe.pipeline_layout(), true, false, false).is_ok()) {
+    h.cleanup(); out.cleanup(h.ctx.device()); GTEST_SKIP() << "Scene pipeline build failed";
+  }
+
+  // HDR-bright cube: base_color 5.0 far exceeds the 0.8 bloom threshold.
+  omnicpp::render::PbrMaterialData mat{};
+  mat.base_color_factor = {5.0f, 5.0f, 5.0f, 1.0f};
+  mat.metallic_factor = 0; mat.roughness_factor = 0.5f;
+  std::memcpy(h.mat_buf.mapped, &mat, sizeof(mat));
+
+  VulkanPbrScene scene{};
+  scene.pipeline = scene_pipe.pipeline();
+  scene.pipeline_layout = scene_pipe.pipeline_layout();
+  scene.camera.view_projection = make_perspective(45, 1.0f, 0.1f, 100);
+  scene.camera_position = {0,0,10,1};
+  scene.texture_set = h.tex_set;
+  scene.material_set = h.mat_set;
+  omnicpp::render::ScenePbrObject obj{};
+  obj.mesh = &h.cube_mesh;
+  obj.model = make_translation(0,0,-4);
+  obj.material_index = 0;
+  scene.objects = {obj};
+  (void)h.render_and_postprocess(scene, out);
+
+  const auto bloom = render_bloom(h, out);
+  scene_pipe.cleanup(h.ctx.device());
+  out.cleanup(h.ctx.device());
+  h.cleanup();
+
+  ASSERT_TRUE(bloom.submitted);
+  // The bright cube's energy must survive the threshold + downsample.
+  EXPECT_GT(bloom.non_clear_pixels, 50U)
+      << "bloom output blank: threshold removed everything";
+  // Bloom values are HDR floats tonemapped by the readback to LDR; the
+  // blurred cube must be dimmer than the full-energy source (spread + the
+  // 13-tap weights distribute energy), but clearly present.
+  EXPECT_GT(bloom.peak_luma, 30U) << "bloom energy lost";
+  EXPECT_LT(bloom.peak_luma, 765U) << "bloom not filtered (raw copy)";
 }
 
 #endif  // OMNICPP_HAS_VULKAN

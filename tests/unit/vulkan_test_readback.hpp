@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 #include <vector>
 
 #ifdef OMNICPP_HAS_VULKAN
@@ -74,7 +75,13 @@ inline ReadbackResult readback_swapchain_image(VkPhysicalDevice physical_device,
                                         VkImageLayout final_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                                         bool store_pixels = false) {
   ReadbackResult output;
-  const VkDeviceSize byte_size = static_cast<VkDeviceSize>(width) * height * 4;
+  // Texel size depends on the format: the 4-byte path handles BGRA8/RGBA8;
+  // RGBA16F (HDR bloom/scene targets) packs 8 bytes per pixel and is
+  // converted to 8-bit BGRA on readback so callers see the same stats.
+  const bool is_rgba16f = image_format == VK_FORMAT_R16G16B16A16_SFLOAT;
+  const std::uint32_t bytes_per_texel = is_rgba16f ? 8U : 4U;
+  const VkDeviceSize byte_size =
+      static_cast<VkDeviceSize>(width) * height * bytes_per_texel;
 
   VkBufferCreateInfo buffer_info{};
   buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -197,9 +204,33 @@ inline ReadbackResult readback_swapchain_image(VkPhysicalDevice physical_device,
       const auto* bytes = static_cast<const std::uint8_t*>(mapped);
       const bool rgba = image_format == VK_FORMAT_R8G8B8A8_UNORM ||
                         image_format == VK_FORMAT_R8G8B8A8_SRGB;
-      const auto pixel_at = [&](std::uint32_t x, std::uint32_t y) {
+      // RGBA16F half-float decode (F16 -> 0..255 8-bit, clamped).
+      const auto f16_to_u8 = [](std::uint16_t h) -> std::uint32_t {
+        const std::uint32_t sign = (h >> 15U) & 1U;
+        const std::uint32_t exp = (h >> 10U) & 0x1FU;
+        const std::uint32_t frac = h & 0x3FFU;
+        if (exp == 0U) return 0U;                       // zero/subnormal -> 0
+        if (exp == 31U) return 255U;                    // inf/nan -> clamp
+        // value = 1.frac * 2^(exp-15); scale via bit construction.
+        const std::uint32_t f32_exp = exp - 15U + 127U;
+        const std::uint32_t bits = (f32_exp << 23U) | (frac << 13U);
+        float f;
+        std::memcpy(&f, &bits, sizeof(f));
+        const float scaled = f * 255.0F;
+        const auto v = static_cast<std::uint32_t>(scaled < 0.0F ? 0.0F
+                                                : (scaled > 255.0F ? 255.0F
+                                                                   : scaled));
+        return sign != 0U ? 0U : v;
+      };
+      const auto texel_at = [&](std::uint32_t x, std::uint32_t y) {
         const std::size_t offset =
-            (static_cast<std::size_t>(y) * width + x) * 4U;
+            (static_cast<std::size_t>(y) * width + x) * bytes_per_texel;
+        if (is_rgba16f) {
+          std::uint16_t c[4];
+          std::memcpy(c, bytes + offset, 8U);
+          return f16_to_u8(c[2]) | (f16_to_u8(c[1]) << 8U) |
+                 (f16_to_u8(c[0]) << 16U) | (f16_to_u8(c[3]) << 24U);
+        }
         const auto first = bytes[offset];
         const auto second = bytes[offset + 1];
         const auto third = bytes[offset + 2];
@@ -212,29 +243,29 @@ inline ReadbackResult readback_swapchain_image(VkPhysicalDevice physical_device,
                (static_cast<std::uint32_t>(b) << 16U) |
                (static_cast<std::uint32_t>(alpha) << 24U);
       };
+      const auto pixel_at = [&](std::uint32_t x, std::uint32_t y) {
+        return texel_at(x, y);
+      };
 
       std::uint64_t hash = 1469598103934665603ULL;
-      for (std::size_t i = 0; i < static_cast<std::size_t>(byte_size); i += 4) {
-        const auto first = bytes[i];
-        const auto g = bytes[i + 1];
-        const auto third = bytes[i + 2];
-        const auto r = rgba ? first : third;
-        const auto b = rgba ? third : first;
-        if (r != 0 || g != 0 || b != 0) ++output.non_clear_pixels;
-        if (r > g && r > b) ++output.red_dominant_pixels;
-        if (g > r && g > b) ++output.green_dominant_pixels;
-        if (b > r && b > g) ++output.blue_dominant_pixels;
-        if (r >= 200U && g >= 200U && b >= 200U) ++output.bright_pixels;
-        const std::uint32_t luma = static_cast<std::uint32_t>(r) +
-                                   static_cast<std::uint32_t>(g) +
-                                   static_cast<std::uint32_t>(b);
-        if (luma > output.peak_luma) output.peak_luma = luma;
-        const std::uint32_t pixel = static_cast<std::uint32_t>(r) |
-                                     (static_cast<std::uint32_t>(g) << 8U) |
-                                     (static_cast<std::uint32_t>(b) << 16U) |
-                                     (static_cast<std::uint32_t>(bytes[i + 3]) << 24U);
-        hash ^= pixel;
-        hash *= 1099511628211ULL;
+      for (std::uint32_t py = 0; py < height; ++py) {
+        for (std::uint32_t px2 = 0; px2 < width; ++px2) {
+          const std::uint32_t pixel = texel_at(px2, py);
+          const auto r = static_cast<std::uint32_t>(pixel & 0xFFU);
+          const auto g = static_cast<std::uint32_t>((pixel >> 8U) & 0xFFU);
+          const auto b = static_cast<std::uint32_t>((pixel >> 16U) & 0xFFU);
+          const auto a = static_cast<std::uint32_t>((pixel >> 24U) & 0xFFU);
+          if (r != 0 || g != 0 || b != 0) ++output.non_clear_pixels;
+          if (r > g && r > b) ++output.red_dominant_pixels;
+          if (g > r && g > b) ++output.green_dominant_pixels;
+          if (b > r && b > g) ++output.blue_dominant_pixels;
+          if (r >= 200U && g >= 200U && b >= 200U) ++output.bright_pixels;
+          const std::uint32_t luma = r + g + b;
+          if (luma > output.peak_luma) output.peak_luma = luma;
+          hash ^= pixel;
+          hash *= 1099511628211ULL;
+          (void)a;
+        }
       }
       output.center_pixel = pixel_at(width / 2U, height / 2U);
       if (store_pixels) {
