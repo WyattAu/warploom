@@ -1,11 +1,16 @@
 # llvmpipe JIT segfault — viewport + 2 tests (environment issue, not engine)
 
-## Status (2026-09-25)
+## Status (2026-09-25, updated)
 
-The NVIDIA driver is broken on this machine (kernel module 610.57.04 in memory vs
-615.71.09 userspace after the 2026-09-19 `pacman -Syu`; fixed by **reboot**, not
-fixable from userspace). While waiting for that, all verification moved to
-lavapipe (Mesa software Vulkan). Result:
+**Resolution: the machine was rebooted; the NVIDIA driver (615.71.09, kernel
+7.2.6) is healthy again. All 563 tests pass on hardware with 0 skips, and the
+live viewport runs normally. The material below is retained as the record of
+the llvmpipe-side investigation, which remains accurate for software-Vulkan
+CI runs.**
+
+The NVIDIA driver was broken at the time (kernel module 610.57.04 in memory vs
+615.71.09 userspace after the 2026-09-19 `pacman -Syu`). While waiting for the
+reboot, all verification moved to lavapipe (Mesa software Vulkan). Result:
 
 - **Full test suite on lavapipe: 560 tests, 555 pass, 5 documented skips, 0 failures.**
 - Two tests and the live viewport crash inside Mesa's raster JIT — the only
@@ -49,12 +54,11 @@ CPU, bounded from every side we can control. Engine-side code validates clean
 
 ## Practical workarounds
 
-1. **Reboot** → real NVIDIA driver (615.71.09 userspace matches a freshly
-   loaded kernel module). Viewport + all hardware tests run normally. This is
-   the real fix.
-2. Until then: **headless verification is fully sufficient** — the 555-test
-   lavapipe suite, control-protocol E2E over unix sockets, and byte-level
-   readback tests exercise everything except live windowed presentation.
+1. ~~Reboot~~ **DONE** — real NVIDIA driver verified (563/563 on hardware).
+2. On machines without a working hardware driver: **headless verification is
+   fully sufficient** — the lavapipe suite, control-protocol E2E over unix
+   sockets, and byte-level readback tests exercise everything except live
+   windowed presentation (the viewport + 2 raster tests hit the JIT bug).
 3. Optionally report upstream to CachyOS/Mesa with the isolation matrix above.
 
 ## If mesa gets pinned / downgraded again
