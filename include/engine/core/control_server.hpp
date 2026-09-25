@@ -84,6 +84,15 @@ struct ControlCommand final {
     // v1.4: document persistence (M8) — path rides in `text`.
     SaveDocument,
     LoadDocument,
+    // v1.5: graph -> scene bindings (M10).
+    //   BindNodeProperty:   numbers[0] = node id, numbers[1] = object id,
+    //                       text = out pin, text2 = property (axis
+    //                       suffix like "position.y" allowed)
+    //   UnbindNodeProperty: numbers[0] = object id, text = property
+    //   ListBindings:       no payload; detail = JSON array
+    BindNodeProperty,
+    UnbindNodeProperty,
+    ListBindings,
   };
 
   Kind kind{Kind::Unknown};

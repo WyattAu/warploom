@@ -457,6 +457,42 @@ bool EditorSession::handle_edit(
       reply.detail = "loaded " + command.text;
       return true;
     }
+    case CK::BindNodeProperty: {
+      if (command.number_count < 2U || command.text.empty() ||
+          command.text2.empty()) {
+        reply.ok = false;
+        reply.error = "bind_node_property needs nid, oid, pin, property";
+        return true;
+      }
+      std::string error;
+      if (!bind_property(
+              static_cast<std::uint64_t>(command.numbers[0]), command.text,
+              static_cast<std::uint64_t>(command.numbers[1]), command.text2,
+              error)) {
+        reply.ok = false;
+        reply.error = "bind_node_property failed: " + error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "bound";
+      return true;
+    }
+    case CK::UnbindNodeProperty: {
+      if (command.number_count < 1U || command.text.empty()) {
+        reply.ok = false;
+        reply.error = "unbind_node_property needs oid + property";
+        return true;
+      }
+      if (!unbind_property(static_cast<std::uint64_t>(command.numbers[0]),
+                           command.text)) {
+        reply.ok = false;
+        reply.error = "no such binding";
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "unbound";
+      return true;
+    }
     case CK::Undo:
     case CK::Redo: {
       std::string error;
@@ -550,6 +586,24 @@ bool EditorSession::handle_query(
     case CK::GetGraph: {
       reply.ok = true;
       reply.detail = doc_.node_graph.to_json();
+      return true;
+    }
+    case CK::ListBindings: {
+      std::string out = "{\"bindings\":[";
+      bool first = true;
+      for (const auto& b : bindings_) {
+        if (!first) {
+          out += ",";
+        }
+        first = false;
+        out += "{\"node\":" + std::to_string(b.node_id) +
+               ",\"pin\":" + quote(b.out_pin) +
+               ",\"oid\":" + std::to_string(b.object_id) +
+               ",\"property\":" + quote(b.property) + "}";
+      }
+      out += "],\"count\":" + std::to_string(bindings_.size()) + "}";
+      reply.ok = true;
+      reply.detail = std::move(out);
       return true;
     }
     default:

@@ -108,6 +108,10 @@ namespace {
       {"get_graph", ControlCommand::Kind::GetGraph},
       {"save_document", ControlCommand::Kind::SaveDocument},
       {"load_document", ControlCommand::Kind::LoadDocument},
+      // v1.5 graph->scene bindings (M10).
+      {"bind_node_property", ControlCommand::Kind::BindNodeProperty},
+      {"unbind_node_property", ControlCommand::Kind::UnbindNodeProperty},
+      {"list_bindings", ControlCommand::Kind::ListBindings},
   };
   command.kind = ControlCommand::Kind::Unknown;
   command.number_count = 0;
@@ -228,7 +232,32 @@ namespace {
       break;
     }
     case ControlCommand::Kind::GetGraph:
+    case ControlCommand::Kind::ListBindings:
       break;
+    case ControlCommand::Kind::BindNodeProperty: {
+      std::uint64_t nid = 0;
+      std::uint64_t oid = 0;
+      if (!find_unsigned_field(line, "nid", nid) ||
+          !find_unsigned_field(line, "oid", oid)) {
+        error = "bind_node_property needs \"nid\" and \"oid\"";
+        return false;
+      }
+      numbers[count++] = static_cast<double>(nid);
+      numbers[count++] = static_cast<double>(oid);
+      take_text("out", command.text);
+      take_text("property", command.text2);
+      break;
+    }
+    case ControlCommand::Kind::UnbindNodeProperty: {
+      std::uint64_t oid = 0;
+      if (!find_unsigned_field(line, "oid", oid)) {
+        error = "unbind_node_property needs \"oid\"";
+        return false;
+      }
+      numbers[count++] = static_cast<double>(oid);
+      take_text("property", command.text);
+      break;
+    }
     case ControlCommand::Kind::SaveDocument:
     case ControlCommand::Kind::LoadDocument:
       take_text("path", command.text);

@@ -67,6 +67,16 @@ class EditorSession final : public omnicpp::core::ControlHost {
   [[nodiscard]] const std::vector<PropertyBinding>& bindings() const noexcept {
     return bindings_;
   }
+  //! Replaces the document wholesale (file load): the loaded document becomes
+  //! authoritative and history is cleared (undo across a load boundary is
+  //! meaningless). Bindings and selection reset; borrowed graph pointers
+  //! stay valid (the document object's address does not change).
+  void reset_from(SceneDocument&& loaded) {
+    doc_ = std::move(loaded);
+    stack_.clear();
+    bindings_.clear();
+    selected_id_ = 0;
+  }
   //! Runs the graph evaluation, then writes every binding's current pin
   //! value into its bound object property. Returns the number of bindings
   //! applied. Deterministic: bindings apply in insertion order.

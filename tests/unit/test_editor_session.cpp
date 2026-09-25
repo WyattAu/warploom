@@ -436,3 +436,188 @@ TEST(EditorSessionNodes, SocketDrivenNodeCommands) {
 }
 
 }  // namespace
+
+// ============================================================================
+// v1.5 graph -> scene binding protocol (M10)
+// ============================================================================
+
+TEST(EditorSessionBindings, ProtocolRoundTrip) {
+  SessionFixture f;
+
+  // Spawn target cube (id 2 from the fixture; environment is 1).
+  ASSERT_TRUE(f.session.document().find(2U) != nullptr);
+
+  // Graph: const(3.5) -> vec3_compose -> cube.scale
+  const double pos0[2] = {40.0, 20.0};
+  auto r = f.send(ControlCommand::Kind::NodeAdd, pos0, 2, "const_number");
+  ASSERT_TRUE(r.ok) << r.error;
+  const double val[2] = {1.0, 3.5};
+  r = f.send(ControlCommand::Kind::SetNodeParam, val, 2, "value");
+  ASSERT_TRUE(r.ok) << r.error;
+  const double pos1[2] = {60.0, 80.0};
+  r = f.send(ControlCommand::Kind::NodeAdd, pos1, 2, "vec3_compose");
+  ASSERT_TRUE(r.ok) << r.error;
+  const double ends[2] = {1.0, 2.0};
+  r = f.send(ControlCommand::Kind::LinkNodes, ends, 2, "value", "x");
+  ASSERT_TRUE(r.ok) << r.error;
+
+  // Bind through the protocol.
+  const double bind[2] = {2.0, 2.0};  // node 2 (compose) -> object 2 (cube)
+  r = f.send(ControlCommand::Kind::BindNodeProperty, bind, 2, "v", "scale");
+  ASSERT_TRUE(r.ok) << r.error;
+  ASSERT_EQ(f.session.bindings().size(), 1U);
+  EXPECT_EQ(f.session.bindings()[0].node_id, 2U);
+  EXPECT_EQ(f.session.bindings()[0].object_id, 2U);
+  EXPECT_EQ(f.session.bindings()[0].property, "scale");
+
+  // Bind-time validation rejects the same cases as the C++ API.
+  const double bad[2] = {1.0, 999.0};
+  r = f.send(ControlCommand::Kind::BindNodeProperty, bad, 2, "value", "scale");
+  EXPECT_FALSE(r.ok);
+  EXPECT_NE(r.error.find("bind_node_property failed"), std::string::npos);
+
+  // list_bindings serializes the binding map.
+  r = f.send(ControlCommand::Kind::ListBindings);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_NE(r.detail.find("\"node\":2"), std::string::npos);
+  EXPECT_NE(r.detail.find("\"property\":\"scale\""), std::string::npos);
+  EXPECT_NE(r.detail.find("\"count\":1"), std::string::npos);
+
+  // sync applies the binding: cube.scale becomes (3.5, 0, 0).
+  std::string err;
+  const auto applied = f.session.sync_graph(err);
+  ASSERT_TRUE(err.empty()) << err;
+  EXPECT_EQ(applied, 1U);
+  const auto* cube = f.session.document().find(2U);
+  ASSERT_NE(cube, nullptr);
+  EXPECT_DOUBLE_EQ(cube->properties.at("scale").vec[0], 3.5);
+
+  // Unbind through the protocol; list empties.
+  const double oid[1] = {2.0};
+  r = f.send(ControlCommand::Kind::UnbindNodeProperty, oid, 1, "scale");
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_TRUE(f.session.bindings().empty());
+  r = f.send(ControlCommand::Kind::UnbindNodeProperty, oid, 1, "scale");
+  EXPECT_FALSE(r.ok);  // already gone
+
+  // Parse-level: unknown command name rejected by the server parser.
+  // (Covered by the socket test below for bind; parser errors are uniform.)
+}
+
+TEST(EditorSessionBindings, SocketDrivenBindListUnbind) {
+  SessionFixture f;
+  omnicpp::core::ControlServer server;
+  std::string error;
+  const std::string path = "/tmp/omnicpp_test_bind_protocol.sock";
+  ASSERT_TRUE(server.start(path, error)) << error;
+
+  int client = -1;
+  ASSERT_GE(client = socket(AF_UNIX, SOCK_STREAM, 0), 0);
+  sockaddr_un addr{};
+  addr.sun_family = AF_UNIX;
+  std::snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path.c_str());
+  ASSERT_EQ(connect(client, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)),
+            0);
+  server.poll(f.session);  // welcome
+
+  auto roundtrip = [&](const std::string& line) {
+    std::string reply;
+    if (send(client, line.data(), line.size(), 0) !=
+        static_cast<ssize_t>(line.size())) {
+      ADD_FAILURE() << "short send";
+      return reply;
+    }
+    server.poll(f.session);
+    char buf[4096];
+    const auto n = recv(client, buf, sizeof(buf) - 1, MSG_DONTWAIT);
+    if (n <= 0) {
+      ADD_FAILURE() << "no reply";
+      return reply;
+    }
+    buf[n] = '\0';
+    reply = std::string(buf);
+    return reply;
+  };
+
+  // Setup: a cube and a const node, over the wire.
+  const std::string spawn =
+      "{\"cmd\":\"spawn_cube\",\"id\":1,\"x\":1,\"y\":0,\"z\":0,\"size\":1}\n";
+  EXPECT_NE(roundtrip(spawn).find("\"ok\":true"), std::string::npos);
+  const std::string add =
+      "{\"cmd\":\"add_node\",\"id\":2,\"type\":\"const_number\"}\n";
+  EXPECT_NE(roundtrip(add).find("\"ok\":true"), std::string::npos);
+  const std::string param =
+      "{\"cmd\":\"set_node_param\",\"id\":3,\"nid\":1,\"key\":\"value\","
+      "\"value\":2.25}\n";
+  EXPECT_NE(roundtrip(param).find("\"ok\":true"), std::string::npos);
+
+  // Axis-suffix binding over the wire: const -> cube.position.y
+  const std::string bind =
+      "{\"cmd\":\"bind_node_property\",\"id\":4,\"nid\":1,\"oid\":2,"
+      "\"out\":\"value\",\"property\":\"position.y\"}\n";
+  EXPECT_NE(roundtrip(bind).find("\"ok\":true"), std::string::npos);
+
+  // Malformed bind (missing oid) is a parse error with a precise message.
+  const std::string bad_bind =
+      "{\"cmd\":\"bind_node_property\",\"id\":5,\"nid\":1,"
+      "\"out\":\"value\",\"property\":\"position.y\"}\n";
+  const std::string bad_reply = roundtrip(bad_bind);
+  EXPECT_NE(bad_reply.find("\"ok\":false"), std::string::npos);
+  EXPECT_NE(bad_reply.find("needs \\\"nid\\\" and \\\"oid\\\""),
+            std::string::npos)
+      << bad_reply;
+
+  // list_bindings over the wire shows the axis-suffixed property (the
+  // detail rides JSON-escaped inside the reply envelope, so assert on the
+  // unescaped substrings).
+  const std::string list = "{\"cmd\":\"list_bindings\",\"id\":6}\n";
+  const std::string list_reply = roundtrip(list);
+  EXPECT_NE(list_reply.find("position.y"), std::string::npos)
+      << list_reply;
+  EXPECT_NE(list_reply.find("\"ok\":true"), std::string::npos) << list_reply;
+
+  // unbind over the wire.
+  const std::string unbind =
+      "{\"cmd\":\"unbind_node_property\",\"id\":7,\"oid\":2,"
+      "\"property\":\"position.y\"}\n";
+  EXPECT_NE(roundtrip(unbind).find("\"ok\":true"), std::string::npos);
+
+  close(client);
+  server.stop();
+}
+
+// ============================================================================
+// reset_from (M10): file-load path replaces document + clears history
+// ============================================================================
+
+TEST(EditorSessionReset, ResetFromReplacesDocumentAndClearsHistory) {
+  SessionFixture f;
+  ASSERT_EQ(f.session.stack().undo_count(), 1U);  // fixture cube
+
+  // Build a replacement document with a different object set.
+  ed::SceneDocument fresh;
+  ed::SceneObject obj;
+  obj.id = 9;
+  obj.type_id = 0;
+  obj.name = "replacement";
+  fresh.objects.push_back(obj);
+  fresh.next_object_id = 10;
+
+  f.session.reset_from(std::move(fresh));
+  EXPECT_EQ(f.session.stack().undo_count(), 0U);
+  EXPECT_EQ(f.session.stack().redo_count(), 0U);
+  EXPECT_EQ(f.session.selected_id(), 0U);
+  EXPECT_EQ(f.session.document().objects.size(), 1U);
+  EXPECT_EQ(f.session.document().objects[0].name, "replacement");
+  EXPECT_TRUE(f.session.bindings().empty());
+
+  // The session remains fully operational after the swap: undo is empty,
+  // a new edit lands on the NEW document and becomes undoable.
+  auto r = f.spawn_cube(0.0, 0.0, 0.0, 1.0);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(f.session.stack().undo_count(), 1U);
+  EXPECT_EQ(f.session.document().objects.size(), 2U);
+  r = f.send(ControlCommand::Kind::Undo);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(f.session.document().objects.size(), 1U);
+}

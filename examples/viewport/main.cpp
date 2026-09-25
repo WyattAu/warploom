@@ -21,11 +21,13 @@
 #include <fstream>
 #include <iterator>
 #include "engine/core/control_server.hpp"
+#include "engine/core/editor_session.hpp"
 #include "engine/core/document.hpp"
 #include <memory>
 #include <random>
 #include <string>
 #include <string_view>
+#include <mutex>
 #include <vector>
 
 #include <xcb/xcb.h>
@@ -244,7 +246,6 @@ struct ViewportApp {
   // UI paint path over the scene: graph cards, pins, bezier wires, value
   // readouts; mouse selects/drags node cards. UI failures fail the frame.
   bool node_editor{false};
-  omnicpp::editor::NodeGraph node_graph;
   std::unique_ptr<omnicpp::editor::NodeEditorView> node_view;
   omnicpp::ui::WidgetTree ui_tree;
   omnicpp::ui::PaintList ui_paint;
@@ -269,6 +270,14 @@ struct ViewportApp {
   bool node_dirty{false};      //!< graph mutated: rebuild the view
   bool undo_requested{false};  //!< toolbar undo button
   bool redo_requested{false};  //!< toolbar redo button
+  //! Event thread -> frame-thread command queue (M10): mouse/keyboard edits
+  //! are queued as protocol commands and drained ON the frame thread through
+  //! editor.on_control, so every mutation crosses the single session stack.
+  struct QueuedEdit {
+    omnicpp::core::ControlCommand command;
+  };
+  std::vector<QueuedEdit> edit_queue;
+  std::mutex edit_queue_mutex;
   //! Optional document loaded at startup via OMNICPP_DOC=<path>.
   std::string doc_path{};
   //! The draw pipeline's full layout (sets 0..2, 160-byte push) so the
@@ -542,10 +551,15 @@ struct ViewportApp {
 
   //! The app's authoritative editable document (owns the node graph the
   //! editor view projects; graph edits go through CommandStack semantics).
+  //! M10: the embedded EditorSession IS the mutation authority — every edit
+  //! path (protocol, mouse, keys) funnels through its CommandStack, so
+  //! undo/redo/replay are one mechanism.
   [[nodiscard]] omnicpp::editor::SceneDocument& session_document() {
-    return session_doc_;
+    return editor.document();
   }
-  omnicpp::editor::SceneDocument session_doc_{};
+  omnicpp::editor::EditorSession editor{};
+  //! The session document's graph (borrowed view; the document owns it).
+  omnicpp::editor::NodeGraph* node_graph{nullptr};
 };
 
 //! ControlHost implementation over the viewport: translates protocol
@@ -649,6 +663,35 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
         app_.control_capture_requested_ = true;
         reply.detail = "capture scheduled";
         break;
+      // M10: every document command delegates to the embedded EditorSession
+      // — the single mutation authority. Protocol edits, mouse edits, and
+      // key edits now share one CommandStack, so undo/redo cover ALL paths
+      // and the document stays replayable no matter where the edit came
+      // from. The view flags cover the resulting rebuild.
+      case CK::ListObjects:
+      case CK::GetObject:
+      case CK::SetProperty:
+      case CK::DestroyObject:
+      case CK::Undo:
+      case CK::Redo:
+      case CK::Schema:
+      case CK::NodeAdd:
+      case CK::NodeRemove:
+      case CK::LinkNodes:
+      case CK::UnlinkNodes:
+      case CK::SetNodeParam:
+      case CK::SetNodePosition:
+      case CK::GetGraph:
+      case CK::SaveDocument:
+      case CK::LoadDocument: {
+        const bool structural = command.kind == CK::NodeAdd ||
+                                command.kind == CK::NodeRemove ||
+                                command.kind == CK::LinkNodes ||
+                                command.kind == CK::UnlinkNodes;
+        reply = app_.editor.on_control(command);
+        if (reply.ok && structural) app_.node_dirty = true;
+        break;
+      }
       default:
         reply.ok = false;
         reply.error = "unhandled command";
@@ -670,6 +713,14 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
     json += ",\"drawn\":" + std::to_string(drawn);
     json += ",\"camera_override\":";
     json += app_.camera_override_ ? "true" : "false";
+    json += ",\"nodes\":" +
+            std::to_string(app_.editor.document().node_graph.node_count());
+    json += ",\"links\":" +
+            std::to_string(app_.editor.document().node_graph.link_count());
+    json += ",\"undo_depth\":" +
+            std::to_string(app_.editor.stack().undo_count());
+    json += ",\"redo_depth\":" +
+            std::to_string(app_.editor.stack().redo_count());
     json += "}";
     return json;
   }
@@ -783,17 +834,15 @@ bool poll_events(ViewportApp& app) {
           }
         }
         if (selected != 0U) {
-          auto cmd = std::make_unique<omnicpp::editor::RemoveNodeCommand>(
-              selected);
-          std::string err;
-          if (cmd->apply(app.session_document(), err)) {
-            app.node_dirty = true;
-            std::printf("viewport: removed node %llu (undoable)\n",
-                        static_cast<unsigned long long>(selected));
-          } else {
-            std::fprintf(stderr, "viewport: remove failed: %s\n",
-                         err.c_str());
+          omnicpp::core::ControlCommand cmd;
+          cmd.kind = omnicpp::core::ControlCommand::Kind::NodeRemove;
+          cmd.numbers[0] = static_cast<double>(selected);
+          cmd.number_count = 1;
+          {
+            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+            app.edit_queue.push_back({std::move(cmd)});
           }
+          app.node_dirty = true;
         }
       }
       app.kb_mouse.on_key(key->detail, true);
@@ -835,18 +884,16 @@ bool poll_events(ViewportApp& app) {
         const auto* link =
             app.node_view->link_at_index(link_index);
         if (link != nullptr) {
-          auto cmd = std::make_unique<omnicpp::editor::UnlinkNodeCommand>(
-              link->to_node, link->to_pin);
-          std::string err;
-          if (cmd->apply(app.session_document(), err)) {
-            std::printf("viewport: unlinked %llu.%s (undoable)\n",
-                        static_cast<unsigned long long>(link->to_node),
-                        link->to_pin.c_str());
-            app.node_dirty = true;
-          } else {
-            std::fprintf(stderr, "viewport: unlink failed: %s\n",
-                         err.c_str());
+          omnicpp::core::ControlCommand cmd;
+          cmd.kind = omnicpp::core::ControlCommand::Kind::UnlinkNodes;
+          cmd.numbers[0] = static_cast<double>(link->to_node);
+          cmd.number_count = 1;
+          cmd.text2 = link->to_pin;
+          {
+            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+            app.edit_queue.push_back({std::move(cmd)});
           }
+          app.node_dirty = true;
         }
       }
       // Left press on the node canvas: toolbar > pin (link drag) > card
@@ -855,23 +902,21 @@ bool poll_events(ViewportApp& app) {
         // Toolbar buttons first (they live over the canvas).
         if (!app.node_toolbar_buttons.empty()) {
           const auto tb = omnicpp::editor::hit_test_toolbar(
-              app.ui_tree, app.node_toolbar_buttons, app.node_graph,
+              app.ui_tree, app.node_toolbar_buttons, *app.node_graph,
               app.mouse_x, app.mouse_y);
           using TA = omnicpp::editor::ToolbarAction;
-          std::string err;
           if (tb.action == TA::AddType) {
-            auto cmd = std::make_unique<omnicpp::editor::AddNodeCommand>(
-                app.node_graph.types()[tb.type_index].name,
-                static_cast<double>(app.mouse_x),
-                static_cast<double>(app.mouse_y));
-            if (cmd->apply(app.session_document(), err)) {
-              app.node_dirty = true;
-              std::printf("viewport: added %s node\n",
-                          app.node_graph.types()[tb.type_index].name.c_str());
-            } else {
-              std::fprintf(stderr, "viewport: add_node failed: %s\n",
-                           err.c_str());
+            omnicpp::core::ControlCommand cmd;
+            cmd.kind = omnicpp::core::ControlCommand::Kind::NodeAdd;
+            cmd.text = app.node_graph->types()[tb.type_index].name;
+            cmd.numbers[0] = static_cast<double>(app.mouse_x);
+            cmd.numbers[1] = static_cast<double>(app.mouse_y);
+            cmd.number_count = 2;
+            {
+              std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+              app.edit_queue.push_back({std::move(cmd)});
             }
+            app.node_dirty = true;
           } else if (tb.action == TA::Undo) {
             app.undo_requested = true;
           } else if (tb.action == TA::Redo) {
@@ -919,25 +964,18 @@ bool poll_events(ViewportApp& app) {
           if (drop.valid()) {
             // Source pin determines direction: output->input, or reversed.
             const auto src = app.node_view->drag_source_pin();
-            std::string link_error;
-            omnicpp::editor::LinkNodesCommand link_cmd(
-                src.is_input ? drop.node_id : src.node_id,
-                src.is_input ? drop.pin_name : src.pin_name,
-                src.is_input ? src.node_id : drop.node_id,
-                src.is_input ? src.pin_name : drop.pin_name);
-            if (link_cmd.apply(app.session_document(), link_error)) {
-              std::printf("viewport: linked %llu.%s -> %llu.%s\n",
-                          static_cast<unsigned long long>(
-                              src.is_input ? drop.node_id : src.node_id),
-                          (src.is_input ? drop.pin_name : src.pin_name)
-                              .c_str(),
-                          static_cast<unsigned long long>(
-                              src.is_input ? src.node_id : drop.node_id),
-                          (src.is_input ? src.pin_name : drop.pin_name)
-                              .c_str());
-            } else {
-              std::fprintf(stderr, "viewport: link rejected: %s\n",
-                           link_error.c_str());
+            omnicpp::core::ControlCommand cmd;
+            cmd.kind = omnicpp::core::ControlCommand::Kind::LinkNodes;
+            cmd.numbers[0] = static_cast<double>(src.is_input ? drop.node_id
+                                                              : src.node_id);
+            cmd.numbers[1] = static_cast<double>(src.is_input ? src.node_id
+                                                              : drop.node_id);
+            cmd.number_count = 2;
+            cmd.text = src.is_input ? drop.pin_name : src.pin_name;
+            cmd.text2 = src.is_input ? src.pin_name : drop.pin_name;
+            {
+              std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+              app.edit_queue.push_back({std::move(cmd)});
             }
           }
         } else if (app.drag_node_id != 0U) {
@@ -948,13 +986,15 @@ bool poll_events(ViewportApp& app) {
           float ch = 0.0F;
           if (app.node_view != nullptr &&
               app.node_view->node_rect(app.drag_node_id, cx, cy, cw, ch)) {
-            omnicpp::editor::SetNodePositionCommand move_cmd(
-                app.drag_node_id, static_cast<double>(cx),
-                static_cast<double>(cy));
-            std::string move_error;
-            if (!move_cmd.apply(app.session_document(), move_error)) {
-              std::fprintf(stderr, "viewport: position commit failed: %s\n",
-                           move_error.c_str());
+            omnicpp::core::ControlCommand cmd;
+            cmd.kind = omnicpp::core::ControlCommand::Kind::SetNodePosition;
+            cmd.numbers[0] = static_cast<double>(app.drag_node_id);
+            cmd.numbers[1] = static_cast<double>(cx);
+            cmd.numbers[2] = static_cast<double>(cy);
+            cmd.number_count = 3;
+            {
+              std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+              app.edit_queue.push_back({std::move(cmd)});
             }
           }
         }
@@ -4064,7 +4104,7 @@ bool setup_node_editor(ViewportApp& app) {
   // protocol uses, so the first undo steps are the demo's construction.
   omnicpp::editor::register_builtin_node_types(
       app.session_document().node_graph);
-  omnicpp::editor::SceneDocument& doc = app.session_doc_;
+  omnicpp::editor::SceneDocument& doc = app.session_document();
   {
     auto add_cmd = std::make_unique<omnicpp::editor::AddNodeCommand>(
         "const_number", 60.0, 60.0);
@@ -4100,13 +4140,12 @@ bool setup_node_editor(ViewportApp& app) {
     }
     (void)add_cmd.release();
   }
-  app.node_graph = std::move(doc.node_graph);
-  // Put the (possibly mutated) graph back: the view reads app.node_graph;
-  // session edits re-sync below via reset.
-  doc.node_graph = app.node_graph;
+  // M10: the document owns the graph; app.node_graph is a borrowed view
+  // (session commands mutate it in place — no copy-back needed).
+  app.node_graph = &doc.node_graph;
 
   app.node_view = std::make_unique<omnicpp::editor::NodeEditorView>(
-      app.node_graph);
+      *app.node_graph);
   const auto canvas = app.ui_tree.add(omnicpp::ui::Widget{},
                                       app.ui_tree.root());
   app.node_canvas = canvas;
@@ -4120,7 +4159,7 @@ bool setup_node_editor(ViewportApp& app) {
                                          app.ui_tree.root());
     app.node_toolbar = toolbar;
     app.node_toolbar_buttons = omnicpp::editor::build_node_toolbar(
-        app.ui_tree, toolbar, app.node_graph);
+        app.ui_tree, toolbar, *app.node_graph);
   }
 
   const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
@@ -4144,22 +4183,56 @@ void tick_node_editor(ViewportApp& app) {
   // event thread must not mutate document state.
   // The viewport drives the document through direct command application
   // (event thread) and stack ops (here); rebuild flags cover both.
-  if (app.undo_requested || app.redo_requested || app.node_dirty) {
-    // Document-level undo/redo needs the session; the viewport owns one
-    // embedded EditorSession-free stack over its own document.
-    // Undo/redo semantics live in the control protocol path; the toolbar
-    // requests are serviced by replaying the inverse of the last applied
-    // command. For M8 the flags track the last direct-applied command.
+  // M10: drain the event-thread edit queue through the session — the
+  // single mutation authority. Every queued command executes with
+  // protocol-identical semantics (validation + undoable stack push) on the
+  // frame thread.
+  {
+    std::vector<ViewportApp::QueuedEdit> drained;
+    {
+      std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+      drained.swap(app.edit_queue);
+    }
+    for (auto& queued : drained) {
+      const auto reply = app.editor.on_control(queued.command);
+      if (!reply.ok) {
+        std::fprintf(stderr, "viewport: edit rejected: %s\n",
+                     reply.error.c_str());
+      }
+    }
+  }
+  // Toolbar undo/redo: real stack operations (M8 placeholder removed).
+  if (app.undo_requested) {
     app.undo_requested = false;
+    omnicpp::core::ControlCommand cmd;
+    cmd.kind = omnicpp::core::ControlCommand::Kind::Undo;
+    const auto reply = app.editor.on_control(cmd);
+    if (!reply.ok) {
+      std::fprintf(stderr, "viewport: undo: %s\n", reply.error.c_str());
+    }
+  }
+  if (app.redo_requested) {
     app.redo_requested = false;
+    omnicpp::core::ControlCommand cmd;
+    cmd.kind = omnicpp::core::ControlCommand::Kind::Redo;
+    const auto reply = app.editor.on_control(cmd);
+    if (!reply.ok) {
+      std::fprintf(stderr, "viewport: redo: %s\n", reply.error.c_str());
+    }
+  }
+  if (app.node_dirty) {
     app.node_dirty = false;
-    // Structural change: rebind the view to the (possibly new) graph and
-    // rebuild the widget cards; layout + paint follow below.
+    // Structural change: rebuild the widget cards; layout + paint below.
     app.node_view->rebuild(app.ui_tree, app.node_canvas);
   }
 
   std::string error;
-  (void)app.node_graph.evaluate(error);
+  (void)app.node_graph->evaluate(error);
+  // M10: graph->scene bridge — bindings write their pin values into object
+  // properties every tick (insertion order, deterministic; skipped bindings
+  // are non-fatal).
+  std::string sync_error;
+  (void)app.editor.sync_graph(sync_error);
   app.node_view->sync_widgets();
   omnicpp::ui::compute_layout(app.ui_tree, static_cast<float>(kWidth),
                               static_cast<float>(kHeight));
@@ -4401,9 +4474,11 @@ bool ViewportApp::initialize() {
       std::string err;
       if (omnicpp::editor::SceneDocument::load_from_file(doc_path, loaded,
                                                          err)) {
-        session_doc_ = std::move(loaded);
+        editor.reset_from(std::move(loaded));
+        // Re-borrow the graph (same document address, but stay explicit).
+        node_graph = &session_document().node_graph;
         std::printf("viewport: loaded document %s (%zu nodes)\n",
-                    doc_path.c_str(), session_doc_.node_graph.node_count());
+                    doc_path.c_str(), editor.document().node_graph.node_count());
       } else {
         std::fprintf(stderr, "viewport: OMNICPP_DOC load failed: %s\n",
                      err.c_str());
