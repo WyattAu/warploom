@@ -22,6 +22,7 @@
 #include <iterator>
 #include "engine/core/control_server.hpp"
 #include "engine/core/editor_session.hpp"
+#include "engine/editor/graph_anim_bridge.hpp"
 #include "engine/editor/inspector.hpp"
 #include "engine/core/document.hpp"
 #include <memory>
@@ -253,6 +254,9 @@ struct ViewportApp {
   bool node_editor{false};
   std::unique_ptr<omnicpp::editor::NodeEditorView> node_view;
   omnicpp::editor::InspectorPanel inspector;
+  //! M13 fusion: graph outputs -> animation actions (OMNICPP_GRAPH_ANIM=1).
+  bool graph_anim_enabled{false};
+  std::unique_ptr<omnicpp::editor::GraphSignalAdapter> graph_anim;
   std::uint32_t inspector_canvas{omnicpp::ui::kInvalidWidget};
   std::uint32_t inspector_root{omnicpp::ui::kInvalidWidget};
   omnicpp::ui::WidgetTree ui_tree;
@@ -4313,6 +4317,34 @@ bool setup_node_editor(ViewportApp& app) {
         app.ui_tree, toolbar, *app.node_graph);
   }
 
+  // M13 fusion: when enabled, seed a pulse node mapped to "graph_move" so
+  // the mannequin's walk<->idle machine is graph-driven out of the box.
+  if (app.graph_anim_enabled) {
+    auto add_cmd = std::make_unique<omnicpp::editor::AddNodeCommand>(
+        "pulse", 480.0, 60.0);
+    std::string err;
+    if (add_cmd->apply(doc, err)) {
+      const auto pid = add_cmd->node_id();
+      (void)add_cmd.release();
+      omnicpp::editor::SetNodeParamCommand freq(
+          pid, "frequency", omnicpp::editor::PropValue::make_number(0.25));
+      omnicpp::editor::SetNodeParamCommand thresh(
+          pid, "threshold", omnicpp::editor::PropValue::make_number(0.5));
+      (void)freq.apply(doc, err);
+      (void)thresh.apply(doc, err);
+    } else {
+      (void)add_cmd.release();
+      std::fprintf(stderr, "viewport: graph-anim pulse node failed: %s\n",
+                   err.c_str());
+    }
+    app.graph_anim = std::make_unique<omnicpp::editor::GraphSignalAdapter>();
+    // Bind to whatever id the pulse got (last added node).
+    const auto pulse_id = doc.node_graph.nodes().back().id;
+    app.graph_anim->set_signal({"graph_move", pulse_id, "on", 0.5});
+    std::printf("viewport: graph-anim fusion on (pulse node %llu -> move)\n",
+                static_cast<unsigned long long>(pulse_id));
+  }
+
   // M11: inspector/outliner panel on the right edge.
   {
     const auto insp_canvas = app.ui_tree.add(omnicpp::ui::Widget{},
@@ -4498,6 +4530,8 @@ bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
 
 bool ViewportApp::initialize() {
   run_config = viewport::RunConfig::from_environment();
+  // M13 fusion: enable graph->animation signal projection.
+  graph_anim_enabled = std::getenv("OMNICPP_GRAPH_ANIM") != nullptr;
   // M11: resolve the document cube type id for the render mirror.
   if (const auto* cube_type =
           omnicpp::editor::default_registry().find_by_name(
@@ -4950,16 +4984,38 @@ void ViewportApp::run() {
     // demo cycle synthesizes the toggle action at each half-period boundary
     // so ONE machine configuration serves both modes.
     if (machine) {
+      // M13 fusion: graph signal actions (OMNICPP_GRAPH_ANIM=1) overlay the
+      // input snapshot — node outputs hold the same "fade_toggle" action
+      // the demo cycle synthesizes, so graphs control the mannequin.
+      omnicpp::core::InputSnapshot snapshot = input.current();
+      if (graph_anim_enabled && graph_anim != nullptr &&
+          node_graph != nullptr) {
+        std::string gerr;
+        omnicpp::editor::GraphContext ctx;
+        ctx.time = static_cast<double>(time);
+        ctx.tick = static_cast<std::uint64_t>(frame_index);
+        (void)node_graph->evaluate_with(ctx, gerr);
+        const auto graph_snap = graph_anim->build(*node_graph);
+        for (const auto& [name, held] : graph_snap.actions) {
+          snapshot.actions[name] = held;
+        }
+        // A graph signal mapped to the machine's action name drives the
+        // mannequin; map it onto fade_toggle here so the standard machine
+        // configuration is graph-controllable without new transitions.
+        if (snapshot.actions["graph_move"]) {
+          snapshot.actions["fade_toggle"] = true;
+        }
+      }
       if (input_scripted) {
         machine->tick(input.current(), run_config.fixed_dt);
       } else if (run_config.crossfade_period > 0.0f) {
-        omnicpp::core::InputSnapshot demo = input.current();
+        omnicpp::core::InputSnapshot demo = snapshot;
         const float period = run_config.crossfade_period;
         demo.actions["fade_toggle"] = std::fmod(time, 2.0f * period) <
                                        run_config.fixed_dt;
         machine->tick(demo, run_config.fixed_dt);
       } else {
-        machine->tick(input.current(), run_config.fixed_dt);
+        machine->tick(snapshot, run_config.fixed_dt);
       }
       if (telemetry_enabled && machine->state() != machine_last_state) {
         machine_last_state = machine->state();
