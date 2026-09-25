@@ -683,7 +683,10 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
       case CK::SetNodePosition:
       case CK::GetGraph:
       case CK::SaveDocument:
-      case CK::LoadDocument: {
+      case CK::LoadDocument:
+      case CK::BindNodeProperty:
+      case CK::UnbindNodeProperty:
+      case CK::ListBindings: {
         const bool structural = command.kind == CK::NodeAdd ||
                                 command.kind == CK::NodeRemove ||
                                 command.kind == CK::LinkNodes ||
@@ -4099,11 +4102,12 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
 //! renderer. False (non-fatal for the scene; overlay just stays off) when
 //! the ui_quad shaders are unavailable.
 bool setup_node_editor(ViewportApp& app) {
-  // The session document owns the graph + type registry (M7). The demo
-  // const -> add graph is authored through the SAME undoable commands the
-  // protocol uses, so the first undo steps are the demo's construction.
-  omnicpp::editor::register_builtin_node_types(
-      app.session_document().node_graph);
+  // The session document owns the graph + type registry (M7); the embedded
+  // EditorSession constructor already registered the builtin node types —
+  // do NOT register again (duplicate registration is a contract violation).
+  // The demo const -> add graph is authored through the SAME undoable
+  // commands the protocol uses, so the first undo steps are the demo's
+  // construction.
   omnicpp::editor::SceneDocument& doc = app.session_document();
   {
     auto add_cmd = std::make_unique<omnicpp::editor::AddNodeCommand>(
