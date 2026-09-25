@@ -100,9 +100,11 @@ class UiRasterizer final {
   //! Rows, MSB-left. Only the glyphs the tests use are defined.
   static const char* glyph(const char ch) {
     switch (ch) {
-      case 'O': return "0111010001100011000110001110111";
-      case 'K': return "1000110010101001100010100110001";
-      case 'X': return "1000110001010100010001010110001";
+      // 7 rows x 5 cols = 35 cells (rows used to be 6 and the row-7 read
+      // ran off the end of the literal; ASan caught it). Row 7 is blank.
+      case 'O': return "011101000110001100011000111011100000";
+      case 'K': return "100011001010100110001010011000100000";
+      case 'X': return "100011000101010001000101011000100000";
       default:  return nullptr;
     }
   }
