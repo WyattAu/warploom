@@ -22,6 +22,7 @@
 #include <iterator>
 #include "engine/core/control_server.hpp"
 #include "engine/core/editor_session.hpp"
+#include "engine/editor/inspector.hpp"
 #include "engine/core/document.hpp"
 #include <memory>
 #include <random>
@@ -129,6 +130,10 @@ SceneMatrix rotation_y_matrix(float radians) {
   m[10] = c;
   return m;
 }
+
+//! Property-registry type id for document-authoritative cubes (resolved once
+//! at startup; the mirror skips objects whose type_id does not match).
+std::uint32_t kDocumentCubeTypeId{0xFFFFFFFFU};
 
 //! Column-major product a * b.
 SceneMatrix multiply(const SceneMatrix& a, const SceneMatrix& b) {
@@ -247,6 +252,9 @@ struct ViewportApp {
   // readouts; mouse selects/drags node cards. UI failures fail the frame.
   bool node_editor{false};
   std::unique_ptr<omnicpp::editor::NodeEditorView> node_view;
+  omnicpp::editor::InspectorPanel inspector;
+  std::uint32_t inspector_canvas{omnicpp::ui::kInvalidWidget};
+  std::uint32_t inspector_root{omnicpp::ui::kInvalidWidget};
   omnicpp::ui::WidgetTree ui_tree;
   omnicpp::ui::PaintList ui_paint;
   std::uint32_t node_canvas{omnicpp::ui::kInvalidWidget};
@@ -270,6 +278,7 @@ struct ViewportApp {
   bool node_dirty{false};      //!< graph mutated: rebuild the view
   bool undo_requested{false};  //!< toolbar undo button
   bool redo_requested{false};  //!< toolbar redo button
+  bool inspector_rebuild_requested{false};  //!< selection changed
   //! Event thread -> frame-thread command queue (M10): mouse/keyboard edits
   //! are queued as protocol commands and drained ON the frame thread through
   //! editor.on_control, so every mutation crosses the single session stack.
@@ -493,9 +502,6 @@ struct ViewportApp {
   bool control_capture_requested_{false};
   //! Editor selection mirrored from the `select` control command (0 = none).
   std::uint64_t selected_object_id{0};
-  //! Objects spawned via the control channel (persist across the per-frame
-  //! scene rebuild, which clears scene.objects every frame).
-  std::vector<omnicpp::render::ScenePbrObject> control_objects;
   bool camera_override_{false};
   std::array<float, 3> camera_eye_{16.0f, 14.0f, 0.0f};
   std::array<float, 3> camera_target_{0.0f, 1.0f, 0.0f};
@@ -626,24 +632,15 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
         }
         break;
       }      case CK::SpawnCube: {
-        // Prove the command path reaches the authoritative scene: add a
-        // static cube (identity skin slot) at the requested position. Held
-        // in control_objects — the record path clears scene.objects each
-        // frame and re-appends these after the built-in scene lists.
-        omnicpp::render::ScenePbrObject obj;
-        obj.mesh = &app_.cube.mesh;
-        const float s = command.number_count > 3U
-                            ? static_cast<float>(command.numbers[3])
-                            : 1.0f;
-        obj.model = multiply(translation_matrix(
-                                 static_cast<float>(command.numbers[0]),
-                                 static_cast<float>(command.numbers[1]),
-                                 static_cast<float>(command.numbers[2])),
-                             scale_matrix(s, s, s));
-        obj.material_index = 2U;
-        obj.joint_base = 0U;
-        app_.control_objects.push_back(obj);
-        reply.detail = "cube spawned";
+        // M11: spawn is DOCUMENT-authoritative. The session bridge creates
+        // a registry-typed cube object (undoable, saveable, queryable); the
+        // record path mirrors every document cube into the scene each frame
+        // (mirror_document_objects). No render-side spawn list exists.
+        {
+          const bool structural = true;
+          reply = app_.editor.on_control(command);
+          if (reply.ok && structural) app_.node_dirty = true;
+        }
         break;
       }
       case CK::Select: {
@@ -731,6 +728,14 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
  private:
   ViewportApp& app_;
 };
+
+//! M11: mirror every document-authoritative cube into the render scene.
+//! The document (registry type "cube": position/rotation/scale/color) is the
+//! single source of truth — the record path consumes it read-only each frame
+//! after scene.objects.clear(), so undo/redo/save/load/queries apply to
+//! exactly what renders. Rotation uses the document's Euler XYZ degrees
+//! (yaw about Y first, matching the city's actor convention).
+void mirror_document_objects(ViewportApp& app);
 
 //! Free-function RT-shadow helpers (defined near setup_lighting).
 bool setup_rt_shadows(ViewportApp& app);
@@ -949,7 +954,25 @@ bool poll_events(ViewportApp& app) {
               app.drag_start_y = cy;
             }
           } else {
-            (void)app.node_view->select(0U);
+            // Empty canvas space: the inspector gets the click BEFORE
+            // deselecting (its rows select document objects, undoable
+            // through the same session path).
+            const auto ihit = app.inspector.hit_test(app.ui_tree, app.mouse_x,
+                                                     app.mouse_y);
+            if (ihit.kind == omnicpp::editor::InspectorHit::Kind::SelectObject) {
+              omnicpp::core::ControlCommand sel_cmd;
+              sel_cmd.kind = omnicpp::core::ControlCommand::Kind::Select;
+              sel_cmd.numbers[0] = static_cast<double>(ihit.object_id);
+              sel_cmd.number_count = 1;
+              {
+                std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+                app.edit_queue.push_back({std::move(sel_cmd)});
+              }
+              app.inspector_rebuild_requested = true;
+            } else if (ihit.kind ==
+                       omnicpp::editor::InspectorHit::Kind::None) {
+              (void)app.node_view->select(0U);
+            }
           }
         }
       }
@@ -3902,13 +3925,9 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
       app.scene.shadow_pipeline_layout =
           app.shadow_pipeline_static.pipeline_layout();
     }
-    // Control-spawned objects append after the built-in city lists so they
-    // draw with the already-selected ML pipeline (cube mesh, identity skin
-    // slot 0). The city branch returns below, so the append must happen here
-    // too — the shared append at the tail only serves the non-city scenes.
-    for (const auto& spawned : app.control_objects) {
-      app.scene.objects.push_back(spawned);
-    }
+    // M11: document cubes mirror into the city branch too (it returns
+    // below, so the shared tail append cannot serve it).
+    mirror_document_objects(app);
     return omnicpp::render::VulkanRenderer{}
         .record_pbr_scene(command_buffer, app.scene, width, height)
         .is_ok();
@@ -4002,11 +4021,8 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
   // OMNICPP_NO_SHADOW keeps the composed pipelines (their shaders statically
   // use set 4) but binds the neutral 1x1 cleared map: every PCF comparison
   // passes, so the image equals composed shading with no shadow term.
-  // Control-spawned objects append after the built-in scene lists so they
-  // draw with the already-selected pipeline (cube mesh, identity skin slot).
-  for (const auto& spawned : app.control_objects) {
-    app.scene.objects.push_back(spawned);
-  }
+  // M11: document cubes mirror after the built-in scene lists.
+  mirror_document_objects(app);
   const bool shadow_active = app.lighting_ready && !app.no_shadow;
   app.scene.shadow_set =
       app.lighting_ready
@@ -4091,6 +4107,47 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
       .is_ok();
 }
 
+//! M11: mirror every document-authoritative cube into the render scene.
+//! The document (registry type "cube": position/rotation/scale/color) is the
+//! single source of truth — the record path consumes it read-only each frame
+//! after scene.objects.clear(), so undo/redo/save/load/queries apply to
+//! exactly what renders. Rotation uses the document's Euler XYZ degrees
+//! (yaw about Y first, matching the city's actor convention).
+void mirror_document_objects(ViewportApp& app) {
+  const auto& doc_objects = app.editor.document().objects;
+  for (const auto& obj : doc_objects) {
+    if (obj.type_id != kDocumentCubeTypeId) continue;
+    const auto pos_it = obj.properties.find("position");
+    const auto rot_it = obj.properties.find("rotation");
+    const auto scale_it = obj.properties.find("scale");
+    const auto color_it = obj.properties.find("color");
+    if (pos_it == obj.properties.end() || rot_it == obj.properties.end() ||
+        scale_it == obj.properties.end()) {
+      continue;
+    }
+    const auto& p = pos_it->second.vec;
+    const auto& r = rot_it->second.vec;
+    const auto& s = scale_it->second.vec;
+    const float kDegToRad = 3.14159265358979f / 180.0f;
+    SceneMatrix model =
+        multiply(translation_matrix(static_cast<float>(p[0]),
+                                    static_cast<float>(p[1]),
+                                    static_cast<float>(p[2])),
+                 multiply(rotation_y_matrix(static_cast<float>(r[1]) *
+                                            kDegToRad),
+                          scale_matrix(static_cast<float>(s[0]),
+                                       static_cast<float>(s[1]),
+                                       static_cast<float>(s[2]))));
+    omnicpp::render::ScenePbrObject render_obj;
+    render_obj.mesh = &app.cube.mesh;
+    render_obj.model = model;
+    render_obj.material_index = 2U;
+    render_obj.joint_base = 0U;
+    (void)color_it;  // material table is fixed for now (M12: per-object)
+    app.scene.objects.push_back(render_obj);
+  }
+}
+
 //! Renderer hook: advance the clock (the one sanctioned mutation) and record
 //! the window's scene for this frame.
 // ============================================================================
@@ -4156,14 +4213,24 @@ bool setup_node_editor(ViewportApp& app) {
   app.node_view->rebuild(app.ui_tree, canvas);
   app.node_view->sync_widgets();
 
-  // Toolbar: one add-button per registered type + undo/redo placeholders
-  // (wired to session commands below).
+  // Toolbar: one add-button per registered type + undo/redo.
   {
     const auto toolbar = app.ui_tree.add(omnicpp::ui::Widget{},
                                          app.ui_tree.root());
     app.node_toolbar = toolbar;
     app.node_toolbar_buttons = omnicpp::editor::build_node_toolbar(
         app.ui_tree, toolbar, *app.node_graph);
+  }
+
+  // M11: inspector/outliner panel on the right edge.
+  {
+    const auto insp_canvas = app.ui_tree.add(omnicpp::ui::Widget{},
+                                             app.ui_tree.root());
+    app.inspector_canvas = insp_canvas;
+    app.inspector.rebuild(app.ui_tree, insp_canvas, doc,
+                          app.editor.registry(), app.editor.selected_id(),
+                          app.editor.bindings());
+    app.inspector_root = app.inspector.panel_handle();
   }
 
   const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
@@ -4228,6 +4295,20 @@ void tick_node_editor(ViewportApp& app) {
     app.node_dirty = false;
     // Structural change: rebuild the widget cards; layout + paint below.
     app.node_view->rebuild(app.ui_tree, app.node_canvas);
+    // The inspector mirrors document objects too (spawn/destroy/undo all
+    // mark the dirty flag) — full re-derive keeps it a pure projection.
+    app.inspector.rebuild(app.ui_tree, app.inspector_canvas,
+                          app.editor.document(), app.editor.registry(),
+                          app.editor.selected_id(), app.editor.bindings());
+    app.inspector_root = app.inspector.panel_handle();
+  }
+
+  if (app.inspector_rebuild_requested) {
+    app.inspector_rebuild_requested = false;
+    app.inspector.rebuild(app.ui_tree, app.inspector_canvas,
+                          app.editor.document(), app.editor.registry(),
+                          app.editor.selected_id(), app.editor.bindings());
+    app.inspector_root = app.inspector.panel_handle();
   }
 
   std::string error;
@@ -4243,6 +4324,23 @@ void tick_node_editor(ViewportApp& app) {
   app.ui_paint.clear();
   omnicpp::ui::paint(app.ui_tree, app.ui_paint);
   app.node_view->append_wires(app.ui_paint);
+  // M11: binding wires from output pins to the inspector chips. Anchors are
+  // recomputed every frame (cheap: layout rects are fresh) so wires track
+  // the panel when rows move.
+  {
+    std::vector<omnicpp::editor::NodeEditorView::BindingWire> wires;
+    const auto& bindings = app.editor.bindings();
+    wires.reserve(bindings.size());
+    for (std::size_t i = 0; i < bindings.size(); ++i) {
+      float ax = 0.0F;
+      float ay = 0.0F;
+      if (app.inspector.binding_anchor(app.ui_tree, i, ax, ay)) {
+        wires.push_back({bindings[i].node_id, bindings[i].out_pin, ax, ay});
+      }
+    }
+    app.node_view->set_binding_wires(std::move(wires));
+    app.node_view->append_binding_wires(app.ui_paint);
+  }
 }
 
 //! Pre-pass chain when the node editor is active: the UI atlas one-time
@@ -4303,6 +4401,13 @@ bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
 
 bool ViewportApp::initialize() {
   run_config = viewport::RunConfig::from_environment();
+  // M11: resolve the document cube type id for the render mirror.
+  if (const auto* cube_type =
+          omnicpp::editor::default_registry().find_by_name(
+              std::string(omnicpp::editor::kTypeCube));
+      cube_type != nullptr) {
+    kDocumentCubeTypeId = cube_type->id;
+  }
   // A/B selection must be known BEFORE setup_lighting() picks the pipeline
   // family; the flag read later in this function only adds telemetry.
   legacy_lighting = std::getenv("OMNICPP_LEGACY_LIGHTING") != nullptr;

@@ -729,6 +729,7 @@ add_executable(omnicpp_unit_tests
     unit/test_editor_session.cpp
     unit/test_node_graph.cpp
     unit/test_node_editor.cpp
+    unit/test_inspector.cpp
     unit/test_node_persistence.cpp
     unit/test_script_module.cpp
     unit/test_input_state.cpp

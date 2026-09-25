@@ -633,4 +633,71 @@ ToolbarHit hit_test_toolbar(const ui::WidgetTree& tree,
   return ToolbarHit{};
 }
 
+void NodeEditorView::append_binding_wires(ui::PaintList& list) const {
+  if (binding_wires_.empty()) {
+    return;
+  }
+  for (const auto& anchor : binding_wires_) {
+    // Resolve the source OUTPUT pin center for this binding.
+    const NodeView* v = find_view(anchor.node_id);
+    const auto* node =
+        v != nullptr ? graph_->find(anchor.node_id) : nullptr;
+    if (v == nullptr || node == nullptr) {
+      continue;  // dangling binding: skipped, never fatal
+    }
+    const auto* type = graph_->find_type(node->type);
+    if (type == nullptr) {
+      continue;
+    }
+    float x0 = v->x;
+    float y0 = v->y;
+    int out_idx = -1;
+    for (std::size_t i = 0; i < type->outputs.size(); ++i) {
+      if (type->outputs[i].name == anchor.pin) {
+        out_idx = static_cast<int>(i);
+      }
+    }
+    if (out_idx < 0) {
+      continue;  // unknown pin (e.g. node type changed): skipped
+    }
+    x0 += kCardW;
+    y0 += pin_offset(out_idx) + kPinH * 0.5F;
+    // Dashed amber band: same visual language as the pending wire, distinct
+    // hue (amber = graph->scene flow, gray = graph-internal flow).
+    const float dx = anchor.x - x0;
+    const float dy = anchor.y - y0;
+    constexpr int kSegs = 8;
+    for (int s = 0; s < kSegs; ++s) {
+      const float t0 = static_cast<float>(s) / kSegs;
+      const float t1 = static_cast<float>(s + 1) / kSegs;
+      const float ax = x0 + dx * t0;
+      const float ay = y0 + dy * t0;
+      const float bx = x0 + dx * t1;
+      const float by = y0 + dy * t1;
+      // Skip every other segment (dash pattern).
+      if ((s & 1) != 0) {
+        continue;
+      }
+      ui::PaintRect r;
+      r.x = ax;
+      r.y = ay;
+      r.w = bx - ax;
+      r.h = by - ay;
+      r.color = 0xFFE0B060;
+      if (r.w < 1.0F) {
+        const float nx = ay - by;
+        const float ny = bx - ax;
+        const float len = std::sqrt(nx * nx + ny * ny);
+        if (len > 0.001F) {
+          r.x -= nx / len * 1.0F;
+          r.y -= ny / len * 1.0F;
+          r.w = nx / len * 2.0F;
+          r.h = ny / len * 2.0F;
+        }
+      }
+      list.rects.push_back(r);
+    }
+  }
+}
+
 }  // namespace omnicpp::editor

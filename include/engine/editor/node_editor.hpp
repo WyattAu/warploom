@@ -87,6 +87,23 @@ class NodeEditorView final {
   void set_show_values(bool on) noexcept { show_values_ = on; }
   [[nodiscard]] bool show_values() const noexcept { return show_values_; }
 
+  // -- Binding wires (M11) -------------------------------------------------
+  //! Destination anchor for a binding wire (the inspector chip's left edge).
+  struct BindingWire final {
+    std::uint64_t node_id{0};
+    std::string pin{};
+    float x{0.0F};
+    float y{0.0F};
+  };
+  //! Sets the binding wires (one per graph->scene binding; the inspector
+  //! computes the chip positions). Cleared by set_binding_wires({}).
+  void set_binding_wires(std::vector<BindingWire> wires) {
+    binding_wires_ = std::move(wires);
+  }
+  //! Emits one dashed amber wire per binding from the source node's
+  //! output pin to the anchor. Missing pins are skipped (dangling binding).
+  void append_binding_wires(ui::PaintList& list) const;
+
   void set_wire_style(WireStyle style) noexcept { wire_style_ = style; }
   [[nodiscard]] WireStyle wire_style() const noexcept { return wire_style_; }
 
@@ -187,6 +204,8 @@ class NodeEditorView final {
   PinRef pending_pin_{};
   float drag_x_{0.0F};
   float drag_y_{0.0F};
+  // Binding wires (M11): one per graph->scene binding.
+  std::vector<BindingWire> binding_wires_{};
 };
 
 //! Switches `canvas` to absolute layout (free placement of children).

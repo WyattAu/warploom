@@ -15,6 +15,7 @@ add_library(omnicpp_runtime SHARED
     core/node_graph.cpp
     core/script_module.cpp
     editor/node_editor.cpp
+    editor/inspector.cpp
     ui/widget.cpp
     ui/glyphs.cpp
     core/input_translators.cpp
