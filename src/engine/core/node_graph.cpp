@@ -85,7 +85,8 @@ std::string g_error_scratch;
 
 void NodeGraph::register_type(NodeType type) {
   OMNICPP_CONTRACT(!type.name.empty());
-  OMNICPP_CONTRACT(type.evaluate != nullptr && "node type needs evaluate");
+  OMNICPP_CONTRACT((type.evaluate != nullptr || type.context_evaluate != nullptr) &&
+                   "node type needs evaluate or context_evaluate");
   for (const auto& existing : types_) {
     OMNICPP_CONTRACT(existing.name != type.name && "duplicate node type");
   }
@@ -172,6 +173,13 @@ bool NodeGraph::remove_node(std::uint64_t id) {
 }
 
 const GraphNode* NodeGraph::find(std::uint64_t id) const {
+  const auto it = std::find_if(
+      nodes_.begin(), nodes_.end(),
+      [id](const GraphNode& n) { return n.id == id; });
+  return it == nodes_.end() ? nullptr : &*it;
+}
+
+GraphNode* NodeGraph::find_mut(std::uint64_t id) {
   const auto it = std::find_if(
       nodes_.begin(), nodes_.end(),
       [id](const GraphNode& n) { return n.id == id; });
@@ -305,6 +313,12 @@ std::vector<std::uint64_t> NodeGraph::topological_order() const {
 }
 
 bool NodeGraph::evaluate(std::string& error) {
+  return evaluate_with(context_, error);
+}
+
+bool NodeGraph::evaluate_with(const GraphContext& context,
+                              std::string& error) {
+  context_ = context;
   const auto order = topological_order();
   if (order.size() != nodes_.size()) {
     error = "eval: graph contains a cycle";
@@ -342,7 +356,12 @@ bool NodeGraph::evaluate(std::string& error) {
       }
       node->inputs[link.to_pin] = out_it->second;
     }
-    type->evaluate(node->params, node->inputs, node->outputs);
+    if (type->context_evaluate) {
+      type->context_evaluate(node->params, node->inputs, node->outputs,
+                             context);
+    } else {
+      type->evaluate(node->params, node->inputs, node->outputs);
+    }
   }
   return true;
 }
@@ -515,6 +534,229 @@ void register_builtin_node_types(NodeGraph& graph) {
       outputs["x"] = NodeValue::make_number(v.vec[0]);
       outputs["y"] = NodeValue::make_number(v.vec[1]);
       outputs["z"] = NodeValue::make_number(v.vec[2]);
+    };
+    graph.register_type(std::move(t));
+  }
+
+  // ---------------- M13 node library ----------------
+  // Context-driven (time/tick) and pure utility nodes. All deterministic:
+  // time/tick come from the host-supplied GraphContext, never wall clocks.
+  {
+    NodeType t;
+    t.name = "time";
+    t.doc = "Emits the graph evaluation time (seconds) and tick count";
+    t.outputs = {{"seconds", PinType::Number}, {"tick", PinType::Number}};
+    t.context_evaluate = [](const std::map<std::string, NodeValue>&,
+                            const std::map<std::string, NodeValue>&,
+                            std::map<std::string, NodeValue>& outputs,
+                            const GraphContext& context) {
+      outputs["seconds"] = NodeValue::make_number(context.time);
+      outputs["tick"] = NodeValue::make_number(static_cast<double>(context.tick));
+    };
+    graph.register_type(std::move(t));
+  }
+  {
+    NodeType t;
+    t.name = "sine_osc";
+    t.doc =
+        "Sinusoid: amplitude * sin(2*pi*frequency*time + phase_deg). "
+        "Params: amplitude, frequency (Hz), phase_deg";
+    t.outputs = {{"value", PinType::Number}};
+    t.context_evaluate = [](const std::map<std::string, NodeValue>& params,
+                            const std::map<std::string, NodeValue>&,
+                            std::map<std::string, NodeValue>& outputs,
+                            const GraphContext& context) {
+      const auto num = [&](std::string_view k, double dflt) {
+        const auto it = params.find(std::string(k));
+        return it != params.end() ? it->second.number : dflt;
+      };
+      const double amplitude = num("amplitude", 1.0);
+      const double frequency = num("frequency", 1.0);
+      const double phase_deg = num("phase_deg", 0.0);
+      constexpr double kPi = 3.14159265358979323846;
+      outputs["value"] = NodeValue::make_number(
+          amplitude * std::sin(2.0 * kPi * frequency * context.time +
+                               phase_deg * kPi / 180.0));
+    };
+    graph.register_type(std::move(t));
+  }
+  {
+    NodeType t;
+    t.name = "saw_osc";
+    t.doc =
+        "Sawtooth in [-amplitude, amplitude): period 1/frequency seconds. "
+        "Params: amplitude, frequency";
+    t.outputs = {{"value", PinType::Number}};
+    t.context_evaluate = [](const std::map<std::string, NodeValue>& params,
+                            const std::map<std::string, NodeValue>&,
+                            std::map<std::string, NodeValue>& outputs,
+                            const GraphContext& context) {
+      const auto num = [&](std::string_view k, double dflt) {
+        const auto it = params.find(std::string(k));
+        return it != params.end() ? it->second.number : dflt;
+      };
+      const double amplitude = num("amplitude", 1.0);
+      const double frequency = num("frequency", 1.0);
+      const double phase =
+          frequency > 0.0
+              ? std::fmod(context.time * frequency, 1.0)
+              : 0.0;
+      outputs["value"] =
+          NodeValue::make_number(amplitude * (2.0 * phase - 1.0));
+    };
+    graph.register_type(std::move(t));
+  }
+  {
+    NodeType t;
+    t.name = "pulse";
+    t.doc =
+        "Square pulse: on (true) for period*threshold, then off. "
+        "Params: frequency (Hz), threshold (0..1)";
+    t.outputs = {{"on", PinType::Bool}, {"value", PinType::Number}};
+    t.context_evaluate = [](const std::map<std::string, NodeValue>& params,
+                            const std::map<std::string, NodeValue>&,
+                            std::map<std::string, NodeValue>& outputs,
+                            const GraphContext& context) {
+      const auto num = [&](std::string_view k, double dflt) {
+        const auto it = params.find(std::string(k));
+        return it != params.end() ? it->second.number : dflt;
+      };
+      const double frequency = num("frequency", 1.0);
+      const double threshold = num("threshold", 0.5);
+      const double phase =
+          frequency > 0.0
+              ? std::fmod(context.time * frequency, 1.0)
+              : 0.0;
+      const bool on = phase < threshold;
+      outputs["on"] = NodeValue::make_bool(on);
+      outputs["value"] = NodeValue::make_number(on ? 1.0 : 0.0);
+    };
+    graph.register_type(std::move(t));
+  }
+  {
+    NodeType t;
+    t.name = "logic_and";
+    t.doc = "a AND b (missing inputs are false)";
+    t.inputs = {{"a", PinType::Bool}, {"b", PinType::Bool}};
+    t.outputs = {{"out", PinType::Bool}};
+    t.evaluate = [](const std::map<std::string, NodeValue>&,
+                    const std::map<std::string, NodeValue>& inputs,
+                    std::map<std::string, NodeValue>& outputs) {
+      const auto get = [&](std::string_view k) {
+        const auto it = inputs.find(std::string(k));
+        return it != inputs.end() && it->second.boolean;
+      };
+      outputs["out"] = NodeValue::make_bool(get("a") && get("b"));
+    };
+    graph.register_type(std::move(t));
+  }
+  {
+    NodeType t;
+    t.name = "logic_or";
+    t.doc = "a OR b";
+    t.inputs = {{"a", PinType::Bool}, {"b", PinType::Bool}};
+    t.outputs = {{"out", PinType::Bool}};
+    t.evaluate = [](const std::map<std::string, NodeValue>&,
+                    const std::map<std::string, NodeValue>& inputs,
+                    std::map<std::string, NodeValue>& outputs) {
+      const auto get = [&](std::string_view k) {
+        const auto it = inputs.find(std::string(k));
+        return it != inputs.end() && it->second.boolean;
+      };
+      outputs["out"] = NodeValue::make_bool(get("a") || get("b"));
+    };
+    graph.register_type(std::move(t));
+  }
+  {
+    NodeType t;
+    t.name = "logic_not";
+    t.doc = "NOT a";
+    t.inputs = {{"a", PinType::Bool}};
+    t.outputs = {{"out", PinType::Bool}};
+    t.evaluate = [](const std::map<std::string, NodeValue>&,
+                    const std::map<std::string, NodeValue>& inputs,
+                    std::map<std::string, NodeValue>& outputs) {
+      const auto it = inputs.find("a");
+      outputs["out"] =
+          NodeValue::make_bool(!(it != inputs.end() && it->second.boolean));
+    };
+    graph.register_type(std::move(t));
+  }
+  {
+    NodeType t;
+    t.name = "compare";
+    t.doc = "a >= b (number comparison)";
+    t.inputs = {{"a", PinType::Number}, {"b", PinType::Number}};
+    t.outputs = {{"out", PinType::Bool}};
+    t.evaluate = [](const std::map<std::string, NodeValue>&,
+                    const std::map<std::string, NodeValue>& inputs,
+                    std::map<std::string, NodeValue>& outputs) {
+      const auto num = [&](std::string_view k) {
+        const auto it = inputs.find(std::string(k));
+        return it != inputs.end() ? it->second.number : 0.0;
+      };
+      outputs["out"] = NodeValue::make_bool(num("a") >= num("b"));
+    };
+    graph.register_type(std::move(t));
+  }
+  {
+    NodeType t;
+    t.name = "lerp";
+    t.doc = "a + (b - a) * clamp(t, 0, 1)";
+    t.inputs = {{"a", PinType::Number},
+                {"b", PinType::Number},
+                {"t", PinType::Number}};
+    t.outputs = {{"out", PinType::Number}};
+    t.evaluate = [](const std::map<std::string, NodeValue>&,
+                    const std::map<std::string, NodeValue>& inputs,
+                    std::map<std::string, NodeValue>& outputs) {
+      const auto num = [&](std::string_view k, double dflt) {
+        const auto it = inputs.find(std::string(k));
+        return it != inputs.end() ? it->second.number : dflt;
+      };
+      const double a = num("a", 0.0);
+      const double b = num("b", 0.0);
+      const double x = num("t", 0.0);
+      const double clamped = x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x);
+      outputs["out"] = NodeValue::make_number(a + (b - a) * clamped);
+    };
+    graph.register_type(std::move(t));
+  }
+  {
+    NodeType t;
+    t.name = "noise1d";
+    t.doc =
+        "Deterministic value noise over time: lattice hash (PCG), cosine "
+        "interpolation. Params: amplitude, frequency";
+    t.outputs = {{"value", PinType::Number}};
+    t.context_evaluate = [](const std::map<std::string, NodeValue>& params,
+                            const std::map<std::string, NodeValue>&,
+                            std::map<std::string, NodeValue>& outputs,
+                            const GraphContext& context) {
+      const auto num = [&](std::string_view k, double dflt) {
+        const auto it = params.find(std::string(k));
+        return it != params.end() ? it->second.number : dflt;
+      };
+      const double amplitude = num("amplitude", 1.0);
+      const double frequency = num("frequency", 1.0);
+      const double x = context.time * frequency;
+      const double i = std::floor(x);
+      const double frac = x - i;
+      const auto lattice = [](double n) {
+        // PCG-style integer hash on the lattice index (deterministic).
+        std::uint64_t z =
+            static_cast<std::uint64_t>(n) * 6364136223846793005ULL +
+            1442695040888963407ULL;
+        z ^= z >> 33U;
+        z *= 0xFF51AFD7ED558CCDULL;
+        z ^= z >> 33U;
+        return static_cast<double>(z % 2000000ULL) / 1000000.0 - 1.0;
+      };
+      const double a = lattice(i);
+      const double b = lattice(i + 1.0);
+      const double t2 = frac * frac * (3.0 - 2.0 * frac);  // smoothstep
+      outputs["value"] =
+          NodeValue::make_number(amplitude * (a + (b - a) * t2));
     };
     graph.register_type(std::move(t));
   }

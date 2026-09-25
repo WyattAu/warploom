@@ -4312,7 +4312,12 @@ void tick_node_editor(ViewportApp& app) {
   }
 
   std::string error;
-  (void)app.node_graph->evaluate(error);
+  // M13: context-driven nodes (time/oscillators/noise) use the sim clock +
+  // frame counter — deterministic, host-driven, never wall clocks.
+  omnicpp::editor::GraphContext ctx;
+  ctx.time = static_cast<double>(app.time);
+  ctx.tick = static_cast<std::uint64_t>(app.frame_index);
+  (void)app.node_graph->evaluate_with(ctx, error);
   // M10: graph->scene bridge — bindings write their pin values into object
   // properties every tick (insertion order, deterministic; skipped bindings
   // are non-fatal).

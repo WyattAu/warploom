@@ -43,6 +43,13 @@ struct NodePinDesc final {
   PinType type{PinType::Number};
 };
 
+//! Evaluation context: engine-provided inputs available to every node.
+//! Deterministic — hosts drive time/tick, never the nodes themselves.
+struct GraphContext final {
+  double time{0.0};        //!< simulation seconds
+  std::uint64_t tick{0};   //!< evaluation counter
+};
+
 //! One evaluated node instance.
 struct GraphNode final {
   std::uint64_t id{0};
@@ -70,9 +77,16 @@ struct NodeType final {
   //! Pure function: params + inputs -> outputs. Must not capture or mutate
   //! graph state. Type errors (wrong pin type) are contract violations.
   std::function<void(const std::map<std::string, NodeValue>& params,
-                     const std::map<std::string, NodeValue>& inputs,
-                     std::map<std::string, NodeValue>& outputs)>
+                    const std::map<std::string, NodeValue>& inputs,
+                    std::map<std::string, NodeValue>& outputs)>
       evaluate;
+  //! Context-aware alternative (M13): time/tick-driven node types set this
+  //! INSTEAD of `evaluate`. Called with the graph's current context.
+  std::function<void(const std::map<std::string, NodeValue>& params,
+                    const std::map<std::string, NodeValue>& inputs,
+                    std::map<std::string, NodeValue>& outputs,
+                    const GraphContext& context)>
+      context_evaluate;
 };
 
 class NodeGraph final {
@@ -123,8 +137,18 @@ class NodeGraph final {
   //! Evaluates in deterministic topological order. Returns false when the
   //! graph has an unknown node type or a type mismatch (`error` set).
   [[nodiscard]] bool evaluate(std::string& error);
+  //! Same traversal with a caller-supplied context (time/tick-driven nodes).
+  [[nodiscard]] bool evaluate_with(const GraphContext& context,
+                                   std::string& error);
+  //! Context used by plain evaluate() (defaults to zeros).
+  void set_context(const GraphContext& context) { context_ = context; }
+  [[nodiscard]] const GraphContext& context() const noexcept {
+    return context_;
+  }
 
   [[nodiscard]] const GraphNode* find(std::uint64_t id) const;
+  //! Mutable lookup (host-side input seeding, tests).
+  [[nodiscard]] GraphNode* find_mut(std::uint64_t id);
   [[nodiscard]] std::size_t node_count() const noexcept {
     return nodes_.size();
   }
@@ -162,6 +186,7 @@ class NodeGraph final {
   std::vector<NodeType> types_{};
   std::vector<GraphNode> nodes_{};  // id order (sorted by construction)
   std::vector<GraphLink> links_{};
+  GraphContext context_{};
   std::uint64_t next_node_id_{1};
   std::uint64_t version_{0};
 };
