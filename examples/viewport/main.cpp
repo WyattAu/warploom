@@ -825,6 +825,87 @@ bool poll_events(ViewportApp& app) {
     } else if (type == XCB_KEY_PRESS) {
       const auto* key =
           reinterpret_cast<const xcb_key_press_event_t*>(event);
+      // M12: active param editor consumes keys first. Enter (36) commits,
+      // ESC (9) cancels (without closing the window), printable + backspace
+      // edit the buffer. XCB keycodes: digits 10..19 map to 1..9,0;
+      // letters use the evdev+offset layout via the host lookup below.
+      if (app.node_editor && app.node_view != nullptr &&
+          app.node_view->param_edit_active()) {
+        if (key->detail == 36) {  // Return: commit through the session
+          std::uint64_t nid = 0;
+          std::string param;
+          double number = 0.0;
+          std::string text;
+          bool is_number = false;
+          if (app.node_view->end_param_edit(
+                  true, nullptr, nid, param, number, text, is_number)) {
+            omnicpp::core::ControlCommand cmd;
+            cmd.kind = omnicpp::core::ControlCommand::Kind::SetNodeParam;
+            cmd.numbers[0] = static_cast<double>(nid);
+            cmd.number_count = 1;
+            cmd.text = param;
+            if (is_number) {
+              cmd.numbers[1] = number;
+              cmd.number_count = 2;
+            } else {
+              cmd.text2 = text;
+            }
+            {
+              std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+              app.edit_queue.push_back({std::move(cmd)});
+            }
+            app.node_dirty = true;
+          }
+          free(event);
+          return true;
+        }
+        if (key->detail == 9) {  // ESC: cancel the edit, keep the window
+          std::uint64_t nid = 0;
+          std::string param;
+          double number = 0.0;
+          std::string text;
+          bool is_number = false;
+          (void)app.node_view->end_param_edit(
+              false, nullptr, nid, param, number, text, is_number);
+          free(event);
+          return true;
+        }
+        if (key->detail == 22) {  // BackSpace
+          app.node_view->edit_param_char('\b');
+          free(event);
+          return true;
+        }
+        static constexpr char kDigitRow[10] = {'1', '2', '3', '4', '5',
+                                               '6', '7', '8', '9', '0'};
+        if (key->detail >= 10 && key->detail <= 19) {
+          app.node_view->edit_param_char(kDigitRow[key->detail - 10]);
+          free(event);
+          return true;
+        }
+        if (key->detail == 60) app.node_view->edit_param_char('.');
+        if (key->detail == 61) app.node_view->edit_param_char('-');
+        if ((key->detail >= 10 && key->detail <= 19) || key->detail == 60 ||
+            key->detail == 61) {
+          free(event);
+          return true;
+        }
+        // Letters (evdev q..p=24..33, a..l=38..46, z..m=52..58) are accepted
+        // for string params; numbers ignore them at parse time.
+        static const char* kRows = "qqq";  // placeholder to keep structure
+        (void)kRows;
+        if (key->detail >= 24 && key->detail <= 58) {
+          static const char kLower[] =
+              "?qwertzuiop?asdfghjkl?yxcvbnm";  // index by keycode-24
+          const char c = kLower[key->detail - 24];
+          if (c != '?') {
+            app.node_view->edit_param_char(c);
+            free(event);
+            return true;
+          }
+        }
+        free(event);
+        return true;  // swallow all other keys while editing
+      }
       // ESC (keycode 9 on most servers).
       if (key->detail == 9) {
         free(event);
@@ -933,6 +1014,16 @@ bool poll_events(ViewportApp& app) {
           if (tb.action != TA::None) {
             free(event);
             return true;  // toolbar consumed the click
+          }
+        }
+        // M12: param rows next — click begins editing (one at a time).
+        {
+          const auto prow = app.node_view->param_row_at(app.mouse_x,
+                                                        app.mouse_y);
+          if (prow.valid()) {
+            (void)app.node_view->begin_param_edit(prow.node_id, prow.param);
+            free(event);
+            return true;
           }
         }
         const auto pin = app.node_view->pin_at(app.mouse_x, app.mouse_y);
@@ -4345,6 +4436,7 @@ void tick_node_editor(ViewportApp& app) {
     }
     app.node_view->set_binding_wires(std::move(wires));
     app.node_view->append_binding_wires(app.ui_paint);
+    app.node_view->append_param_editor(app.ui_paint);
   }
 }
 

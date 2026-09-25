@@ -614,3 +614,108 @@ TEST(NodeEditorWires, LinkHitTestFindsNearestWithinThreshold) {
   // Far away: none.
   EXPECT_EQ(view.link_at(5000.0F, 5000.0F, 12.0F), g.links().size());
 }
+
+// ============================================================================
+// M12: inline param editing (hit-test, edit lifecycle, commit payload)
+// ============================================================================
+
+namespace {
+
+using ed::NodeEditorView;
+using ed::NodeValue;
+using ed::NodeGraph;
+namespace ui = omnicpp::ui;
+
+TEST(NodeParamEdit, RowHitTestResolvesNodeAndParam) {
+  NodeGraph g;
+  ed::register_builtin_node_types(g);
+  const auto cn = g.add_node("const_number",
+                             {{"value", NodeValue::make_number(2.5)}});
+  NodeEditorView view(g);
+  ui::WidgetTree tree;
+  const auto canvas = tree.add(ui::Widget{}, tree.root());
+  ed::pin_canvas(tree, canvas);
+  view.rebuild(tree, canvas);
+  ui::compute_layout(tree, 1280.0F, 720.0F);
+
+  // The param row sits directly under the card body; card default grid
+  // position for id 1 is (40 + (1%5)*170, 40) = (210, 40); rows at y 96..110.
+  const auto hit = view.param_row_at(210.0F + 20.0F, 96.0F + 7.0F);
+  ASSERT_TRUE(hit.valid());
+  EXPECT_EQ(hit.node_id, cn);
+  EXPECT_EQ(hit.param, "value");
+
+  // Misses: above the rows (card body) and far away.
+  EXPECT_FALSE(view.param_row_at(210.0F + 20.0F, 40.0F + 10.0F).valid());
+  EXPECT_FALSE(view.param_row_at(900.0F, 900.0F).valid());
+}
+
+TEST(NodeParamEdit, EditLifecycleProducesSetNodeParamPayload) {
+  NodeGraph g;
+  ed::register_builtin_node_types(g);
+  const auto cn = g.add_node("const_number",
+                             {{"value", NodeValue::make_number(2.5)}});
+  NodeEditorView view(g);
+
+  ASSERT_TRUE(view.begin_param_edit(cn, "value"));
+  EXPECT_TRUE(view.param_edit_active());
+  // Second begin fails (one editor at a time).
+  EXPECT_FALSE(view.begin_param_edit(cn, "value"));
+
+  // Clear the prefilled text and type a new number.
+  for (int i = 0; i < 20; ++i) view.edit_param_char('\b');
+  for (char c : std::string("7.25")) view.edit_param_char(c);
+
+  std::uint64_t nid = 0;
+  std::string param;
+  double number = 0.0;
+  std::string text;
+  bool is_number = false;
+  ASSERT_TRUE(view.end_param_edit(true, nullptr, nid, param, number,
+                                  text, is_number));
+  EXPECT_EQ(nid, cn);
+  EXPECT_EQ(param, "value");
+  EXPECT_DOUBLE_EQ(number, 7.25);
+  EXPECT_TRUE(is_number);
+  EXPECT_FALSE(view.param_edit_active());
+
+  // Non-numeric input for a number param fails and cancels the edit.
+  ASSERT_TRUE(view.begin_param_edit(cn, "value"));
+  for (int i = 0; i < 20; ++i) view.edit_param_char('\b');
+  for (char c : std::string("abc")) view.edit_param_char(c);
+  EXPECT_FALSE(view.end_param_edit(true, nullptr, nid, param, number,
+                                   text, is_number));
+  EXPECT_FALSE(view.param_edit_active());
+
+  // Cancel path leaves nothing pending.
+  ASSERT_TRUE(view.begin_param_edit(cn, "value"));
+  EXPECT_FALSE(view.end_param_edit(false, nullptr, nid, param, number,
+                                   text, is_number));
+  EXPECT_FALSE(view.param_edit_active());
+}
+
+TEST(NodeParamEdit, EditorRendersHighlightedRowWithBuffer) {
+  NodeGraph g;
+  ed::register_builtin_node_types(g);
+  const auto cn = g.add_node("const_number",
+                             {{"value", NodeValue::make_number(1.0)}});
+  NodeEditorView view(g);
+  ui::WidgetTree tree;
+  const auto canvas = tree.add(ui::Widget{}, tree.root());
+  ed::pin_canvas(tree, canvas);
+  view.rebuild(tree, canvas);
+
+  ASSERT_TRUE(view.begin_param_edit(cn, "value"));
+  // Clear the prefilled current-value text, then type a new one.
+  for (int i = 0; i < 20; ++i) view.edit_param_char('\b');
+  view.edit_param_char('9');
+  ui::PaintList paint;
+  view.append_param_editor(paint);
+  ASSERT_GE(paint.rects.size(), 1U);
+  ASSERT_GE(paint.texts.size(), 1U);
+  // The editor shows the typed buffer plus a caret underscore.
+  EXPECT_EQ(paint.texts.back().text, "9_");
+  EXPECT_EQ(paint.rects.back().color, 0xFF2E6E4EU);
+}
+
+}  // namespace

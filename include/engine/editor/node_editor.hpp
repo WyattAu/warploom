@@ -25,6 +25,7 @@
 #include <string>
 #include <vector>
 
+#include "engine/core/control_server.hpp"
 #include "engine/core/node_graph.hpp"
 #include "engine/ui/widget.hpp"
 
@@ -103,6 +104,9 @@ class NodeEditorView final {
   //! Emits one dashed amber wire per binding from the source node's
   //! output pin to the anchor. Missing pins are skipped (dangling binding).
   void append_binding_wires(ui::PaintList& list) const;
+  //! When a param edit is active: renders the in-progress editor (highlight
+  //! rect + typed text) over the row. Call after paint, before wires.
+  void append_param_editor(ui::PaintList& list) const;
 
   void set_wire_style(WireStyle style) noexcept { wire_style_ = style; }
   [[nodiscard]] WireStyle wire_style() const noexcept { return wire_style_; }
@@ -142,6 +146,35 @@ class NodeEditorView final {
   //! Hit-test: topmost node whose card contains the point, else 0.
   //! Ties resolve to the highest node id (deterministic).
   [[nodiscard]] std::uint64_t hit_test(float x, float y) const;
+
+  // -- Param editing (M12) -------------------------------------------------
+  //! A param row hit: the node and the param key whose row contains the
+  //! point (rows render under the card body when the node has params).
+  struct ParamRowHit final {
+    std::uint64_t node_id{0};
+    std::string param{};
+    [[nodiscard]] bool valid() const noexcept { return node_id != 0U; }
+  };
+  //! Resolves (x, y) against param rows (topmost card wins, ascending id
+  //! order otherwise). Invalid when the point is not on a param row.
+  [[nodiscard]] ParamRowHit param_row_at(float x, float y) const;
+  //! Begins editing the given param: the row becomes a 12-char text field
+  //! pre-filled with the current value's text. One editor at a time.
+  //! Returns false when the node/param is unknown or already editing.
+  bool begin_param_edit(std::uint64_t node_id, const std::string& param);
+  //! Appends/erases a character ('\b' erases). No-ops when not editing.
+  void edit_param_char(char c);
+  //! Commits the edit by building a SetNodeParam command payload. Returns
+  //! false (and cancels) when not editing or the text does not parse.
+  //! On success `out_kind`, `out_numbers`, `out_count`, `out_text` carry the
+  //! exact ControlCommand payload the host should enqueue.
+  [[nodiscard]] bool end_param_edit(
+      bool commit, const omnicpp::core::ControlCommand* /*unused tag*/,
+      std::uint64_t& out_node, std::string& out_param, double& out_number,
+      std::string& out_text, bool& out_is_number);
+  [[nodiscard]] bool param_edit_active() const noexcept {
+    return edit_node_ != 0U;
+  }
 
   // -- Link dragging (M7) -------------------------------------------------
   //! Begins a link drag from an output pin. Only one drag at a time.
@@ -206,6 +239,10 @@ class NodeEditorView final {
   float drag_y_{0.0F};
   // Binding wires (M11): one per graph->scene binding.
   std::vector<BindingWire> binding_wires_{};
+  // Param-edit state (invalid node = not editing).
+  std::uint64_t edit_node_{0};
+  std::string edit_param_{};
+  std::string edit_text_{};
 };
 
 //! Switches `canvas` to absolute layout (free placement of children).

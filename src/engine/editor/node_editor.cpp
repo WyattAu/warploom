@@ -136,6 +136,25 @@ void NodeEditorView::rebuild(ui::WidgetTree& tree,
     tree.get(card_handle).w = kCardW;
     tree.get(card_handle).h = kCardH;
 
+    // M12: one param row per sorted param ("key = value"), stacked under
+    // the card. Rows are absolute children so positions stay authoritative.
+    float row_y = view.y + kCardH;
+    for (const auto& [key, value] : node.params) {
+      ui::Widget row;
+      row.kind = ui::WidgetKind::Panel;
+      row.name = "param_row_" + std::to_string(node.id) + "_" + key;
+      row.text = key + ": " + value_to_text(value);
+      row.color = 0xFF141A20U;
+      row.border_color = 0x00000000U;
+      row.fixed_w = kCardW;
+      row.fixed_h = 14.0F;
+      row.text_color = 0xFFB8C4CEU;
+      const auto row_handle = tree.add(row, card_root_);
+      tree.get(row_handle).x = view.x;
+      tree.get(row_handle).y = row_y;
+      row_y += 14.0F;
+    }
+
     views_.push_back(view);
   }
 }
@@ -451,6 +470,118 @@ std::uint64_t NodeEditorView::hit_test(float x, float y) const {
   return 0U;
 }
 
+NodeEditorView::ParamRowHit NodeEditorView::param_row_at(float x,
+                                                         float y) const {
+  ParamRowHit hit;
+  for (std::size_t i = views_.size(); i-- > 0;) {
+    const auto& v = views_[i];
+    const auto* node = graph_->find(v.node_id);
+    if (node == nullptr || node->params.empty()) {
+      continue;
+    }
+    // Row stack sits directly under the card body.
+    const float rows_top = v.y + kCardH;
+    const float rows_bottom =
+        rows_top + static_cast<float>(node->params.size()) * 14.0F;
+    if (x < v.x || x >= v.x + kCardW || y < rows_top || y >= rows_bottom) {
+      continue;
+    }
+    const std::size_t row =
+        static_cast<std::size_t>((y - rows_top) / 14.0F);
+    std::size_t p = 0;
+    for (const auto& [key, value] : node->params) {
+      (void)value;
+      if (p == row) {
+        hit.node_id = v.node_id;
+        hit.param = key;
+        return hit;
+      }
+      ++p;
+    }
+  }
+  return hit;
+}
+
+bool NodeEditorView::begin_param_edit(std::uint64_t node_id,
+                                      const std::string& param) {
+  if (edit_node_ != 0U) {
+    return false;
+  }
+  const auto* node = graph_->find(node_id);
+  if (node == nullptr || node->params.find(param) == node->params.end()) {
+    return false;
+  }
+  edit_node_ = node_id;
+  edit_param_ = param;
+  edit_text_ = value_to_text(node->params.at(param));
+  return true;
+}
+
+void NodeEditorView::edit_param_char(char c) {
+  if (edit_node_ == 0U) {
+    return;
+  }
+  if (c == '\b') {
+    if (!edit_text_.empty()) {
+      edit_text_.pop_back();
+    }
+    return;
+  }
+  if (c >= 0x20 && c < 0x7F) {
+    edit_text_.push_back(c);
+  }
+}
+
+bool NodeEditorView::end_param_edit(
+    bool commit, const omnicpp::core::ControlCommand* /*unused tag*/,
+    std::uint64_t& out_node, std::string& out_param, double& out_number,
+    std::string& out_text, bool& out_is_number) {
+  out_node = edit_node_;
+  out_param = edit_param_;
+  if (edit_node_ == 0U) {
+    return false;
+  }
+  const auto* node = graph_->find(edit_node_);
+  const auto it =
+      node != nullptr ? node->params.find(edit_param_) : node->params.end();
+  if (node == nullptr || it == node->params.end()) {
+    edit_node_ = 0;
+    edit_param_.clear();
+    edit_text_.clear();
+    return false;
+  }
+  if (!commit) {
+    edit_node_ = 0;
+    edit_param_.clear();
+    edit_text_.clear();
+    return false;
+  }
+  const PropValue::Type type = it->second.type;
+  bool parsed = false;
+  if (type == PropValue::Type::Number) {
+    try {
+      std::size_t consumed = 0;
+      const double v = std::stod(edit_text_, &consumed);
+      if (consumed == edit_text_.size() && !edit_text_.empty()) {
+        out_number = v;
+        parsed = true;
+      }
+    } catch (...) {
+    }
+  } else if (type == PropValue::Type::Bool) {
+    out_text = edit_text_;
+    parsed = out_text == "true" || out_text == "false";
+  } else {
+    out_text = edit_text_;
+    parsed = true;
+  }
+  out_is_number = type == PropValue::Type::Number;
+  edit_node_ = 0;
+  edit_param_.clear();
+  edit_text_.clear();
+  return parsed;
+}
+
 PinRef NodeEditorView::pin_at(float x, float y) const {
   for (std::size_t i = views_.size(); i-- > 0;) {
     const auto& v = views_[i];
@@ -631,6 +762,42 @@ ToolbarHit hit_test_toolbar(const ui::WidgetTree& tree,
     break;  // unknown button index: stop
   }
   return ToolbarHit{};
+}
+
+void NodeEditorView::append_param_editor(ui::PaintList& list) const {
+  if (edit_node_ == 0U) {
+    return;
+  }
+  const NodeView* v = find_view(edit_node_);
+  const auto* node = v != nullptr ? graph_->find(edit_node_) : nullptr;
+  if (v == nullptr || node == nullptr) {
+    return;
+  }
+  // Locate the edited row's y offset within the sorted param stack.
+  std::size_t row = 0;
+  for (const auto& [key, value] : node->params) {
+    (void)value;
+    if (key == edit_param_) {
+      break;
+    }
+    ++row;
+  }
+  const float ry = v->y + kCardH + static_cast<float>(row) * 14.0F;
+  ui::PaintRect editor;
+  editor.x = v->x;
+  editor.y = ry;
+  editor.w = kCardW;
+  editor.h = 14.0F;
+  editor.color = 0xFF2E6E4EU;
+  editor.border_color = 0xFF66D9A0U;
+  editor.border_width = 1.0F;
+  list.rects.push_back(editor);
+  ui::PaintText text;
+  text.x = v->x + 4.0F;
+  text.y = ry + 1.0F;
+  text.text = edit_text_ + "_";
+  text.color = 0xFFEFFFFFFFU;
+  list.texts.push_back(text);
 }
 
 void NodeEditorView::append_binding_wires(ui::PaintList& list) const {
