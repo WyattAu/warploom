@@ -6,19 +6,8 @@ cmake_minimum_required(VERSION 3.20)
 # ============================================================================
 
 add_library(omnicpp_runtime SHARED
-    core/engine.cpp
-    core/input_state.cpp
-    core/control_server.cpp
-    core/document.cpp
-    core/property_registry.cpp
-    core/command_recorder.cpp
-    core/editor_session.cpp
-    core/node_graph.cpp
-    core/replay_scrubber.cpp
-    core/script_module.cpp
     editor/node_editor.cpp
     editor/inspector.cpp
-    core/input_translators.cpp
     render/vulkan_ibl_baker.cpp
     asset/gltf_importer.cpp
     asset/gltf_animation.cpp
@@ -56,21 +45,24 @@ target_include_directories(omnicpp_runtime
 
 # S1: the UI toolkit lives in its own module (modules/ui) and is consumed
 # as Warploom::ui. PUBLIC: editor/render headers include warploom/ui/*.
-target_link_libraries(omnicpp_runtime PUBLIC Warploom::ui)
+# S2: the determinism substrate lives in modules/core as Warploom::core;
+# PUBLIC for the same reason (editor/render/engine headers include
+# warploom/core/* — via the include/engine/core forwarders today).
+target_link_libraries(omnicpp_runtime PUBLIC Warploom::ui Warploom::core)
 
 # ============================================================================
 # Module-alias libraries (publishing units)
 #
 # omnicpp_runtime is ONE shared object (one ABI, one dlopen surface), but
-# downstream projects consume it through these alias targets so a future
-# physical split (omnicpp_core / omnicpp_ui / omnicpp_render shared
-# libraries) changes no consumer CMake. Dependency direction is enforced
-# by convention today (core has no ui/render includes) and becomes
-# link-time enforcement when the split happens.
+# downstream projects consume it through these alias targets. S2 phase A:
+# warploom-core is now a REAL library (modules/core, Warploom::core) and
+# omnicpp_runtime links it PUBLIC — the runtime itself shrinks to the
+# integration layer (editor widgets + render + asset).
 # ============================================================================
 
-add_library(omnicpp_core ALIAS omnicpp_runtime)
-add_library(omnicpp_ui ALIAS omnicpp_runtime)
+# (CMake forbids alias-of-alias, so these point at the real module targets.)
+add_library(omnicpp_core ALIAS warploom_core)
+add_library(omnicpp_ui ALIAS warploom_ui)
 add_library(omnicpp_render_lib ALIAS omnicpp_runtime)
 
 # Link Vulkan if available (gracefully returns errors when absent)

@@ -1,7 +1,7 @@
 //! @file command_recorder.cpp
 //! @brief warploom-replay-v1 writer (docs/replay-format.md is the contract).
 
-#include "engine/core/command_recorder.hpp"
+#include "warploom/core/command_recorder.hpp"
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -11,7 +11,7 @@
 #include <cstring>
 #include <fstream>
 
-#include "engine/core/replay_scrubber.hpp"
+#include "warploom/core/replay_scrubber.hpp"
 
 namespace omnicpp::editor {
 

@@ -2,7 +2,7 @@
 //! @brief Virtual input driver script loading (kept out of the header so the
 //!        JSONL parser stays out of hot paths).
 
-#include "engine/core/input_state.hpp"
+#include "warploom/core/input_state.hpp"
 
 #include <algorithm>
 #include <cstdio>

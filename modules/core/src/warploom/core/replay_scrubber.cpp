@@ -6,11 +6,11 @@
 //! document must re-serialize to the exact same bytes (schema round-trip
 //! integrity). Together they make a scrub provably lossless.
 
-#include "engine/core/replay_scrubber.hpp"
+#include "warploom/core/replay_scrubber.hpp"
 
 #include <utility>
 
-#include "engine/core/node_graph.hpp"
+#include "warploom/core/node_graph.hpp"
 
 namespace omnicpp::editor {
 

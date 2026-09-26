@@ -79,7 +79,14 @@ with its own tests and docs. Order = strictly increasing dependencies.
    — **DONE**: lives in `modules/ui` as package `WarploomUI`, exported
    target `Warploom::ui`, namespace `warploom::ui`; standalone
    find_package consumption proven.
-3. Then core, render, editor in dependency order
+3. Then core — **phase A DONE**: lives in `modules/core` as package
+   `WarploomCore`, exported target `Warploom::core`, 22-header allowlist,
+   compat forwarders keep `include/engine/core/*` valid (zero churn at
+   84 include sites); namespaces stay `omnicpp::*` until phase B (the
+   identifier migration, wired to the S-decision pass — the
+   `omnicpp::editor` namespace spans non-core widget code, so the
+   namespace split waits for S4; see `docs/warploom-core-plan.md`).
+   Then render, editor in dependency order
 4. Aggregate package last; viewport moves to `find_package`
 
 ## Non-goals

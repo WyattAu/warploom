@@ -2,7 +2,7 @@
 //! @brief Node-graph bodies (see the header): registry, cycle-checked
 //!        linking, deterministic topological evaluation, serialization.
 
-#include "engine/core/node_graph.hpp"
+#include "warploom/core/node_graph.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -10,8 +10,8 @@
 #include <set>
 #include <utility>
 
-#include "engine/core/contract.hpp"
-#include "engine/core/script_module.hpp"
+#include "warploom/core/contract.hpp"
+#include "warploom/core/script_module.hpp"
 
 namespace omnicpp::editor {
 

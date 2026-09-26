@@ -168,6 +168,8 @@ find_package(Threads REQUIRED)
 if(OMNICPP_BUILD_ENGINE)
     # S1: warploom-ui is a real module (Warploom::ui) consumed by the runtime.
     add_subdirectory(modules/ui)
+    # S2: the determinism substrate is a real module (Warploom::core).
+    add_subdirectory(modules/core)
     add_subdirectory(src/engine)
     # Headless proof host (P0): runs the live-proof harness in CI —
     # EditorSession + ControlServer, no GPU/window. Builds on every leg.

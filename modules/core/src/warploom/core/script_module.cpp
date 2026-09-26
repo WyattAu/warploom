@@ -1,7 +1,7 @@
 //! @file script_module.cpp
 //! @brief Script-module host bodies (see the header).
 
-#include "engine/core/script_module.hpp"
+#include "warploom/core/script_module.hpp"
 
 #include <dlfcn.h>
 
@@ -9,7 +9,7 @@
 #include <mutex>
 #include <utility>
 
-#include "engine/core/contract.hpp"
+#include "warploom/core/contract.hpp"
 
 namespace omnicpp::core {
 

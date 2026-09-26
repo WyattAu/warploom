@@ -6,7 +6,7 @@
 //! stay dependency-free and strict about the accepted shape. Unknown fields
 //! are ignored (forward compatibility); unknown commands are protocol errors.
 
-#include "engine/core/control_server.hpp"
+#include "warploom/core/control_server.hpp"
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -16,7 +16,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "engine/core/contract.hpp"
+#include "warploom/core/contract.hpp"
 
 namespace omnicpp::core {
 

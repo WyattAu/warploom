@@ -6,7 +6,9 @@ milestone is not done until its proof is machine-checked and documented.
 
 ## Where we are
 
-S1 done: `warploom-ui` is a real installed package. A verified vertical
+S1 done: `warploom-ui` is a real installed package. S2 phase A done:
+`warploom-core` (the determinism substrate: runtime, document/JSON, ECS,
+node graph, scrubber/recorder, protocol/session) is the second one. A verified vertical
 slice through render / simulate / edit / verify:
 deterministic runtime with replay + state hashing, archetype ECS,
 deterministic physics, node graph (20+ node types) with graph→property
@@ -36,19 +38,36 @@ or a time-warp boundary.
       (4/4 suites on every CI leg) AND standalone: install +
       `find_package(WarploomUI CONFIG REQUIRED)` + linked consumer
       binary runs.
-- [ ] **S2 `warploom-core`** — determinism substrate. Largest surface;
-      land after S1 validates the process. Starts with a written
-      dependency analysis (runtime, replay/scrubber, hashing, ECS,
-      document in core; node graph and physics boundaries settled on
-      paper first; control server stays out — transport, not
-      determinism).
+- [x] **S2 `warploom-core` (phase A)** — extracted the determinism
+      substrate as the second real module (`Warploom::core`, own package
+      config + version file, own test target, 22-header allowlist).
+      Gate first: `docs/warploom-core-plan.md` (measured audit: 11 TUs,
+      84 include sites, zero render/ui leakage; key finding —
+      `omnicpp::editor` is NOT a pure core namespace, so the namespace
+      move is deferred to phase B with the S-decision pass, and the
+      truthful editor split becomes an S4 prerequisite). Phase A kept
+      identifiers stable: compat forwarders under `include/engine/core/`
+      left all 84 include sites compiling unchanged. Verified: 5/5
+      suites on all four CI legs (20 total, incl. the new
+      `WarploomCoreTests`), standalone install +
+      `find_package(WarploomCore CONFIG REQUIRED)` consumer runs
+      (`CORE_CONSUMER_OK`), the S1 ui-consumer proof still passes, and
+      37/37 live-proof assertions on hardware.
+- [ ] **S2 phase B: identifier migration** — `warploom::core` /
+      `warploom::editor` namespaces in core headers + compat aliases,
+      wired to the S-decision pass so external adopters see one
+      coherent identity change. Phase A gate (green four-leg matrix) is
+      already banked.
 - [ ] **S4 `warploom-editor`** — session, control server/protocol, node
       editor, inspector. **Comes third, before S3** (decided): the hot
       development path (W/G/protocol work) lands in this module, so
       extracting it means future features stop growing the viewport
       `main.cpp`. Headless-testable, hence lower-risk than render.
       *Forces* decomposing the 5.3k-line viewport `main.cpp`; budget a
-      session for that alone.
+      session for that alone. **S4 also owns the truthful
+      `omnicpp::editor` namespace split** (document/session types vs
+      widget types — see docs/warploom-core-plan.md) since the widget
+      layer moves in the same pass.
 - [ ] **S3 `warploom-render`** — Vulkan context/renderer, render graph,
       scene structures. Runs after S4, against a stable editor boundary.
 - [ ] **S5 `warploom-engine` aggregate** — viewport and tests move to

@@ -1,11 +1,11 @@
 //! @file property_registry.cpp
 //! @brief Registry bodies + the M0→document bridge (see the header).
 
-#include "engine/core/property_registry.hpp"
+#include "warploom/core/property_registry.hpp"
 
 #include <cmath>
 
-#include "engine/core/contract.hpp"
+#include "warploom/core/contract.hpp"
 
 namespace omnicpp::editor {
 

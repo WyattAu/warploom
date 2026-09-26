@@ -9,7 +9,7 @@
 //! micro-optimization here; the hot path (per-frame telemetry) lives
 //! elsewhere.
 
-#include "engine/core/document.hpp"
+#include "warploom/core/document.hpp"
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -24,7 +24,7 @@
 #include <fstream>
 #include <iterator>
 
-#include "engine/core/contract.hpp"
+#include "warploom/core/contract.hpp"
 
 namespace omnicpp::editor {
 

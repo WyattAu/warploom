@@ -1,7 +1,7 @@
 //! @file input_translators.cpp
 //! @brief XCB keyboard/mouse + Linux joystick translation into InputState.
 
-#include "engine/core/input_translators.hpp"
+#include "warploom/core/input_translators.hpp"
 
 #include <cmath>
 

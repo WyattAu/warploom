@@ -3,7 +3,7 @@
 //!        document writer's conventions (sorted keys via std::map, %.17g
 //!        doubles, minimal escaping) so snapshots stay byte-deterministic.
 
-#include "engine/core/editor_session.hpp"
+#include "warploom/core/editor_session.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -17,9 +17,9 @@
 #include <cstring>
 #include <fstream>
 
-#include "engine/core/contract.hpp"
-#include "engine/core/control_server.hpp"
-#include "engine/core/replay_scrubber.hpp"
+#include "warploom/core/contract.hpp"
+#include "warploom/core/control_server.hpp"
+#include "warploom/core/replay_scrubber.hpp"
 
 namespace omnicpp::editor {
 
