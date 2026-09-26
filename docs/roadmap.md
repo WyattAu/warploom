@@ -75,12 +75,16 @@ makes it visible.
       and wire-payload parser coverage), a 23-assertion live socket proof
       (`scrub_to(999)` rejected; post-warp `list_objects` byte-equal to the
       baseline), 4/4 suites on all four CI legs.
-- [ ] **W2 protocol record/replay** — `start_capture`/`stop_capture`
-      protocol commands producing portable replay files (schema named
-      `warploom-replay-v1` now, so the identifier decision doesn't leak
-      in late): command log + embedded scrubber checkpoints, composing
-      with the G1 document format; scrubber can load them. **Next up,
-      before S2.**
+- [ ] **W2 protocol record/replay** — opens with the format spec
+      (`docs/replay-format.md`, `warploom-replay-v1`): JSONL, header line
+      + frame-stamped command log + embedded scrubber checkpoints
+      reusing the `{frame, hash, json}` record shape; settles the
+      checkpoint-density question (capture-start + explicit snapshots vs
+      every-K-frames) on paper before any code. Then protocol v1.7
+      (`start_capture`/`stop_capture`/`capture_status`), a session-side
+      recorder, and scrubber load. Exit proof: a recorded session loaded
+      into a second fresh instance scrubs and re-applies to byte-identical
+      state hashes. **Next up, before S2.**
 - [ ] **W3 graph-triggered replay events** — node outputs mark scrub
       points / trigger on replay (e.g. pulse node tags "collision frame").
 
@@ -119,6 +123,11 @@ makes it visible.
 
 ## P — Platform & packaging
 
+- [ ] **P0 CI matrix** — GitHub Actions owns the headless legs (Clang,
+      TSan, ASan-UBSan); a self-hosted runner on the hardware box owns
+      the Vulkan leg and the live-proof harness. Milestone verification
+      becomes continuous instead of hand-run per session — targeted
+      before 0.1, since it also gates any external contributor.
 - [ ] **P1 WASM leg green** — software rasterizer is deterministic;
       headless WASM CI target.
 - [ ] **P2 native Wayland surface** — XCB today; surface creation is
@@ -163,8 +172,9 @@ P1–P4) is post-0.1 by definition.
    editor module; render extraction runs against a stable editor
    boundary; S5 flips the viewport to `find_package` and the
    S-decision (flags, binaries, repo rename, with shim) rides with it.
-5. **P after S5** — platform legs and adoption tooling target published
-   modules, not the monolith.
+5. **P0 (CI) alongside W2** — the proof harness and automation land
+   together; the remaining P items (WASM, Wayland, adoption, docs)
+   come after S5, targeting published modules, not the monolith.
 
 ## Non-goals (for now)
 
