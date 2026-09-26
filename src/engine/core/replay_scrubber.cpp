@@ -58,6 +58,26 @@ bool ReplayScrubber::capture(std::uint64_t frame, const SceneDocument& doc,
   return true;
 }
 
+void ReplayScrubber::insert(std::uint64_t frame, std::uint64_t hash,
+                            std::string json) {
+  ReplayCheckpoint cp;
+  cp.frame = frame;
+  cp.hash = hash;
+  cp.json = std::move(json);
+  for (auto& existing : ring_) {
+    if (existing.frame == frame) {
+      existing = std::move(cp);
+      return;
+    }
+  }
+  if (ring_.size() < capacity_) {
+    ring_.push_back(std::move(cp));
+  } else {
+    ring_[write_index_] = std::move(cp);
+    write_index_ = (write_index_ + 1U) % capacity_;
+  }
+}
+
 bool ReplayScrubber::restore(std::uint64_t frame, SceneDocument& doc,
                              std::string& error) {
   const ReplayCheckpoint* cp = find_checkpoint(frame);

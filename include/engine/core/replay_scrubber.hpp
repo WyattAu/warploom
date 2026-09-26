@@ -83,6 +83,18 @@ class ReplayScrubber final {
   [[nodiscard]] bool empty() const noexcept { return ring_.empty(); }
   void clear() noexcept { ring_.clear(); }
 
+  //! W2: inserts a checkpoint captured ELSEWHERE (e.g. hydrated from a
+  //! warploom-replay-v1 file) without re-serializing. The caller supplies
+  //! the bytes and their capture-time hash; no document needed. Same-frame
+  //! insertion replaces (newest wins), the ring evicts oldest when full —
+  //! identical ring semantics to capture().
+  void insert(std::uint64_t frame, std::uint64_t hash, std::string json);
+
+  //! Read-only ring view (ring order, oldest first) for writers/tests.
+  [[nodiscard]] const std::vector<ReplayCheckpoint>& items() const noexcept {
+    return ring_;
+  }
+
   //! Default ring size: 4096 checkpoints of a typical 2-8 KiB document is
   //! 8-32 MiB worst case — bounded, documented, and generous for scrubbing.
   static constexpr std::size_t kDefaultCheckpointCapacity = 4096;

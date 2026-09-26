@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <set>
 #include <string>
 
 #include "engine/core/control_server.hpp"
@@ -274,6 +275,78 @@ TEST_F(ControlServerTest, ScrubCommandsParseWirePayloads) {
 
   EXPECT_EQ(host.last_scrub_start_, 0U);  // default-0 case ran last
   EXPECT_EQ(host.last_scrub_to_, 42U);
+  ::close(fd);
+}
+
+//! Protocol invariant (roadmap, verification discipline): EVERY entry in
+//! the public wire-name table must parse over a real socket — recognition
+//! never fails for a table name, every name is unique, the reverse lookup
+//! agrees, and kinds with parser-required payloads reject their absence
+//! with the documented error. This is the generic form of the W1 "frame"
+//! gap: enforced by a test walking the REAL table, not by memory.
+TEST_F(ControlServerTest, WireParityEveryKindParsesAndEnforcesPayloads) {
+  FakeHost host;
+  ControlServer server;
+  std::string error;
+  ASSERT_TRUE(server.start(path_, error)) << error;
+  const int fd = connect_client();
+  (void)server.poll(host);
+  (void)read_message(fd);  // swallow welcome
+
+  const auto& table = omnicpp::core::ControlCommand::kind_names();
+  ASSERT_FALSE(table.empty());
+
+  // Names unique; reverse lookup agrees.
+  std::set<std::string> names;
+  for (const auto& entry : table) {
+    EXPECT_TRUE(names.insert(entry.name).second) << "duplicate " << entry.name;
+    EXPECT_STREQ(ControlCommand::kind_name(entry.kind), entry.name)
+        << "reverse lookup broken for " << entry.name;
+  }
+
+  int id = 100;
+  for (const auto& entry : table) {
+    const std::string line =
+        std::string("{\"cmd\":\"") + entry.name + "\",\"id\":" +
+        std::to_string(id++) + "}";
+    const std::string reply = roundtrip(fd, line, server, host);
+    // Recognition: a table name must never be "unknown".
+    EXPECT_EQ(reply.find("unknown command"), std::string::npos)
+        << entry.name << " not recognized -> " << reply;
+    // Payload enforcement: kinds with parser-required fields must reject
+    // the bare invocation with their documented message.
+    const char* expect_missing = nullptr;
+    switch (entry.kind) {
+      case ControlCommand::Kind::GetObject:
+      case ControlCommand::Kind::DestroyObject:
+      case ControlCommand::Kind::Select:
+        expect_missing = "missing \\\"oid\\\"";
+        break;
+      case ControlCommand::Kind::UnbindNodeProperty:
+        expect_missing = "unbind_node_property needs";
+        break;
+      case ControlCommand::Kind::NodeRemove:
+      case ControlCommand::Kind::SetNodeParam:
+      case ControlCommand::Kind::SetNodePosition:
+        expect_missing = "missing \\\"nid\\\"";
+        break;
+      case ControlCommand::Kind::LinkNodes:
+        expect_missing = "missing \\\"from\\\"";
+        break;
+      case ControlCommand::Kind::ScrubTo:
+        expect_missing = "missing \\\"frame\\\"";
+        break;
+      case ControlCommand::Kind::BindNodeProperty:
+        expect_missing = "bind_node_property needs";
+        break;
+      default:
+        break;
+    }
+    if (expect_missing != nullptr) {
+      EXPECT_NE(reply.find(expect_missing), std::string::npos)
+          << entry.name << " accepted an empty payload -> " << reply;
+    }
+  }
   ::close(fd);
 }
 

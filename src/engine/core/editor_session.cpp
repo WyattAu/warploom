@@ -12,8 +12,14 @@
 #include <utility>
 #include <vector>
 
+#include <algorithm>
+#include <cerrno>
+#include <cstring>
+#include <fstream>
+
 #include "engine/core/contract.hpp"
 #include "engine/core/control_server.hpp"
+#include "engine/core/replay_scrubber.hpp"
 
 namespace omnicpp::editor {
 
@@ -134,6 +140,7 @@ omnicpp::core::ControlReply EditorSession::on_control(
 
   // 1. Document edits.
   if (handle_edit(command, reply)) {
+    if (reply.ok && !replaying_) recorder_.record(command);
     return reply;
   }
   // 2. Queries.
@@ -141,7 +148,9 @@ omnicpp::core::ControlReply EditorSession::on_control(
     return reply;
   }
   // 3. Session passthrough.
-  return handle_session(command);
+  reply = handle_session(command);
+  if (reply.ok && !replaying_) recorder_.record(command);
+  return reply;
 }
 
 bool EditorSession::handle_edit(
@@ -467,6 +476,12 @@ bool EditorSession::handle_edit(
         reply.error = error;
         return true;
       }
+      // W2: an explicit scrub_start during capture embeds a checkpoint at
+      // the scrub TARGET frame (capture-start + explicit-snapshots density,
+      // per the format spec; targets never collide, logical frames would).
+      if (recorder_.active()) {
+        recorder_.embed_checkpoint(doc_, frame);
+      }
       reply.ok = true;
       reply.detail = "checkpoint @" + std::to_string(frame);
       return true;
@@ -502,6 +517,60 @@ bool EditorSession::handle_edit(
              ",\"capacity\":" + std::to_string(scrubber_.capacity()) + "}";
       reply.ok = true;
       reply.detail = std::move(out);
+      return true;
+    }
+    // v1.7 record/replay (W2).
+    case CK::StartCapture: {
+      const auto frame = command.number_count > 0U
+                             ? static_cast<std::uint64_t>(command.numbers[0])
+                             : 0U;
+      std::string error;
+      if (!capture_start(frame, command.text, error)) {
+        reply.ok = false;
+        reply.error = error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "recording from frame " + std::to_string(frame);
+      return true;
+    }
+    case CK::StopCapture: {
+      std::string error;
+      if (!capture_stop(command.text, error)) {
+        reply.ok = false;
+        reply.error = error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "captured " + command.text;
+      return true;
+    }
+    case CK::CaptureStatus: {
+      std::string out = "{\"recording\":";
+      out += recorder_.active() ? "true" : "false";
+      out += ",\"frame\":" + std::to_string(recorder_.frame());
+      out += ",\"commands\":" + std::to_string(recorder_.command_count());
+      out += ",\"checkpoints\":" +
+              std::to_string(recorder_.checkpoint_count());
+      out += "}";
+      reply.ok = true;
+      reply.detail = std::move(out);
+      return true;
+    }
+    case CK::LoadReplay: {
+      if (command.text.empty()) {
+        reply.ok = false;
+        reply.error = "load_replay needs \"path\"";
+        return true;
+      }
+      std::string error;
+      if (!load_replay(command.text, error)) {
+        reply.ok = false;
+        reply.error = error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "replay loaded " + command.text;
       return true;
     }
     case CK::BindNodeProperty: {
@@ -853,6 +922,236 @@ bool EditorSession::scrub_to(std::uint64_t frame, std::string& error) {
   if (selected_id_ != 0U && doc_.find(selected_id_) == nullptr) {
     selected_id_ = 0;
   }
+  return true;
+}
+
+// ============================================================================
+// W2: warploom-replay-v1 loading (docs/replay-format.md is the contract)
+// ============================================================================
+
+namespace {
+
+//! Flat-JSON scans over one replay line (same approach as the protocol's
+//! parse_command: targeted, dependency-free, strict about accepted shape).
+
+[[nodiscard]] bool replay_find_string(const std::string& line, const char* key,
+                                      std::string& out) {
+  const std::string needle = "\"" + std::string(key) + "\":";
+  const std::size_t key_pos = line.find(needle);
+  if (key_pos == std::string::npos) return false;
+  const std::size_t open = line.find('"', key_pos + needle.size());
+  if (open == std::string::npos) return false;
+  const std::size_t close = line.find('"', open + 1);
+  if (close == std::string::npos) return false;
+  out = line.substr(open + 1, close - open - 1);
+  return true;
+}
+
+[[nodiscard]] bool replay_find_u64(const std::string& line, const char* key,
+                                   std::uint64_t& out) {
+  const std::string needle = "\"" + std::string(key) + "\":";
+  const std::size_t key_pos = line.find(needle);
+  if (key_pos == std::string::npos) return false;
+  try {
+    std::size_t consumed = 0;
+    const unsigned long long v =
+        std::stoull(line.substr(key_pos + needle.size()), &consumed);
+    out = static_cast<std::uint64_t>(v);
+    return consumed > 0U;
+  } catch (const std::exception&) {
+    return false;
+  }
+}
+
+//! Parses the positional "n":[...] array (optional; empty when absent).
+[[nodiscard]] bool replay_find_numbers(const std::string& line,
+                                       std::vector<double>& out) {
+  out.clear();
+  const std::size_t key_pos = line.find("\"n\":[");
+  if (key_pos == std::string::npos) return true;
+  std::size_t cur = key_pos + 5U;
+  while (cur < line.size() && line[cur] != ']') {
+    try {
+      std::size_t consumed = 0;
+      out.push_back(std::stod(line.substr(cur), &consumed));
+      cur += consumed;
+    } catch (const std::exception&) {
+      return false;
+    }
+    while (cur < line.size() && (line[cur] == ',' || line[cur] == ' ')) {
+      ++cur;
+    }
+  }
+  return cur < line.size();  // found the closing ']'
+}
+
+}  // namespace
+
+bool EditorSession::load_replay(const std::string& path,
+                                std::string& error) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in.is_open()) {
+    error = "load_replay: cannot open \"" + path + "\": " +
+            std::strerror(errno);
+    return false;
+  }
+  std::vector<std::string> lines;
+  std::string text((std::istreambuf_iterator<char>(in)),
+                   std::istreambuf_iterator<char>());
+  for (std::size_t pos = 0; pos < text.size();) {
+    const std::size_t nl = text.find('\n', pos);
+    const std::size_t end = nl == std::string::npos ? text.size() : nl;
+    if (end > pos) lines.emplace_back(text.substr(pos, end - pos));
+    if (nl == std::string::npos) break;
+    pos = nl + 1;
+  }
+  if (lines.size() < 2U) {
+    error = "load_replay: truncated file (need header + end)";
+    return false;
+  }
+
+  // Header contract.
+  std::string record;
+  std::string format;
+  std::uint64_t schema_version = 0;
+  if (!replay_find_string(lines.front(), "record", record) ||
+      record != "header" ||
+      !replay_find_string(lines.front(), "format", format) ||
+      format != "warploom-replay-v1" ||
+      !replay_find_u64(lines.front(), "schema_version", schema_version) ||
+      schema_version != 1U) {
+    error = "load_replay: not a warploom-replay-v1 file";
+    return false;
+  }
+  // Truncation guard: the last line must be the end record.
+  if (!replay_find_string(lines.back(), "record", record) ||
+      record != "end") {
+    error = "load_replay: truncated file (missing end record)";
+    return false;
+  }
+
+  // Pass 1: collect command records and checkpoint pairs.
+  struct LoggedCommand {
+    std::uint64_t seq{0};
+    omnicpp::core::ControlCommand command{};
+  };
+  std::vector<LoggedCommand> logged;
+  struct HydratedCheckpoint {
+    std::uint64_t frame{0};
+    std::uint64_t hash{0};
+    std::string json{};
+  };
+  std::vector<HydratedCheckpoint> hydrated;
+  std::uint64_t expected_seq = 0;
+  for (std::size_t i = 1; i + 1 < lines.size(); ++i) {
+    const std::string& line = lines[i];
+    if (!replay_find_string(line, "record", record)) {
+      error = "load_replay: line " + std::to_string(i + 1) +
+              " has no record field";
+      return false;
+    }
+    if (record == "cmd") {
+      std::string name;
+      std::uint64_t seq = 0;
+      std::vector<double> numbers;
+      if (!replay_find_string(line, "cmd", name) ||
+          !replay_find_u64(line, "seq", seq) ||
+          !replay_find_numbers(line, numbers)) {
+        error = "load_replay: malformed cmd record at line " +
+                std::to_string(i + 1);
+        return false;
+      }
+      LoggedCommand entry;
+      entry.seq = seq;
+      entry.command.number_count =
+          static_cast<std::uint32_t>(
+              std::min(numbers.size(), size_t{8}));
+      for (std::uint32_t n = 0; n < entry.command.number_count; ++n) {
+        entry.command.numbers[n] = numbers[n];
+      }
+      (void)replay_find_string(line, "t", entry.command.text);
+      (void)replay_find_string(line, "t2", entry.command.text2);
+      (void)replay_find_string(line, "t3", entry.command.text3);
+      for (const auto& kn : omnicpp::core::ControlCommand::kind_names()) {
+        if (name == kn.name) {
+          entry.command.kind = kn.kind;
+          break;
+        }
+      }
+      if (entry.command.kind == omnicpp::core::ControlCommand::Kind::Unknown) {
+        error = "load_replay: unknown command \"" + name + "\" at line " +
+                std::to_string(i + 1);
+        return false;
+      }
+      if (seq != expected_seq++) {
+        error = "load_replay: seq gap at line " + std::to_string(i + 1);
+        return false;
+      }
+      logged.push_back(std::move(entry));
+    } else if (record == "ckpt") {
+      HydratedCheckpoint cp;
+      std::string hash_text;
+      if (!replay_find_u64(line, "frame", cp.frame) ||
+          !replay_find_string(line, "hash", hash_text)) {
+        error = "load_replay: malformed ckpt record at line " +
+                std::to_string(i + 1);
+        return false;
+      }
+      if (i + 1 >= lines.size()) {
+        error = "load_replay: ckpt at line " + std::to_string(i + 1) +
+                " has no document line";
+        return false;
+      }
+      cp.json = lines[++i];  // the raw document bytes
+      cp.hash = std::stoull(hash_text);
+      if (fnv1a64(cp.json.data(), cp.json.size()) != cp.hash) {
+        error = "load_replay: checkpoint hash mismatch at line " +
+                std::to_string(i);
+        return false;
+      }
+      hydrated.push_back(std::move(cp));
+    }
+    // "header"/"end" records: already validated.
+  }
+
+  // Hydrate the scrubber: the loaded session's timeline REPLACES the ring.
+  scrubber_.clear();
+  for (const auto& cp : hydrated) {
+    scrubber_.insert(cp.frame, cp.hash, cp.json);
+  }
+
+  // Re-apply needs a defined start state: restore the EARLIEST checkpoint
+  // (the capture-start snapshot; `start` embeds at the start frame before
+  // any command exists, so earliest == opening) before replaying the log.
+  if (!hydrated.empty()) {
+    std::string restore_error;
+    if (!scrubber_.restore(hydrated.front().frame, doc_, restore_error)) {
+      error = "load_replay: opening checkpoint failed to restore: " +
+              restore_error;
+      return false;
+    }
+    stack_ = CommandStack(doc_);
+    selected_id_ = 0;
+  }
+
+  // Re-apply the command log in seq order through the normal mutation
+  // authority. Re-applied commands are NOT re-recorded (spec): the guard
+  // flag suppresses the on_control hook. A failed command aborts the load;
+  // state is whatever the prefix produced and the hydrated checkpoints
+  // remain available for scrub_to recovery.
+  replaying_ = true;
+  for (const auto& entry : logged) {
+    const auto reply = on_control(entry.command);
+    if (!reply.ok) {
+      replaying_ = false;
+      error = "load_replay: command seq " + std::to_string(entry.seq) +
+              " (" +
+              omnicpp::core::ControlCommand::kind_name(entry.command.kind) +
+              ") failed: " + reply.error;
+      return false;
+    }
+  }
+  replaying_ = false;
   return true;
 }
 

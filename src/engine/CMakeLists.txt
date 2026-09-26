@@ -11,6 +11,7 @@ add_library(omnicpp_runtime SHARED
     core/control_server.cpp
     core/document.cpp
     core/property_registry.cpp
+    core/command_recorder.cpp
     core/editor_session.cpp
     core/node_graph.cpp
     core/replay_scrubber.cpp

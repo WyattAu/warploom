@@ -739,10 +739,12 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
       case CK::Pause:
         app_.control_paused_ = true;
         reply.detail = "paused";
+        app_.editor.record_external(command);  // W2: host-handled, recorded
         break;
       case CK::Resume:
         app_.control_paused_ = false;
         reply.detail = "resumed";
+        app_.editor.record_external(command);  // W2: host-handled, recorded
         break;
       case CK::Step:
         app_.control_steps_requested_ +=
@@ -753,6 +755,7 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
                        std::to_string(command.number_count > 0
                                           ? static_cast<unsigned>(command.numbers[0])
                                           : 1U);
+        app_.editor.record_external(command);  // W2: host-handled, recorded
         break;
       case CK::SetCamera: {
         if (command.number_count >= 6U) {
@@ -824,6 +827,17 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
       case CK::ScrubInfo:
         reply = app_.editor.on_control(command);
         break;
+      // W2: record/replay rides the session (recorder observes post-parse);
+      // LoadReplay and ScrubTo are structural (document replaced/rebuilt).
+      case CK::StartCapture:
+      case CK::StopCapture:
+      case CK::CaptureStatus:
+      case CK::LoadReplay: {
+        const bool structural = command.kind == CK::LoadReplay;
+        reply = app_.editor.on_control(command);
+        if (reply.ok && structural) app_.node_dirty = true;
+        break;
+      }
       // M10: every document command delegates to the embedded EditorSession
       // — the single mutation authority. Protocol edits, mouse edits, and
       // key edits now share one CommandStack, so undo/redo cover ALL paths

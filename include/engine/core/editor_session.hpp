@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "engine/core/command_recorder.hpp"
 #include "engine/core/control_server.hpp"
 #include "engine/core/document.hpp"
 #include "engine/core/property_registry.hpp"
@@ -98,6 +99,35 @@ class EditorSession final : public omnicpp::core::ControlHost {
     return scrubber_;
   }
 
+  // -- Protocol record/replay (W2, protocol v1.7) ---------------------------
+  //! Begins recording protocol commands into a warploom-replay-v1 file
+  //! (docs/replay-format.md). Embeds the opening checkpoint at `frame`.
+  [[nodiscard]] bool capture_start(std::uint64_t frame,
+                                   const std::string& scene,
+                                   std::string& error) {
+    return recorder_.start(frame, doc_, scene, error);
+  }
+  //! Ends recording and writes the file atomically (tmp+rename, 0600).
+  //! Embeds the closing checkpoint at the current logical frame.
+  [[nodiscard]] bool capture_stop(const std::string& path,
+                                  std::string& error) {
+    return recorder_.stop(path, doc_, error);
+  }
+  [[nodiscard]] const CommandRecorder& recorder() const noexcept {
+    return recorder_;
+  }
+  //! Records a command that was handled OUTSIDE the session (the viewport
+  //! host owns pause/resume/step — the sim loop — so those never reach
+  //! on_control). Call after the host handled the command successfully;
+  //! recording semantics are identical (recorded-kinds set, frame stamps).
+  void record_external(const omnicpp::core::ControlCommand& command) {
+    if (!replaying_) recorder_.record(command);
+  }
+  //! Loads a warploom-replay-v1 file: hash-verified checkpoint hydration
+  //! + command-log re-apply in seq order (spec "Load semantics").
+  [[nodiscard]] bool load_replay(const std::string& path,
+                                 std::string& error);
+
   // -- ControlHost ---------------------------------------------------------
   [[nodiscard]] omnicpp::core::ControlReply on_control(
       const omnicpp::core::ControlCommand& command) override;
@@ -118,6 +148,8 @@ class EditorSession final : public omnicpp::core::ControlHost {
   SceneDocument doc_{};
   CommandStack stack_{doc_};
   std::uint64_t selected_id_{0};
+  CommandRecorder recorder_{};  //!< W2 capture (frame-thread-only)
+  bool replaying_{false};       //!< suppresses re-recording during load_replay
   std::vector<PropertyBinding> bindings_{};
   //! W1: checkpoint ring for hash-verified scrubbing. Frame-thread-only
   //! (all access arrives via on_control), matching the session's model.

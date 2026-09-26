@@ -20,6 +20,58 @@
 
 namespace omnicpp::core {
 
+// The single source of truth for command-name -> Kind. Public (see the
+// header): tests walk this real table to enforce the protocol invariant.
+const std::vector<ControlCommand::KindName>& ControlCommand::kind_names() {
+  static const std::vector<ControlCommand::KindName> kTable = {
+      // v1.0 session + camera + scene.
+      {Kind::Ping, "ping"},           {Kind::Pause, "pause"},
+      {Kind::Resume, "resume"},       {Kind::Step, "step"},
+      {Kind::SetCamera, "set_camera"}, {Kind::SetSun, "set_sun"},
+      {Kind::SpawnCube, "spawn_cube"}, {Kind::Capture, "capture"},
+      // v1.1 document queries + edits.
+      {Kind::ListObjects, "list_objects"},
+      {Kind::GetObject, "get_object"},
+      {Kind::SetProperty, "set_property"},
+      {Kind::DestroyObject, "destroy_object"},
+      {Kind::Undo, "undo"},           {Kind::Redo, "redo"},
+      {Kind::Schema, "schema"},       {Kind::Select, "select"},
+      // v1.3 node graph (M7).
+      {Kind::NodeAdd, "add_node"},
+      {Kind::NodeRemove, "remove_node"},
+      {Kind::LinkNodes, "link_nodes"},
+      {Kind::UnlinkNodes, "unlink_nodes"},
+      {Kind::SetNodeParam, "set_node_param"},
+      {Kind::SetNodePosition, "set_node_position"},
+      {Kind::GetGraph, "get_graph"},
+      {Kind::SaveDocument, "save_document"},
+      {Kind::LoadDocument, "load_document"},
+      // v1.5 graph->scene bindings (M10).
+      {Kind::BindNodeProperty, "bind_node_property"},
+      {Kind::UnbindNodeProperty, "unbind_node_property"},
+      {Kind::ListBindings, "list_bindings"},
+      // v1.6 replay scrubbing (W1).
+      {Kind::ScrubStart, "scrub_start"},
+      {Kind::ScrubTo, "scrub_to"},
+      {Kind::ScrubInfo, "scrub_info"},
+      // v1.7 record/replay (W2).
+      {Kind::StartCapture, "start_capture"},
+      {Kind::StopCapture, "stop_capture"},
+      {Kind::CaptureStatus, "capture_status"},
+      {Kind::LoadReplay, "load_replay"},
+  };
+  return kTable;
+}
+
+const char* ControlCommand::kind_name(Kind kind) noexcept {
+  for (const auto& entry : kind_names()) {
+    if (entry.kind == kind) {
+      return entry.name;
+    }
+  }
+  return "unknown";
+}
+
 namespace {
 
 //! Flat-JSON scans (same approach as input_state.cpp's script parser).
@@ -77,51 +129,12 @@ namespace {
   }
   (void)find_unsigned_field(line, "id", command.id);
 
-  struct Mapping {
-    const char* name;
-    ControlCommand::Kind kind;
-  };
-  constexpr Mapping kMappings[] = {
-      {"ping", ControlCommand::Kind::Ping},
-      {"pause", ControlCommand::Kind::Pause},
-      {"resume", ControlCommand::Kind::Resume},
-      {"step", ControlCommand::Kind::Step},
-      {"set_camera", ControlCommand::Kind::SetCamera},
-      {"set_sun", ControlCommand::Kind::SetSun},
-      {"spawn_cube", ControlCommand::Kind::SpawnCube},
-      {"capture", ControlCommand::Kind::Capture},
-      {"list_objects", ControlCommand::Kind::ListObjects},
-      {"get_object", ControlCommand::Kind::GetObject},
-      {"set_property", ControlCommand::Kind::SetProperty},
-      {"destroy_object", ControlCommand::Kind::DestroyObject},
-      {"undo", ControlCommand::Kind::Undo},
-      {"redo", ControlCommand::Kind::Redo},
-      {"schema", ControlCommand::Kind::Schema},
-      {"select", ControlCommand::Kind::Select},
-      // v1.3 node graph (M7).
-      {"add_node", ControlCommand::Kind::NodeAdd},
-      {"remove_node", ControlCommand::Kind::NodeRemove},
-      {"link_nodes", ControlCommand::Kind::LinkNodes},
-      {"unlink_nodes", ControlCommand::Kind::UnlinkNodes},
-      {"set_node_param", ControlCommand::Kind::SetNodeParam},
-      {"set_node_position", ControlCommand::Kind::SetNodePosition},
-      {"get_graph", ControlCommand::Kind::GetGraph},
-      {"save_document", ControlCommand::Kind::SaveDocument},
-      {"load_document", ControlCommand::Kind::LoadDocument},
-      // v1.5 graph->scene bindings (M10).
-      {"bind_node_property", ControlCommand::Kind::BindNodeProperty},
-      {"unbind_node_property", ControlCommand::Kind::UnbindNodeProperty},
-      {"list_bindings", ControlCommand::Kind::ListBindings},
-      // v1.6 replay scrubbing (W1).
-      {"scrub_start", ControlCommand::Kind::ScrubStart},
-      {"scrub_to", ControlCommand::Kind::ScrubTo},
-      {"scrub_info", ControlCommand::Kind::ScrubInfo},
-  };
+  // The wire-name table is public (ControlCommand::kind_names) so the
+  // wire-parity audit walks the real mapping, not a copy.
   command.kind = ControlCommand::Kind::Unknown;
-  command.number_count = 0;
-  for (const auto& mapping : kMappings) {
-    if (cmd == mapping.name) {
-      command.kind = mapping.kind;
+  for (const auto& entry : ControlCommand::kind_names()) {
+    if (cmd == entry.name) {
+      command.kind = entry.kind;
       break;
     }
   }
@@ -129,6 +142,7 @@ namespace {
     error = "unknown command \"" + cmd + "\"";
     return false;
   }
+  command.number_count = 0;
 
   // Kind-specific numeric payloads.
   double numbers[8] = {};
@@ -263,9 +277,10 @@ namespace {
       break;
     }
     case ControlCommand::Kind::ScrubStart:
-    case ControlCommand::Kind::ScrubTo: {
-      // v1.6: scrub_start defaults to frame 0 when "frame" is absent;
-      // scrub_to requires it.
+    case ControlCommand::Kind::ScrubTo:
+    case ControlCommand::Kind::StartCapture: {
+      // v1.6/v1.7: scrub_start and start_capture default to frame 0 when
+      // "frame" is absent; scrub_to requires it.
       std::uint64_t frame = 0;
       const bool have_frame = find_unsigned_field(line, "frame", frame);
       if (command.kind == ControlCommand::Kind::ScrubTo && !have_frame) {
@@ -275,6 +290,10 @@ namespace {
       numbers[count++] = static_cast<double>(frame);
       break;
     }
+    case ControlCommand::Kind::StopCapture:
+    case ControlCommand::Kind::LoadReplay:
+      take_text("path", command.text);
+      break;
     case ControlCommand::Kind::SaveDocument:
     case ControlCommand::Kind::LoadDocument:
       take_text("path", command.text);

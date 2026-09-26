@@ -103,7 +103,35 @@ struct ControlCommand final {
     ScrubStart,
     ScrubTo,
     ScrubInfo,
+    // v1.7: protocol record/replay (W2) — warploom-replay-v1 files
+    // (docs/replay-format.md).
+    //   StartCapture:  wire key "frame" (optional, default 0) -> numbers[0];
+    //                  begins recording, embeds the opening checkpoint
+    //   StopCapture:   wire key "path" (required) -> text; writes the file
+    //                  atomically (tmp+rename, 0600) and stops recording
+    //   CaptureStatus: no payload; detail = JSON {recording, frame,
+    //                  commands, checkpoints, path}
+    //   LoadReplay:    wire key "path" (required) -> text; hash-verified
+    //                  checkpoint hydration + command-log re-apply in seq
+    //                  order (docs/replay-format.md, "Load semantics")
+    StartCapture,
+    StopCapture,
+    CaptureStatus,
+    LoadReplay,
   };
+
+  //! One entry of the public command-name table: every `Kind` maps to
+  //! exactly one wire name (v1.7 exposes the table itself so tests can
+  //! enforce the protocol invariant — every kind parses and round-trips —
+  //! against the REAL table, not a copy). Ordered by protocol version.
+  struct KindName {
+    Kind kind;
+    const char* name;
+  };
+  [[nodiscard]] static const std::vector<KindName>& kind_names();
+  //! Reverse lookup: the wire name for `kind` ("unknown" for Unknown).
+  //! Used by the W2 recorder to log command names generically.
+  [[nodiscard]] static const char* kind_name(Kind kind) noexcept;
 
   Kind kind{Kind::Unknown};
   std::uint64_t id{0};  // client-assigned, echoed in the reply

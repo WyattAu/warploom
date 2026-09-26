@@ -75,16 +75,26 @@ makes it visible.
       and wire-payload parser coverage), a 23-assertion live socket proof
       (`scrub_to(999)` rejected; post-warp `list_objects` byte-equal to the
       baseline), 4/4 suites on all four CI legs.
-- [ ] **W2 protocol record/replay** — opens with the format spec
-      (`docs/replay-format.md`, `warploom-replay-v1`): JSONL, header line
-      + frame-stamped command log + embedded scrubber checkpoints
-      reusing the `{frame, hash, json}` record shape; settles the
-      checkpoint-density question (capture-start + explicit snapshots vs
-      every-K-frames) on paper before any code. Then protocol v1.7
-      (`start_capture`/`stop_capture`/`capture_status`), a session-side
-      recorder, and scrubber load. Exit proof: a recorded session loaded
-      into a second fresh instance scrubs and re-applies to byte-identical
-      state hashes. **Next up, before S2.**
+- [x] **W2 protocol record/replay** — format spec first
+      (`docs/replay-format.md`, `warploom-replay-v1`): JSONL, header +
+      positional-args command log (echoes the parsed command generically,
+      so recording cannot drift from the parser) + two-line checkpoint
+      records (marker + raw document bytes); density settled as
+      capture-start + explicit snapshots (`scrub_start` targets, stop) —
+      no periodic auto-capture in v1. Protocol v1.7
+      (`start_capture`/`stop_capture`/`capture_status`/`load_replay`);
+      load = hash-verified hydration + opening-checkpoint restore +
+      seq-order re-apply (not re-recorded; truncated files rejected).
+      Verified: 4 recorder unit tests incl. fresh-session byte-identical
+      reproduction, wire-parity audit walking the now-PUBLIC kind table
+      (`ControlCommand::kind_names`, single source of truth for the
+      parser), checked-in `tools/live_proof.py` running w1 (10), g1 (8)
+      and the W2 exit proof (19): record on instance A → load into a
+      fresh instance B → byte-identical wire state + hydrated timeline →
+      B warps back to the opening checkpoint. 4/4 suites on all four CI
+      legs. Live proof caught: host-handled `step` was invisible to the
+      session recorder (now `record_external`), and a char-vs-string
+      ternary corrupted the numbers array in records.
 - [ ] **W3 graph-triggered replay events** — node outputs mark scrub
       points / trigger on replay (e.g. pulse node tags "collision frame").
 
@@ -123,11 +133,14 @@ makes it visible.
 
 ## P — Platform & packaging
 
-- [ ] **P0 CI matrix** — GitHub Actions owns the headless legs (Clang,
-      TSan, ASan-UBSan); a self-hosted runner on the hardware box owns
-      the Vulkan leg and the live-proof harness. Milestone verification
-      becomes continuous instead of hand-run per session — targeted
-      before 0.1, since it also gates any external contributor.
+- [ ] **P0 CI completion** — REVISED after audit: the Actions matrix
+      already exists and covers all four presets headlessly (Clang, TSan,
+      ASan-UBSan, and the Vulkan leg on lavapipe software Vulkan) plus
+      docs. Remaining: (a) a headless control-host harness so
+      `tools/live_proof.py` runs in CI (the EditorSession+ControlServer
+      pair needs no GPU or window); (b) optionally a self-hosted runner
+      on the hardware box for true-NVIDIA proof. Targeted before 0.1 —
+      also gates any external contributor.
 - [ ] **P1 WASM leg green** — software rasterizer is deterministic;
       headless WASM CI target.
 - [ ] **P2 native Wayland surface** — XCB today; surface creation is
@@ -157,14 +170,13 @@ P1–P4) is post-0.1 by definition.
 
 1. **S1 done** — packaging machinery while boundaries were freshest; the
    process is validated (in-tree + standalone consumer proof).
-2. **W2 next, then S2** — W2 is short and completes the W-track's story
-   arc (record a session, scrub anywhere in it — the product pitch), and
-   replay files give S2 another real consumer to validate the core
-   boundary against. **S2 `warploom-core` follows immediately**:
+2. **W2 done; S2 next** — W2 completed the W-track's story arc (record
+   a session, scrub anywhere in it) and its replay file gave the module
+   boundary another real consumer. **S2 `warploom-core` follows now**:
    foundation-first, while the monolith is still young enough to move.
    S2 starts with a written dependency analysis (what lives in core:
-   runtime, replay/scrubber, hashing, ECS, document — and where the node
-   graph and physics land) before any target moves.
+   runtime, replay/scrubber/recorder, hashing, ECS, document — and where
+   the node graph and physics land) before any target moves.
 3. **S4 before S3** (decided) — extract where development is hottest so
    new features land in the module, not deeper into the monolith; the
    editor is headless-testable, which de-risks extraction.
