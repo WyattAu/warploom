@@ -76,6 +76,9 @@ with its own tests and docs. Order = strictly increasing dependencies.
 1. Land the rename (repo + CMake project name + include roots stay
    `engine/` internally to keep churn low)
 2. Extract `warploom-ui` first (smallest, fewest dependents) as the pilot
+   — **DONE**: lives in `modules/ui` as package `WarploomUI`, exported
+   target `Warploom::ui`, namespace `warploom::ui`; standalone
+   find_package consumption proven.
 3. Then core, render, editor in dependency order
 4. Aggregate package last; viewport moves to `find_package`
 

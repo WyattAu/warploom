@@ -32,7 +32,7 @@
 #include <string_view>
 #include <vector>
 
-namespace omnicpp::ui {
+namespace warploom::ui {
 
 //! Sentinel widget handle.
 inline constexpr std::uint32_t kInvalidWidget = 0xFFFFFFFFu;
@@ -196,4 +196,4 @@ struct PaintList final {
 void paint(const WidgetTree& tree, PaintList& out,
            const TextMetrics& metrics = {});
 
-}  // namespace omnicpp::ui
+}  // namespace warploom::ui

@@ -16,9 +16,10 @@
 #include <vulkan/vulkan.h>
 #endif
 
-#include "engine/ui/glyphs.hpp"
+#include "warploom/ui/glyphs.hpp"
 
 namespace omnicpp::render {
+namespace ui = ::warploom::ui;  // S1
 
 #ifdef OMNICPP_HAS_VULKAN
 
@@ -394,7 +395,7 @@ omnicpp::core::Result<void> VulkanUiRenderer::initialize(
 }
 
 omnicpp::core::Result<std::uint32_t> VulkanUiRenderer::upload_paint_list(
-    const omnicpp::ui::PaintList& paint, float viewport_w, float viewport_h) {
+    const warploom::ui::PaintList& paint, float viewport_w, float viewport_h) {
   (void)viewport_w;
   (void)viewport_h;
   vertices_.clear();

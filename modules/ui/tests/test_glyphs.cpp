@@ -9,11 +9,11 @@
 #include <string>
 #include <vector>
 
-#include "engine/ui/glyphs.hpp"
+#include "warploom/ui/glyphs.hpp"
 
 namespace {
 
-namespace ui = omnicpp::ui;
+namespace ui = warploom::ui;
 
 TEST(UiGlyphs, PrintableAsciiFullyCovered) {
   for (int c = 0x20; c <= 0x7E; ++c) {

@@ -11,17 +11,17 @@
 #include <string>
 #include <vector>
 
-#include "engine/ui/widget.hpp"
+#include "warploom/ui/widget.hpp"
 
 namespace {
 
-using omnicpp::ui::Align;
-using omnicpp::ui::StackDirection;
-using omnicpp::ui::TextMetrics;
-using omnicpp::ui::Widget;
-using omnicpp::ui::WidgetKind;
-using omnicpp::ui::WidgetTree;
-namespace ui = omnicpp::ui;
+using warploom::ui::Align;
+using warploom::ui::StackDirection;
+using warploom::ui::TextMetrics;
+using warploom::ui::Widget;
+using warploom::ui::WidgetKind;
+using warploom::ui::WidgetTree;
+namespace ui = warploom::ui;
 
 constexpr TextMetrics kMetrics{};  // 8 px chars, 16 px lines
 

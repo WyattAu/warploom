@@ -15,7 +15,7 @@
 namespace {
 
 namespace ed = omnicpp::editor;
-namespace ui = omnicpp::ui;
+namespace ui = warploom::ui;
 
 using ed::EditorSession;
 using ed::InspectorHit;

@@ -2,12 +2,12 @@
 //! @brief Bitmap font bodies (see the header): glyph bits, rasterization,
 //!        atlas packing.
 
-#include "engine/ui/glyphs.hpp"
+#include "warploom/ui/glyphs.hpp"
 
 #include <cstring>
 #include <vector>
 
-namespace omnicpp::ui {
+namespace warploom::ui {
 
 // 5x7 glyphs, rows top-to-bottom, 5 bits per row (MSB = leftmost pixel).
 // Printable ASCII only; everything else renders as the blank glyph.
@@ -186,4 +186,4 @@ TextMetrics font_metrics() noexcept {
   return TextMetrics{};  // 8 px advance, 16 px line — matches layout defaults
 }
 
-}  // namespace omnicpp::ui
+}  // namespace warploom::ui

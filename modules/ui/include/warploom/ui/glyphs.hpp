@@ -23,9 +23,9 @@
 #include <string_view>
 #include <vector>
 
-#include "engine/ui/widget.hpp"
+#include "warploom/ui/widget.hpp"
 
-namespace omnicpp::ui {
+namespace warploom::ui {
 
 //! Glyph cell geometry in the atlas (each glyph lives in one cell).
 inline constexpr std::uint32_t kGlyphCellW = 8;
@@ -62,4 +62,4 @@ inline constexpr std::uint32_t kAtlasH = kGlyphRows * kGlyphCellH;     // 64
 //! the same numbers so shader-side scaling agrees with layout.
 [[nodiscard]] TextMetrics font_metrics() noexcept;
 
-}  // namespace omnicpp::ui
+}  // namespace warploom::ui

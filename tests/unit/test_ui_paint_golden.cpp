@@ -14,11 +14,11 @@
 #include <vector>
 
 #include "engine/render/software_rasterizer.hpp"
-#include "engine/ui/widget.hpp"
+#include "warploom/ui/widget.hpp"
 
 namespace {
 
-namespace ui = omnicpp::ui;
+namespace ui = warploom::ui;
 using omnicpp::render::SoftwareRasterizer;
 
 constexpr ui::TextMetrics kMetrics{};  // 8 px chars, 16 px lines

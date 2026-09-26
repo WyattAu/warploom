@@ -24,9 +24,10 @@
 #include "engine/core/document.hpp"
 #include "engine/core/editor_session.hpp"
 #include "engine/core/property_registry.hpp"
-#include "engine/ui/widget.hpp"
+#include "warploom/ui/widget.hpp"
 
 namespace omnicpp::editor {
+namespace ui = ::warploom::ui;  // S1: ui module moved to the warploom namespace
 
 //! What a click on the inspector resolved to.
 struct InspectorHit final {

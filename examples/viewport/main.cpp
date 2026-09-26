@@ -257,15 +257,15 @@ struct ViewportApp {
   //! M13 fusion: graph outputs -> animation actions (OMNICPP_GRAPH_ANIM=1).
   bool graph_anim_enabled{false};
   std::unique_ptr<omnicpp::editor::GraphSignalAdapter> graph_anim;
-  std::uint32_t inspector_canvas{omnicpp::ui::kInvalidWidget};
-  std::uint32_t inspector_root{omnicpp::ui::kInvalidWidget};
-  omnicpp::ui::WidgetTree ui_tree;
-  omnicpp::ui::PaintList ui_paint;
-  std::uint32_t node_canvas{omnicpp::ui::kInvalidWidget};
+  std::uint32_t inspector_canvas{warploom::ui::kInvalidWidget};
+  std::uint32_t inspector_root{warploom::ui::kInvalidWidget};
+  warploom::ui::WidgetTree ui_tree;
+  warploom::ui::PaintList ui_paint;
+  std::uint32_t node_canvas{warploom::ui::kInvalidWidget};
   omnicpp::render::VulkanUiRenderer ui_renderer;
   //! Toolbar buttons (per registered type, then undo/redo) + their handles.
   std::vector<std::uint32_t> node_toolbar_buttons{};
-  std::uint32_t node_toolbar{omnicpp::ui::kInvalidWidget};
+  std::uint32_t node_toolbar{warploom::ui::kInvalidWidget};
   // Mouse tracking (view-space pixels) for node select/drag.
   float mouse_x{0.0f};
   float mouse_y{0.0f};
@@ -4302,7 +4302,7 @@ bool setup_node_editor(ViewportApp& app) {
 
   app.node_view = std::make_unique<omnicpp::editor::NodeEditorView>(
       *app.node_graph);
-  const auto canvas = app.ui_tree.add(omnicpp::ui::Widget{},
+  const auto canvas = app.ui_tree.add(warploom::ui::Widget{},
                                       app.ui_tree.root());
   app.node_canvas = canvas;
   app.node_view->rebuild(app.ui_tree, canvas);
@@ -4310,7 +4310,7 @@ bool setup_node_editor(ViewportApp& app) {
 
   // Toolbar: one add-button per registered type + undo/redo.
   {
-    const auto toolbar = app.ui_tree.add(omnicpp::ui::Widget{},
+    const auto toolbar = app.ui_tree.add(warploom::ui::Widget{},
                                          app.ui_tree.root());
     app.node_toolbar = toolbar;
     app.node_toolbar_buttons = omnicpp::editor::build_node_toolbar(
@@ -4347,7 +4347,7 @@ bool setup_node_editor(ViewportApp& app) {
 
   // M11: inspector/outliner panel on the right edge.
   {
-    const auto insp_canvas = app.ui_tree.add(omnicpp::ui::Widget{},
+    const auto insp_canvas = app.ui_tree.add(warploom::ui::Widget{},
                                              app.ui_tree.root());
     app.inspector_canvas = insp_canvas;
     app.inspector.rebuild(app.ui_tree, insp_canvas, doc,
@@ -4447,10 +4447,10 @@ void tick_node_editor(ViewportApp& app) {
   std::string sync_error;
   (void)app.editor.sync_graph(sync_error);
   app.node_view->sync_widgets();
-  omnicpp::ui::compute_layout(app.ui_tree, static_cast<float>(kWidth),
+  warploom::ui::compute_layout(app.ui_tree, static_cast<float>(kWidth),
                               static_cast<float>(kHeight));
   app.ui_paint.clear();
-  omnicpp::ui::paint(app.ui_tree, app.ui_paint);
+  warploom::ui::paint(app.ui_tree, app.ui_paint);
   app.node_view->append_wires(app.ui_paint);
   // M11: binding wires from output pins to the inspector chips. Anchors are
   // recomputed every frame (cheap: layout rects are fresh) so wires track

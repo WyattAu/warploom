@@ -16,8 +16,6 @@ add_library(omnicpp_runtime SHARED
     core/script_module.cpp
     editor/node_editor.cpp
     editor/inspector.cpp
-    ui/widget.cpp
-    ui/glyphs.cpp
     core/input_translators.cpp
     render/vulkan_ibl_baker.cpp
     asset/gltf_importer.cpp
@@ -53,6 +51,10 @@ target_include_directories(omnicpp_runtime
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/../../include
 )
+
+# S1: the UI toolkit lives in its own module (modules/ui) and is consumed
+# as Warploom::ui. PUBLIC: editor/render headers include warploom/ui/*.
+target_link_libraries(omnicpp_runtime PUBLIC Warploom::ui)
 
 # ============================================================================
 # Module-alias libraries (publishing units)

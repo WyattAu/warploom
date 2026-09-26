@@ -28,7 +28,7 @@
 #include "engine/core/node_graph.hpp"
 #include "engine/editor/node_editor.hpp"
 #include "engine/render/software_rasterizer.hpp"
-#include "engine/ui/widget.hpp"
+#include "warploom/ui/widget.hpp"
 
 namespace ed = omnicpp::editor;
 
@@ -37,9 +37,9 @@ namespace {
 using omnicpp::editor::NodeEditorView;
 using omnicpp::editor::NodeView;
 using omnicpp::editor::PinRef;
-using omnicpp::ui::PaintList;
-using omnicpp::ui::TextMetrics;
-using omnicpp::ui::WidgetTree;
+using warploom::ui::PaintList;
+using warploom::ui::TextMetrics;
+using warploom::ui::WidgetTree;
 
 constexpr TextMetrics kMetrics{};  // 8x16 monospace
 
@@ -60,7 +60,7 @@ omnicpp::editor::NodeGraph make_graph() {
 //! Standard rebuild: canvas as root child, cards under it.
 NodeEditorView make_view(omnicpp::editor::NodeGraph& g, WidgetTree& tree) {
   NodeEditorView view(g);
-  const auto canvas = tree.add(omnicpp::ui::Widget{}, tree.root());
+  const auto canvas = tree.add(warploom::ui::Widget{}, tree.root());
   view.rebuild(tree, canvas);
   view.sync_widgets();
   return view;
@@ -68,9 +68,9 @@ NodeEditorView make_view(omnicpp::editor::NodeGraph& g, WidgetTree& tree) {
 
 //! Full paint pipeline: layout -> widget paint -> wires+pins overlay.
 PaintList full_paint(NodeEditorView& view, WidgetTree& tree, float w, float h) {
-  omnicpp::ui::compute_layout(tree, w, h, kMetrics);
+  warploom::ui::compute_layout(tree, w, h, kMetrics);
   PaintList list;
-  omnicpp::ui::paint(tree, list, kMetrics);
+  warploom::ui::paint(tree, list, kMetrics);
   view.append_wires(list);
   return list;
 }
@@ -81,10 +81,10 @@ TEST(NodeEditorCanvas, CardsKeepAbsoluteRects) {
   auto g = make_graph();
   WidgetTree tree;
   NodeEditorView view(g);
-  const auto canvas = tree.add(omnicpp::ui::Widget{}, tree.root());
+  const auto canvas = tree.add(warploom::ui::Widget{}, tree.root());
   view.rebuild(tree, canvas);
   view.sync_widgets();
-  omnicpp::ui::compute_layout(tree, 800.0F, 600.0F, kMetrics);
+  warploom::ui::compute_layout(tree, 800.0F, 600.0F, kMetrics);
 
   // Node 1 defaults to x=40+170*1%5, y=40 — layout must NOT reposition it.
   const auto* v1 = view.find_view(1);
@@ -104,7 +104,7 @@ TEST(NodeEditorCanvas, RebuildIsIdempotent) {
   auto g = make_graph();
   WidgetTree tree;
   NodeEditorView view(g);
-  const auto canvas = tree.add(omnicpp::ui::Widget{}, tree.root());
+  const auto canvas = tree.add(warploom::ui::Widget{}, tree.root());
   view.rebuild(tree, canvas);
   view.sync_widgets();
   const PaintList first = full_paint(view, tree, 800.0F, 600.0F);
@@ -140,7 +140,7 @@ TEST(NodeEditorView, OneCardPerNodeWithTypeLabel) {
     ASSERT_NE(node, nullptr);
     const std::string expected = "node_" + std::to_string(node->id);
     const auto card = tree.find_by_name(expected);
-    EXPECT_NE(card, omnicpp::ui::kInvalidWidget);
+    EXPECT_NE(card, warploom::ui::kInvalidWidget);
     EXPECT_EQ(tree.get(card).text, node->type);
   }
 }
@@ -193,7 +193,7 @@ TEST(NodeEditorView, SelectionRestylesCardBorder) {
   ASSERT_TRUE(view.select(1));
   view.sync_widgets();
   const auto card1 = tree.find_by_name("node_1");
-  ASSERT_NE(card1, omnicpp::ui::kInvalidWidget);
+  ASSERT_NE(card1, warploom::ui::kInvalidWidget);
   EXPECT_EQ(tree.get(card1).border_color, 0xFFFFC24BU);
   EXPECT_FLOAT_EQ(tree.get(card1).border_width, 2.0F);
   // Deselect restores the default border.
@@ -295,7 +295,7 @@ TEST(NodeEditorGolden, RasterizesCardsWiresPins) {
 TEST(NodeEditorToolbar, BuildsAddButtonsPerTypePlusUndoRedo) {
   auto g = make_graph();
   WidgetTree tree;
-  const auto panel = tree.add(omnicpp::ui::Widget{}, tree.root());
+  const auto panel = tree.add(warploom::ui::Widget{}, tree.root());
   const auto buttons = omnicpp::editor::build_node_toolbar(tree, panel, g);
   // Builtin types + undo + redo.
   ASSERT_GE(buttons.size(), g.types().size() + 2U);
@@ -534,10 +534,10 @@ TEST(NodeEditorLinkDrag, IncompatibleDropDoesNotResolve) {
 TEST(NodeEditorToolbar, HitTestResolvesActions) {
   auto g = make_graph();
   WidgetTree tree;
-  const auto toolbar = tree.add(omnicpp::ui::Widget{}, tree.root());
+  const auto toolbar = tree.add(warploom::ui::Widget{}, tree.root());
   const auto buttons =
       omnicpp::editor::build_node_toolbar(tree, toolbar, g);
-  omnicpp::ui::compute_layout(tree, 800.0F, 600.0F, kMetrics);
+  warploom::ui::compute_layout(tree, 800.0F, 600.0F, kMetrics);
 
   // Click inside the FIRST type button ("+ const_number").
   const auto& w0 = tree.get(buttons[0]);
@@ -570,10 +570,10 @@ TEST(NodeEditorToolbar, AddTypeActionDrivesSession) {
   ed::register_builtin_node_types(doc.node_graph);
   ed::CommandStack stack(doc);
   WidgetTree tree;
-  const auto toolbar = tree.add(omnicpp::ui::Widget{}, tree.root());
+  const auto toolbar = tree.add(warploom::ui::Widget{}, tree.root());
   const auto buttons =
       omnicpp::editor::build_node_toolbar(tree, toolbar, doc.node_graph);
-  omnicpp::ui::compute_layout(tree, 800.0F, 600.0F, kMetrics);
+  warploom::ui::compute_layout(tree, 800.0F, 600.0F, kMetrics);
   const auto& w0 = tree.get(buttons[0]);
 
   const auto hit = omnicpp::editor::hit_test_toolbar(tree, buttons, g,
@@ -624,7 +624,7 @@ namespace {
 using ed::NodeEditorView;
 using ed::NodeValue;
 using ed::NodeGraph;
-namespace ui = omnicpp::ui;
+namespace ui = warploom::ui;
 
 TEST(NodeParamEdit, RowHitTestResolvesNodeAndParam) {
   NodeGraph g;

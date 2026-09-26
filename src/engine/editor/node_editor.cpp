@@ -22,6 +22,7 @@
 #include "engine/core/contract.hpp"
 
 namespace omnicpp::editor {
+namespace ui = ::warploom::ui;  // S1
 
 std::string value_to_text(const NodeValue& value) {
   switch (value.type) {

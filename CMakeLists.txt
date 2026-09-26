@@ -166,6 +166,8 @@ find_package(Threads REQUIRED)
 # Build Targets
 # ============================================================================
 if(OMNICPP_BUILD_ENGINE)
+    # S1: warploom-ui is a real module (Warploom::ui) consumed by the runtime.
+    add_subdirectory(modules/ui)
     add_subdirectory(src/engine)
 endif()
 

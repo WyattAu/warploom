@@ -6,7 +6,8 @@ milestone is not done until its proof is machine-checked and documented.
 
 ## Where we are
 
-A verified vertical slice through render / simulate / edit / verify:
+S1 done: `warploom-ui` is a real installed package. A verified vertical
+slice through render / simulate / edit / verify:
 deterministic runtime with replay + state hashing, archetype ECS,
 deterministic physics, node graph (20+ node types) with graph→property
 bindings driven live, protocol v1.5 editor with unified undo/redo,
@@ -21,10 +22,13 @@ is load-only.
 
 ## S — Module split (committed plan in `rename-and-modules.md`)
 
-- [ ] **S1 `warploom-ui` pilot** — extract `ui/` + `editor/glyphs` as a
-      CMake package (`*Config.cmake` + version file), own test target,
-      header allowlist. Smallest module, fewest dependents; proves the
-      machinery before the big extractions.
+- [x] **S1 `warploom-ui` pilot** — extracted `ui/` + `editor/glyphs` as a
+      CMake package (`WarploomUIConfig.cmake` + version file), own test
+      target, header allowlist, namespace `warploom::ui` (was
+      `omnicpp::ui`), includes under `warploom/ui/`. Verified in-tree
+      (4/4 suites on every CI leg) AND standalone: install +
+      `find_package(WarploomUI CONFIG REQUIRED)` + linked consumer
+      binary runs.
 - [ ] **S2 `warploom-core`** — determinism substrate. Largest surface;
       land after S1 validates the process.
 - [ ] **S3 `warploom-render`** — Vulkan context/renderer, render graph,

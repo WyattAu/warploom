@@ -27,9 +27,10 @@
 
 #include "engine/core/control_server.hpp"
 #include "engine/core/node_graph.hpp"
-#include "engine/ui/widget.hpp"
+#include "warploom/ui/widget.hpp"
 
 namespace omnicpp::editor {
+namespace ui = ::warploom::ui;  // S1: ui module moved to the warploom namespace
 
 //! Formats a NodeValue compactly for card readouts (number/bool/string/vec3).
 [[nodiscard]] std::string value_to_text(const NodeValue& value);

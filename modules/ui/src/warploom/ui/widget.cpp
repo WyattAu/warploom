@@ -14,13 +14,13 @@
 //! Preferred sizes live in w/h only between the sweeps; after arrange,
 //! w/h are final. The same tree always yields the same rects.
 
-#include "engine/ui/widget.hpp"
+#include "warploom/ui/widget.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <utility>
 
-namespace omnicpp::ui {
+namespace warploom::ui {
 
 namespace {
 
@@ -374,4 +374,4 @@ void paint(const WidgetTree& tree, PaintList& out,
   }
 }
 
-}  // namespace omnicpp::ui
+}  // namespace warploom::ui

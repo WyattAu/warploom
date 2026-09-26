@@ -19,7 +19,7 @@
 #include "engine/render/vulkan_offscreen.hpp"
 #include "engine/render/vulkan_renderer.hpp"
 #include "engine/render/vulkan_ui_renderer.hpp"
-#include "engine/ui/widget.hpp"
+#include "warploom/ui/widget.hpp"
 #include "vulkan_test_readback.hpp"
 
 #if defined(OMNICPP_HAS_VULKAN)
@@ -27,7 +27,7 @@
 
 namespace {
 
-namespace ui = omnicpp::ui;
+namespace ui = warploom::ui;
 using omnicpp::render::VulkanContext;
 using omnicpp::render::VulkanMemoryAllocator;
 using omnicpp::render::VulkanOffscreenTarget;

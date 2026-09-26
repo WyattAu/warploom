@@ -14,11 +14,12 @@
 #include <string>
 
 namespace omnicpp::editor {
+namespace ui = ::warploom::ui;  // S1
 
 namespace {
 
-using omnicpp::ui::Widget;
-using omnicpp::ui::WidgetKind;
+using warploom::ui::Widget;
+using warploom::ui::WidgetKind;
 
 Widget make_label(std::string name, std::string text, std::uint32_t color) {
   Widget w;

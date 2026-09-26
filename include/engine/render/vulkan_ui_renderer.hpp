@@ -23,9 +23,10 @@
 
 #include "engine/core/deterministic_runtime.hpp"
 #include "engine/render/vulkan_memory_allocator.hpp"
-#include "engine/ui/widget.hpp"
+#include "warploom/ui/widget.hpp"
 
 namespace omnicpp::render {
+namespace ui = ::warploom::ui;  // S1
 
 class VulkanUiRenderer final {
  public:
@@ -45,7 +46,7 @@ class VulkanUiRenderer final {
   //! Converts the paint list to quad vertices and uploads them. Returns the
   //! recorded quad count. Call every frame before record().
   [[nodiscard]] omnicpp::core::Result<std::uint32_t> upload_paint_list(
-      const omnicpp::ui::PaintList& paint, float viewport_w, float viewport_h);
+      const warploom::ui::PaintList& paint, float viewport_w, float viewport_h);
 
   //! Records the one-time atlas layout barrier (host-written -> shader
   //! read). MUST be called on `cmd` BEFORE the render pass begins — layout
