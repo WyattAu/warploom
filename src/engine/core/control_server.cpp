@@ -112,6 +112,10 @@ namespace {
       {"bind_node_property", ControlCommand::Kind::BindNodeProperty},
       {"unbind_node_property", ControlCommand::Kind::UnbindNodeProperty},
       {"list_bindings", ControlCommand::Kind::ListBindings},
+      // v1.6 replay scrubbing (W1).
+      {"scrub_start", ControlCommand::Kind::ScrubStart},
+      {"scrub_to", ControlCommand::Kind::ScrubTo},
+      {"scrub_info", ControlCommand::Kind::ScrubInfo},
   };
   command.kind = ControlCommand::Kind::Unknown;
   command.number_count = 0;
@@ -256,6 +260,19 @@ namespace {
       }
       numbers[count++] = static_cast<double>(oid);
       take_text("property", command.text);
+      break;
+    }
+    case ControlCommand::Kind::ScrubStart:
+    case ControlCommand::Kind::ScrubTo: {
+      // v1.6: scrub_start defaults to frame 0 when "frame" is absent;
+      // scrub_to requires it.
+      std::uint64_t frame = 0;
+      const bool have_frame = find_unsigned_field(line, "frame", frame);
+      if (command.kind == ControlCommand::Kind::ScrubTo && !have_frame) {
+        error = "missing \"frame\" unsigned field";
+        return false;
+      }
+      numbers[count++] = static_cast<double>(frame);
       break;
     }
     case ControlCommand::Kind::SaveDocument:

@@ -457,6 +457,53 @@ bool EditorSession::handle_edit(
       reply.detail = "loaded " + command.text;
       return true;
     }
+    case CK::ScrubStart: {
+      const auto frame = command.number_count > 0U
+                             ? static_cast<std::uint64_t>(command.numbers[0])
+                             : 0U;
+      std::string error;
+      if (!scrub_start(frame, error)) {
+        reply.ok = false;
+        reply.error = error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "checkpoint @" + std::to_string(frame);
+      return true;
+    }
+    case CK::ScrubTo: {
+      if (command.number_count < 1U) {
+        reply.ok = false;
+        reply.error = "scrub_to needs frame";
+        return true;
+      }
+      const auto frame = static_cast<std::uint64_t>(command.numbers[0]);
+      std::string error;
+      if (!scrub_to(frame, error)) {
+        reply.ok = false;
+        reply.error = error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "scrubbed to frame " + std::to_string(frame);
+      return true;
+    }
+    case CK::ScrubInfo: {
+      std::string out = "{\"checkpoints\":[";
+      bool first = true;
+      for (const auto f : scrubber_.frames()) {
+        if (!first) {
+          out += ",";
+        }
+        first = false;
+        out += std::to_string(f);
+      }
+      out += "],\"count\":" + std::to_string(scrubber_.size()) +
+             ",\"capacity\":" + std::to_string(scrubber_.capacity()) + "}";
+      reply.ok = true;
+      reply.detail = std::move(out);
+      return true;
+    }
     case CK::BindNodeProperty: {
       if (command.number_count < 2U || command.text.empty() ||
           command.text2.empty()) {
@@ -789,6 +836,24 @@ std::size_t EditorSession::sync_graph(std::string& error) {
     }
   }
   return applied;
+}
+
+bool EditorSession::scrub_start(std::uint64_t frame, std::string& error) {
+  return scrubber_.capture(frame, doc_, error);
+}
+
+bool EditorSession::scrub_to(std::uint64_t frame, std::string& error) {
+  SceneDocument restored;
+  if (!scrubber_.restore(frame, restored, error)) {
+    return false;
+  }
+  doc_ = std::move(restored);
+  stack_ = CommandStack(doc_);  // undo cannot cross a time warp
+  // Selection survives only when the restored document still has the object.
+  if (selected_id_ != 0U && doc_.find(selected_id_) == nullptr) {
+    selected_id_ = 0;
+  }
+  return true;
 }
 
 std::string EditorSession::snapshot_json() const {

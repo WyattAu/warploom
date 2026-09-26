@@ -17,8 +17,12 @@ hardware, glTF/GLB/KTX2 import, 584-test hardware suite plus
 Clang/TSan/ASan-UBSan legs, scale benchmark (10k instances, ~100 FPS).
 
 The engine is named Warploom (see `rename-and-modules.md`). Nothing is
-published yet; the viewport is one large `main.cpp`; document persistence
-is load-only.
+published yet; the viewport is one large `main.cpp`; document save/load
+exists over the protocol but the round-trip proof is still pending (G1).
+
+W1 done: replay scrubbing is real — hash-verified checkpoints of the whole
+document, protocol v1.6, a timeline strip in the viewport, and a live
+socket proof that a time warp returns state to the checkpoint exactly.
 
 ## S — Module split (committed plan in `rename-and-modules.md`)
 
@@ -48,9 +52,16 @@ is load-only.
 The differentiator. The name promises steppable, rewoven time; this track
 makes it visible.
 
-- [ ] **W1 replay scrubber** — timeline strip in the viewport: pause,
-      step frames both directions, restore from checkpoints, state-hash
-      verified on every restore. Builds on proven replay + hashing.
+- [x] **W1 replay scrubber** — `ReplayScrubber` checkpoint ring (default
+      4096 frames, same-frame recapture replaces, oldest evicted) + protocol
+      v1.6 (`scrub_start`/`scrub_to`/`scrub_info`) + timeline strip in the
+      viewport (click a checkpoint to warp). Restore is provably lossless:
+      bytes re-hash to the capture-time hash AND the parsed document
+      re-serializes byte-identically. Undo cannot cross a time warp.
+      Verified: 8 unit tests (incl. graph-bearing-document restore regression
+      and wire-payload parser coverage), a 23-assertion live socket proof
+      (`scrub_to(999)` rejected; post-warp `list_objects` byte-equal to the
+      baseline), 4/4 suites on all four CI legs.
 - [ ] **W2 protocol record/replay** — `start_capture`/`stop_capture`
       protocol commands producing portable replay files; scrubber can
       load them.
@@ -59,9 +70,11 @@ makes it visible.
 
 ## G — Editor depth
 
-- [ ] **G1 document save + round-trip** — protocol `save_document`,
+- [~] **G1 document save + round-trip** — protocol `save_document`,
       atomic write, schema-versioned; round-trip proof (load → save →
-      byte-compare or schema-equal).
+      byte-compare or schema-equal). Implementation already exists (v1.4:
+      atomic `save_to_file`, load replaces the document and clears
+      history); the remaining work is the machine-checked round-trip proof.
 - [ ] **G2 multi-select, copy/paste of node subgraphs** — command-based,
       undo-able, preserves bindings.
 - [ ] **G3 timeline panel** — clips + recorded graph signals; pairs with

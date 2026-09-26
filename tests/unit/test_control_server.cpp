@@ -63,6 +63,22 @@ class FakeHost final : public ControlHost {
         captures_ += 1;
         reply.detail = "captured";
         break;
+      case ControlCommand::Kind::ScrubStart:
+        // Echo the parsed frame so tests can pin the wire-key mapping.
+        last_scrub_start_ = command.number_count > 0U
+                                ? static_cast<std::uint64_t>(command.numbers[0])
+                                : 0U;
+        reply.detail = "scrub_start " + std::to_string(last_scrub_start_);
+        break;
+      case ControlCommand::Kind::ScrubTo:
+        last_scrub_to_ = command.number_count > 0U
+                             ? static_cast<std::uint64_t>(command.numbers[0])
+                             : 0U;
+        reply.detail = "scrub_to " + std::to_string(last_scrub_to_);
+        break;
+      case ControlCommand::Kind::ScrubInfo:
+        reply.detail = "scrub_info";
+        break;
       default:
         reply.ok = false;
         reply.error = "fake host: unhandled kind";
@@ -81,6 +97,9 @@ class FakeHost final : public ControlHost {
   std::uint64_t steps_{0};
   std::uint64_t cubes_{0};
   std::uint64_t captures_{0};
+  // Sentinel 7777 = "never scrubbed": distinguishes a real 0 from no command.
+  std::uint64_t last_scrub_start_{7777};
+  std::uint64_t last_scrub_to_{7777};
   double camera_[3]{8.0, 3.0, 0.0};
   double sun_[3]{0.45, 0.7, 0.55};
 };
@@ -211,6 +230,50 @@ TEST_F(ControlServerTest, EveryCommandRoundTrips) {
   EXPECT_NEAR(host.sun_[2], 0.7, 1e-6);
   EXPECT_EQ(host.cubes_, 1U);
   EXPECT_EQ(host.captures_, 1U);
+  ::close(fd);
+}
+
+//! v1.6: scrub commands must parse their "frame" wire key into numbers[0]
+//! (scrub_start optional with default 0, scrub_to required) — the parser path
+//! the live socket clients exercise and struct-built tests bypass.
+TEST_F(ControlServerTest, ScrubCommandsParseWirePayloads) {
+  FakeHost host;
+  ControlServer server;
+  std::string error;
+  ASSERT_TRUE(server.start(path_, error)) << error;
+
+  const int fd = connect_client();
+  (void)server.poll(host);
+  (void)read_message(fd);  // swallow welcome
+
+  const std::string r1 =
+      roundtrip(fd, "{\"cmd\":\"scrub_start\",\"id\":30,\"frame\":42}", server,
+                host);
+  EXPECT_NE(r1.find("\"detail\":\"scrub_start 42\""), std::string::npos) << r1;
+
+  // No "frame" key: scrub_start defaults to frame 0.
+  const std::string r2 =
+      roundtrip(fd, "{\"cmd\":\"scrub_start\",\"id\":31}", server, host);
+  EXPECT_NE(r2.find("\"detail\":\"scrub_start 0\""), std::string::npos) << r2;
+
+  const std::string r3 =
+      roundtrip(fd, "{\"cmd\":\"scrub_to\",\"id\":32,\"frame\":42}", server, host);
+  EXPECT_NE(r3.find("\"detail\":\"scrub_to 42\""), std::string::npos) << r3;
+
+  const std::string r4 =
+      roundtrip(fd, "{\"cmd\":\"scrub_info\",\"id\":33}", server, host);
+  EXPECT_NE(r4.find("\"detail\":\"scrub_info\""), std::string::npos) << r4;
+  EXPECT_NE(r4.find("\"ok\":true"), std::string::npos) << r4;
+
+  // scrub_to without "frame" is a parse error before any host dispatch.
+  const std::string r5 =
+      roundtrip(fd, "{\"cmd\":\"scrub_to\",\"id\":34}", server, host);
+  EXPECT_NE(r5.find("missing \\\"frame\\\" unsigned field"), std::string::npos)
+      << r5;
+  EXPECT_NE(r5.find("\"ok\":false"), std::string::npos) << r5;
+
+  EXPECT_EQ(host.last_scrub_start_, 0U);  // default-0 case ran last
+  EXPECT_EQ(host.last_scrub_to_, 42U);
   ::close(fd);
 }
 

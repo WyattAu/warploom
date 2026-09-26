@@ -93,6 +93,16 @@ struct ControlCommand final {
     BindNodeProperty,
     UnbindNodeProperty,
     ListBindings,
+    // v1.6: replay scrubbing (W1) — hash-verified checkpoints of the
+    // document timeline (docs/roadmap.md track W).
+    //   ScrubStart: wire key "frame" (optional, default 0) -> numbers[0];
+    //               captures a checkpoint at that sim frame
+    //   ScrubTo:    wire key "frame" (required) -> numbers[0]; sim frame to
+    //               restore (must be checkpointed)
+    //   ScrubInfo:  no payload; detail = JSON {checkpoints, capacity, start}
+    ScrubStart,
+    ScrubTo,
+    ScrubInfo,
   };
 
   Kind kind{Kind::Unknown};

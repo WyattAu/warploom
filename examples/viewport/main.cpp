@@ -11,6 +11,7 @@
 //!
 //! Controls: ESC closes; the camera slowly orbits automatically.
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <atomic>
@@ -22,6 +23,7 @@
 #include <iterator>
 #include "engine/core/control_server.hpp"
 #include "engine/core/editor_session.hpp"
+#include "engine/core/replay_scrubber.hpp"
 #include "engine/editor/graph_anim_bridge.hpp"
 #include "engine/editor/inspector.hpp"
 #include "engine/core/document.hpp"
@@ -178,6 +180,150 @@ struct ViewportApp;
 //! ControlHost over the viewport (defined after ViewportApp).
 class ViewportControlHost;
 
+//! W1: bottom-strip timeline for hash-verified replay scrubbing. Absolute
+//! widgets (authored rects, no layout participation); the per-frame sync
+//! writes only cursor/fill/label fields, so the cost is a few field writes.
+struct TimelinePanel {
+  static constexpr float kBarH = 26.0F;
+  static constexpr float kMarginX = 16.0F;
+  static constexpr float kBottomGap = 10.0F;
+  static constexpr float kPadX = 8.0F;
+
+  std::uint32_t root{warploom::ui::kInvalidWidget};
+  std::uint32_t fill{warploom::ui::kInvalidWidget};
+  std::uint32_t cursor{warploom::ui::kInvalidWidget};
+  std::uint32_t label{warploom::ui::kInvalidWidget};
+  // Last-synced track rect (hit-testing without a tree reference).
+  float tx{0.0F};
+  float ty{0.0F};
+  float tw{0.0F};
+  float th{0.0F};
+
+  void rebuild(warploom::ui::WidgetTree& tree) {
+    if (root != warploom::ui::kInvalidWidget) {
+      return;  // built once; handles are stable forever
+    }
+    warploom::ui::Widget track;
+    track.kind = warploom::ui::WidgetKind::Panel;
+    track.layout = warploom::ui::LayoutMode::Absolute;
+    track.name = "timeline_track";
+    track.color = 0xFF1B1E24;
+    track.border_color = 0xFF2A2F38;
+    root = tree.add(track, tree.root());
+
+    warploom::ui::Widget fill_w;
+    fill_w.kind = warploom::ui::WidgetKind::Panel;
+    fill_w.layout = warploom::ui::LayoutMode::Absolute;
+    fill_w.name = "timeline_fill";
+    fill_w.color = 0xFF2C5D46;
+    fill = tree.add(fill_w, root);
+
+    warploom::ui::Widget cur;
+    cur.kind = warploom::ui::WidgetKind::Panel;
+    cur.layout = warploom::ui::LayoutMode::Absolute;
+    cur.name = "timeline_cursor";
+    cur.color = 0xFFFFB000;
+    cursor = tree.add(cur, root);
+
+    warploom::ui::Widget lbl;
+    lbl.kind = warploom::ui::WidgetKind::Label;
+    lbl.layout = warploom::ui::LayoutMode::Absolute;
+    lbl.name = "timeline_label";
+    lbl.text_color = 0xFFC8CDD6;
+    label = tree.add(lbl, root);
+  }
+
+  //! Updates cursor/fill/label from the live scrubber + sim frame.
+  void sync(warploom::ui::WidgetTree& tree,
+            const omnicpp::editor::ReplayScrubber& scrubber, float view_w,
+            float view_h, std::uint64_t current_frame, bool paused) {
+    if (root == warploom::ui::kInvalidWidget) {
+      return;
+    }
+    tx = kMarginX;
+    ty = view_h - kBarH - kBottomGap;
+    tw = view_w - 2.0F * kMarginX;
+    th = kBarH;
+    auto& tr = tree.get(root);
+    tr.x = tx;
+    tr.y = ty;
+    tr.w = tw;
+    tr.h = th;
+
+    const auto frames = scrubber.frames();
+    const float span_w = tw - 2.0F * kPadX;
+    float frac = 0.0F;
+    if (!frames.empty()) {
+      const double lo = static_cast<double>(frames.front());
+      const double hi = static_cast<double>(frames.back());
+      if (hi > lo) {
+        const double t =
+            (static_cast<double>(current_frame) - lo) / (hi - lo);
+        frac = static_cast<float>(std::min(std::max(t, 0.0), 1.0));
+      } else {
+        frac = 1.0F;
+      }
+    }
+    const float cx = tx + kPadX + frac * span_w;
+
+    auto& fl = tree.get(fill);
+    fl.x = tx + kPadX;
+    fl.y = ty + 6.0F;
+    fl.w = std::max(0.0F, cx - (tx + kPadX));
+    fl.h = th - 12.0F;
+
+    auto& cu = tree.get(cursor);
+    cu.x = cx - 2.0F;
+    cu.y = ty + 3.0F;
+    cu.w = 4.0F;
+    cu.h = th - 6.0F;
+
+    auto& lb = tree.get(label);
+    lb.x = tx + kPadX;
+    lb.y = ty;
+    lb.w = tw - 2.0F * kPadX;
+    lb.h = th;
+    if (frames.empty()) {
+      lb.text = "scrub: no checkpoints (scrub_start via protocol)";
+    } else {
+      lb.text = "scrub f=" + std::to_string(current_frame) + "  ckpts=" +
+                std::to_string(frames.size()) + "  (" +
+                std::to_string(frames.front()) + ".." +
+                std::to_string(frames.back()) + ")" + (paused ? "  PAUSED" : "");
+    }
+  }
+
+  //! True when (px, py) is inside the track; `frame` = nearest checkpoint.
+  [[nodiscard]] bool frame_at(
+      float px, float py, const omnicpp::editor::ReplayScrubber& scrubber,
+      std::uint64_t& frame) const {
+    if (px < tx + kPadX || px >= tx + tw - kPadX || py < ty ||
+        py >= ty + th) {
+      return false;
+    }
+    const auto frames = scrubber.frames();
+    if (frames.empty()) {
+      return false;
+    }
+    const double lo = static_cast<double>(frames.front());
+    const double hi = static_cast<double>(frames.back());
+    const double t = static_cast<double>(px - (tx + kPadX)) /
+                     static_cast<double>(tw - 2.0F * kPadX);
+    const double target = lo + t * (hi - lo);
+    std::uint64_t best = frames.front();
+    double best_dist = std::abs(static_cast<double>(frames.front()) - target);
+    for (const auto f : frames) {
+      const double dist = std::abs(static_cast<double>(f) - target);
+      if (dist < best_dist) {
+        best_dist = dist;
+        best = f;
+      }
+    }
+    frame = best;
+    return true;
+  }
+};
+
 struct ViewportApp {
   // Vulkan stack.
   omnicpp::render::VulkanContext context;
@@ -260,6 +406,7 @@ struct ViewportApp {
   std::uint32_t inspector_canvas{warploom::ui::kInvalidWidget};
   std::uint32_t inspector_root{warploom::ui::kInvalidWidget};
   warploom::ui::WidgetTree ui_tree;
+  TimelinePanel timeline;  //!< W1: hash-verified scrub strip (bottom edge)
   warploom::ui::PaintList ui_paint;
   std::uint32_t node_canvas{warploom::ui::kInvalidWidget};
   omnicpp::render::VulkanUiRenderer ui_renderer;
@@ -664,6 +811,19 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
         app_.control_capture_requested_ = true;
         reply.detail = "capture scheduled";
         break;
+      // W1: scrub commands ride the session (single mutation authority);
+      // the host mirrors the resulting state change so the frame loop
+      // rebuilds the scene + node view.
+      case CK::ScrubStart:
+      case CK::ScrubTo: {
+        const bool structural = command.kind == CK::ScrubTo;
+        reply = app_.editor.on_control(command);
+        if (reply.ok && structural) app_.node_dirty = true;
+        break;
+      }
+      case CK::ScrubInfo:
+        reply = app_.editor.on_control(command);
+        break;
       // M10: every document command delegates to the embedded EditorSession
       // — the single mutation authority. Protocol edits, mouse edits, and
       // key edits now share one CommandStack, so undo/redo cover ALL paths
@@ -987,6 +1147,26 @@ bool poll_events(ViewportApp& app) {
             app.edit_queue.push_back({std::move(cmd)});
           }
           app.node_dirty = true;
+        }
+      }
+      // W1: the timeline strip consumes left presses first (it overlays the
+      // bottom edge, under the node canvas's empty-space deselect). Click →
+      // scrub_to the nearest checkpoint (queued through the session path).
+      if (app.node_editor && button->detail == 1) {
+        std::uint64_t scrub_frame = 0;
+        if (app.timeline.frame_at(app.mouse_x, app.mouse_y,
+                                  app.editor.scrubber(), scrub_frame)) {
+          omnicpp::core::ControlCommand cmd;
+          cmd.kind = omnicpp::core::ControlCommand::Kind::ScrubTo;
+          cmd.numbers[0] = static_cast<double>(scrub_frame);
+          cmd.number_count = 1U;
+          {
+            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+            app.edit_queue.push_back({std::move(cmd)});
+          }
+          app.node_dirty = true;
+          free(event);
+          return true;
         }
       }
       // Left press on the node canvas: toolbar > pin (link drag) > card
@@ -4350,6 +4530,8 @@ bool setup_node_editor(ViewportApp& app) {
     const auto insp_canvas = app.ui_tree.add(warploom::ui::Widget{},
                                              app.ui_tree.root());
     app.inspector_canvas = insp_canvas;
+    // W1: the timeline strip (built once; synced per frame in tick).
+    app.timeline.rebuild(app.ui_tree);
     app.inspector.rebuild(app.ui_tree, insp_canvas, doc,
                           app.editor.registry(), app.editor.selected_id(),
                           app.editor.bindings());
@@ -4441,6 +4623,10 @@ void tick_node_editor(ViewportApp& app) {
   ctx.time = static_cast<double>(app.time);
   ctx.tick = static_cast<std::uint64_t>(app.frame_index);
   (void)app.node_graph->evaluate_with(ctx, error);
+  // W1: keep the timeline strip in sync with the live scrubber + clock.
+  app.timeline.sync(app.ui_tree, app.editor.scrubber(),
+                    static_cast<float>(kWidth), static_cast<float>(kHeight),
+                    app.frame_index, app.control_paused());
   // M10: graph->scene bridge — bindings write their pin values into object
   // properties every tick (insertion order, deterministic; skipped bindings
   // are non-fatal).

@@ -13,6 +13,7 @@ add_library(omnicpp_runtime SHARED
     core/property_registry.cpp
     core/editor_session.cpp
     core/node_graph.cpp
+    core/replay_scrubber.cpp
     core/script_module.cpp
     editor/node_editor.cpp
     editor/inspector.cpp

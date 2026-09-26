@@ -22,6 +22,7 @@
 #include "engine/core/control_server.hpp"
 #include "engine/core/document.hpp"
 #include "engine/core/property_registry.hpp"
+#include "engine/core/replay_scrubber.hpp"
 
 namespace omnicpp::editor {
 
@@ -82,6 +83,21 @@ class EditorSession final : public omnicpp::core::ControlHost {
   //! applied. Deterministic: bindings apply in insertion order.
   [[nodiscard]] std::size_t sync_graph(std::string& error);
 
+  // -- Replay scrubbing (W1, protocol v1.6) --------------------------------
+  //! Captures a checkpoint of the CURRENT document at sim frame `frame`.
+  //! Checkpoints live in a bounded ring (see ReplayScrubber); restoring is
+  //! hash-verified two ways (bytes -> capture hash, parse -> re-serialize
+  //! byte equality) so a scrub is provably lossless.
+  [[nodiscard]] bool scrub_start(std::uint64_t frame, std::string& error);
+  //! Restores the checkpoint captured at sim frame `frame`. The document is
+  //! replaced by the captured state and history CLEARS — undo cannot cross
+  //! a time warp (same semantics as a document load). Selection survives
+  //! only when the restored document still contains the object.
+  [[nodiscard]] bool scrub_to(std::uint64_t frame, std::string& error);
+  [[nodiscard]] const ReplayScrubber& scrubber() const noexcept {
+    return scrubber_;
+  }
+
   // -- ControlHost ---------------------------------------------------------
   [[nodiscard]] omnicpp::core::ControlReply on_control(
       const omnicpp::core::ControlCommand& command) override;
@@ -103,6 +119,9 @@ class EditorSession final : public omnicpp::core::ControlHost {
   CommandStack stack_{doc_};
   std::uint64_t selected_id_{0};
   std::vector<PropertyBinding> bindings_{};
+  //! W1: checkpoint ring for hash-verified scrubbing. Frame-thread-only
+  //! (all access arrives via on_control), matching the session's model.
+  ReplayScrubber scrubber_{};
 };
 
 }  // namespace omnicpp::editor
