@@ -163,6 +163,43 @@ jobs:
         run: ctest --test-dir build/vulkan-validation --output-on-failure --timeout 300
 
   # ============================================================================
+  # Live protocol proofs (P0) — the checked-in harness (tools/live_proof.py)
+  # against headless control hosts (EditorSession + ControlServer, no GPU):
+  # W1 scrubber, G1 save/load round-trip, and the W2 record→load→
+  # byte-identical two-instance proof, all over a real socket.
+  # ============================================================================
+  live-proof:
+    name: "Live Protocol Proofs (headless)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ python3
+
+      - name: Configure
+        run: cmake --preset headless-debug
+
+      - name: Build
+        run: |
+          cmake --build build/headless-debug -j$(nproc)
+
+      - name: Start headless hosts
+        run: |
+          build/headless-debug/bin/omnicpp_headless_host /tmp/proof_a.sock 2>/tmp/proof_a.log &
+          build/headless-debug/bin/omnicpp_headless_host /tmp/proof_b.sock 2>/tmp/proof_b.log &
+          for i in $(seq 1 50); do
+            [ -S /tmp/proof_a.sock ] && [ -S /tmp/proof_b.sock ] && break
+            sleep 0.2
+          done
+          test -S /tmp/proof_a.sock && test -S /tmp/proof_b.sock
+
+      - name: Run live proofs (w1 + g1 + w2)
+        run: python3 tools/live_proof.py all --sock /tmp/proof_a.sock --sock-a /tmp/proof_a.sock --sock-b /tmp/proof_b.sock
+
+  # ============================================================================
   # Documentation links
   # ============================================================================
   docs:

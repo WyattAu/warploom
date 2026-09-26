@@ -133,14 +133,15 @@ makes it visible.
 
 ## P — Platform & packaging
 
-- [ ] **P0 CI completion** — REVISED after audit: the Actions matrix
-      already exists and covers all four presets headlessly (Clang, TSan,
+- [x] **P0 CI live proofs** — REVISED after audit: the Actions matrix
+      already existed and covered all four presets headlessly (Clang, TSan,
       ASan-UBSan, and the Vulkan leg on lavapipe software Vulkan) plus
-      docs. Remaining: (a) a headless control-host harness so
-      `tools/live_proof.py` runs in CI (the EditorSession+ControlServer
-      pair needs no GPU or window); (b) optionally a self-hosted runner
-      on the hardware box for true-NVIDIA proof. Targeted before 0.1 —
-      also gates any external contributor.
+      docs. Landed: a headless control host (`omnicpp_headless_host`,
+      EditorSession + ControlServer, no GPU/window, built on every leg)
+      and a `live-proof` CI job running the full checked-in harness
+      (`tools/live_proof.py`: w1 10 + g1 8 + w2 19 assertions) over real
+      sockets — 37/37. Remaining option: a self-hosted hardware runner
+      for true-NVIDIA proof (nice-to-have, not gating).
 - [ ] **P1 WASM leg green** — software rasterizer is deterministic;
       headless WASM CI target.
 - [ ] **P2 native Wayland surface** — XCB today; surface creation is

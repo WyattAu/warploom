@@ -169,6 +169,9 @@ if(OMNICPP_BUILD_ENGINE)
     # S1: warploom-ui is a real module (Warploom::ui) consumed by the runtime.
     add_subdirectory(modules/ui)
     add_subdirectory(src/engine)
+    # Headless proof host (P0): runs the live-proof harness in CI —
+    # EditorSession + ControlServer, no GPU/window. Builds on every leg.
+    add_subdirectory(tools)
 endif()
 
 if(OMNICPP_LEGACY_ENGINE)
