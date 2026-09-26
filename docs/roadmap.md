@@ -48,7 +48,8 @@ or a time-warp boundary.
 - [ ] **S-decision: identifier migration** — `OMNICPP_*` env/option flags
       and `omnicpp_*` binary names to `WARPLOOM_*`/`warploom_*` *before*
       the first external publish (with a compatibility shim), so early
-      adopters never see a breaking rename.
+      adopters never see a breaking rename. Same pass renames the GitHub
+      repo (`OmniCPP-template` → `warploom`).
 
 ## W — Determinism as product ("time warp")
 
@@ -66,8 +67,11 @@ makes it visible.
       (`scrub_to(999)` rejected; post-warp `list_objects` byte-equal to the
       baseline), 4/4 suites on all four CI legs.
 - [ ] **W2 protocol record/replay** — `start_capture`/`stop_capture`
-      protocol commands producing portable replay files; scrubber can
-      load them.
+      protocol commands producing portable replay files (schema named
+      `warploom-replay-v1` now, so the identifier decision doesn't leak
+      in late): command log + embedded scrubber checkpoints, composing
+      with the G1 document format; scrubber can load them. **Next up,
+      before S2.**
 - [ ] **W3 graph-triggered replay events** — node outputs mark scrub
       points / trigger on replay (e.g. pulse node tags "collision frame").
 
@@ -117,11 +121,14 @@ makes it visible.
 
 1. **S1 now** — packaging machinery while boundaries are freshest; small
    enough to finish in one pass.
-2. **W1 next** — the flagship demo and the name's promise; every later
-   milestone (G3, W2, W3) builds on its UI + protocol surfaces.
-3. **G1 after W1** — persistence is table stakes for real use.
-4. Then interleave G2–G5 / R1–R4 by interest; R3 pairs with the scale
-   benchmark follow-up, G4 unlocks user extensibility.
+2. **W2 next, then S2** — W2 is short and completes the W-track's story
+   arc (record a session, scrub anywhere in it — the product pitch), and
+   replay files give S2 another real consumer to validate the core
+   boundary against. **S2 `warploom-core` follows immediately**:
+   foundation-first, while the monolith is still young enough to move.
+   S2 starts with a written dependency analysis (what lives in core:
+   runtime, replay/scrubber, hashing, ECS, document — and where the node
+   graph and physics land) before any target moves.
 5. **P after S5** — platform legs and adoption tooling target published
    modules, not the monolith.
 
@@ -138,5 +145,10 @@ mobile; ABI stability promises before S5 completes.
 - New feature ⇒ new unit/GPU test + scenario-runner coverage where it
   touches the viewport; telemetry-analyzer gates extended rather than
   bypassed.
-- Live hardware proof for anything protocol- or viewport-facing.
+- Live hardware proof for anything protocol- or viewport-facing, via a
+  checked-in socket harness (`tools/live_proof.py`) extended per feature
+  rather than rewritten — proofs are repeatable, not throwaway scripts.
+- Protocol invariant: every command `Kind` in the mapping table has a
+  `parse_command` case and round-trips over the wire — the generic form
+  of the W1 parser gap, enforced by a test, not by memory.
 - `rendering-status.md` claims table updated in the same commit.
