@@ -1,5 +1,5 @@
 # ============================================================================
-# OmniCpp Template - Examples CMakeLists.txt
+# Warploom - Examples CMakeLists.txt
 # ============================================================================
 # Builds example applications. The pong example requires Qt6 + quill; it is
 # skipped when those dependencies are unavailable (the default in the

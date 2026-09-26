@@ -1,5 +1,5 @@
 # ============================================================================
-# OmniCpp Template - vcpkg Integration
+# Warploom - vcpkg Integration
 # ============================================================================
 # vcpkg package manager integration
 # https://vcpkg.io/

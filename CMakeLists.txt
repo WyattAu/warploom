@@ -1,5 +1,5 @@
 # ============================================================================
-# OmniCpp Template - Root CMakeLists.txt
+# Warploom - Root CMakeLists.txt
 # ============================================================================
 # CMake 3.28+ Root Configuration
 # Supports: Windows, Linux, WASM
@@ -7,9 +7,9 @@
 # ============================================================================
 
 cmake_minimum_required(VERSION 3.28...4.0)
-project(OmniCppTemplate
+project(Warploom
     VERSION 1.0.0
-    DESCRIPTION "OmniCpp Template Project"
+    DESCRIPTION "Warploom - deterministic simulation + node-based editor engine"
     LANGUAGES CXX
 )
 

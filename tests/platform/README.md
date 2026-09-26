@@ -1,6 +1,6 @@
 # Platform-Specific Tests
 
-This directory contains platform-specific test files for the OmniCPP Template project. These tests are organized by platform and compiler to facilitate targeted testing across different operating systems and compiler configurations.
+This directory contains platform-specific test files for the Warploom project. These tests are organized by platform and compiler to facilitate targeted testing across different operating systems and compiler configurations.
 
 ## Directory Structure
 

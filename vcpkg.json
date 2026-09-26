@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
-  "name": "omnicpp-template",
+  "name": "warploom",
   "version": "0.0.5",
-  "description": "OmniCpp - Advanced C++ Development Template with C++23 support",
+  "description": "Warploom - deterministic simulation + node-based editor engine with C++23 support",
   "license": "MIT",
   "dependencies": [
  {

@@ -1,5 +1,5 @@
 # ============================================================================
-# OmniCpp Template - Platform Configuration
+# Warploom - Platform Configuration
 # ============================================================================
 # Defines platform-specific settings for Windows, Linux, and WASM
 # ============================================================================

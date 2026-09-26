@@ -1,5 +1,5 @@
 # ============================================================================
-# OmniCpp Template - Property-Based Testing Configuration
+# Warploom - Property-Based Testing Configuration
 # ============================================================================
 # COMPLIANCE: Phase 3 - Property-Based Testing & Fuzzing
 # Example-based testing is insufficient for parsers and domain math.

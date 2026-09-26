@@ -1,4 +1,6 @@
-# OmniCPP
+# Warploom
+
+*(formerly OmniCPP)*
 
 A data-oriented C++ engine with deterministic simulation, lock-free concurrency, Vulkan rendering, and an ECS foundation.
 
