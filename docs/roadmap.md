@@ -37,14 +37,23 @@ or a time-warp boundary.
       `find_package(WarploomUI CONFIG REQUIRED)` + linked consumer
       binary runs.
 - [ ] **S2 `warploom-core`** — determinism substrate. Largest surface;
-      land after S1 validates the process.
-- [ ] **S3 `warploom-render`** — Vulkan context/renderer, render graph,
-      scene structures.
+      land after S1 validates the process. Starts with a written
+      dependency analysis (runtime, replay/scrubber, hashing, ECS,
+      document in core; node graph and physics boundaries settled on
+      paper first; control server stays out — transport, not
+      determinism).
 - [ ] **S4 `warploom-editor`** — session, control server/protocol, node
-      editor, inspector. *Forces* decomposing the 5.3k-line viewport
-      `main.cpp`; budget a session for that alone.
+      editor, inspector. **Comes third, before S3** (decided): the hot
+      development path (W/G/protocol work) lands in this module, so
+      extracting it means future features stop growing the viewport
+      `main.cpp`. Headless-testable, hence lower-risk than render.
+      *Forces* decomposing the 5.3k-line viewport `main.cpp`; budget a
+      session for that alone.
+- [ ] **S3 `warploom-render`** — Vulkan context/renderer, render graph,
+      scene structures. Runs after S4, against a stable editor boundary.
 - [ ] **S5 `warploom-engine` aggregate** — viewport and tests move to
-      `find_package`; one-liner adoption works.
+      `find_package`; one-liner adoption works. The moment the monolith
+      stops being load-bearing.
 - [ ] **S-decision: identifier migration** — `OMNICPP_*` env/option flags
       and `omnicpp_*` binary names to `WARPLOOM_*`/`warploom_*` *before*
       the first external publish (with a compatibility shim), so early
@@ -88,7 +97,8 @@ makes it visible.
 - [ ] **G2 multi-select, copy/paste of node subgraphs** — command-based,
       undo-able, preserves bindings.
 - [ ] **G3 timeline panel** — clips + recorded graph signals; pairs with
-      W1/W2 surfaces.
+      W1/W2 surfaces. **Held until after S4** so it lands in the extracted
+      editor module instead of growing `main.cpp` further.
 - [ ] **G4 script node** — the script-module C ABI as a node type:
       extend the graph without recompiling.
 - [ ] **G5 asset browser** — browse/drop glTF assets; import path is
@@ -117,10 +127,27 @@ makes it visible.
       S5; CPack release artifacts per module.
 - [ ] **P4 docs site rebrand** — mkdocs tree under the new name.
 
+## The 0.1 gate
+
+**Warploom 0.1 is publishable when all four hold:**
+
+1. **Clone-and-build** — from a fresh clone, the README's build steps
+   produce a working viewport on this hardware with no manual steps.
+2. **Modules real** — S5 done: the viewport and tests consume
+   `find_package(Warploom …)`; no monolithic engine target required.
+3. **Demo story works** — record a session (W2), replay it and scrub
+   anywhere in it (W1), save/load documents losslessly (G1), all proven
+   over the live protocol.
+4. **Signature render feature** — R1 path-tracing toggleable in the
+   viewport.
+
+It commits to a scope, not a date. Everything else (G2, G4, G5, R2–R4,
+P1–P4) is post-0.1 by definition.
+
 ## Sequencing rationale
 
-1. **S1 now** — packaging machinery while boundaries are freshest; small
-   enough to finish in one pass.
+1. **S1 done** — packaging machinery while boundaries were freshest; the
+   process is validated (in-tree + standalone consumer proof).
 2. **W2 next, then S2** — W2 is short and completes the W-track's story
    arc (record a session, scrub anywhere in it — the product pitch), and
    replay files give S2 another real consumer to validate the core
@@ -129,6 +156,13 @@ makes it visible.
    S2 starts with a written dependency analysis (what lives in core:
    runtime, replay/scrubber, hashing, ECS, document — and where the node
    graph and physics land) before any target moves.
+3. **S4 before S3** (decided) — extract where development is hottest so
+   new features land in the module, not deeper into the monolith; the
+   editor is headless-testable, which de-risks extraction.
+4. **G3 after S4; then S3 → S5** — the timeline panel ships inside the
+   editor module; render extraction runs against a stable editor
+   boundary; S5 flips the viewport to `find_package` and the
+   S-decision (flags, binaries, repo rename, with shim) rides with it.
 5. **P after S5** — platform legs and adoption tooling target published
    modules, not the monolith.
 
