@@ -355,6 +355,89 @@ TEST(NodeDisk, LoadRejectsGarbageAndMissingFiles) {
 }
 
 // ============================================================================
+// G1: protocol-path save/load round-trip (session semantics, not just bytes)
+// ============================================================================
+
+bool protocol_spawn(omnicpp::editor::EditorSession& session, double x,
+                    double y, double z, double size);
+
+//! save_document → mutate → load_document through the protocol must restore
+//! the saved document byte-identically AND enforce the load boundary: undo
+//! history is cleared (the old stack's captured indices cannot survive) and
+//! selection resets.
+TEST(NodeDisk, ProtocolSaveLoadRoundTripRestoresStateAndResetsSession) {
+  ed::EditorSession session;
+  ASSERT_TRUE(protocol_spawn(session, 1.0, 2.0, 3.0, 0.75));
+  const std::uint64_t spawned_id = 2U;  // constructor seeds object 1
+
+  omnicpp::core::ControlCommand sel;
+  sel.kind = omnicpp::core::ControlCommand::Kind::Select;
+  sel.numbers[0] = static_cast<double>(spawned_id);
+  sel.number_count = 1;
+  ASSERT_TRUE(session.on_control(sel).ok);
+  EXPECT_EQ(session.selected_id(), spawned_id);
+
+  const std::string path = "/tmp/omnicpp_test_g1_roundtrip.json";
+  omnicpp::core::ControlCommand save;
+  save.kind = omnicpp::core::ControlCommand::Kind::SaveDocument;
+  save.text = path;
+  auto reply = session.on_control(save);
+  ASSERT_TRUE(reply.ok) << reply.error;
+
+  // Ground truth: the file bytes ARE the document's serialization.
+  std::ifstream in(path, std::ios::binary);
+  std::string saved_bytes;
+  saved_bytes.assign(std::istreambuf_iterator<char>(in),
+                     std::istreambuf_iterator<char>());
+  ASSERT_FALSE(saved_bytes.empty());
+  ASSERT_EQ(saved_bytes, session.document().to_json());
+
+  // Mutate past the save point (undoable): spawn, verify undo works, spawn
+  // again so the session diverges from the file.
+  ASSERT_TRUE(protocol_spawn(session, -1.0, 0.0, 0.5, 1.0));
+  omnicpp::core::ControlCommand undo;
+  undo.kind = omnicpp::core::ControlCommand::Kind::Undo;
+  ASSERT_TRUE(session.on_control(undo).ok);
+  ASSERT_TRUE(protocol_spawn(session, -1.0, 0.0, 0.5, 1.0));
+  ASSERT_NE(session.document().to_json(), saved_bytes);
+
+  // Missing file: clean protocol error, state untouched.
+  omnicpp::core::ControlCommand bad_load;
+  bad_load.kind = omnicpp::core::ControlCommand::Kind::LoadDocument;
+  bad_load.text = "/tmp/omnicpp_g1_definitely_missing_9x.json";
+  reply = session.on_control(bad_load);
+  ASSERT_FALSE(reply.ok);
+  EXPECT_NE(reply.error.find("cannot open"), std::string::npos) << reply.error;
+  ASSERT_EQ(session.document().to_json(), session.document().to_json());
+  ASSERT_EQ(session.document().objects.size(), 3U);
+
+  // Empty path is rejected before touching the filesystem.
+  omnicpp::core::ControlCommand no_path;
+  no_path.kind = omnicpp::core::ControlCommand::Kind::SaveDocument;
+  reply = session.on_control(no_path);
+  EXPECT_FALSE(reply.ok);
+  EXPECT_NE(reply.error.find("needs \"path\""), std::string::npos)
+      << reply.error;
+
+  // The real load: state returns to the save point...
+  omnicpp::core::ControlCommand load;
+  load.kind = omnicpp::core::ControlCommand::Kind::LoadDocument;
+  load.text = path;
+  reply = session.on_control(load);
+  ASSERT_TRUE(reply.ok) << reply.error;
+  EXPECT_EQ(session.document().to_json(), saved_bytes);
+  EXPECT_EQ(session.document().objects.size(), 2U);
+  EXPECT_NE(session.document().find(spawned_id), nullptr);
+  // ...selection reset (the load boundary)...
+  EXPECT_EQ(session.selected_id(), 0U);
+  // ...and history cleared: undo must fail even though it worked pre-load.
+  reply = session.on_control(undo);
+  EXPECT_FALSE(reply.ok);
+
+  std::remove(path.c_str());
+}
+
+// ============================================================================
 // M9: script-module nodes (native C++/Rust modules as graph nodes)
 // ============================================================================
 

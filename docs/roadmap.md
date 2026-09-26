@@ -17,12 +17,15 @@ hardware, glTF/GLB/KTX2 import, 584-test hardware suite plus
 Clang/TSan/ASan-UBSan legs, scale benchmark (10k instances, ~100 FPS).
 
 The engine is named Warploom (see `rename-and-modules.md`). Nothing is
-published yet; the viewport is one large `main.cpp`; document save/load
-exists over the protocol but the round-trip proof is still pending (G1).
+published yet; the viewport is one large `main.cpp`.
 
 W1 done: replay scrubbing is real — hash-verified checkpoints of the whole
 document, protocol v1.6, a timeline strip in the viewport, and a live
 socket proof that a time warp returns state to the checkpoint exactly.
+
+G1 done: documents round-trip losslessly through the protocol — save is
+atomic, load restores the saved bytes, and undo cannot cross either a load
+or a time-warp boundary.
 
 ## S — Module split (committed plan in `rename-and-modules.md`)
 
@@ -70,11 +73,14 @@ makes it visible.
 
 ## G — Editor depth
 
-- [~] **G1 document save + round-trip** — protocol `save_document`,
-      atomic write, schema-versioned; round-trip proof (load → save →
-      byte-compare or schema-equal). Implementation already exists (v1.4:
-      atomic `save_to_file`, load replaces the document and clears
-      history); the remaining work is the machine-checked round-trip proof.
+- [x] **G1 document save + round-trip** — protocol `save_document`/
+      `load_document` (v1.4): byte-deterministic payload, atomic
+      tmp+rename write, load replaces the document and clears history.
+      Verified: new protocol-path unit test (save → mutate → load restores
+      the saved bytes; selection resets; undo fails across the load
+      boundary; missing file leaves state untouched) plus a 16-assertion
+      live socket proof ending in load → save → sha256 byte-compare;
+      4/4 suites on all four CI legs.
 - [ ] **G2 multi-select, copy/paste of node subgraphs** — command-based,
       undo-able, preserves bindings.
 - [ ] **G3 timeline panel** — clips + recorded graph signals; pairs with
