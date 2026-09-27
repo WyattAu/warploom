@@ -8,8 +8,9 @@ milestone is not done until its proof is machine-checked and documented.
 
 S1 done: `warploom-ui` is a real installed package. S2 phase A done:
 `warploom-core` (the determinism substrate: runtime, document/JSON, ECS,
-node graph, scrubber/recorder, protocol/session) is the second one. S4 is
-in progress: `warploom-editor` (the widget/view layer) is gated and moving.
+node graph, scrubber/recorder, protocol/session) is the second one. S4 done:
+`warploom-editor` (the widget/view layer: node editor, inspector,
+graph→animation bridge) is the third.
 A verified vertical
 slice through render / simulate / edit / verify:
 deterministic runtime with replay + state hashing, archetype ECS,
@@ -60,10 +61,10 @@ or a time-warp boundary.
       wired to the S-decision pass so external adopters see one
       coherent identity change. Phase A gate (green four-leg matrix) is
       already banked.
-- [~] **S4 `warploom-editor`** — the widget/view layer over core: node
+- [x] **S4 `warploom-editor`** — the widget/view layer over core: node
       editor, inspector, graph→animation bridge (session/control
       server/protocol are already core — the S4 plan re-scopes this).
-      **Comes third, before S3** (decided): the hot development path
+      **Came third, before S3** (decided): the hot development path
       (W/G/protocol work) lands in this module, so future features stop
       growing the viewport `main.cpp`. Gate first:
       `docs/warploom-editor-plan.md` (measured audit: 3 headers + 2 TUs,
@@ -72,7 +73,15 @@ or a time-warp boundary.
       corrects the S2 audit: the parallel recorder never declared
       `omnicpp::editor`). Main.cpp decomposition is deliberately narrow
       (delete nothing yet — the real decompression arrives with G3/G5
-      landing as module features).
+      landing as module features). Verified: 6/6 suites on all four CI
+      legs (incl. the new `WarploomEditorTests`), standalone install +
+      `find_package(WarploomEditor CONFIG REQUIRED)` consumer runs
+      (`EDITOR_CONSUMER_OK`: graph→cards→paint + inspector projection;
+      core/ui consumer re-proofs pass against the same install tree),
+      and 37/37 live-proof assertions. Extraction lesson banked: module
+      headers include only the modules' own include roots
+      (`warploom/core/*`), never the superproject's forwarders —
+      forwarders are superproject-side convenience, not package API.
 - [ ] **S3 `warploom-render`** — Vulkan context/renderer, render graph,
       scene structures. Runs after S4, against a stable editor boundary.
 - [ ] **S5 `warploom-engine` aggregate** — viewport and tests move to
