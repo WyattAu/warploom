@@ -115,6 +115,108 @@ std::string object_to_json(const SceneObject& o) {
 
 }  // namespace
 
+// ============================================================================
+// G3: timeline clips — armed-record/playback tick + disarm points
+// ============================================================================
+
+//! Splits "property" or "property.<x|y|z>" (the M10 axis-suffix form).
+//! axis = -1 for the whole-property form.
+void split_axis_property(const std::string& property, std::string& base,
+                         int& axis) {
+  const std::size_t dot = property.rfind('.');
+  if (dot != std::string::npos && dot + 2 == property.size() &&
+      (property[dot + 1] == 'x' || property[dot + 1] == 'y' ||
+       property[dot + 1] == 'z')) {
+    base = property.substr(0, dot);
+    axis = property[dot + 1] == 'x' ? 0 : (property[dot + 1] == 'y' ? 1 : 2);
+    return;
+  }
+  base = property;
+  axis = -1;
+}
+
+void EditorSession::tick_timeline(std::uint64_t frame) {
+  // 1. Playback first: apply the armed clip's step-hold values (direct
+  //    application, bindings model). Auto-stops at clip end.
+  if (playing_) {
+    const TimelineClip* clip = doc_.find_clip(playing_clip_);
+    if (clip == nullptr) {
+      playing_ = false;  // clip removed while armed
+    } else if (frame >= clip->start_frame + clip->length_frames) {
+      playing_ = false;  // deterministic end: the clip's own length
+    } else if (frame >= play_started_) {
+      for (const auto& [tkey, track] : clip->tracks) {
+        PropValue value;
+        if (clip->evaluate(frame, track.object_id, track.property, value)) {
+          SceneObject* obj = doc_.find(track.object_id);
+          if (obj == nullptr) continue;
+          std::string base;
+          int axis = -1;
+          split_axis_property(track.property, base, axis);
+          if (axis >= 0) {
+            // Axis-suffix track: writes one vec3 component.
+            auto it = obj->properties.find(base);
+            if (it != obj->properties.end() &&
+                it->second.type == PropValue::Type::Vec3) {
+              it->second.vec[axis] = value.number;
+            }
+          } else {
+            obj->properties[track.property] = value;
+          }
+        }
+      }
+    }
+  }
+  // 2. Recording second: sample the CURRENT document value into the armed
+  //    track (read AFTER playback applied, so clip->same-track chains
+  //    reproduce themselves). Auto-disarms at clip end.
+  if (recording_) {
+    TimelineClip* clip = doc_.find_clip(recording_clip_);  // mutable: samples land here
+    SceneObject* obj =
+        recording_ ? doc_.find(recording_object_) : nullptr;
+    if (clip == nullptr || obj == nullptr) {
+      recording_ = false;
+    } else if (frame >= clip->start_frame + clip->length_frames) {
+      recording_ = false;
+    } else if (frame >= clip->start_frame) {
+      std::string base;
+      int axis = -1;
+      split_axis_property(recording_property_, base, axis);
+      const auto it = obj->properties.find(base);
+      double number = 0.0;
+      bool have = false;
+      if (it != obj->properties.end()) {
+        if (axis >= 0) {
+          // Axis-suffix track: one vec3 component as the sample.
+          if (it->second.type == PropValue::Type::Vec3) {
+            number = it->second.vec[axis];
+            have = true;
+          }
+        } else if (it->second.type == PropValue::Type::Number) {
+          number = it->second.number;
+          have = true;
+        }
+      }
+      if (have) {
+        const std::uint64_t offset = frame - clip->start_frame;
+        auto& track =
+            clip->tracks[track_key(recording_object_, recording_property_)];
+        track.object_id = recording_object_;
+        track.property = recording_property_;
+        if (track.samples.empty() ||
+            track.samples.back().frame_offset < offset) {
+          // Resumed arms append at the next unseen offset (never duplicate
+          // a frame); the next_clip_id monotonic contract keeps save/load
+          // round-trips byte-stable through re-records.
+          track.samples.push_back(
+              ClipSample{offset, PropValue::make_number(number)});
+          recorded_samples_ = offset + 1;
+        }
+      }
+    }
+  }
+}
+
 EditorSession::EditorSession() {
   // Seed the singleton environment object so camera/sun edits work on a
   // fresh session (matches the bridge's expectations).
@@ -300,6 +402,87 @@ bool EditorSession::handle_edit(
                                  : "selected object " + std::to_string(oid);
       return true;
     }
+    // v1.8 timeline clips (G3): document entities — undoable edits.
+    case CK::ClipAdd: {
+      if (command.text.empty()) {
+        reply.ok = false;
+        reply.error = "clip_add needs \"name\"";
+        return true;
+      }
+      const auto start = command.number_count > 0U
+                             ? static_cast<std::uint64_t>(command.numbers[0])
+                             : 0U;
+      const auto length = command.number_count > 1U
+                              ? static_cast<std::uint64_t>(command.numbers[1])
+                              : 0U;
+      const auto expected_id = doc_.next_clip_id;  // apply claims exactly this
+      auto cmd = std::make_unique<AddClipCommand>(command.text, start,
+                                                  length);
+      std::string error;
+      if (!stack_.execute(std::move(cmd), error)) {
+        reply.ok = false;
+        reply.error = "clip_add failed: " + error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "added clip " + std::to_string(expected_id);
+      return true;
+    }
+    case CK::ClipRemove: {
+      if (command.number_count < 1U) {
+        reply.ok = false;
+        reply.error = "clip_remove needs clip";
+        return true;
+      }
+      const auto clip_id =
+          static_cast<std::uint64_t>(command.numbers[0]);
+      auto cmd = std::make_unique<RemoveClipCommand>(clip_id);
+      std::string error;
+      if (!stack_.execute(std::move(cmd), error)) {
+        reply.ok = false;
+        reply.error = "clip_remove failed: " + error;
+        return true;
+      }
+      if (recording_ && recording_clip_ == clip_id) {
+        recording_ = false;
+      }
+      if (playing_ && playing_clip_ == clip_id) {
+        playing_ = false;
+      }
+      reply.ok = true;
+      reply.detail = "removed clip " + std::to_string(clip_id);
+      return true;
+    }
+    case CK::ClipMove: {
+      if (command.number_count < 1U) {
+        reply.ok = false;
+        reply.error = "clip_move needs clip";
+        return true;
+      }
+      const auto clip_id =
+          static_cast<std::uint64_t>(command.numbers[0]);
+      const TimelineClip* clip = doc_.find_clip(clip_id);
+      if (clip == nullptr) {
+        reply.ok = false;
+        reply.error = "clip_move: no clip " + std::to_string(clip_id);
+        return true;
+      }
+      const auto new_start = command.number_count > 1U
+                                 ? static_cast<std::uint64_t>(
+                                       command.numbers[1])
+                                 : clip->start_frame;
+      auto cmd = std::make_unique<MoveClipCommand>(clip_id, new_start);
+      std::string error;
+      if (!stack_.execute(std::move(cmd), error)) {
+        reply.ok = false;
+        reply.error = "clip_move failed: " + error;
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "moved clip " + std::to_string(clip_id) + " to frame " +
+                     std::to_string(new_start);
+      return true;
+    }
     case CK::NodeAdd: {
       if (command.text.empty()) {
         reply.ok = false;
@@ -462,6 +645,9 @@ bool EditorSession::handle_edit(
       doc_ = std::move(loaded);
       stack_ = CommandStack(doc_);
       selected_id_ = 0;
+      // G3: armed clip intent does not survive a wholesale document replace.
+      recording_ = false;
+      playing_ = false;
       reply.ok = true;
       reply.detail = "loaded " + command.text;
       return true;
@@ -571,6 +757,137 @@ bool EditorSession::handle_edit(
       }
       reply.ok = true;
       reply.detail = "replay loaded " + command.text;
+      return true;
+    }
+    // v1.8 timeline clips (G3): arm/disarm + query (session-side intent;
+    // the EDITS — add/remove/move — are document commands above).
+    case CK::ClipRecord: {
+      if (command.number_count < 2U || command.text.empty()) {
+        reply.ok = false;
+        reply.error = "clip_record needs clip, oid, key";
+        return true;
+      }
+      const auto clip_id =
+          static_cast<std::uint64_t>(command.numbers[0]);
+      const auto object_id =
+          static_cast<std::uint64_t>(command.numbers[1]);
+      const TimelineClip* clip = doc_.find_clip(clip_id);
+      if (clip == nullptr) {
+        reply.ok = false;
+        reply.error = "clip_record: no clip " + std::to_string(clip_id);
+        return true;
+      }
+      const SceneObject* obj = doc_.find(object_id);
+      if (obj == nullptr) {
+        reply.ok = false;
+        reply.error = "clip_record: no object " + std::to_string(object_id);
+        return true;
+      }
+      std::string base;
+      int axis = -1;
+      split_axis_property(command.text, base, axis);
+      const auto prop_it = obj->properties.find(base);
+      if (prop_it == obj->properties.end() ||
+          (axis >= 0 &&
+           prop_it->second.type != PropValue::Type::Vec3) ||
+          (axis < 0 &&
+           prop_it->second.type != PropValue::Type::Number)) {
+        reply.ok = false;
+        reply.error = "clip_record: object " + std::to_string(object_id) +
+                      " has no recordable \"" + command.text +
+                      "\" (number property or vec3 axis)";
+        return true;
+      }
+      recording_ = true;
+      recording_clip_ = clip_id;
+      recording_object_ = object_id;
+      recording_property_ = command.text;
+      recorded_samples_ = 0;
+      // Existing samples on this track stay (a resumed arm appends at the
+      // next unseen offset — deterministic, never duplicated).
+      reply.ok = true;
+      reply.detail = "recording clip " + std::to_string(clip_id) + " track " +
+                     std::to_string(object_id) + ":" + command.text;
+      return true;
+    }
+    case CK::ClipRecordStop: {
+      const bool was = recording_;
+      recording_ = false;
+      reply.ok = true;
+      reply.detail = was ? "record disarmed" : "record was not armed";
+      return true;
+    }
+    case CK::ClipPlay: {
+      if (command.number_count < 1U) {
+        reply.ok = false;
+        reply.error = "clip_play needs clip";
+        return true;
+      }
+      const auto clip_id =
+          static_cast<std::uint64_t>(command.numbers[0]);
+      const TimelineClip* clip = doc_.find_clip(clip_id);
+      if (clip == nullptr) {
+        reply.ok = false;
+        reply.error = "clip_play: no clip " + std::to_string(clip_id);
+        return true;
+      }
+      if (clip->tracks.empty()) {
+        reply.ok = false;
+        reply.error = "clip_play: clip " + std::to_string(clip_id) +
+                      " has no tracks";
+        return true;
+      }
+      const auto from = command.number_count > 1U
+                            ? static_cast<std::uint64_t>(command.numbers[1])
+                            : clip->start_frame;
+      playing_ = true;
+      playing_clip_ = clip_id;
+      play_started_ = from;
+      reply.ok = true;
+      reply.detail = "playing clip " + std::to_string(clip_id) + " from " +
+                     std::to_string(from);
+      return true;
+    }
+    case CK::ClipStop: {
+      const bool was = playing_;
+      playing_ = false;
+      reply.ok = true;
+      reply.detail = was ? "playback stopped" : "playback was not armed";
+      return true;
+    }
+    case CK::ClipsInfo: {
+      std::string out = "[";
+      bool first_clip = true;
+      for (const auto& clip : doc_.clips) {
+        if (!first_clip) out += ",";
+        first_clip = false;
+        out += "{\"id\":" + std::to_string(clip.id);
+        out += ",\"name\":" + quote(clip.name);
+        out += ",\"start_frame\":" + std::to_string(clip.start_frame);
+        out += ",\"length_frames\":" + std::to_string(clip.length_frames);
+        out += ",\"tracks\":{";
+        bool first_track = true;
+        for (const auto& [tkey, track] : clip.tracks) {  // map: sorted
+          if (!first_track) out += ",";
+          first_track = false;
+          out += quote(tkey) + ":{\"object_id\":" +
+                 std::to_string(track.object_id) + ",\"property\":" +
+                 quote(track.property) + ",\"samples\":[";
+          if (!track.samples.empty()) {
+            // Head/tail values for display (std::to_string's 6 fixed
+            // decimals; exact values live in the document itself).
+            out += std::to_string(track.samples.front().value.number);
+            out += ',';
+            out += std::to_string(track.samples.back().value.number);
+          }
+          out += "],\"count\":" + std::to_string(track.samples.size()) +
+                 "}";
+        }  // tracks
+        out += "}}";
+      }  // clips
+      out += "]";
+      reply.ok = true;
+      reply.detail = std::move(out);
       return true;
     }
     case CK::BindNodeProperty: {
@@ -922,6 +1239,10 @@ bool EditorSession::scrub_to(std::uint64_t frame, std::string& error) {
   if (selected_id_ != 0U && doc_.find(selected_id_) == nullptr) {
     selected_id_ = 0;
   }
+  // G3: armed clip intent was aimed at the pre-warp timeline context; the
+  // warp may also have replaced the clip definitions themselves.
+  recording_ = false;
+  playing_ = false;
   return true;
 }
 
@@ -1139,8 +1460,30 @@ bool EditorSession::load_replay(const std::string& path,
   // flag suppresses the on_control hook. A failed command aborts the load;
   // state is whatever the prefix produced and the hydrated checkpoints
   // remain available for scrub_to recovery.
+  using CK = omnicpp::core::ControlCommand::Kind;
+  // G3: logical sim frame driving the re-simulated session ticks (starts at
+  // the opening checkpoint's frame, advances one per tick).
+  std::uint64_t frame_source_frame =
+      hydrated.empty() ? 0U : hydrated.front().frame;
+
   replaying_ = true;
   for (const auto& entry : logged) {
+    // G3: ONE full session tick per recorded step tick — the sim loop is
+    // the re-applier (headless sessions have no free-running clock). This
+    // is what makes timeline sample capture (armed clip_record armed via
+    // the log) re-execute deterministically under load_replay; the file
+    // format itself is unchanged (v1, readers never re-simulate).
+    const auto ticks_to_run = entry.command.kind == CK::Step &&
+                                      entry.command.number_count > 0U
+                                  ? static_cast<std::uint64_t>(
+                                        entry.command.numbers[0])
+                                  : 1U;
+    for (std::uint64_t t = 0; t < ticks_to_run; ++t) {
+      std::string sync_error;
+      (void)sync_graph(sync_error);
+      tick_timeline(frame_source_frame);
+      frame_source_frame += 1;
+    }
     const auto reply = on_control(entry.command);
     if (!reply.ok) {
       replaying_ = false;

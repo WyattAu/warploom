@@ -78,6 +78,8 @@ class EditorSession final : public omnicpp::core::ControlHost {
     stack_.clear();
     bindings_.clear();
     selected_id_ = 0;
+    recording_ = false;  // G3: armed clip intent does not survive a replace
+    playing_ = false;
   }
   //! Runs the graph evaluation, then writes every binding's current pin
   //! value into its bound object property. Returns the number of bindings
@@ -97,6 +99,22 @@ class EditorSession final : public omnicpp::core::ControlHost {
   [[nodiscard]] bool scrub_to(std::uint64_t frame, std::string& error);
   [[nodiscard]] const ReplayScrubber& scrubber() const noexcept {
     return scrubber_;
+  }
+
+  // -- Timeline clips (G3, protocol v1.8) ----------------------------------
+  //! ONE session tick of the timeline: record-into-armed-clip, then
+  //! play-from-armed-clip. Direct application (NOT commands — driven values
+  //! are the bindings model; W1 scrubbing is the recovery path). Call once
+  //! per sim tick AFTER sync_graph (bindings write first; the clip wins
+  //! that frame when both drive the same property — documented order).
+  //! The current document value is read AFTER playback applied, so a clip
+  //! that plays into the same track it records from reproduces itself.
+  void tick_timeline(std::uint64_t frame);
+  [[nodiscard]] const TimelineClip* recording_target() const noexcept {
+    return recording_ ? doc_.find_clip(recording_clip_) : nullptr;
+  }
+  [[nodiscard]] const TimelineClip* playing_clip() const noexcept {
+    return playing_ ? doc_.find_clip(playing_clip_) : nullptr;
   }
 
   // -- Protocol record/replay (W2, protocol v1.7) ---------------------------
@@ -124,7 +142,9 @@ class EditorSession final : public omnicpp::core::ControlHost {
     if (!replaying_) recorder_.record(command);
   }
   //! Loads a warploom-replay-v1 file: hash-verified checkpoint hydration
-  //! + command-log re-apply in seq order (spec "Load semantics").
+  //! + command-log re-apply in seq order (spec "Load semantics"), with
+  //! ONE full session tick (sync_graph + tick_timeline) per recorded step
+  //! tick — sample capture re-executes deterministically.
   [[nodiscard]] bool load_replay(const std::string& path,
                                  std::string& error);
 
@@ -151,6 +171,15 @@ class EditorSession final : public omnicpp::core::ControlHost {
   CommandRecorder recorder_{};  //!< W2 capture (frame-thread-only)
   bool replaying_{false};       //!< suppresses re-recording during load_replay
   std::vector<PropertyBinding> bindings_{};
+  // G3: armed clip state (session-side intent; at most one of each).
+  bool recording_{false};       //!< armed record target exists
+  std::uint64_t recording_clip_{0};
+  std::uint64_t recording_object_{0};
+  std::string recording_property_{};
+  std::uint64_t recorded_samples_{0};  //!< next sample offset (per arm)
+  bool playing_{false};         //!< armed playback clip exists
+  std::uint64_t playing_clip_{0};
+  std::uint64_t play_started_{0};  //!< frame playback was armed at
   //! W1: checkpoint ring for hash-verified scrubbing. Frame-thread-only
   //! (all access arrives via on_control), matching the session's model.
   ReplayScrubber scrubber_{};

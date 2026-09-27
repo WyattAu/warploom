@@ -59,6 +59,15 @@ const std::vector<ControlCommand::KindName>& ControlCommand::kind_names() {
       {Kind::StopCapture, "stop_capture"},
       {Kind::CaptureStatus, "capture_status"},
       {Kind::LoadReplay, "load_replay"},
+      // v1.8 timeline clips (G3).
+      {Kind::ClipAdd, "clip_add"},
+      {Kind::ClipRemove, "clip_remove"},
+      {Kind::ClipMove, "clip_move"},
+      {Kind::ClipRecord, "clip_record"},
+      {Kind::ClipRecordStop, "clip_record_stop"},
+      {Kind::ClipPlay, "clip_play"},
+      {Kind::ClipStop, "clip_stop"},
+      {Kind::ClipsInfo, "clips_info"},
   };
   return kTable;
 }
@@ -251,7 +260,48 @@ namespace {
     }
     case ControlCommand::Kind::GetGraph:
     case ControlCommand::Kind::ListBindings:
+    case ControlCommand::Kind::ClipRecordStop:
+    case ControlCommand::Kind::ClipStop:
+    case ControlCommand::Kind::ClipsInfo:
       break;
+    case ControlCommand::Kind::ClipAdd: {
+      take_text("name", command.text);
+      take("frame");  // start (optional, default 0)
+      take("length");  // frames (optional, default 0)
+      break;
+    }
+    case ControlCommand::Kind::ClipRemove:
+    case ControlCommand::Kind::ClipRecord:
+    case ControlCommand::Kind::ClipPlay: {
+      std::uint64_t clip = 0;
+      if (!find_unsigned_field(line, "clip", clip)) {
+        error = "missing \"clip\" unsigned field";
+        return false;
+      }
+      numbers[count++] = static_cast<double>(clip);
+      if (command.kind == ControlCommand::Kind::ClipRecord) {
+        std::uint64_t oid = 0;
+        if (!find_unsigned_field(line, "oid", oid)) {
+          error = "clip_record needs \"oid\"";
+          return false;
+        }
+        numbers[count++] = static_cast<double>(oid);
+        take_text("key", command.text);
+      } else if (command.kind == ControlCommand::Kind::ClipPlay) {
+        take("frame");  // playback start (optional; default = clip start)
+      }
+      break;
+    }
+    case ControlCommand::Kind::ClipMove: {
+      std::uint64_t clip = 0;
+      if (!find_unsigned_field(line, "clip", clip)) {
+        error = "missing \"clip\" unsigned field";
+        return false;
+      }
+      numbers[count++] = static_cast<double>(clip);
+      take("frame");  // new start; session keeps current when absent
+      break;
+    }
     case ControlCommand::Kind::BindNodeProperty: {
       std::uint64_t nid = 0;
       std::uint64_t oid = 0;

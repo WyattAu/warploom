@@ -10,6 +10,7 @@
 //! Deterministic and drive-by-wire: the sim only advances via `step`.
 
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -23,17 +24,35 @@ volatile std::sig_atomic_t g_stop = 0;
 void on_signal(int) { g_stop = 1; }
 
 //! Forwards every command to the embedded session; nothing is host-owned
-//! here (headless = no camera, no sun, no capture scheduling).
+//! here (headless = no camera, no sun, no capture scheduling) except the
+//! SIM CLOCK: `step` advances the frame counter and runs ONE full session
+//! tick (sync_graph + tick_timeline) per tick — the same contract the
+//! viewport's frame loop follows (G3 timeline sampling is host-ticked).
+//! The logical frame model matches the W2 recorder exactly.
 class HeadlessHost final : public omnicpp::core::ControlHost {
  public:
   [[nodiscard]] omnicpp::core::ControlReply on_control(
       const omnicpp::core::ControlCommand& command) override {
+    if (command.kind ==
+        omnicpp::core::ControlCommand::Kind::Step) {
+      const std::uint64_t ticks =
+          command.number_count > 0U
+              ? static_cast<std::uint64_t>(command.numbers[0])
+              : 1U;
+      for (std::uint64_t t = 0; t < ticks; ++t) {
+        std::string error;
+        (void)editor_.sync_graph(error);
+        editor_.tick_timeline(frame_);
+        frame_ += 1;
+      }
+    }
     return editor_.on_control(command);
   }
   [[nodiscard]] std::string snapshot_json() const override {
     return editor_.snapshot_json();
   }
   omnicpp::editor::EditorSession editor_{};
+  std::uint64_t frame_{0};  //!< logical sim frame (advanced by step)
 };
 
 }  // namespace

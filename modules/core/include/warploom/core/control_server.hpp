@@ -118,6 +118,32 @@ struct ControlCommand final {
     StopCapture,
     CaptureStatus,
     LoadReplay,
+    // v1.8: timeline clips (G3) — document entities (schema v3); edits are
+    // undoable, recording/playback are session-side driven values ticked by
+    // the host (docs/warploom-timeline-plan.md).
+    //   ClipAdd:        text = name (required), numbers[0] = start frame
+    //                   (optional, default 0), numbers[1] = length frames
+    //                   (optional, default 0)
+    //   ClipRemove:     numbers[0] = clip id ("clip", required)
+    //   ClipMove:       numbers[0] = clip id ("clip", required),
+    //                   numbers[1] = new start frame ("frame", optional;
+    //                   absent = move to 0? NO — required in practice:
+    //                   absent keeps the current start)
+    //   ClipRecord:     numbers[0] = clip id ("clip"), numbers[1] = object
+    //                   id ("oid"), text = property — arms sample capture
+    //   ClipRecordStop: no payload — disarms sample capture
+    //   ClipPlay:       numbers[0] = clip id ("clip"), numbers[1] = start
+    //                   frame ("frame", optional; default = clip's start)
+    //   ClipStop:       no payload — disarms playback
+    //   ClipsInfo:      no payload; detail = JSON array
+    ClipAdd,
+    ClipRemove,
+    ClipMove,
+    ClipRecord,
+    ClipRecordStop,
+    ClipPlay,
+    ClipStop,
+    ClipsInfo,
   };
 
   //! One entry of the public command-name table: every `Kind` maps to

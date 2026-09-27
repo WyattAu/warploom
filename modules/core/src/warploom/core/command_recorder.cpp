@@ -43,6 +43,13 @@ using CK = omnicpp::core::ControlCommand::Kind;
     case CK::Step:
     case CK::ScrubStart:
     case CK::ScrubTo:
+    case CK::ClipAdd:
+    case CK::ClipRemove:
+    case CK::ClipMove:
+    case CK::ClipRecord:
+    case CK::ClipRecordStop:
+    case CK::ClipPlay:
+    case CK::ClipStop:
       return true;
     default:
       return false;

@@ -78,6 +78,7 @@ if(WARPLOOM_CORE_BUILD_TESTS AND (NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME))
         add_executable(warploom_core_tests
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_document.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scrubber.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_timeline.cpp
         )
         target_link_libraries(warploom_core_tests PRIVATE warploom_core gtest gtest_main)
         target_include_directories(warploom_core_tests

@@ -350,6 +350,238 @@ class JsonReader final {
   return read_prop_object(r, out, error);
 }
 
+//! G3: reads one clip track's samples array. Offsets must be strictly
+//! increasing (the writer's invariant); duplicates are rejected so a
+//! tampered file cannot silently alias samples.
+[[nodiscard]] bool read_clip_samples(JsonReader& r, ClipTrack& track,
+                                     std::string& error) {
+  if (!r.expect('[', error)) return false;
+  r.skip_ws();
+  if (!r.at_end() && r.peek_is(']')) {
+    return r.expect(']', error);
+  }
+  for (;;) {
+    ClipSample sample;
+    if (!r.expect('{', error)) return false;
+    bool seen_offset = false;
+    bool seen_value = false;
+    r.skip_ws();
+    if (!r.at_end() && r.peek_is('}')) {
+      r.fail(error, "empty sample entry");
+      return false;
+    }
+    for (;;) {
+      std::string key;
+      if (!r.read_key(key, error)) return false;
+      if (key == "frame_offset") {
+        double v = 0.0;
+        if (!r.expect(':', error) || !r.read_number(v, error)) return false;
+        if (v < 0.0 || v != std::floor(v) ||
+            v > static_cast<double>(UINT64_MAX)) {
+          r.fail(error, "frame_offset must be a non-negative integer");
+          return false;
+        }
+        sample.frame_offset = static_cast<std::uint64_t>(v);
+        seen_offset = true;
+      } else if (key == "value") {
+        if (!r.expect(':', error)) return false;
+        if (!read_prop_value(r, sample.value, error)) return false;
+        seen_value = true;
+      } else {
+        r.fail(error, "unknown sample key \"" + key + "\"");
+        return false;
+      }
+      r.skip_ws();
+      if (r.at_end()) {
+        r.fail(error, "unterminated sample entry");
+        return false;
+      }
+      if (r.peek_is('}')) break;
+      if (!r.expect(',', error)) return false;
+    }
+    if (!r.expect('}', error)) return false;
+    if (!seen_offset || !seen_value) {
+      r.fail(error, "sample entry missing required key(s): " +
+                        std::string(seen_offset ? "" : "frame_offset ") +
+                        std::string(seen_value ? "" : "value"));
+      return false;
+    }
+    if (!track.samples.empty() &&
+        sample.frame_offset <= track.samples.back().frame_offset) {
+      r.fail(error, "sample offsets must be strictly increasing");
+      return false;
+    }
+    track.samples.push_back(std::move(sample));
+    r.skip_ws();
+    if (r.at_end()) {
+      r.fail(error, "unterminated samples array");
+      return false;
+    }
+    if (r.peek_is(']')) break;
+    if (!r.expect(',', error)) return false;
+  }
+  return r.expect(']', error);
+}
+
+//! G3: reads one clip (id/name/start/length/tracks; all required except
+//! empty tracks, which the writer emits for a fresh clip).
+[[nodiscard]] bool read_timeline_clip(JsonReader& r, TimelineClip& clip,
+                                      std::string& error) {
+  if (!r.expect('{', error)) return false;
+  bool seen_id = false;
+  bool seen_name = false;
+  bool seen_start = false;
+  bool seen_length = false;
+  bool seen_tracks = false;
+  r.skip_ws();
+  if (!r.at_end() && r.peek_is('}')) {
+    r.fail(error, "empty clip entry");
+    return false;
+  }
+  for (;;) {
+    std::string key;
+    if (!r.read_key(key, error)) return false;
+    if (key == "id") {
+      double v = 0.0;
+      if (!r.expect(':', error) || !r.read_number(v, error)) return false;
+      if (v < 1.0 || v != std::floor(v) ||
+          v > static_cast<double>(UINT64_MAX)) {
+        r.fail(error, "clip id must be a positive integer");
+        return false;
+      }
+      clip.id = static_cast<std::uint64_t>(v);
+      seen_id = true;
+    } else if (key == "name") {
+      if (!r.expect(':', error) || !r.read_string(clip.name, error)) {
+        return false;
+      }
+      seen_name = true;
+    } else if (key == "start_frame") {
+      double v = 0.0;
+      if (!r.expect(':', error) || !r.read_number(v, error)) return false;
+      if (v < 0.0 || v != std::floor(v) ||
+          v > static_cast<double>(UINT64_MAX)) {
+        r.fail(error, "start_frame must be a non-negative integer");
+        return false;
+      }
+      clip.start_frame = static_cast<std::uint64_t>(v);
+      seen_start = true;
+    } else if (key == "length_frames") {
+      double v = 0.0;
+      if (!r.expect(':', error) || !r.read_number(v, error)) return false;
+      if (v < 0.0 || v != std::floor(v) ||
+          v > static_cast<double>(UINT64_MAX)) {
+        r.fail(error, "length_frames must be a non-negative integer");
+        return false;
+      }
+      clip.length_frames = static_cast<std::uint64_t>(v);
+      seen_length = true;
+    } else if (key == "tracks") {
+      if (!r.expect(':', error) || !r.expect('{', error)) return false;
+      r.skip_ws();
+      if (!r.at_end() && r.peek_is('}')) {
+        if (!r.expect('}', error)) return false;
+      } else {
+        for (;;) {
+          std::string tkey;
+          if (!r.read_key(tkey, error)) return false;
+          if (!r.expect(':', error)) return false;
+          ClipTrack track;
+          if (!r.expect('{', error)) return false;
+          bool seen_oid = false;
+          bool seen_prop = false;
+          bool seen_samples = false;
+          r.skip_ws();
+          if (!r.at_end() && r.peek_is('}')) {
+            r.fail(error, "empty track entry");
+            return false;
+          }
+          for (;;) {
+            std::string tk;
+            if (!r.read_key(tk, error)) return false;
+            if (tk == "object_id") {
+              double v = 0.0;
+              if (!r.expect(':', error) || !r.read_number(v, error)) {
+                return false;
+              }
+              if (v < 0.0 || v != std::floor(v) ||
+                  v > static_cast<double>(UINT64_MAX)) {
+                r.fail(error, "track object_id must be a non-negative integer");
+                return false;
+              }
+              track.object_id = static_cast<std::uint64_t>(v);
+              seen_oid = true;
+            } else if (tk == "property") {
+              if (!r.expect(':', error) ||
+                  !r.read_string(track.property, error)) {
+                return false;
+              }
+              seen_prop = true;
+            } else if (tk == "samples") {
+              if (!r.expect(':', error)) return false;
+              if (!read_clip_samples(r, track, error)) return false;
+              seen_samples = true;
+            } else {
+              r.fail(error, "unknown track key \"" + tk + "\"");
+              return false;
+            }
+            r.skip_ws();
+            if (r.at_end()) {
+              r.fail(error, "unterminated track entry");
+              return false;
+            }
+            if (r.peek_is('}')) break;
+            if (!r.expect(',', error)) return false;
+          }
+          if (!r.expect('}', error)) return false;
+          if (!seen_oid || !seen_prop || !seen_samples) {
+            r.fail(error, "track entry missing required key(s): " +
+                              std::string(seen_oid ? "" : "object_id ") +
+                              std::string(seen_prop ? "" : "property ") +
+                              std::string(seen_samples ? "" : "samples"));
+            return false;
+          }
+          if (!clip.tracks.emplace(tkey, std::move(track)).second) {
+            r.fail(error, "duplicate track key \"" + tkey + "\"");
+            return false;
+          }
+          r.skip_ws();
+          if (r.at_end()) {
+            r.fail(error, "unterminated tracks object");
+            return false;
+          }
+          if (r.peek_is('}')) break;
+          if (!r.expect(',', error)) return false;
+        }
+        if (!r.expect('}', error)) return false;
+      }
+      seen_tracks = true;
+    } else {
+      r.fail(error, "unknown clip key \"" + key + "\"");
+      return false;
+    }
+    r.skip_ws();
+    if (r.at_end()) {
+      r.fail(error, "unterminated clip entry");
+      return false;
+    }
+    if (r.peek_is('}')) break;
+    if (!r.expect(',', error)) return false;
+  }
+  if (!r.expect('}', error)) return false;
+  if (!seen_id || !seen_name || !seen_start || !seen_length ||
+      !seen_tracks) {
+    r.fail(error, "clip entry missing required key(s): " +
+                      std::string(seen_id ? "" : "id ") +
+                      std::string(seen_name ? "" : "name ") +
+                      std::string(seen_start ? "" : "start_frame ") +
+                      std::string(seen_length ? "" : "length_frames ") +
+                      std::string(seen_tracks ? "" : "tracks"));
+    return false;
+  }
+  return true;
+}
+
 //! Reads a `properties` object into the sorted map (duplicate keys rejected).
 [[nodiscard]] bool read_properties(JsonReader& r,
                                    std::map<std::string, PropValue>& out,
@@ -703,6 +935,57 @@ const SceneObject* SceneDocument::find(std::uint64_t id) const {
   return nullptr;
 }
 
+std::string track_key(std::uint64_t object_id, const std::string& property) {
+  return std::to_string(object_id) + ":" + property;
+}
+
+TimelineClip* SceneDocument::find_clip(std::uint64_t id) {
+  for (auto& clip : clips) {
+    if (clip.id == id) {
+      return &clip;
+    }
+  }
+  return nullptr;
+}
+
+const TimelineClip* SceneDocument::find_clip(std::uint64_t id) const {
+  for (const auto& clip : clips) {
+    if (clip.id == id) {
+      return &clip;
+    }
+  }
+  return nullptr;
+}
+
+//! G3: step-hold evaluation — the value of the last sample at or before the
+//! query offset; nothing before the first sample (unrecorded lead-in holds
+//! nothing, so playback before the first sample is a no-op per track).
+bool TimelineClip::evaluate(std::uint64_t frame, std::uint64_t object_id,
+                            const std::string& property,
+                            PropValue& out) const {
+  if (frame < start_frame || frame >= start_frame + length_frames) {
+    return false;
+  }
+  const auto it = tracks.find(track_key(object_id, property));
+  if (it == tracks.end() || it->second.samples.empty()) {
+    return false;
+  }
+  const std::uint64_t offset = frame - start_frame;
+  const ClipSample* best = nullptr;
+  for (const auto& sample : it->second.samples) {
+    if (sample.frame_offset <= offset) {
+      best = &sample;
+    } else {
+      break;  // samples are strictly increasing
+    }
+  }
+  if (best == nullptr) {
+    return false;
+  }
+  out = best->value;
+  return true;
+}
+
 std::string SceneDocument::to_json() const {
   std::string out;
   out.reserve(256U + objects.size() * 96U);
@@ -781,6 +1064,79 @@ std::string SceneDocument::to_json() const {
     }
     out += '}';
   }
+
+  // G3 timeline clips (schema v3): written only when present so v2-era
+  // documents stay byte-identical to the old writer. next_clip_id rides
+  // along whenever clips exist (or the cursor moved, so a save/load round
+  // trip preserves future id allocation).
+  if (!clips.empty() || next_clip_id != 1U) {
+    out += ",\"next_clip_id\":";
+    write_number(out, static_cast<double>(next_clip_id));
+    out += ",\"clips\":[";
+    for (std::size_t i = 0; i < clips.size(); ++i) {
+      const TimelineClip& clip = clips[i];
+      if (i != 0) out += ',';
+      out += "{\"id\":";
+      write_number(out, static_cast<double>(clip.id));
+      out += ",\"name\":";
+      write_escaped(out, clip.name);
+      out += ",\"start_frame\":";
+      write_number(out, static_cast<double>(clip.start_frame));
+      out += ",\"length_frames\":";
+      write_number(out, static_cast<double>(clip.length_frames));
+      out += ",\"tracks\":{";
+      bool first_track = true;
+      for (const auto& [tkey, track] : clip.tracks) {  // std::map: sorted
+        if (!first_track) out += ',';
+        first_track = false;
+        write_escaped(out, tkey);
+        out += ":{\"object_id\":";
+        write_number(out, static_cast<double>(track.object_id));
+        out += ",\"property\":";
+        write_escaped(out, track.property);
+        out += ",\"samples\":[";
+        for (std::size_t s = 0; s < track.samples.size(); ++s) {
+          const ClipSample& sample = track.samples[s];
+          if (s != 0) out += ',';
+          out += "{\"frame_offset\":";
+          write_number(out, static_cast<double>(sample.frame_offset));
+          out += ",\"value\":";
+          switch (sample.value.type) {
+            case PropValue::Type::Number:
+              out += "{\"type\":\"number\",\"v\":";
+              write_number(out, sample.value.number);
+              out += '}';
+              break;
+            case PropValue::Type::Bool:
+              out += "{\"type\":\"bool\",\"v\":";
+              out += sample.value.boolean ? "true" : "false";
+              out += '}';
+              break;
+            case PropValue::Type::String:
+              out += "{\"type\":\"string\",\"v\":";
+              write_escaped(out, sample.value.text);
+              out += '}';
+              break;
+            case PropValue::Type::Vec3:
+              out += "{\"type\":\"vec3\",\"x\":";
+              write_number(out, sample.value.vec[0]);
+              out += ",\"y\":";
+              write_number(out, sample.value.vec[1]);
+              out += ",\"z\":";
+              write_number(out, sample.value.vec[2]);
+              out += '}';
+              break;
+          }
+          out += '}';
+        }
+        out += "]}}";  // samples array, track entry, tracks object
+      }
+      // The last track's suffix closed the tracks object; an EMPTY tracks
+      // map still needs its own closer before the clip entry closes.
+      out += first_track ? "}}" : "}";
+    }
+    out += ']';
+  }
   out += '}';
   return out;
 }
@@ -803,6 +1159,8 @@ bool SceneDocument::from_json(std::string_view text,
   bool seen_objects = false;
   bool seen_graph = false;
   bool seen_layout = false;
+  bool seen_clips = false;
+  bool seen_next_clip_id = false;
   r.skip_ws();
   if (!r.at_end() && r.peek_is('}')) {
     r.fail(error, "empty document object");
@@ -954,6 +1312,51 @@ bool SceneDocument::from_json(std::string_view text,
       if (!r.expect(':', error)) return false;
       if (!read_node_layout(r, parsed.node_layout, error)) return false;
       seen_layout = true;
+    } else if (key == "next_clip_id") {
+      if (seen_next_clip_id) {
+        r.fail(error, "duplicate key \"next_clip_id\"");
+        return false;
+      }
+      double v = 0.0;
+      if (!r.expect(':', error) || !r.read_number(v, error)) return false;
+      if (v < 1.0 || v != std::floor(v) ||
+          v > static_cast<double>(UINT64_MAX)) {
+        r.fail(error, "next_clip_id must be a positive integer");
+        return false;
+      }
+      parsed.next_clip_id = static_cast<std::uint64_t>(v);
+      seen_next_clip_id = true;
+    } else if (key == "clips") {
+      if (seen_clips) {
+        r.fail(error, "duplicate key \"clips\"");
+        return false;
+      }
+      if (!r.expect(':', error) || !r.expect('[', error)) return false;
+      r.skip_ws();
+      if (!r.at_end() && r.peek_is(']')) {
+        if (!r.expect(']', error)) return false;
+      } else {
+        for (;;) {
+          TimelineClip clip;
+          if (!read_timeline_clip(r, clip, error)) return false;
+          for (const auto& c : parsed.clips) {
+            if (c.id == clip.id) {
+              r.fail(error, "duplicate clip id " + std::to_string(clip.id));
+              return false;
+            }
+          }
+          parsed.clips.push_back(std::move(clip));
+          r.skip_ws();
+          if (r.at_end()) {
+            r.fail(error, "unterminated clips array");
+            return false;
+          }
+          if (r.peek_is(']')) break;
+          if (!r.expect(',', error)) return false;
+        }
+        if (!r.expect(']', error)) return false;
+      }
+      seen_clips = true;
     } else {
       r.fail(error, "unknown document key \"" + key + "\"");
       return false;
@@ -987,6 +1390,53 @@ bool SceneDocument::from_json(std::string_view text,
   if (!seen_graph != !seen_layout) {
     r.fail(error, "node_graph and node_layout must appear together");
     return false;
+  }
+  // G3: clip payload requires schema v3 (the version that introduced it),
+  // and the two clip keys travel together (writer emits both or neither).
+  if ((seen_clips || seen_next_clip_id) && parsed.schema_version < 3) {
+    r.fail(error, "clips require schema_version >= 3");
+    return false;
+  }
+  if (!seen_clips != !seen_next_clip_id) {
+    r.fail(error, "clips and next_clip_id must appear together");
+    return false;
+  }
+  for (const auto& clip : parsed.clips) {
+    if (clip.id >= parsed.next_clip_id) {
+      r.fail(error, "clip id " + std::to_string(clip.id) +
+                        " is not below next_clip_id");
+      return false;
+    }
+    for (const auto& [tkey, track] : clip.tracks) {
+      const std::string expected =
+          std::to_string(track.object_id) + ":" + track.property;
+      if (tkey != expected) {
+        r.fail(error, "clip " + std::to_string(clip.id) +
+                          " track key \"" + tkey +
+                          "\" does not match its payload (expected \"" +
+                          expected + "\")");
+        return false;
+      }
+      if (parsed.find(track.object_id) == nullptr) {
+        r.fail(error, "clip " + std::to_string(clip.id) +
+                          " track references unknown object id " +
+                          std::to_string(track.object_id));
+        return false;
+      }
+      // Track values must be numeric: the recorder samples properties that
+      // a number pin (or numeric property) drives; bool/string/vec3 tracks
+      // have no deterministic playback meaning in v1 (step-hold of a vec3
+      // is meaningful, but the recorder never samples one — refuse the
+      // shape so the on-disk format stays honest).
+      for (const auto& sample : track.samples) {
+        if (sample.value.type != PropValue::Type::Number) {
+          r.fail(error, "clip " + std::to_string(clip.id) +
+                            " track \"" + tkey +
+                            "\" has a non-numeric sample");
+          return false;
+        }
+      }
+    }
   }
   // Every layout entry must reference a real node (view state of nothing).
   for (const auto& [id, xy] : parsed.node_layout) {
@@ -1291,6 +1741,113 @@ void RemoveNodeCommand::undo(SceneDocument& doc) {
 
 std::string RemoveNodeCommand::describe() const {
   return "remove node " + std::to_string(node_id_);
+}
+
+// G3: timeline clip commands (undo restores byte-identical document state,
+// including the next_clip_id cursor for spawn+undo+redo id determinism).
+
+AddClipCommand::AddClipCommand(std::string name, std::uint64_t start_frame,
+                               std::uint64_t length_frames)
+    : name_(std::move(name)),
+      start_frame_(start_frame),
+      length_frames_(length_frames) {}
+
+bool AddClipCommand::apply(SceneDocument& doc, std::string& error) {
+  (void)error;
+  clip_id_ = doc.next_clip_id;
+  TimelineClip clip;
+  clip.id = clip_id_;
+  clip.name = name_;
+  clip.start_frame = start_frame_;
+  clip.length_frames = length_frames_;
+  doc.clips.push_back(std::move(clip));
+  doc.next_clip_id += 1;
+  bumped_ = true;
+  return true;
+}
+
+void AddClipCommand::undo(SceneDocument& doc) {
+  OMNICPP_CONTRACT(clip_id_ != 0U);
+  OMNICPP_CONTRACT(bumped_);
+  for (auto it = doc.clips.rbegin(); it != doc.clips.rend(); ++it) {
+    if (it->id == clip_id_) {
+      doc.clips.erase(std::next(it).base());
+      break;
+    }
+  }
+  // Restore the cursor so spawn+undo+redo claims the SAME id again —
+  // the byte-determinism contract for spawn+undo round-trips.
+  doc.next_clip_id = clip_id_;
+}
+
+std::string AddClipCommand::describe() const {
+  return "add clip \"" + name_ + "\" @" + std::to_string(start_frame_);
+}
+
+RemoveClipCommand::RemoveClipCommand(std::uint64_t clip_id)
+    : clip_id_(clip_id) {}
+
+bool RemoveClipCommand::apply(SceneDocument& doc, std::string& error) {
+  for (std::size_t i = 0; i < doc.clips.size(); ++i) {
+    if (doc.clips[i].id == clip_id_) {
+      captured_ = doc.clips[i];
+      doc.clips.erase(doc.clips.begin() +
+                      static_cast<std::ptrdiff_t>(i));
+      applied_ = true;
+      return true;
+    }
+  }
+  error = "remove_clip: no clip " + std::to_string(clip_id_);
+  return false;
+}
+
+void RemoveClipCommand::undo(SceneDocument& doc) {
+  OMNICPP_CONTRACT(applied_);
+  // Re-insert at the id-ordered slot (ids are monotonic, so the captured
+  // clip's position is the first clip with a larger id — or the end).
+  std::size_t at = doc.clips.size();
+  for (std::size_t i = 0; i < doc.clips.size(); ++i) {
+    if (doc.clips[i].id > captured_.id) {
+      at = i;
+      break;
+    }
+  }
+  doc.clips.insert(doc.clips.begin() + static_cast<std::ptrdiff_t>(at),
+                   captured_);
+  applied_ = false;
+}
+
+std::string RemoveClipCommand::describe() const {
+  return "remove clip " + std::to_string(clip_id_);
+}
+
+MoveClipCommand::MoveClipCommand(std::uint64_t clip_id,
+                                 std::uint64_t new_start)
+    : clip_id_(clip_id), new_start_(new_start) {}
+
+bool MoveClipCommand::apply(SceneDocument& doc, std::string& error) {
+  TimelineClip* clip = doc.find_clip(clip_id_);
+  if (clip == nullptr) {
+    error = "move_clip: no clip " + std::to_string(clip_id_);
+    return false;
+  }
+  old_start_ = clip->start_frame;
+  clip->start_frame = new_start_;
+  applied_ = true;
+  return true;
+}
+
+void MoveClipCommand::undo(SceneDocument& doc) {
+  OMNICPP_CONTRACT(applied_);
+  TimelineClip* clip = doc.find_clip(clip_id_);
+  OMNICPP_CONTRACT(clip != nullptr);
+  clip->start_frame = old_start_;
+  applied_ = false;
+}
+
+std::string MoveClipCommand::describe() const {
+  return "move clip " + std::to_string(clip_id_) + " to frame " +
+         std::to_string(new_start_);
 }
 
 LinkNodesCommand::LinkNodesCommand(std::uint64_t from_node, std::string from_pin,

@@ -37,7 +37,8 @@ namespace omnicpp::editor {
 
 //! Current document schema. Bump on breaking changes; `from_json` refuses
 //! documents from the future.
-inline constexpr std::uint32_t kDocumentSchemaVersion = 2;
+//! v2: node_graph + node_layout. v3: timeline clips (G3).
+inline constexpr std::uint32_t kDocumentSchemaVersion = 3;
 
 //! One editable scene object: a registry type plus a property bag.
 struct SceneObject final {
@@ -48,6 +49,47 @@ struct SceneObject final {
   std::map<std::string, PropValue> properties{};
 };
 
+//! G3: one property sample inside a clip track. `frame_offset` is relative
+//! to the owning clip's start_frame (clips stay movable without rewriting
+//! samples). Offsets within a track are strictly increasing.
+struct ClipSample final {
+  std::uint64_t frame_offset{0};
+  PropValue value{};
+};
+
+//! G3: one recorded channel — object property values sampled over the clip's
+//! span. Step-hold evaluation: the value of the last sample at or before the
+//! query offset; nothing before the first sample.
+struct ClipTrack final {
+  std::uint64_t object_id{0};
+  std::string property{};
+  std::vector<ClipSample> samples{};  // sorted by frame_offset, unique
+};
+
+//! G3: one timeline clip — a named frame span holding recorded tracks.
+struct TimelineClip final {
+  std::uint64_t id{0};
+  std::string name{};
+  std::uint64_t start_frame{0};
+  std::uint64_t length_frames{0};
+  //! Key "<object_id>:<property>" (std::map: key-sorted, so serialization
+  //! is byte-deterministic).
+  std::map<std::string, ClipTrack> tracks{};
+
+  //! Step-hold value of a track at an absolute frame; false when the clip
+  //! does not cover the frame or the track does not exist / has no samples
+  //! at or before the offset.
+  [[nodiscard]] bool evaluate(std::uint64_t frame, std::uint64_t object_id,
+                              const std::string& property,
+                              PropValue& out) const;
+};
+
+//! G3: the canonical track key for one (object, property) channel. Shared
+//! by the recorder, playback, and the on-disk format (writer + reader
+//! validate the key against its payload).
+[[nodiscard]] std::string track_key(std::uint64_t object_id,
+                                    const std::string& property);
+
 //! The whole editable scene.
 struct SceneDocument final {
   std::uint32_t schema_version{kDocumentSchemaVersion};
@@ -57,6 +99,13 @@ struct SceneDocument final {
   //! graph core stays view-agnostic and object-free).
   NodeGraph node_graph{};
   std::map<std::uint64_t, std::pair<double, double>> node_layout{};
+  //! G3: timeline clips (schema v3). Insertion-ordered; ids from
+  //! next_clip_id. Absent from serialization when empty (v2 byte stability).
+  std::vector<TimelineClip> clips{};
+  std::uint64_t next_clip_id{1};  // monotonically increasing
+
+  [[nodiscard]] TimelineClip* find_clip(std::uint64_t id);
+  [[nodiscard]] const TimelineClip* find_clip(std::uint64_t id) const;
 
   [[nodiscard]] SceneObject* find(std::uint64_t id);
   [[nodiscard]] const SceneObject* find(std::uint64_t id) const;
@@ -218,6 +267,56 @@ class RemoveNodeCommand final : public Command {
   std::uint64_t node_id_;
   GraphNode captured_{};
   std::vector<GraphLink> captured_links_{};
+  bool applied_{false};
+};
+
+//! G3: adds an empty clip (undo removes it and restores the id cursor).
+class AddClipCommand final : public Command {
+ public:
+  AddClipCommand(std::string name, std::uint64_t start_frame,
+                 std::uint64_t length_frames);
+
+  [[nodiscard]] bool apply(SceneDocument& doc, std::string& error) override;
+  void undo(SceneDocument& doc) override;
+  [[nodiscard]] std::string describe() const override;
+  [[nodiscard]] std::uint64_t clip_id() const noexcept { return clip_id_; }
+
+ private:
+  std::string name_;
+  std::uint64_t start_frame_;
+  std::uint64_t length_frames_;
+  std::uint64_t clip_id_{0};  // claimed at apply
+  bool bumped_{false};
+};
+
+//! G3: removes a clip (undo restores clip + id cursor exactly).
+class RemoveClipCommand final : public Command {
+ public:
+  explicit RemoveClipCommand(std::uint64_t clip_id);
+
+  [[nodiscard]] bool apply(SceneDocument& doc, std::string& error) override;
+  void undo(SceneDocument& doc) override;
+  [[nodiscard]] std::string describe() const override;
+
+ private:
+  std::uint64_t clip_id_;
+  TimelineClip captured_{};
+  bool applied_{false};
+};
+
+//! G3: moves a clip's start frame (undo restores the previous start).
+class MoveClipCommand final : public Command {
+ public:
+  MoveClipCommand(std::uint64_t clip_id, std::uint64_t new_start);
+
+  [[nodiscard]] bool apply(SceneDocument& doc, std::string& error) override;
+  void undo(SceneDocument& doc) override;
+  [[nodiscard]] std::string describe() const override;
+
+ private:
+  std::uint64_t clip_id_;
+  std::uint64_t new_start_;
+  std::uint64_t old_start_{0};
   bool applied_{false};
 };
 
