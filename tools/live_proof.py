@@ -10,11 +10,17 @@ Proofs (run against hardware per docs/roadmap.md verification discipline):
          FRESH instance B (socket B); wire state must be byte-identical,
          the checkpoint timeline must hydrate, and B must warp back to
          the opening checkpoint. Exit proof for W2.
+  g3  -- timeline clips (protocol v1.8): record a property track through
+         step ticks, play it back step-held after a clip_move, verify
+         clips_info shape and that scrub warps disarm record/playback.
+         Exit proof for G3 core.
 
 Usage:
   tools/live_proof.py w1 --sock /tmp/omnicpp_hw.sock
   tools/live_proof.py g1 --sock /tmp/omnicpp_hw.sock
   tools/live_proof.py w2 --sock-a /tmp/omnicpp_w2a.sock --sock-b /tmp/omnicpp_w2b.sock
+  tools/live_proof.py g3 --sock /tmp/omnicpp_hw.sock  # FRESH host: the
+                        # g3 frame contract needs a step-untouched counter
 """
 
 import argparse
@@ -197,9 +203,117 @@ def proof_w2(a, b):
     os.remove(path)
 
 
+def proof_g3(c):
+    print("G3: timeline clips over the wire")
+    # Frame contract: the host frame advances ONLY on `step` ticks, so this
+    # proof must run on a connection whose frame counter is known. In `all`
+    # mode main() runs it on sock-b AFTER w2 (w2's instance B never gets a
+    # wire `step` — its load_replay re-simulates ticks internally — so its
+    # frame is 0); standalone, run it against a fresh host.
+    base = c.detail(cmd="list_objects", id=49)
+    base_names = [o["name"] for o in base["objects"]]
+    r = c.cmd(cmd="spawn_cube", id=50, x=1, y=1, z=1, size=1.0)
+    check("spawn cube", r.get("ok") is True, str(r))
+    after = c.detail(cmd="list_objects", id=50)
+    new = [o for o in after["objects"] if o["name"] not in base_names]
+    check("one new object", len(new) == 1, str(new))
+    oid = new[0]["id"]
+    name = new[0]["name"]
+
+    # Clip spanning [0, 6); frame is 0, so the record below captures
+    # frames 0..3.
+    r = c.cmd(cmd="clip_add", id=51, name="proof", frame=0, length=6)
+    check("clip_add", r.get("ok") is True, str(r))
+    clip_id = int(r["detail"].rsplit(" ", 1)[1])  # "added clip <N>"
+
+    # Arm a record track on position.x (vec3 axis form) and tick 2 step
+    # frames (0..1); the mid-recording edit must land in later samples.
+    r = c.cmd(cmd="clip_record", id=52, clip=clip_id, oid=oid,
+              key="position.x")
+    check("clip_record armed", r.get("ok") is True and
+          "recording clip %d" % clip_id in r.get("detail", ""), str(r))
+    r = c.cmd(cmd="step", id=53, ticks=2)
+    check("step 2 (pre-edit)", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="set_property", id=54, object=name, key="position",
+              x=0.75, y=1, z=1)
+    check("set mid-recording", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="step", id=55, ticks=2)
+    check("step 2 (post-edit)", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_record_stop", id=56)
+    check("record stop", r.get("ok") is True and
+          r.get("detail") == "record disarmed", str(r))
+
+    # Playback armed from frame 6 while the host frame is 4 is silence:
+    # ticks 4..5 are below play_started_, so nothing applies.
+    r = c.cmd(cmd="clip_play", id=57, clip=clip_id, frame=6)
+    check("clip_play@6", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="step", id=58, ticks=2)
+    check("step 2 (play silent)", r.get("ok") is True, str(r))
+
+    # Re-arming record past the clip end auto-disarms on the first tick
+    # (frame 6 >= 0 + 6): no samples are added and stop reports unarmed.
+    r = c.cmd(cmd="clip_record", id=59, clip=clip_id, oid=oid,
+              key="position.x")
+    check("record re-arm past end", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="step", id=60, ticks=2)
+    check("step 2 (past end)", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_record_stop", id=61)
+    check("record auto-disarmed at clip end",
+          r.get("detail") == "record was not armed", str(r))
+
+    info = c.detail(cmd="clips_info", id=62)  # already parsed JSON
+    matching = [k for k in info
+                if k["name"] == "proof" and
+                str(oid) + ":position.x" in k["tracks"]]
+    check("clips_info has proof clip", len(matching) == 1, str(info))
+    track = matching[0]["tracks"][str(oid) + ":position.x"]
+    check("4 samples (end ticks excluded)", track["count"] == 4,
+          str(track))
+    check("head 1.0 / tail 0.75",
+          track["samples"][0] == 1.0 and
+          track["samples"][-1] == 0.75, str(track["samples"]))
+
+    # Move the clip to [8, 14) and replay from its (new) start. Ticks run
+    # 8..10: offsets 0,1,2 step-hold 1.0, 1.0, then the edit value 0.75.
+    r = c.cmd(cmd="clip_move", id=63, clip=clip_id, frame=8)
+    check("clip_move@8", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_play", id=64, clip=clip_id)
+    check("clip_play from start", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="step", id=65, ticks=3)
+    check("step 3 (replay)", r.get("ok") is True, str(r))
+
+    after = c.detail(cmd="get_object", oid=oid)
+    px = after["properties"]["position"][0]
+    check("step-held 0.75", abs(px - 0.75) < 1e-9, str(px))
+
+    info = c.detail(cmd="clips_info", id=66)
+    moved = [k for k in info
+             if k["name"] == "proof" and
+             str(oid) + ":position.x" in k["tracks"]]
+    check("moved start", len(moved) == 1 and
+          moved[0]["start_frame"] == 8, str(moved))
+
+    # Scrub warps disarm anything armed: re-arm both, warp, verify.
+    r = c.cmd(cmd="clip_record", id=67, clip=clip_id, oid=oid,
+              key="position.x")
+    check("record re-arm", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_play", id=68, clip=clip_id)
+    check("play re-arm", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="scrub_start", id=69, frame=20)
+    check("scrub_start", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="scrub_to", id=70, frame=20)
+    check("scrub_to", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_record_stop", id=71)
+    check("record disarmed by warp",
+          r.get("detail") == "record was not armed", str(r))
+    r = c.cmd(cmd="clip_stop", id=72)
+    check("playback disarmed by warp",
+          r.get("detail") == "playback was not armed", str(r))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("proof", choices=["w1", "g1", "w2", "all"])
+    parser.add_argument("proof", choices=["w1", "g1", "w2", "g3", "all"])
     parser.add_argument("--sock", default="/tmp/omnicpp_hw.sock")
     parser.add_argument("--sock-a", default="/tmp/omnicpp_w2a.sock")
     parser.add_argument("--sock-b", default="/tmp/omnicpp_w2b.sock")
@@ -213,6 +327,11 @@ def main():
             proof_g1(c)
     if args.proof in ("w2", "all"):
         proof_w2(Client(args.sock_a), Client(args.sock_b))
+    if args.proof in ("g3", "all"):
+        # In `all` mode g3 runs on sock-b after w2: w2's instance B never
+        # receives a wire `step` (its replay re-simulates internally), so
+        # its host frame counter is still 0 — see proof_g3's contract note.
+        proof_g3(Client(args.sock_b if args.proof == "all" else args.sock))
 
     print()
     print(f"LIVE PROOF: {len(PASS)} passed, {len(FAIL)} failed")

@@ -165,8 +165,9 @@ jobs:
   # ============================================================================
   # Live protocol proofs (P0) — the checked-in harness (tools/live_proof.py)
   # against headless control hosts (EditorSession + ControlServer, no GPU):
-  # W1 scrubber, G1 save/load round-trip, and the W2 record→load→
-  # byte-identical two-instance proof, all over a real socket.
+  # W1 scrubber, G1 save/load round-trip, the W2 record→load→
+  # byte-identical two-instance proof, and the G3 timeline clip proof,
+  # all over a real socket.
   # ============================================================================
   live-proof:
     name: "Live Protocol Proofs (headless)"
@@ -196,7 +197,7 @@ jobs:
           done
           test -S /tmp/proof_a.sock && test -S /tmp/proof_b.sock
 
-      - name: Run live proofs (w1 + g1 + w2)
+      - name: Run live proofs (w1 + g1 + w2 + g3)
         run: python3 tools/live_proof.py all --sock /tmp/proof_a.sock --sock-a /tmp/proof_a.sock --sock-b /tmp/proof_b.sock
 
   # ============================================================================
