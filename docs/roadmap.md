@@ -8,7 +8,9 @@ milestone is not done until its proof is machine-checked and documented.
 
 S1 done: `warploom-ui` is a real installed package. S2 phase A done:
 `warploom-core` (the determinism substrate: runtime, document/JSON, ECS,
-node graph, scrubber/recorder, protocol/session) is the second one. A verified vertical
+node graph, scrubber/recorder, protocol/session) is the second one. S4 is
+in progress: `warploom-editor` (the widget/view layer) is gated and moving.
+A verified vertical
 slice through render / simulate / edit / verify:
 deterministic runtime with replay + state hashing, archetype ECS,
 deterministic physics, node graph (20+ node types) with graph→property
@@ -58,16 +60,19 @@ or a time-warp boundary.
       wired to the S-decision pass so external adopters see one
       coherent identity change. Phase A gate (green four-leg matrix) is
       already banked.
-- [ ] **S4 `warploom-editor`** — session, control server/protocol, node
-      editor, inspector. **Comes third, before S3** (decided): the hot
-      development path (W/G/protocol work) lands in this module, so
-      extracting it means future features stop growing the viewport
-      `main.cpp`. Headless-testable, hence lower-risk than render.
-      *Forces* decomposing the 5.3k-line viewport `main.cpp`; budget a
-      session for that alone. **S4 also owns the truthful
-      `omnicpp::editor` namespace split** (document/session types vs
-      widget types — see docs/warploom-core-plan.md) since the widget
-      layer moves in the same pass.
+- [~] **S4 `warploom-editor`** — the widget/view layer over core: node
+      editor, inspector, graph→animation bridge (session/control
+      server/protocol are already core — the S4 plan re-scopes this).
+      **Comes third, before S3** (decided): the hot development path
+      (W/G/protocol work) lands in this module, so future features stop
+      growing the viewport `main.cpp`. Gate first:
+      `docs/warploom-editor-plan.md` (measured audit: 3 headers + 2 TUs,
+      6 consumers, zero render leakage; the truthful
+      `omnicpp::editor` map is 7 core headers vs 3 widget headers — and
+      corrects the S2 audit: the parallel recorder never declared
+      `omnicpp::editor`). Main.cpp decomposition is deliberately narrow
+      (delete nothing yet — the real decompression arrives with G3/G5
+      landing as module features).
 - [ ] **S3 `warploom-render`** — Vulkan context/renderer, render graph,
       scene structures. Runs after S4, against a stable editor boundary.
 - [ ] **S5 `warploom-engine` aggregate** — viewport and tests move to

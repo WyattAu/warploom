@@ -32,6 +32,10 @@ part of warploom-core:
   (the widget-layer node editor, S1-aliased to `warploom::ui` inside);
 - `include/engine/render/vulkan_parallel_recorder.hpp` (one render header
   declares `namespace omnicpp::editor`).
+  *Correction (S4 re-audit, docs/warploom-editor-plan.md):* this header
+  declares `omnicpp::core` then `omnicpp::render` — never `omnicpp::editor`.
+  The conservative S2 claim was wrong in the safe direction; the truthful
+  split is 7 core headers vs 3 widget headers, nothing else.
 
 Therefore: `omnicpp::editor` is NOT a pure core namespace. A repo-wide
 namespace sed would silently re-badge editor widgets and a render header as
