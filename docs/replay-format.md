@@ -3,7 +3,9 @@
 Status: **spec for W2** (docs/roadmap.md, track W). This document is the
 contract for replay files before any code lands. The schema name embeds the
 target identity (`warploom`) so the S-decision identifier migration never
-breaks this format's namespace.
+breaks this format's namespace. G3 (protocol v1.8) extends the *recorded
+command set* with the timeline clip kinds; the file format itself is
+unchanged — still `warploom-replay-v1`, `schema_version` 1.
 
 ## Goals
 
@@ -57,7 +59,7 @@ in arrival order, stamped with the logical frame at arrival:
 - `frame`: sim frame when the command arrived (from the recorder's
   frame source; see "Frame source").
 - `seq`: 0-based monotonic arrival index within the file.
-- `cmd`: the protocol command name (same strings as the v1.7 mapping table).
+- `cmd`: the protocol command name (same strings as the v1.8 mapping table).
 - `args`: the command's parsed payload in **positional form** —
   `"n":[numbers[0..number_count)} when any numbers are set, plus
   `"text"`/`"text2"`/`"text3"` when non-empty. Writers echo the parsed
@@ -67,14 +69,18 @@ in arrival order, stamped with the logical frame at arrival:
   inside the positional payload; replies are not recorded.
 
 **Recorded kinds** — every *mutating* kind (the document-edit set:
-spawn/destroy/set_property/undo/redo/select/node-*/bind-*) plus the scrub
-commands and `pause`/`resume`/`step` (they shape the sim-frame timeline and
-are part of session intent). NOT recorded: pure queries (`list_objects`,
-`get_object`, `schema`, `get_graph`, `list_bindings`, `scrub_info`,
-`capture_status`, `ping`), host-mirrored visual state (`set_camera`,
-`set_sun`, `capture` — no document effect), and the v1.7 capture commands
-themselves (`start_capture`/`stop_capture`/`load_replay` never nest; v1
-records one session per file).
+spawn/destroy/set_property/undo/redo/select/node-*/bind-*, plus the G3 clip
+document edits `clip_add`/`clip_remove`/`clip_move`) plus the session-arm
+commands `clip_record`/`clip_record_stop`/`clip_play`/`clip_stop` (arming
+shapes what the following step ticks capture and apply, so they are part of
+session intent), the scrub commands and `pause`/`resume`/`step` (they shape
+the sim-frame timeline and are part of session intent). NOT recorded: pure
+queries (`list_objects`, `get_object`, `schema`, `get_graph`,
+`list_bindings`, `scrub_info`, `clips_info`, `capture_status`, `ping`),
+host-mirrored visual state (`set_camera`, `set_sun`, `capture` — no
+document effect), and the v1.7 capture commands themselves
+(`start_capture`/`stop_capture`/`load_replay` never nest; v1 records one
+session per file).
 
 **Frame source.** The recorder stamps commands with a *logical* frame: the
 `start_capture` frame plus the accumulated `ticks` of recorded `step`
@@ -83,6 +89,19 @@ commands (the headless session has no free-running sim clock). A
 arrival stamp, not sim time; the restored state is carried by the command
 itself, and replay reproduces both identically. Viewport hosts may pass a
 richer frame source later.
+
+**Tick contract (G3).** Since v1.8 one full session tick is
+`sync_graph()` followed by `tick_timeline(frame)`: playback first (apply
+step-hold values for every playing clip track at the current frame), then
+record (sample the current document value into each armed clip track).
+Hosts run this per `step` tick *before* the step command is recorded, so
+the command log alone does NOT carry tick side effects — a replay loader
+must re-execute the same contract: per logged `step` command, run its
+`ticks` count of full ticks with the logical frame from the frame source
+(incrementing per tick) before applying the next command. The W1
+non-timeline sessions are unaffected (empty clip set makes `tick_timeline`
+a no-op). Sample offsets are clip-relative, so `clip_move` never rewrites
+recorded samples and replay stays byte-faithful.
 
 **Only commands whose reply was `ok` are recorded.** A failed command had
 no state effect; recording it would abort re-apply on load for no fidelity
@@ -145,7 +164,10 @@ Loading a replay file (`load_replay` protocol command, v1.7) into a session:
    the session's scrubber ring.
 3. **Re-apply the command log in `seq` order** through the session's normal
    `on_control` path (same mutation authority as live editing, so undo
-   history, bindings, and validation behave identically). Re-applied
+   history, bindings, and validation behave identically), executing the
+   tick contract above for every recorded `step` between commands
+   (`sync_graph` + `tick_timeline` per tick, logical frame incrementing
+   from the opening checkpoint's frame). Re-applied
    commands are NOT re-recorded when a capture is active — the loaded log
    IS their record. A command that fails to apply aborts the load with the
    seq, command, and error; the session state is then whatever the prefix
@@ -160,7 +182,7 @@ Loading a replay file (`load_replay` protocol command, v1.7) into a session:
 Scrub-to-a-checkpoint after load is plain W1 time warp (history clears at
 the warp, same as live).
 
-## Writer semantics (v1.7 protocol)
+## Writer semantics (v1.8 protocol)
 
 - `start_capture {frame}` (optional `scene` string, default ""): begins
   recording. Requires capture not already active. Embeds the opening
