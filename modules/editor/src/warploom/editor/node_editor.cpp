@@ -11,7 +11,7 @@
 //! rebuild-time absolute rects — `pin_canvas` switches the canvas to
 //! absolute mode so layout never repositions them.
 
-#include "engine/editor/node_editor.hpp"
+#include "warploom/editor/node_editor.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -19,7 +19,7 @@
 #include <string>
 #include <vector>
 
-#include "engine/core/contract.hpp"
+#include "warploom/core/contract.hpp"
 
 namespace omnicpp::editor {
 namespace ui = ::warploom::ui;  // S1

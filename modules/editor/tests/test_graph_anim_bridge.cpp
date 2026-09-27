@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "engine/editor/graph_anim_bridge.hpp"
+#include "warploom/editor/graph_anim_bridge.hpp"
 
 namespace {
 

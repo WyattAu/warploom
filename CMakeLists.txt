@@ -170,6 +170,8 @@ if(OMNICPP_BUILD_ENGINE)
     add_subdirectory(modules/ui)
     # S2: the determinism substrate is a real module (Warploom::core).
     add_subdirectory(modules/core)
+    # S4: the editor widget/view layer is a real module (Warploom::editor).
+    add_subdirectory(modules/editor)
     add_subdirectory(src/engine)
     # Headless proof host (P0): runs the live-proof harness in CI —
     # EditorSession + ControlServer, no GPU/window. Builds on every leg.

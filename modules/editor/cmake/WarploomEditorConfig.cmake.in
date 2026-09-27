@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+# The editor public headers include warploom/ui and warploom/core headers
+# (document/graph/session), so both packages are link-time dependencies of
+# the exported target. Co-installed prefixes resolve via find_package's
+# relative-prefix search; Threads via the system.
+find_dependency(WarploomUI)
+find_dependency(WarploomCore)
+find_dependency(Threads)
+
+include("${CMAKE_CURRENT_LIST_DIR}/WarploomEditorTargets.cmake")
+
+check_required_components(WarploomEditor)

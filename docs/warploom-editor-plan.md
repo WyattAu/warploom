@@ -117,7 +117,11 @@ before the next editor-facing feature.
      so the config template lists **`find_dependency(WarploomCore)` too**).
    - Sources git-mv from `src/engine/editor/*.cpp`; headers git-mv from
      `include/engine/editor/*` to `modules/editor/include/warploom/editor/*`.
-     Internal include paths sed'd `engine/editor/` → `warploom/editor/`.
+     Internal include paths sed'd `engine/editor/` → `warploom/editor/`,
+     and `engine/core/` → `warploom/core/` (caught by the standalone
+     consumer proof: installed headers must resolve through the modules'
+     OWN include roots, not the superproject's forwarders — forwarders
+     are a superproject-side convenience only, never a package API).
    - Public header allowlist = all 3 headers.
 2. **Module tests**: git-mv the 3 unit tests into
    `modules/editor/tests/` as a new `warploom_editor_tests` binary

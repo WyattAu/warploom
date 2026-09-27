@@ -6,8 +6,6 @@ cmake_minimum_required(VERSION 3.20)
 # ============================================================================
 
 add_library(omnicpp_runtime SHARED
-    editor/node_editor.cpp
-    editor/inspector.cpp
     render/vulkan_ibl_baker.cpp
     asset/gltf_importer.cpp
     asset/gltf_animation.cpp
@@ -48,21 +46,27 @@ target_include_directories(omnicpp_runtime
 # S2: the determinism substrate lives in modules/core as Warploom::core;
 # PUBLIC for the same reason (editor/render/engine headers include
 # warploom/core/* — via the include/engine/core forwarders today).
-target_link_libraries(omnicpp_runtime PUBLIC Warploom::ui Warploom::core)
+# S4: the widget/view layer (node editor, inspector, graph-anim bridge)
+# lives in modules/editor as Warploom::editor; PUBLIC for the same reason
+# (viewport/tests include engine/editor/* forwarders and need the
+# transitive include dirs + DSO).
+target_link_libraries(omnicpp_runtime
+    PUBLIC Warploom::ui Warploom::core Warploom::editor)
 
 # ============================================================================
 # Module-alias libraries (publishing units)
 #
 # omnicpp_runtime is ONE shared object (one ABI, one dlopen surface), but
-# downstream projects consume it through these alias targets. S2 phase A:
-# warploom-core is now a REAL library (modules/core, Warploom::core) and
-# omnicpp_runtime links it PUBLIC — the runtime itself shrinks to the
-# integration layer (editor widgets + render + asset).
+# downstream projects consume it through these alias targets. S4: the
+# runtime is the integration layer only (render + asset + glue); the
+# editor widget layer is a real module (modules/editor, Warploom::editor)
+# linked PUBLIC alongside ui and core.
 # ============================================================================
 
 # (CMake forbids alias-of-alias, so these point at the real module targets.)
 add_library(omnicpp_core ALIAS warploom_core)
 add_library(omnicpp_ui ALIAS warploom_ui)
+add_library(omnicpp_editor ALIAS warploom_editor)
 add_library(omnicpp_render_lib ALIAS omnicpp_runtime)
 
 # Link Vulkan if available (gracefully returns errors when absent)

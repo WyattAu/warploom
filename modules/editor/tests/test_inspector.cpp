@@ -9,8 +9,8 @@
 #include <algorithm>
 #include <string>
 
-#include "engine/editor/inspector.hpp"
-#include "engine/editor/node_editor.hpp"
+#include "warploom/editor/inspector.hpp"
+#include "warploom/editor/node_editor.hpp"
 
 namespace {
 

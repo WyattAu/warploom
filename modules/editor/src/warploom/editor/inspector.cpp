@@ -7,8 +7,8 @@
 //! rects, so the layout pass is authoritative and tests assert on the
 //! same geometry the renderer draws.
 
-#include "engine/editor/inspector.hpp"
-#include "engine/editor/node_editor.hpp"  // value_to_text (PropValue formatting)
+#include "warploom/editor/inspector.hpp"
+#include "warploom/editor/node_editor.hpp"  // value_to_text (PropValue formatting)
 
 #include <cstdio>
 #include <string>

@@ -24,9 +24,9 @@
 #include <string>
 #include <vector>
 
-#include "engine/core/document.hpp"
-#include "engine/core/node_graph.hpp"
-#include "engine/editor/node_editor.hpp"
+#include "warploom/core/document.hpp"
+#include "warploom/core/node_graph.hpp"
+#include "warploom/editor/node_editor.hpp"
 #include "engine/render/software_rasterizer.hpp"
 #include "warploom/ui/widget.hpp"
 

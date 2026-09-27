@@ -728,9 +728,6 @@ add_executable(omnicpp_unit_tests
     unit/test_replay_scrubber.cpp
     unit/test_command_recorder.cpp
     unit/test_node_graph.cpp
-    unit/test_graph_anim_bridge.cpp
-    unit/test_node_editor.cpp
-    unit/test_inspector.cpp
     unit/test_node_persistence.cpp
     unit/test_script_module.cpp
     unit/test_input_state.cpp
