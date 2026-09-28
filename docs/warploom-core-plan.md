@@ -140,3 +140,67 @@ there.
 4. Standalone core consumer proof + ui consumer re-proof.
 5. Live proofs (37) on hardware.
 6. Roadmap checkbox + docs update in the same commit.
+
+---
+
+# Phase B: identifier migration (S2-B gate)
+
+Status: **gate doc section** — the contract below is the acceptance
+authority for S2-B, appended per the design-first discipline. The phase-A
+blocker (an `omnicpp::editor` collision across not-yet-split widget code)
+dissolved with S4: every `omnicpp::editor` declaration now lives in a
+module header, so the namespace move is mechanical.
+
+## Contract
+
+1. **Module core headers adopt the warploom namespace.** All 21 public
+   headers and 10 TUs under `modules/core` re-badge their namespace
+   blocks: `omnicpp::core` → `warploom::core`, `omnicpp::editor` →
+   `warploom::editor`, `omnicpp::anim` → `warploom::anim`,
+   `omnicpp::physics` → `warploom::physics`, `omnicpp::contract` →
+   `warploom::contract`. File-scoped, mechanical openers + closers —
+   exactly the S1 ui move, now for core.
+2. **Compat aliases in every public header.** Each header ends with
+   `namespace omnicpp { using core = warploom::core; using editor =
+   warploom::editor; }` (+ the header's other re-badged namespaces).
+   Guards: ODR-fenced (only emitted when the old spelling is not yet the
+   alias subject — an alias-then-redeclare would be ill-formed);
+   alias-in-namespace is not ambiguous with real child namespaces
+   (determining a class takes precedence, then no finding in either
+   scope = normal namespace lookup). The one known REAL declaration
+   outside modules — `vulkan_parallel_recorder.hpp`'s
+   `namespace omnicpp::core` (a struct tag, no named types) — coexists
+   with the alias (a struct tag and an alias of a different name do not
+   collide); its `omnicpp::render` half stays put (S3 scope).
+3. **Consumers compile unchanged.** The ~1,050 qualified spellings
+   outside modules/core (`omnicpp::core::X`, `omnicpp::editor::X`,
+   `omnicpp::anim::X`) resolve through the aliases: 113 files across
+   `modules/editor`, `src/`, `include/`, `tools/`, `examples/`, `tests/`.
+   Include roots do NOT change — only namespace spelling moves.
+4. **S-decision split.** Repo-wide external identity (`OMNICPP_*` flags,
+   repo rename, binary names) stays OUT — it rides with S5 so adopters
+   see one coherent identity change. This phase changes namespaces only.
+5. **Verification gate (S2-B exit)**:
+   - `warploom_core_tests` + `warploom_editor_tests` + full 6/6 suites on
+     all four CI legs (aliases exercised by the very consumers that keep
+     using the old spelling);
+   - standalone consumers re-proofed against a fresh install
+     (`CORE_CONSUMER_OK`, `UI_CONSUMER_OK`, `EDITOR_CONSUMER_OK` +
+     `G3B_CONSUMER_OK` — the last two now exercise the alias path, since
+     their sources still spell `omnicpp::editor`);
+   - 64/64 live proofs on hardware (the headless host + proof harness
+     are alias consumers);
+   - the deterministic-runtime benchmark suite stays green and
+     byte-stable (namespaces cannot move bytes, but the sentinel stays
+     the sentinel).
+
+## Mechanical plan (this session)
+
+1. Scripted re-badge of the 31 namespace openers/closers across
+   modules/core (openers AND comment closers), verified by grep before
+   building.
+2. Compat-alias footer appended to each public header (5 namespaces
+   total, guarded).
+3. Full four-leg verification + standalone consumer re-proofs + live
+   proofs.
+4. Roadmap checkbox + this addendum's status flip in the same commit.
