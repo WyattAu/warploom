@@ -156,8 +156,7 @@ makes it visible.
       (`position.x`) record and play one vec3 component. Replay stays
       `warploom-replay-v1`: clip commands are recorded, and the loader
       re-executes the tick contract per recorded `step` (documented in
-      `docs/replay-format.md`). **Panel** (G3-B: ClipTimelineView in
-      warploom-editor) deliberately deferred. Verified: 8 new timeline
+      `docs/replay-format.md`). Panel widget: G3-B below. Verified: 8 new timeline
       unit tests (byte round-trips, reader strictness, undo/redo identity,
       record→move→play determinism incl. replay round-trip, recorded
       clip edits), full core-suite sanity (`warploom_core_tests` 10/10,
@@ -168,6 +167,20 @@ makes it visible.
       warp disarms both arms; standalone `g3` on a fresh host = 27/27),
       6/6 suites on all four CI legs. Live proof caught: the harness (not
       the engine) assumed spawn ticks the host frame — only `step` does.
+- [x] **G3-B clip timeline panel widget** — `ClipTimelineView` in
+      warploom-editor (gate doc `docs/warploom-clip-timeline-view-plan.md`):
+      pure projection of (document clips, playhead) to the widget tree,
+      one block per id-ordered clip over a host-owned frame window,
+      clamped slivers for out-of-window spans, playhead painted last,
+      sync diffs by span so playhead-only updates are field writes.
+      `clip_at` hit-test + drag state machine commits the exact ClipMove
+      command payload (offset-preserving, start clamped at 0); the view
+      never mutates the document. Verified: 5 new module tests (39/39 in
+      `warploom_editor_tests`), 6/6 suites on all four CI legs, and the
+      standalone `find_package(WarploomEditor)` consumer re-proof now
+      also drives the strip through a session `clip_add` and a block
+      hit-test (EDITOR_CONSUMER_OK + G3B_CONSUMER_OK against the freshly
+      installed package).
 - [ ] **G4 script node** — the script-module C ABI as a node type:
       extend the graph without recompiling.
 - [ ] **G5 asset browser** — browse/drop glTF assets; import path is
@@ -238,11 +251,10 @@ P1–P4) is post-0.1 by definition.
    editor is headless-testable, which de-risks extraction.
 4. **G3 after S4; then S3 → S5** — the timeline core (clips, protocol,
    session tick contract) landed in the editor module post-S4, as
-   planned; the visual panel (G3-B: ClipTimelineView) is the remaining
-   piece and lands in warploom-editor next, before S3. Render extraction
-   runs against a stable editor boundary; S5 flips the viewport to
-   `find_package` and the S-decision (flags, binaries, repo rename, with
-   shim) rides with it.
+   planned, and the visual panel (G3-B: ClipTimelineView) followed in
+   the same module. Render extraction runs against a stable editor
+   boundary; S5 flips the viewport to `find_package` and the
+   S-decision (flags, binaries, repo rename, with shim) rides with it.
 5. **P0 (CI) alongside W2** — the proof harness and automation land
    together; the remaining P items (WASM, Wayland, adoption, docs)
    come after S5, targeting published modules, not the monolith.

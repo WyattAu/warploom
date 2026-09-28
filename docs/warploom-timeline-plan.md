@@ -136,13 +136,12 @@ promise holding: new editor features land in the module, not in main.cpp.
 
 ## G3 phase B (next session, scoped here so phase A doesn't drift)
 
-`ClipTimelineView` in `warploom-editor`: pure projection of (clips,
-scrubber frames) to the widget tree — one row per clip, block per clip
-(absolute layout), playhead, `clip_at(x)` hit-test for drag-to-move
-(committed by the host via the `clip_move` command, keeping command/undo
-semantics in the session layer). Module tests prove geometry + hit-tests;
-viewport integration replaces nothing (it ADDS a second strip above the
-W1 scrub strip).
+**DONE** — `ClipTimelineView` landed in `warploom-editor`; the contract
+above is now authoritative in `docs/warploom-clip-timeline-view-plan.md`
+(pure projection, host-owned frame window, `clip_at` hit-test, drag
+commits the session's `clip_move`). Module tests prove geometry +
+hit-tests; viewport integration replaces nothing (it ADDS a second strip
+above the W1 scrub strip).
 
 ## Risks / open questions
 

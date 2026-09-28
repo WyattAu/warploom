@@ -32,6 +32,7 @@ include(CMakePackageConfigHelpers)
 add_library(warploom_editor SHARED
     src/warploom/editor/node_editor.cpp
     src/warploom/editor/inspector.cpp
+    src/warploom/editor/clip_timeline_view.cpp
 )
 add_library(Warploom::editor ALIAS warploom_editor)
 
@@ -80,6 +81,7 @@ if(WARPLOOM_EDITOR_BUILD_TESTS AND (NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_node_editor.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_inspector.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_graph_anim_bridge.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_clip_timeline_view.cpp
         )
         target_link_libraries(warploom_editor_tests PRIVATE warploom_editor gtest gtest_main)
         target_include_directories(warploom_editor_tests
