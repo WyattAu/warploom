@@ -10,7 +10,9 @@ S1 done: `warploom-ui` is a real installed package. S2 phase A done:
 `warploom-core` (the determinism substrate: runtime, document/JSON, ECS,
 node graph, scrubber/recorder, protocol/session) is the second one. S4 done:
 `warploom-editor` (the widget/view layer: node editor, inspector,
-graph→animation bridge) is the third.
+graph→animation bridge, clip timeline strip) is the third. S2 phase B done:
+core headers now declare `warploom::*` namespaces with `omnicpp::*`
+compat directives, so both spellings name the same types everywhere.
 A verified vertical
 slice through render / simulate / edit / verify:
 deterministic runtime with replay + state hashing, archetype ECS,
@@ -56,11 +58,27 @@ or a time-warp boundary.
       `find_package(WarploomCore CONFIG REQUIRED)` consumer runs
       (`CORE_CONSUMER_OK`), the S1 ui-consumer proof still passes, and
       37/37 live-proof assertions on hardware.
-- [ ] **S2 phase B: identifier migration** — `warploom::core` /
-      `warploom::editor` namespaces in core headers + compat aliases,
-      wired to the S-decision pass so external adopters see one
-      coherent identity change. Phase A gate (green four-leg matrix) is
-      already banked.
+- [x] **S2 phase B: identifier migration** — all 22 core public headers
+      + 10 TUs re-badged to `warploom::core` / `warploom::editor` /
+      `warploom::anim` / `warploom::physics` / `warploom::contract` (the
+      phase-A collision dissolved with S4); every qualified consumer
+      spelling rooted (`::warploom::…` — un-rooted spellings inside our
+      namespaces resolve as `warploom::<this>::warploom::…`). Compat
+      footers use a using-directive in a namespace extension (the type-
+      alias form is ill-formed for namespaces — caught by compile probe
+      during the gate), one directive per declared namespace, each under
+      its own guard (a shared guard suppresses later headers' distinct
+      directives — caught in build). Consumers compile UNCHANGED through
+      the footers; the render recorder's real `omnicpp::core` extension
+      block coexists (and its stale `JobSystem` forward declaration was
+      superseded by the real header — a real member declaration hides
+      directive-injected types). Gate doc:
+      `docs/warploom-core-plan.md` phase B (with the two probe-driven
+      corrections). Verified: 6/6 suites on all four CI legs; three
+      standalone consumers re-proofed against a fresh install through
+      the compat path (CORE/UI/EDITOR_CONSUMER_OK + G3B_CONSUMER_OK);
+      64/64 live proofs on hardware. Repo-wide identity (`OMNICPP_*`
+      flags, rename, binary names) stays with S5 as planned.
 - [x] **S4 `warploom-editor`** — the widget/view layer over core: node
       editor, inspector, graph→animation bridge (session/control
       server/protocol are already core — the S4 plan re-scopes this).

@@ -10,7 +10,7 @@
 #include <iterator>
 #include <string>
 
-namespace omnicpp::core {
+namespace warploom::core {
 
 namespace {
 
@@ -114,4 +114,4 @@ bool VirtualInputDriver::load_script(const std::string& path,
   return true;
 }
 
-}  // namespace omnicpp::core
+}  // namespace warploom::core

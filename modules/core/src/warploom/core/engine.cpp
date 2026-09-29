@@ -5,7 +5,7 @@ namespace OmniCpp::Engine::Core {
 struct Engine::Impl {
   EngineConfig config{};
   bool running{false};
-  std::unique_ptr<omnicpp::core::DeterministicRuntime> runtime;
+  std::unique_ptr<::warploom::core::DeterministicRuntime> runtime;
 };
 
 Engine::Engine() : m_impl(std::make_unique<Impl>()) {}
@@ -13,15 +13,15 @@ Engine::~Engine() { shutdown(); }
 Engine::Engine(Engine&& other) noexcept = default;
 Engine& Engine::operator=(Engine&& other) noexcept = default;
 
-omnicpp::core::Result<void> Engine::initialize(const EngineConfig& config) {
+::warploom::core::Result<void> Engine::initialize(const EngineConfig& config) {
   if (config.fixed_timestep <= 0.0F) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   if (m_impl->running) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::not_running);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::not_running);
   }
   m_impl->config = config;
-  m_impl->runtime = std::make_unique<omnicpp::core::DeterministicRuntime>(
+  m_impl->runtime = std::make_unique<::warploom::core::DeterministicRuntime>(
       static_cast<double>(config.fixed_timestep));
   m_impl->runtime->set_catch_up_policy(
       config.catch_up_policy,

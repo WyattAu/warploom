@@ -20,9 +20,12 @@
 #include <functional>
 #include <vector>
 
-namespace omnicpp::core {
-class JobSystem;
-}
+// S2-B: this header used to forward-declare `omnicpp::core::JobSystem`.
+// A real member declaration hides the compat using-directive's complete
+// type (warploom::core::JobSystem), leaving consumers with an incomplete
+// class — so the declaration is superseded by the real core header
+// (docs/warploom-core-plan.md, phase B).
+#include "engine/core/job_system.hpp"
 
 namespace omnicpp::render {
 

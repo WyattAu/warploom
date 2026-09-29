@@ -26,7 +26,7 @@
 
 #include "warploom/core/contract.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 
 namespace {
 
@@ -2043,4 +2043,4 @@ bool CommandStack::redo(std::string& error) {
   return true;
 }
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor

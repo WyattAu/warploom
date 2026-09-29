@@ -26,7 +26,7 @@
 
 #include "warploom/core/document.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 
 //! FNV-1a 64-bit over bytes (shared with the mesh table's determinism
 //! proofs). Exposed for tests; the scrubber uses it via state_hash().
@@ -108,4 +108,19 @@ class ReplayScrubber final {
   std::vector<ReplayCheckpoint> ring_{};
 };
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor
+// S2-B compat footer: legacy `omnicpp::*` spellings keep resolving
+// during the transition (removed with the S5 identity pass -
+// docs/warploom-core-plan.md, phase B). A using-directive in a
+// namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types, and legally coexists
+// with real `omnicpp::core` extension blocks elsewhere (extension
+// blocks merge). One directive per namespace THIS header declares,
+// each under its OWN guard (a shared guard would suppress later
+// headers' distinct directives).
+#ifndef OMNICPP_COMPAT_EDITOR_NS
+#define OMNICPP_COMPAT_EDITOR_NS
+namespace omnicpp::editor {
+    using namespace ::warploom::editor;
+}
+#endif  // OMNICPP_COMPAT_EDITOR_NS

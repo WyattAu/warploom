@@ -13,11 +13,11 @@
 
 #include "warploom/core/replay_scrubber.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 
 namespace {
 
-using CK = omnicpp::core::ControlCommand::Kind;
+using CK = ::warploom::core::ControlCommand::Kind;
 
 //! The recorded-kinds set: every mutating kind + scrub + pause/resume/step.
 //! Queries, host-mirrored visual state, and the capture commands themselves
@@ -91,7 +91,7 @@ bool CommandRecorder::start(std::uint64_t frame, const SceneDocument& doc,
   return true;
 }
 
-void CommandRecorder::record(const omnicpp::core::ControlCommand& command) {
+void CommandRecorder::record(const ::warploom::core::ControlCommand& command) {
   if (!active_ || !is_recorded(command.kind)) {
     return;
   }
@@ -157,7 +157,7 @@ bool CommandRecorder::stop(const std::string& path, const SceneDocument& doc,
       out += std::to_string(seq++);
       out += ",\"cmd\":";
       append_json_string(
-          omnicpp::core::ControlCommand::kind_name(r.command.kind), out);
+          ::warploom::core::ControlCommand::kind_name(r.command.kind), out);
       bool any_num = false;
       for (std::uint32_t i = 0; i < r.command.number_count; ++i) {
         // Both operands must be const char* — a char/string-literal mix
@@ -236,4 +236,4 @@ bool CommandRecorder::stop(const std::string& path, const SceneDocument& doc,
   return true;
 }
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor

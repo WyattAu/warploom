@@ -21,7 +21,7 @@
 #include "warploom/core/control_server.hpp"
 #include "warploom/core/document.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 
 //! One registered property: typed default + description.
 struct PropertyDesc final {
@@ -95,7 +95,22 @@ struct BridgeOutcome final {
 //! Pure: inspects the document, never mutates it — the caller executes the
 //! returned command on its CommandStack so undo stays in one place.
 [[nodiscard]] BridgeOutcome bridge_control_command(
-    const omnicpp::core::ControlCommand& command, const SceneDocument& doc,
+    const ::warploom::core::ControlCommand& command, const SceneDocument& doc,
     const PropertyRegistry& registry);
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor
+// S2-B compat footer: legacy `omnicpp::*` spellings keep resolving
+// during the transition (removed with the S5 identity pass -
+// docs/warploom-core-plan.md, phase B). A using-directive in a
+// namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types, and legally coexists
+// with real `omnicpp::core` extension blocks elsewhere (extension
+// blocks merge). One directive per namespace THIS header declares,
+// each under its OWN guard (a shared guard would suppress later
+// headers' distinct directives).
+#ifndef OMNICPP_COMPAT_EDITOR_NS
+#define OMNICPP_COMPAT_EDITOR_NS
+namespace omnicpp::editor {
+    using namespace ::warploom::editor;
+}
+#endif  // OMNICPP_COMPAT_EDITOR_NS

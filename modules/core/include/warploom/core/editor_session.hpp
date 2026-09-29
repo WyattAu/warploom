@@ -25,9 +25,9 @@
 #include "warploom/core/property_registry.hpp"
 #include "warploom/core/replay_scrubber.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 
-class EditorSession final : public omnicpp::core::ControlHost {
+class EditorSession final : public ::warploom::core::ControlHost {
  public:
   EditorSession();
 
@@ -138,7 +138,7 @@ class EditorSession final : public omnicpp::core::ControlHost {
   //! host owns pause/resume/step — the sim loop — so those never reach
   //! on_control). Call after the host handled the command successfully;
   //! recording semantics are identical (recorded-kinds set, frame stamps).
-  void record_external(const omnicpp::core::ControlCommand& command) {
+  void record_external(const ::warploom::core::ControlCommand& command) {
     if (!replaying_) recorder_.record(command);
   }
   //! Loads a warploom-replay-v1 file: hash-verified checkpoint hydration
@@ -149,21 +149,21 @@ class EditorSession final : public omnicpp::core::ControlHost {
                                  std::string& error);
 
   // -- ControlHost ---------------------------------------------------------
-  [[nodiscard]] omnicpp::core::ControlReply on_control(
-      const omnicpp::core::ControlCommand& command) override;
+  [[nodiscard]] ::warploom::core::ControlReply on_control(
+      const ::warploom::core::ControlCommand& command) override;
   [[nodiscard]] std::string snapshot_json() const override;
 
  private:
-  [[nodiscard]] omnicpp::core::ControlReply handle_session(
-      const omnicpp::core::ControlCommand& command);
+  [[nodiscard]] ::warploom::core::ControlReply handle_session(
+      const ::warploom::core::ControlCommand& command);
   //! Returns true when the kind was a query (reply filled).
   [[nodiscard]] bool handle_query(
-      const omnicpp::core::ControlCommand& command,
-      omnicpp::core::ControlReply& reply);
+      const ::warploom::core::ControlCommand& command,
+      ::warploom::core::ControlReply& reply);
   //! Returns false when the kind is not a document edit.
   [[nodiscard]] bool handle_edit(
-      const omnicpp::core::ControlCommand& command,
-      omnicpp::core::ControlReply& reply);
+      const ::warploom::core::ControlCommand& command,
+      ::warploom::core::ControlReply& reply);
 
   SceneDocument doc_{};
   CommandStack stack_{doc_};
@@ -185,4 +185,19 @@ class EditorSession final : public omnicpp::core::ControlHost {
   ReplayScrubber scrubber_{};
 };
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor
+// S2-B compat footer: legacy `omnicpp::*` spellings keep resolving
+// during the transition (removed with the S5 identity pass -
+// docs/warploom-core-plan.md, phase B). A using-directive in a
+// namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types, and legally coexists
+// with real `omnicpp::core` extension blocks elsewhere (extension
+// blocks merge). One directive per namespace THIS header declares,
+// each under its OWN guard (a shared guard would suppress later
+// headers' distinct directives).
+#ifndef OMNICPP_COMPAT_EDITOR_NS
+#define OMNICPP_COMPAT_EDITOR_NS
+namespace omnicpp::editor {
+    using namespace ::warploom::editor;
+}
+#endif  // OMNICPP_COMPAT_EDITOR_NS

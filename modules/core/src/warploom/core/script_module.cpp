@@ -11,7 +11,7 @@
 
 #include "warploom/core/contract.hpp"
 
-namespace omnicpp::core {
+namespace warploom::core {
 
 namespace {
 
@@ -134,4 +134,4 @@ std::int32_t ScriptModule::tick(double dt, const double* inputs,
              : -1;
 }
 
-}  // namespace omnicpp::core
+}  // namespace warploom::core

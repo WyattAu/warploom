@@ -10,7 +10,7 @@
 #include <unistd.h>
 #endif
 
-namespace omnicpp::core {
+namespace warploom::core {
 
 namespace {
 
@@ -211,4 +211,4 @@ void LinuxJoystickDriver::poll(InputState& state) {
 
 #endif  // __linux__
 
-}  // namespace omnicpp::core
+}  // namespace warploom::core

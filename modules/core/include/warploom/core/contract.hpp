@@ -24,7 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace omnicpp::contract {
+namespace warploom::contract {
 
 //! Terminate on a violated invariant. [[noreturn]] lets the compiler prune
 //! the guarded path entirely, so the check costs one predictable branch.
@@ -35,7 +35,7 @@ namespace omnicpp::contract {
   std::abort();
 }
 
-}  // namespace omnicpp::contract
+}  // namespace warploom::contract
 
 #if defined(OMNICPP_CONTRACT_MODE_ASSUME)
 
@@ -50,8 +50,23 @@ namespace omnicpp::contract {
 #define OMNICPP_CONTRACT(...)                     \
   do {                                            \
     if (!(__VA_ARGS__)) {                         \
-      ::omnicpp::contract::violate(#__VA_ARGS__, __FILE__, __LINE__); \
+      ::warploom::contract::violate(#__VA_ARGS__, __FILE__, __LINE__); \
     }                                             \
   } while (false)
 
 #endif
+// S2-B compat footer: legacy `omnicpp::*` spellings keep resolving
+// during the transition (removed with the S5 identity pass -
+// docs/warploom-core-plan.md, phase B). A using-directive in a
+// namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types, and legally coexists
+// with real `omnicpp::core` extension blocks elsewhere (extension
+// blocks merge). One directive per namespace THIS header declares,
+// each under its OWN guard (a shared guard would suppress later
+// headers' distinct directives).
+#ifndef OMNICPP_COMPAT_CONTRACT_NS
+#define OMNICPP_COMPAT_CONTRACT_NS
+namespace omnicpp::contract {
+    using namespace ::warploom::contract;
+}
+#endif  // OMNICPP_COMPAT_CONTRACT_NS

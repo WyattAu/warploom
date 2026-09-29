@@ -17,10 +17,10 @@ struct EngineConfig {
   float fixed_timestep{0.01667F};
   bool enable_profiling{false};
   bool headless{true};
-  omnicpp::core::CatchUpPolicy catch_up_policy{omnicpp::core::CatchUpPolicy::run_all};
+  ::warploom::core::CatchUpPolicy catch_up_policy{::warploom::core::CatchUpPolicy::run_all};
   std::uint32_t max_catch_up_ticks{1};
-  omnicpp::core::EventTransport event_transport{omnicpp::core::EventTransport::spsc};
-  omnicpp::core::TimeMode time_mode{omnicpp::core::TimeMode::floating_point};
+  ::warploom::core::EventTransport event_transport{::warploom::core::EventTransport::spsc};
+  ::warploom::core::TimeMode time_mode{::warploom::core::TimeMode::floating_point};
 };
 
 /**
@@ -41,7 +41,7 @@ public:
   Engine& operator=(Engine&&) noexcept;
 
   /** Initialize the runtime; returns error code on failure. */
-  [[nodiscard]] omnicpp::core::Result<void> initialize(const EngineConfig& config);
+  [[nodiscard]] ::warploom::core::Result<void> initialize(const EngineConfig& config);
   /** Perform one non-blocking runtime service pass. */
   void run();
   /** Idempotently stop the runtime. */
@@ -63,3 +63,13 @@ private:
 };
 
 } // namespace OmniCpp::Engine::Core
+// S2-B compat footer: legacy `omnicpp::*` spellings keep resolving
+// during the transition (removed with the S5 identity pass -
+// docs/warploom-core-plan.md, phase B). A using-directive in a
+// namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types, and legally coexists
+// with real `omnicpp::core` extension blocks elsewhere (extension
+// blocks merge). One directive per namespace THIS header declares,
+// each under its OWN guard (a shared guard would suppress later
+// headers' distinct directives).
+

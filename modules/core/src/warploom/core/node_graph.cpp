@@ -13,7 +13,7 @@
 #include "warploom/core/contract.hpp"
 #include "warploom/core/script_module.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 
 namespace {
 
@@ -807,7 +807,7 @@ void register_script_node_type(NodeGraph& graph) {
     // Fixed dt = 0: node evaluation is a pure function, not a per-tick
     // simulation — the module sees a constant so replays stay exact.
     std::vector<double> out(n_out, 0.0);
-    auto module = omnicpp::core::ScriptModule::load_builtin(module_name,
+    auto module = ::warploom::core::ScriptModule::load_builtin(module_name,
                                                             g_error_scratch);
     if (module == nullptr) {
       // Unknown module: outputs stay zero (total + deterministic).
@@ -835,4 +835,4 @@ void register_script_node_type(NodeGraph& graph) {
   graph.register_type(std::move(t));
 }
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor

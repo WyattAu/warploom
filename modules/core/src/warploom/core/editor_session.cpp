@@ -21,7 +21,7 @@
 #include "warploom/core/control_server.hpp"
 #include "warploom/core/replay_scrubber.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 
 namespace {
 
@@ -236,9 +236,9 @@ EditorSession::EditorSession() {
   register_builtin_node_types(doc_.node_graph);
 }
 
-omnicpp::core::ControlReply EditorSession::on_control(
-    const omnicpp::core::ControlCommand& command) {
-  omnicpp::core::ControlReply reply;
+::warploom::core::ControlReply EditorSession::on_control(
+    const ::warploom::core::ControlCommand& command) {
+  ::warploom::core::ControlReply reply;
 
   // 1. Document edits.
   if (handle_edit(command, reply)) {
@@ -256,9 +256,9 @@ omnicpp::core::ControlReply EditorSession::on_control(
 }
 
 bool EditorSession::handle_edit(
-    const omnicpp::core::ControlCommand& command,
-    omnicpp::core::ControlReply& reply) {
-  using CK = omnicpp::core::ControlCommand::Kind;
+    const ::warploom::core::ControlCommand& command,
+    ::warploom::core::ControlReply& reply) {
+  using CK = ::warploom::core::ControlCommand::Kind;
 
   switch (command.kind) {
     case CK::SetCamera:
@@ -946,9 +946,9 @@ bool EditorSession::handle_edit(
 }
 
 bool EditorSession::handle_query(
-    const omnicpp::core::ControlCommand& command,
-    omnicpp::core::ControlReply& reply) {
-  using CK = omnicpp::core::ControlCommand::Kind;
+    const ::warploom::core::ControlCommand& command,
+    ::warploom::core::ControlReply& reply) {
+  using CK = ::warploom::core::ControlCommand::Kind;
 
   switch (command.kind) {
     case CK::ListObjects: {
@@ -1044,10 +1044,10 @@ bool EditorSession::handle_query(
   }
 }
 
-omnicpp::core::ControlReply EditorSession::handle_session(
-    const omnicpp::core::ControlCommand& command) {
-  using CK = omnicpp::core::ControlCommand::Kind;
-  omnicpp::core::ControlReply reply;
+::warploom::core::ControlReply EditorSession::handle_session(
+    const ::warploom::core::ControlCommand& command) {
+  using CK = ::warploom::core::ControlCommand::Kind;
+  ::warploom::core::ControlReply reply;
   switch (command.kind) {
     case CK::Ping:
       reply.ok = true;
@@ -1354,7 +1354,7 @@ bool EditorSession::load_replay(const std::string& path,
   // Pass 1: collect command records and checkpoint pairs.
   struct LoggedCommand {
     std::uint64_t seq{0};
-    omnicpp::core::ControlCommand command{};
+    ::warploom::core::ControlCommand command{};
   };
   std::vector<LoggedCommand> logged;
   struct HydratedCheckpoint {
@@ -1393,13 +1393,13 @@ bool EditorSession::load_replay(const std::string& path,
       (void)replay_find_string(line, "t", entry.command.text);
       (void)replay_find_string(line, "t2", entry.command.text2);
       (void)replay_find_string(line, "t3", entry.command.text3);
-      for (const auto& kn : omnicpp::core::ControlCommand::kind_names()) {
+      for (const auto& kn : ::warploom::core::ControlCommand::kind_names()) {
         if (name == kn.name) {
           entry.command.kind = kn.kind;
           break;
         }
       }
-      if (entry.command.kind == omnicpp::core::ControlCommand::Kind::Unknown) {
+      if (entry.command.kind == ::warploom::core::ControlCommand::Kind::Unknown) {
         error = "load_replay: unknown command \"" + name + "\" at line " +
                 std::to_string(i + 1);
         return false;
@@ -1460,7 +1460,7 @@ bool EditorSession::load_replay(const std::string& path,
   // flag suppresses the on_control hook. A failed command aborts the load;
   // state is whatever the prefix produced and the hydrated checkpoints
   // remain available for scrub_to recovery.
-  using CK = omnicpp::core::ControlCommand::Kind;
+  using CK = ::warploom::core::ControlCommand::Kind;
   // G3: logical sim frame driving the re-simulated session ticks (starts at
   // the opening checkpoint's frame, advances one per tick).
   std::uint64_t frame_source_frame =
@@ -1489,7 +1489,7 @@ bool EditorSession::load_replay(const std::string& path,
       replaying_ = false;
       error = "load_replay: command seq " + std::to_string(entry.seq) +
               " (" +
-              omnicpp::core::ControlCommand::kind_name(entry.command.kind) +
+              ::warploom::core::ControlCommand::kind_name(entry.command.kind) +
               ") failed: " + reply.error;
       return false;
     }
@@ -1526,4 +1526,4 @@ std::string EditorSession::snapshot_json() const {
   return out;
 }
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor

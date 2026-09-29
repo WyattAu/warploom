@@ -12,7 +12,7 @@
 #include <string>
 #include <utility>
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 
 //! The typed currency of the document: every property is one of these.
 struct PropValue final {
@@ -54,4 +54,19 @@ struct PropValue final {
   [[nodiscard]] bool operator==(const PropValue&) const = default;
 };
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor
+// S2-B compat footer: legacy `omnicpp::*` spellings keep resolving
+// during the transition (removed with the S5 identity pass -
+// docs/warploom-core-plan.md, phase B). A using-directive in a
+// namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types, and legally coexists
+// with real `omnicpp::core` extension blocks elsewhere (extension
+// blocks merge). One directive per namespace THIS header declares,
+// each under its OWN guard (a shared guard would suppress later
+// headers' distinct directives).
+#ifndef OMNICPP_COMPAT_EDITOR_NS
+#define OMNICPP_COMPAT_EDITOR_NS
+namespace omnicpp::editor {
+    using namespace ::warploom::editor;
+}
+#endif  // OMNICPP_COMPAT_EDITOR_NS

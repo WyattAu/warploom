@@ -8,7 +8,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace omnicpp::core {
+namespace warploom::core {
 
 // ============================================================================
 // Error Model
@@ -469,4 +469,19 @@ private:
   std::atomic<std::size_t> dropped_events_{0};
 };
 
-} // namespace omnicpp::core
+} // namespace warploom::core
+// S2-B compat footer: legacy `omnicpp::*` spellings keep resolving
+// during the transition (removed with the S5 identity pass -
+// docs/warploom-core-plan.md, phase B). A using-directive in a
+// namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types, and legally coexists
+// with real `omnicpp::core` extension blocks elsewhere (extension
+// blocks merge). One directive per namespace THIS header declares,
+// each under its OWN guard (a shared guard would suppress later
+// headers' distinct directives).
+#ifndef OMNICPP_COMPAT_CORE_NS
+#define OMNICPP_COMPAT_CORE_NS
+namespace omnicpp::core {
+    using namespace ::warploom::core;
+}
+#endif  // OMNICPP_COMPAT_CORE_NS

@@ -12,7 +12,7 @@
 
 #include "warploom/core/node_graph.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 
 std::uint64_t fnv1a64(const char* data, std::size_t size) noexcept {
   std::uint64_t hash = 14695981039346656037ULL;
@@ -146,4 +146,4 @@ const ReplayCheckpoint* ReplayScrubber::find_checkpoint(
   return nullptr;
 }
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor

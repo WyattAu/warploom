@@ -18,7 +18,7 @@
 
 #include "warploom/core/contract.hpp"
 
-namespace omnicpp::core {
+namespace warploom::core {
 
 // The single source of truth for command-name -> Kind. Public (see the
 // header): tests walk this real table to enforce the protocol invariant.
@@ -551,4 +551,4 @@ std::size_t ControlServer::poll(ControlHost& host) {
   return processed;
 }
 
-}  // namespace omnicpp::core
+}  // namespace warploom::core

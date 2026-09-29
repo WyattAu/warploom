@@ -145,7 +145,8 @@ there.
 
 # Phase B: identifier migration (S2-B gate)
 
-Status: **gate doc section** — the contract below is the acceptance
+Status: **DONE** (verified per the gate below) — the contract is the
+acceptance authority that was
 authority for S2-B, appended per the design-first discipline. The phase-A
 blocker (an `omnicpp::editor` collision across not-yet-split widget code)
 dissolved with S4: every `omnicpp::editor` declaration now lives in a
@@ -160,18 +161,19 @@ module header, so the namespace move is mechanical.
    `omnicpp::physics` → `warploom::physics`, `omnicpp::contract` →
    `warploom::contract`. File-scoped, mechanical openers + closers —
    exactly the S1 ui move, now for core.
-2. **Compat aliases in every public header.** Each header ends with
-   `namespace omnicpp { using core = warploom::core; using editor =
-   warploom::editor; }` (+ the header's other re-badged namespaces).
-   Guards: ODR-fenced (only emitted when the old spelling is not yet the
-   alias subject — an alias-then-redeclare would be ill-formed);
-   alias-in-namespace is not ambiguous with real child namespaces
-   (determining a class takes precedence, then no finding in either
-   scope = normal namespace lookup). The one known REAL declaration
-   outside modules — `vulkan_parallel_recorder.hpp`'s
-   `namespace omnicpp::core` (a struct tag, no named types) — coexists
-   with the alias (a struct tag and an alias of a different name do not
-   collide); its `omnicpp::render` half stays put (S3 scope).
+2. **Compat footers in every public header.** The legacy spellings must
+   name the SAME types, so the footer uses a using-directive in a
+   namespace extension: `namespace omnicpp::core { using namespace
+   ::warploom::core; }` (all five re-badged namespaces, every public
+   header). *Correction during implementation (compile-model probe):*
+   the type-alias syntax (`namespace omnicpp { using core =
+   warploom::core; }`) is ill-formed for namespaces — `using X = ...`
+   names types only. The using-directive form is the legal mechanism and
+   additionally coexists with real `omnicpp::core` extension blocks (the
+   render recorder header): extension blocks merge, and a struct tag in
+   one extension never conflicts with directive-injected names. Old
+   spellings resolve to the SAME types (no wrappers, no ODR surface,
+   no ABI effect). Remove with the S5 identity pass.
 3. **Consumers compile unchanged.** The ~1,050 qualified spellings
    outside modules/core (`omnicpp::core::X`, `omnicpp::editor::X`,
    `omnicpp::anim::X`) resolve through the aliases: 113 files across

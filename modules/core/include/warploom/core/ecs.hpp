@@ -26,7 +26,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace omnicpp::core {
+namespace warploom::core {
 
 // ============================================================================
 // Entity
@@ -793,7 +793,7 @@ public:
   //! Within each wave, systems run concurrently via the provided thread pool.
   //! Falls back to sequential execution if pool has 1 thread.
   void run_parallel(World& world, std::uint64_t tick,
-                    omnicpp::core::ThreadPool& pool) {
+                    ::warploom::core::ThreadPool& pool) {
     // Partition into waves
     auto waves = partition_into_waves();
 
@@ -996,4 +996,19 @@ private:
   std::vector<std::size_t> free_list_;
 };
 
-} // namespace omnicpp::core
+} // namespace warploom::core
+// S2-B compat footer: legacy `omnicpp::*` spellings keep resolving
+// during the transition (removed with the S5 identity pass -
+// docs/warploom-core-plan.md, phase B). A using-directive in a
+// namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types, and legally coexists
+// with real `omnicpp::core` extension blocks elsewhere (extension
+// blocks merge). One directive per namespace THIS header declares,
+// each under its OWN guard (a shared guard would suppress later
+// headers' distinct directives).
+#ifndef OMNICPP_COMPAT_CORE_NS
+#define OMNICPP_COMPAT_CORE_NS
+namespace omnicpp::core {
+    using namespace ::warploom::core;
+}
+#endif  // OMNICPP_COMPAT_CORE_NS

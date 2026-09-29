@@ -7,7 +7,7 @@
 
 #include "warploom/core/contract.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 
 std::uint32_t PropertyRegistry::register_type(
     std::string name, std::string doc, std::vector<PropertyDesc> properties) {
@@ -72,10 +72,10 @@ PropertyRegistry& default_registry() {
   return registry;
 }
 
-BridgeOutcome bridge_control_command(const omnicpp::core::ControlCommand& c,
+BridgeOutcome bridge_control_command(const ::warploom::core::ControlCommand& c,
                                      const SceneDocument& doc,
                                      const PropertyRegistry& registry) {
-  using CK = omnicpp::core::ControlCommand::Kind;
+  using CK = ::warploom::core::ControlCommand::Kind;
   using BK = BridgeOutcome::Kind;
 
   const auto* env = registry.find_by_name(kTypeEnvironment);
@@ -182,4 +182,4 @@ BridgeOutcome bridge_control_command(const omnicpp::core::ControlCommand& c,
   return BridgeOutcome{BK::Rejected, nullptr, "unknown command kind"};
 }
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor
