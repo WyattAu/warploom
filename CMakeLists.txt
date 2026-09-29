@@ -172,6 +172,10 @@ if(OMNICPP_BUILD_ENGINE)
     add_subdirectory(modules/core)
     # S4: the editor widget/view layer is a real module (Warploom::editor).
     add_subdirectory(modules/editor)
+    # S3: Vulkan rendering + scene projection is a real module
+    # (Warploom::render). Must precede src/engine (plain-name resolution,
+    # same reason core/ui/editor do).
+    add_subdirectory(modules/render)
     add_subdirectory(src/engine)
     # Headless proof host (P0): runs the live-proof harness in CI —
     # EditorSession + ControlServer, no GPU/window. Builds on every leg.

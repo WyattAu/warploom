@@ -13,6 +13,10 @@ node graph, scrubber/recorder, protocol/session) is the second one. S4 done:
 graph→animation bridge, clip timeline strip) is the third. S2 phase B done:
 core headers now declare `warploom::*` namespaces with `omnicpp::*`
 compat directives, so both spellings name the same types everywhere.
+S3 done: `warploom-render` (Vulkan context/renderer, render graph,
+scene projection) is the fourth module — headers at `warploom/render/*`
+behind `engine/render/*` forwarders, namespaces unchanged this phase
+(identifier migration rides with S5/S-decision).
 A verified vertical
 slice through render / simulate / edit / verify:
 deterministic runtime with replay + state hashing, archetype ECS,
@@ -100,8 +104,20 @@ or a time-warp boundary.
       headers include only the modules' own include roots
       (`warploom/core/*`), never the superproject's forwarders —
       forwarders are superproject-side convenience, not package API.
-- [ ] **S3 `warploom-render`** — Vulkan context/renderer, render graph,
-      scene structures. Runs after S4, against a stable editor boundary.
+- [x] **S3 `warploom-render`** — Vulkan context/renderer, render graph,
+      scene structures. Extracted after S4, against a stable editor
+      boundary (docs/warploom-render-plan.md): 27 headers + 22 TUs moved
+      to `modules/render` (`Warploom::render`, `libwarploom_render.so`);
+      Vulkan plumbing moved with it (`vulkan.h` PUBLIC via
+      vulkan_types.hpp, `OMNICPP_HAS_VULKAN` PUBLIC — it gates
+      declarations in 3 public headers — xcb/win32 PRIVATE in TUs, and
+      the module honors the superproject's `OMNICPP_USE_VULKAN` switch so
+      headless legs stay GPU-free). All 44 include sites compile via
+      forwarders with zero source edits. Verified: 6/6 suites × 4 CI
+      legs (headless proves the no-Vulkan degrade path compiles), fresh
+      install + `find_package(WarploomRender)` consumer proof
+      (RENDER_CONSUMER_OK) alongside re-proofed core/ui/editor
+      consumers, 64/64 live-proof assertions.
 - [ ] **S5 `warploom-engine` aggregate** — viewport and tests move to
       `find_package`; one-liner adoption works. The moment the monolith
       stops being load-bearing.
@@ -270,7 +286,7 @@ P1–P4) is post-0.1 by definition.
 4. **G3 after S4; then S3 → S5** — the timeline core (clips, protocol,
    session tick contract) landed in the editor module post-S4, as
    planned, and the visual panel (G3-B: ClipTimelineView) followed in
-   the same module. Render extraction runs against a stable editor
+   the same module. Render extraction ran against that stable editor
    boundary; S5 flips the viewport to `find_package` and the
    S-decision (flags, binaries, repo rename, with shim) rides with it.
 5. **P0 (CI) alongside W2** — the proof harness and automation land

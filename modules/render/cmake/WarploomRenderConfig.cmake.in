@@ -1,0 +1,20 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+# The render public headers include warploom/core/* (deterministic_runtime,
+# ecs, job_system, latency_telemetry) and warploom/ui/widget.hpp, and gate
+# declarations on OMNICPP_HAS_VULKAN — all three are link-time dependencies
+# of the exported target. Co-installed prefixes resolve via find_package's
+# relative-prefix search; Threads via the system. Vulkan is probed QUIET:
+# a no-Vulkan install (graceful degrade, no OMNICPP_HAS_VULKAN) configures
+# fine without it; an install exported WITH Vulkan fails at targets-include
+# time because the imported Vulkan::Vulkan reference cannot resolve, which
+# is the correct diagnosis of a broken install.
+find_dependency(WarploomCore)
+find_dependency(WarploomUI)
+find_dependency(Threads)
+find_package(Vulkan QUIET)
+
+include("${CMAKE_CURRENT_LIST_DIR}/WarploomRenderTargets.cmake")
+
+check_required_components(WarploomRender)
