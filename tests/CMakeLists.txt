@@ -699,8 +699,9 @@ if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
 endif()
 
 # ============================================================================
-# Canonical runtime tests — these link ONLY to omnicpp_runtime.
-# They must never depend on omnicpp_engine.
+# Canonical runtime tests — these link ONLY to the Warploom::engine
+# aggregate (the five modules transitively; omnicpp_runtime was deleted
+# in S5-A). They must never depend on omnicpp_engine.
 # ============================================================================
 
 # GPU-dependent runtime tests (raw Vulkan symbols in the TU): only added
@@ -781,7 +782,7 @@ add_executable(omnicpp_unit_tests
 if(OMNICPP_USE_VULKAN AND Vulkan_FOUND)
     target_sources(omnicpp_unit_tests PRIVATE ${OMNICPP_GPU_TEST_SOURCES})
 endif()
-target_link_libraries(omnicpp_unit_tests PRIVATE omnicpp_runtime Threads::Threads gtest gtest_main)
+target_link_libraries(omnicpp_unit_tests PRIVATE Warploom::engine Threads::Threads gtest gtest_main)
 target_include_directories(omnicpp_unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/include)
 # Asset directory for file-based tests (mannequin model); shader-dir define
 # only applies when the test shader targets exist (GPU presets).
@@ -821,7 +822,7 @@ endif()
 # Contract-violator child binary: the violation test asserts that
 # OMNICPP_CONTRACT aborts with a diagnostic, in a process that may die.
 add_executable(omnicpp_contract_violator unit/contract_violator.cpp)
-target_link_libraries(omnicpp_contract_violator PRIVATE omnicpp_runtime)
+target_link_libraries(omnicpp_contract_violator PRIVATE Warploom::engine)
 target_include_directories(omnicpp_contract_violator PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dependencies(omnicpp_unit_tests omnicpp_contract_violator)
 if(TARGET omnicpp_test_shaders)
@@ -833,13 +834,13 @@ endif()
 add_executable(omnicpp_runtime_only_tests
     unit/test_runtime_only.cpp
 )
-target_link_libraries(omnicpp_runtime_only_tests PRIVATE omnicpp_runtime Threads::Threads gtest gtest_main)
+target_link_libraries(omnicpp_runtime_only_tests PRIVATE Warploom::engine Threads::Threads gtest gtest_main)
 target_include_directories(omnicpp_runtime_only_tests PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 add_executable(omnicpp_deterministic_runtime_benchmark
     performance/deterministic_runtime_benchmark.cpp
 )
-target_link_libraries(omnicpp_deterministic_runtime_benchmark PRIVATE omnicpp_runtime Threads::Threads)
+target_link_libraries(omnicpp_deterministic_runtime_benchmark PRIVATE Warploom::engine Threads::Threads)
 target_include_directories(omnicpp_deterministic_runtime_benchmark PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 # ============================================================================

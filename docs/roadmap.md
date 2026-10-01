@@ -18,8 +18,11 @@ scene projection) is the fourth module — headers at `warploom/render/*`
 behind `engine/render/*` forwarders, namespaces unchanged this phase
 (identifier migration rides with S5-B). S3.5 done: `warploom-asset`
 (glTF/GLB + skeletal animation import, self-contained PNG/JPEG/KTX2
-decoders) is the fifth — `src/engine` now contains no translation units;
-the runtime is a zero-source INTERFACE shell pending S5-A deletion.
+decoders) is the fifth. S5-A done: the `Warploom::engine` aggregate is
+real and the `omnicpp_runtime` monolith is deleted — the viewport,
+tests, and proof host consume the five modules through one aggregate
+target; `include/engine/*` is forwarders-only now, awaiting the S5-B
+identity migration.
 A verified vertical
 slice through render / simulate / edit / verify:
 deterministic runtime with replay + state hashing, archetype ECS,
@@ -137,11 +140,21 @@ or a time-warp boundary.
       re-proofed plus new ASSET_CONSUMER_OK (golden PNG decode,
       determinism double-decode, malformed rejection) — and 64/64
       live-proof assertions.
-- [ ] **S5-A `warploom-engine` aggregate** — `Warploom::engine` as an
+- [x] **S5-A `warploom-engine` aggregate** — `Warploom::engine` as an
       INTERFACE target whose package config `find_dependency`s the five
-      modules; viewport and tests move to `find_package`; the now-empty
-      `omnicpp_runtime` monolith is deleted. The moment the monolith
-      stops being load-bearing.
+      modules; viewport, tests, and the headless host link the
+      aggregate; the `omnicpp_runtime` monolith is **deleted**
+      (`src/engine/CMakeLists.txt` shrinks to the `omnicpp_*` compat
+      aliases + the rasterizer shim). The monolith stopped being
+      load-bearing here. Gate: `docs/warploom-engine-plan.md`
+      (measured audit: six consumer sites repointed with per-site
+      include-dir analysis; probe correction — the aggregate needs
+      `EXPORT_NAME engine` like any module, caught by the consumer
+      proof). Verified: 6/6 suites × 4 CI legs, fresh install ships six
+      package configs (five DSOs + the headerless aggregate), six
+      standalone consumer proofs (five re-proofed + new
+      ENGINE_CONSUMER_OK reaching core AND asset through one
+      `Warploom::engine` link), 64/64 live-proof assertions.
 - [ ] **S5-B: identity migration (the S-decision)** — namespaces first
       (`warploom::render`/`warploom::editor` footers then re-badge, the
       S2-B scheme), then build surface (`OMNICPP_*` flags/defines to

@@ -9,5 +9,5 @@ add_executable(omnicpp_headless_host headless_host.cpp)
 target_include_directories(omnicpp_headless_host PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
-target_link_libraries(omnicpp_headless_host PRIVATE omnicpp_runtime)
+target_link_libraries(omnicpp_headless_host PRIVATE Warploom::engine)
 target_compile_features(omnicpp_headless_host PRIVATE cxx_std_26)

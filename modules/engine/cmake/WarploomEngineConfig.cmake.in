@@ -1,0 +1,16 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+# The aggregate pulls all five real modules; each one's package config
+# carries its own transitive requirements (core: Threads; render: Vulkan
+# + core + ui; editor: core + ui; asset: core). Co-installed prefixes
+# resolve via find_package's relative-prefix search.
+find_dependency(WarploomCore)
+find_dependency(WarploomUI)
+find_dependency(WarploomEditor)
+find_dependency(WarploomRender)
+find_dependency(WarploomAsset)
+
+include("${CMAKE_CURRENT_LIST_DIR}/WarploomEngineTargets.cmake")
+
+check_required_components(WarploomEngine)

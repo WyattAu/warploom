@@ -1,6 +1,15 @@
 # warploom-engine — S5-A gate
 
-Status: GATE (aggregate not started; this document is the audit + contract)
+Status: DONE (as implemented; one probe-driven correction below).
+
+> **Correction (consumer probe):** the first aggregate export missed
+> `set_target_properties(warploom_engine PROPERTIES EXPORT_NAME engine)`,
+> so the install tree exported `Warploom::warploom_engine` and the
+> ENGINE_CONSUMER configure failed on the `Warploom::engine` link. The
+> consumer probe caught it immediately (exactly what it exists for);
+> fixed, re-installed, re-proved. Same EXPORT_NAME discipline as every
+> other module — S5-A just proved it applies to INTERFACE aggregates
+> too.
 
 ## 1. What S5-A is
 
@@ -50,7 +59,7 @@ needs that an INTERFACE target doesn't:
 | unit tests | `tests/CMakeLists.txt:784` | keep the explicit `${CMAKE_SOURCE_DIR}/include` (already present, line 785) |
 | contract violator | `tests/CMakeLists.txt:824` | include dir already explicit (line 825) |
 | runtime-only tests | `tests/CMakeLists.txt:836` | include dir already explicit (line 837) |
-| runtime benchmark | `tests/CMakeLists.txt:842` | add include dir (check current sourcing) |
+| runtime benchmark | `tests/CMakeLists.txt:842` | include dir already explicit (line 843) |
 | headless host | `tools/CMakeLists.txt:12` | include dir already explicit (lines 9–10) |
 | legacy/integration | `tests/CMakeLists.txt:853,859` | guarded by `OMNICPP_LEGACY_ENGINE` (OFF) — reference `omnicpp_engine`, not the runtime; untouched |
 

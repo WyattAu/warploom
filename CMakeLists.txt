@@ -178,6 +178,8 @@ if(OMNICPP_BUILD_ENGINE)
     add_subdirectory(modules/render)
     # S3.5: asset import is a real module (Warploom::asset), same ordering.
     add_subdirectory(modules/asset)
+    # S5-A: the aggregate (Warploom::engine) over all five modules.
+    add_subdirectory(modules/engine)
     add_subdirectory(src/engine)
     # Headless proof host (P0): runs the live-proof harness in CI —
     # EditorSession + ControlServer, no GPU/window. Builds on every leg.
