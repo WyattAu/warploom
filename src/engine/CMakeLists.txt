@@ -2,22 +2,17 @@ cmake_minimum_required(VERSION 3.20)
 
 # ============================================================================
 # Canonical deterministic runtime
-# S3: the render layer (22 TUs) lives in modules/render as Warploom::render;
-# the runtime is the integration layer: asset + glue, plus the include root
-# for the engine/* forwarder paths.
+# S3: the render layer lives in modules/render as Warploom::render.
+# S3.5: the asset layer lives in modules/asset as Warploom::asset.
+# The runtime is now a zero-source integration shell: it exists so every
+# existing consumer target keeps linking unchanged, and pulls the five
+# modules PUBLIC. S5-A deletes this target when the Warploom::engine
+# aggregate lands (docs/warploom-asset-plan.md §2.4).
 # ============================================================================
 
-add_library(omnicpp_runtime SHARED
-    asset/gltf_importer.cpp
-    asset/gltf_animation.cpp
-    asset/image_decode.cpp
-    asset/ktx2_decoder.cpp
-    asset/png_decoder.cpp
-    asset/jpeg_decoder.cpp
-)
-set_target_properties(omnicpp_runtime PROPERTIES OUTPUT_NAME omnicpp_runtime)
+add_library(omnicpp_runtime INTERFACE)
 target_include_directories(omnicpp_runtime
-    PUBLIC
+    INTERFACE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../include
 )
 
@@ -35,16 +30,20 @@ target_include_directories(omnicpp_runtime
 # forwarders and need the transitive include dirs + DSO; the render DSO
 # carries the Vulkan plumbing, incl. the PUBLIC OMNICPP_HAS_VULKAN
 # definition that gates declarations in render public headers).
+# S3.5: asset import lives in modules/asset as Warploom::asset; PUBLIC
+# for the same reason (viewport/test headers include engine/asset/*
+# forwarders).
 target_link_libraries(omnicpp_runtime
-    PUBLIC Warploom::ui Warploom::core Warploom::editor Warploom::render)
+    INTERFACE Warploom::ui Warploom::core Warploom::editor Warploom::render
+              Warploom::asset)
 
 # ============================================================================
 # Module-alias libraries (publishing units)
 #
-# omnicpp_runtime is ONE shared object (one ABI, one dlopen surface), but
-# downstream projects consume it through these alias targets. S3: the
-# runtime is the integration layer only (asset + glue); render, editor,
-# core and ui are real modules linked PUBLIC.
+# omnicpp_runtime is ONE shared object surface, but the real code lives in
+# the five module DSOs; downstream projects consume them through these
+# alias targets. S5-A replaces this shell with the Warploom::engine
+# aggregate.
 # ============================================================================
 
 # (CMake forbids alias-of-alias, so these point at the real module targets.)
@@ -52,6 +51,7 @@ add_library(omnicpp_core ALIAS warploom_core)
 add_library(omnicpp_ui ALIAS warploom_ui)
 add_library(omnicpp_editor ALIAS warploom_editor)
 add_library(omnicpp_render_lib ALIAS warploom_render)
+add_library(omnicpp_asset ALIAS warploom_asset)
 
 # ============================================================================
 # Software rasterizer (header-only, no dependencies)

@@ -1,9 +1,9 @@
 //! @file gltf_animation.cpp
 //! @brief Deterministic glTF 2.0 skeletal ingestion (see gltf_animation.hpp).
 
-#include "engine/asset/gltf_animation.hpp"
+#include "warploom/asset/gltf_animation.hpp"
 
-#include "engine/asset/gltf_importer.hpp"
+#include "warploom/asset/gltf_importer.hpp"
 #include "gltf_json.hpp"
 
 #include <algorithm>

@@ -176,6 +176,8 @@ if(OMNICPP_BUILD_ENGINE)
     # (Warploom::render). Must precede src/engine (plain-name resolution,
     # same reason core/ui/editor do).
     add_subdirectory(modules/render)
+    # S3.5: asset import is a real module (Warploom::asset), same ordering.
+    add_subdirectory(modules/asset)
     add_subdirectory(src/engine)
     # Headless proof host (P0): runs the live-proof harness in CI —
     # EditorSession + ControlServer, no GPU/window. Builds on every leg.

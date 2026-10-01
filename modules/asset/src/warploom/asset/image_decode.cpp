@@ -1,11 +1,11 @@
 //! @file image_decode.cpp
 //! @brief Magic-byte dispatch to the engine's deterministic image decoders.
 
-#include "engine/asset/image_decode.hpp"
+#include "warploom/asset/image_decode.hpp"
 
-#include "engine/asset/jpeg_decoder.hpp"
-#include "engine/asset/ktx2_decoder.hpp"
-#include "engine/asset/png_decoder.hpp"
+#include "warploom/asset/jpeg_decoder.hpp"
+#include "warploom/asset/ktx2_decoder.hpp"
+#include "warploom/asset/png_decoder.hpp"
 
 #include <algorithm>
 #include <cstdint>

@@ -1,7 +1,7 @@
 //! @file png_decoder.cpp
 //! @brief Strict self-contained PNG decoder. See png_decoder.hpp.
 
-#include "engine/asset/png_decoder.hpp"
+#include "warploom/asset/png_decoder.hpp"
 
 #include <algorithm>
 #include <array>

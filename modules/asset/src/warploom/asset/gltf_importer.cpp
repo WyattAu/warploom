@@ -1,8 +1,8 @@
 //! @file gltf_importer.cpp
 //! @brief Deterministic glTF 2.0 static-mesh ingestion (see gltf_importer.hpp).
 
-#include "engine/asset/gltf_importer.hpp"
-#include "engine/asset/image_decode.hpp"
+#include "warploom/asset/gltf_importer.hpp"
+#include "warploom/asset/image_decode.hpp"
 #include "gltf_json.hpp"
 
 #include <algorithm>

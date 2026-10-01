@@ -2,7 +2,7 @@
 //! @brief Strict self-contained baseline sequential JPEG decoder.
 //! See jpeg_decoder.hpp.
 
-#include "engine/asset/jpeg_decoder.hpp"
+#include "warploom/asset/jpeg_decoder.hpp"
 
 #include <array>
 #include <cmath>

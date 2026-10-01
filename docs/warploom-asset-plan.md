@@ -1,6 +1,13 @@
 # warploom-asset — S3.5 gate
 
-Status: GATE (extraction not started; this document is the audit + contract)
+Status: DONE (as extracted; one probe-driven correction below).
+
+> **Correction (build probe):** §4.1's SHARED-with-no-sources fallback was
+> needed immediately — CMake rejects `add_library(omnicpp_runtime SHARED)`
+> with no sources ("No SOURCES given to target"). The runtime shell is
+> INTERFACE with INTERFACE link libraries; usage requirements flow
+> identically and no consumer dlopens the runtime artifact by name.
+> S5-A deletes the target either way.
 
 ## 1. What moves
 
@@ -97,7 +104,7 @@ target keeps linking unchanged.
    `Warploom::ui Warploom::core Warploom::editor Warploom::render
    Warploom::asset` PUBLIC, alias block extended with
    `omnicpp_asset ALIAS warploom_asset`. Root CMakeLists adds
-   `add_subdirectory(modules/assets)` — **before** `src/engine`
+   `add_subdirectory(modules/asset)` — **before** `src/engine`
    (plain-name resolution; ORDER MATTERS — same as S3).
 
 ## 4. Correctness risks and mitigations

@@ -15,7 +15,7 @@
 //!         uncompressedByteLength:u64}
 //! then DFD, key/value data (zero-padded to 4), and mip payloads.
 
-#include "engine/asset/ktx2_decoder.hpp"
+#include "warploom/asset/ktx2_decoder.hpp"
 
 #include <cstring>
 

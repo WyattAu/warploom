@@ -16,7 +16,10 @@ compat directives, so both spellings name the same types everywhere.
 S3 done: `warploom-render` (Vulkan context/renderer, render graph,
 scene projection) is the fourth module — headers at `warploom/render/*`
 behind `engine/render/*` forwarders, namespaces unchanged this phase
-(identifier migration rides with S5/S-decision).
+(identifier migration rides with S5-B). S3.5 done: `warploom-asset`
+(glTF/GLB + skeletal animation import, self-contained PNG/JPEG/KTX2
+decoders) is the fifth — `src/engine` now contains no translation units;
+the runtime is a zero-source INTERFACE shell pending S5-A deletion.
 A verified vertical
 slice through render / simulate / edit / verify:
 deterministic runtime with replay + state hashing, archetype ECS,
@@ -118,12 +121,22 @@ or a time-warp boundary.
       install + `find_package(WarploomRender)` consumer proof
       (RENDER_CONSUMER_OK) alongside re-proofed core/ui/editor
       consumers, 64/64 live-proof assertions.
-- [ ] **S3.5 `warploom-asset`** — glTF/GLB + skeletal animation import,
+- [x] **S3.5 `warploom-asset`** — glTF/GLB + skeletal animation import,
       PNG/JPEG/KTX2 decode. Decided alongside the S5 re-scope: asset
-      becomes its own module so the S5-A aggregate ships only real
+      became its own module so the S5-A aggregate ships only real
       modules. Smallest extraction: 6 public headers + 6 TUs (plus the
       internal `gltf_json.hpp`), core-only dependencies, self-contained
-      codecs (no external image libraries).
+      codecs (no external image libraries). Gate:
+      `docs/warploom-asset-plan.md` (measured audit: core-only deps,
+      9 external include sites via forwarders, tests stay in the root
+      suite — fixture-driven, `OMNICPP_TEST_ASSET_DIR` is
+      superproject-side). One probe-driven correction: the zero-source
+      `omnicpp_runtime` shell is INTERFACE (CMake rejects sourceless
+      SHARED). Verified: 6/6 suites × 4 CI legs, fresh install (five
+      packages), five standalone consumer proofs — CORE/UI/EDITOR/RENDER
+      re-proofed plus new ASSET_CONSUMER_OK (golden PNG decode,
+      determinism double-decode, malformed rejection) — and 64/64
+      live-proof assertions.
 - [ ] **S5-A `warploom-engine` aggregate** — `Warploom::engine` as an
       INTERFACE target whose package config `find_dependency`s the five
       modules; viewport and tests move to `find_package`; the now-empty

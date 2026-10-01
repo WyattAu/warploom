@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+# The asset public headers include warploom/core/* (deterministic_runtime),
+# so the core package is a link-time dependency of the exported target.
+# Co-installed prefixes resolve via find_package's relative-prefix search;
+# Threads via the system. No other dependencies: the decoders are strict,
+# self-contained, in-tree implementations.
+find_dependency(WarploomCore)
+find_dependency(Threads)
+
+include("${CMAKE_CURRENT_LIST_DIR}/WarploomAssetTargets.cmake")
+
+check_required_components(WarploomAsset)
