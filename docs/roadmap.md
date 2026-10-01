@@ -118,14 +118,26 @@ or a time-warp boundary.
       install + `find_package(WarploomRender)` consumer proof
       (RENDER_CONSUMER_OK) alongside re-proofed core/ui/editor
       consumers, 64/64 live-proof assertions.
-- [ ] **S5 `warploom-engine` aggregate** — viewport and tests move to
-      `find_package`; one-liner adoption works. The moment the monolith
+- [ ] **S3.5 `warploom-asset`** — glTF/GLB + skeletal animation import,
+      PNG/JPEG/KTX2 decode. Decided alongside the S5 re-scope: asset
+      becomes its own module so the S5-A aggregate ships only real
+      modules. Smallest extraction: 6 public headers + 6 TUs (plus the
+      internal `gltf_json.hpp`), core-only dependencies, self-contained
+      codecs (no external image libraries).
+- [ ] **S5-A `warploom-engine` aggregate** — `Warploom::engine` as an
+      INTERFACE target whose package config `find_dependency`s the five
+      modules; viewport and tests move to `find_package`; the now-empty
+      `omnicpp_runtime` monolith is deleted. The moment the monolith
       stops being load-bearing.
-- [ ] **S-decision: identifier migration** — `OMNICPP_*` env/option flags
-      and `omnicpp_*` binary names to `WARPLOOM_*`/`warploom_*` *before*
-      the first external publish (with a compatibility shim), so early
-      adopters never see a breaking rename. Same pass renames the GitHub
-      repo (`OmniCPP-template` → `warploom`).
+- [ ] **S5-B: identity migration (the S-decision)** — namespaces first
+      (`warploom::render`/`warploom::editor` footers then re-badge, the
+      S2-B scheme), then build surface (`OMNICPP_*` flags/defines to
+      `WARPLOOM_*` with compat defines, `omnicpp_*` binaries to
+      `warploom_*`), then ABI surface (`omnicpp_module_*` C ABI
+      dual-exported as `warploom_module_*`), then the GitHub repo rename
+      (`OmniCPP-template` → `warploom`). Every old spelling keeps working
+      through a shim, so early adopters never see a breaking rename and
+      0.1 ships with zero identity debt.
 
 ## W — Determinism as product ("time warp")
 
@@ -283,12 +295,15 @@ P1–P4) is post-0.1 by definition.
 3. **S4 before S3** (decided) — extract where development is hottest so
    new features land in the module, not deeper into the monolith; the
    editor is headless-testable, which de-risks extraction.
-4. **G3 after S4; then S3 → S5** — the timeline core (clips, protocol,
-   session tick contract) landed in the editor module post-S4, as
-   planned, and the visual panel (G3-B: ClipTimelineView) followed in
+4. **G3 after S4; then S3 → S3.5 → S5** — the timeline core (clips,
+   protocol, session tick contract) landed in the editor module post-S4,
+   as planned, and the visual panel (G3-B: ClipTimelineView) followed in
    the same module. Render extraction ran against that stable editor
-   boundary; S5 flips the viewport to `find_package` and the
-   S-decision (flags, binaries, repo rename, with shim) rides with it.
+   boundary. Asset extraction (S3.5) was decided alongside the S5
+   re-scope so the aggregate ships only real modules; S5-A flips the
+   viewport to `find_package` and deletes the runtime monolith, and
+   S5-B carries the full identity migration so 0.1 ships with zero
+   identity debt.
 5. **P0 (CI) alongside W2** — the proof harness and automation land
    together; the remaining P items (WASM, Wayland, adoption, docs)
    come after S5, targeting published modules, not the monolith.
