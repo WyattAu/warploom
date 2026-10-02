@@ -21,7 +21,7 @@
 
 #include "warploom/core/contract.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 namespace ui = ::warploom::ui;  // S1
 
 std::string value_to_text(const NodeValue& value) {
@@ -534,7 +534,7 @@ void NodeEditorView::edit_param_char(char c) {
 }
 
 bool NodeEditorView::end_param_edit(
-    bool commit, const omnicpp::core::ControlCommand* /*unused tag*/,
+    bool commit, const ::warploom::core::ControlCommand* /*unused tag*/,
     std::uint64_t& out_node, std::string& out_param, double& out_number,
     std::string& out_text, bool& out_is_number) {
   out_node = edit_node_;
@@ -868,4 +868,4 @@ void NodeEditorView::append_binding_wires(ui::PaintList& list) const {
   }
 }
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor

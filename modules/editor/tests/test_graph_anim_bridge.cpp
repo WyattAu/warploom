@@ -12,9 +12,9 @@
 
 namespace {
 
-namespace ed = omnicpp::editor;
-using omnicpp::anim::AnimationStateMachine;
-using omnicpp::core::InputSnapshot;
+namespace ed = warploom::editor;
+using ::warploom::anim::AnimationStateMachine;
+using ::warploom::core::InputSnapshot;
 
 //! Builds the standard walk<->idle machine: action "move" fires walk->idle
 //! style transitions (mirrors the mannequin's configuration).
@@ -24,11 +24,11 @@ struct MachineFixture {
   MachineFixture() {
     machine.add_state("walk", 0.0F);
     machine.add_state("idle", 1.0F);
-    omnicpp::anim::AnimTransition to_idle;
+    ::warploom::anim::AnimTransition to_idle;
     to_idle.from = "walk";
     to_idle.to = "idle";
     to_idle.action = "move";
-    omnicpp::anim::AnimTransition to_walk;
+    ::warploom::anim::AnimTransition to_walk;
     to_walk.from = "idle";
     to_walk.to = "walk";
     to_walk.action = "move";

@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 
 void ClipTimelineView::rebuild(ui::WidgetTree& tree,
                                std::uint32_t track_parent) {
@@ -216,7 +216,7 @@ void ClipTimelineView::update_clip_drag(float px) {
 }
 
 bool ClipTimelineView::end_clip_drag(
-    bool commit, omnicpp::core::ControlCommand& out) {
+    bool commit, ::warploom::core::ControlCommand& out) {
   if (!dragging_) {
     return false;
   }
@@ -229,7 +229,7 @@ bool ClipTimelineView::end_clip_drag(
   if (!commit) {
     return false;
   }
-  out.kind = omnicpp::core::ControlCommand::Kind::ClipMove;
+  out.kind = ::warploom::core::ControlCommand::Kind::ClipMove;
   out.numbers[0] = static_cast<double>(clip_id);
   out.numbers[1] = static_cast<double>(new_start);
   out.number_count = 2;
@@ -270,4 +270,4 @@ bool ClipTimelineView::playhead_rect(float& x, float& y, float& w,
   return true;
 }
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor

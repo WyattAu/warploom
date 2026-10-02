@@ -14,7 +14,7 @@
 
 namespace {
 
-namespace ed = omnicpp::editor;
+namespace ed = warploom::editor;
 namespace ui = warploom::ui;
 
 using ed::EditorSession;
@@ -28,8 +28,8 @@ struct Fixture {
   std::uint64_t cube_id{0};
 
   Fixture() {
-    omnicpp::core::ControlCommand spawn;
-    spawn.kind = omnicpp::core::ControlCommand::Kind::SpawnCube;
+    ::warploom::core::ControlCommand spawn;
+    spawn.kind = ::warploom::core::ControlCommand::Kind::SpawnCube;
     spawn.numbers[0] = 1.0;
     spawn.numbers[1] = 2.0;
     spawn.numbers[2] = 3.0;
@@ -43,7 +43,7 @@ struct Fixture {
     }
   }
 
-  [[nodiscard]] const omnicpp::editor::SceneObject* cube() const {
+  [[nodiscard]] const warploom::editor::SceneObject* cube() const {
     return session.document().find(cube_id);
   }
 };

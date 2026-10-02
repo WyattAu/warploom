@@ -13,7 +13,7 @@ cmake_minimum_required(VERSION 3.28...4.0)
 # In-tree:    add_subdirectory(modules/editor) from the root project.
 # Standalone: find_package(WarploomEditor CONFIG REQUIRED) after install.
 #
-# Phase A keeps the omnicpp::* namespaces (identifier migration is the
+# Namespaces are warploom::* since S5-B phase 1b (identifier migration,
 # S2-B / S-decision pass); the compat forwarders under
 # include/engine/editor/ keep every existing include site compiling.
 # ============================================================================

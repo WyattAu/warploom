@@ -30,13 +30,13 @@
 #include "engine/render/software_rasterizer.hpp"
 #include "warploom/ui/widget.hpp"
 
-namespace ed = omnicpp::editor;
+namespace ed = warploom::editor;
 
 namespace {
 
-using omnicpp::editor::NodeEditorView;
-using omnicpp::editor::NodeView;
-using omnicpp::editor::PinRef;
+using warploom::editor::NodeEditorView;
+using warploom::editor::NodeView;
+using warploom::editor::PinRef;
 using warploom::ui::PaintList;
 using warploom::ui::TextMetrics;
 using warploom::ui::WidgetTree;
@@ -44,11 +44,11 @@ using warploom::ui::WidgetTree;
 constexpr TextMetrics kMetrics{};  // 8x16 monospace
 
 //! Registers the builtin types + builds a fixed two-node linked graph.
-omnicpp::editor::NodeGraph make_graph() {
-  omnicpp::editor::NodeGraph g;
-  omnicpp::editor::register_builtin_node_types(g);
+warploom::editor::NodeGraph make_graph() {
+  warploom::editor::NodeGraph g;
+  warploom::editor::register_builtin_node_types(g);
   const auto a = g.add_node(
-      "const_number", {{"value", omnicpp::editor::NodeValue::make_number(2.0)}});
+      "const_number", {{"value", warploom::editor::NodeValue::make_number(2.0)}});
   const auto b = g.add_node("add", {});
   std::string error;
   if (!g.add_link(a, "value", b, "a", error)) {
@@ -58,7 +58,7 @@ omnicpp::editor::NodeGraph make_graph() {
 }
 
 //! Standard rebuild: canvas as root child, cards under it.
-NodeEditorView make_view(omnicpp::editor::NodeGraph& g, WidgetTree& tree) {
+NodeEditorView make_view(warploom::editor::NodeGraph& g, WidgetTree& tree) {
   NodeEditorView view(g);
   const auto canvas = tree.add(warploom::ui::Widget{}, tree.root());
   view.rebuild(tree, canvas);
@@ -258,7 +258,7 @@ TEST(NodeEditorGolden, RasterizesCardsWiresPins) {
   ASSERT_FALSE(list.rects.empty());
 
   // Z-decrement layering (same scheme as the M2 golden tests).
-  omnicpp::render::SoftwareRasterizer rast(800, 600);
+  ::warploom::render::SoftwareRasterizer rast(800, 600);
   rast.clear(0xFF101014);
   float z = 0.9F;
   for (const auto& rect : list.rects) {
@@ -296,7 +296,7 @@ TEST(NodeEditorToolbar, BuildsAddButtonsPerTypePlusUndoRedo) {
   auto g = make_graph();
   WidgetTree tree;
   const auto panel = tree.add(warploom::ui::Widget{}, tree.root());
-  const auto buttons = omnicpp::editor::build_node_toolbar(tree, panel, g);
+  const auto buttons = warploom::editor::build_node_toolbar(tree, panel, g);
   // Builtin types + undo + redo.
   ASSERT_GE(buttons.size(), g.types().size() + 2U);
   // Last two are undo/redo.
@@ -315,13 +315,13 @@ TEST(NodeEditorWires, BezierStaysContinuousThroughMidpoint) {
   WidgetTree tree;
   auto view = make_view(g, tree);
   // Bezier is the default style; force it explicitly for clarity.
-  view.set_wire_style(omnicpp::editor::WireStyle::Bezier);
+  view.set_wire_style(warploom::editor::WireStyle::Bezier);
   PaintList list = full_paint(view, tree, 800.0F, 600.0F);
 
   // Rasterize: the wire leaves node 1's right edge (x=350) and enters
   // node 2's left edge (x=380). The mid-gap pixel (365, ~58) must carry
   // wire color — the segments collectively bridge the gap.
-  omnicpp::render::SoftwareRasterizer rast(800, 600);
+  ::warploom::render::SoftwareRasterizer rast(800, 600);
   rast.clear(0xFF101014);
   float z = 0.9F;
   for (const auto& rect : list.rects) {
@@ -344,11 +344,11 @@ TEST(NodeEditorWires, StraightVsBezierBothDeterministic) {
   auto g = make_graph();
   WidgetTree tree;
   auto view = make_view(g, tree);
-  view.set_wire_style(omnicpp::editor::WireStyle::Straight);
+  view.set_wire_style(warploom::editor::WireStyle::Straight);
   const PaintList a = full_paint(view, tree, 800.0F, 600.0F);
   const PaintList b = full_paint(view, tree, 800.0F, 600.0F);
   ASSERT_EQ(a.rects.size(), b.rects.size());
-  view.set_wire_style(omnicpp::editor::WireStyle::Bezier);
+  view.set_wire_style(warploom::editor::WireStyle::Bezier);
   const PaintList c = full_paint(view, tree, 800.0F, 600.0F);
   const PaintList d = full_paint(view, tree, 800.0F, 600.0F);
   ASSERT_EQ(c.rects.size(), d.rects.size());
@@ -536,31 +536,31 @@ TEST(NodeEditorToolbar, HitTestResolvesActions) {
   WidgetTree tree;
   const auto toolbar = tree.add(warploom::ui::Widget{}, tree.root());
   const auto buttons =
-      omnicpp::editor::build_node_toolbar(tree, toolbar, g);
+      warploom::editor::build_node_toolbar(tree, toolbar, g);
   warploom::ui::compute_layout(tree, 800.0F, 600.0F, kMetrics);
 
   // Click inside the FIRST type button ("+ const_number").
   const auto& w0 = tree.get(buttons[0]);
-  auto hit = omnicpp::editor::hit_test_toolbar(tree, buttons, g,
+  auto hit = warploom::editor::hit_test_toolbar(tree, buttons, g,
                                                w0.x + 2.0F, w0.y + 2.0F);
-  EXPECT_EQ(hit.action, omnicpp::editor::ToolbarAction::AddType);
+  EXPECT_EQ(hit.action, warploom::editor::ToolbarAction::AddType);
   EXPECT_EQ(hit.type_index, 0U);
 
   // Click inside the undo button (right after the type buttons).
   const auto& wu = tree.get(buttons[g.types().size()]);
-  hit = omnicpp::editor::hit_test_toolbar(tree, buttons, g, wu.x + 2.0F,
+  hit = warploom::editor::hit_test_toolbar(tree, buttons, g, wu.x + 2.0F,
                                           wu.y + 2.0F);
-  EXPECT_EQ(hit.action, omnicpp::editor::ToolbarAction::Undo);
+  EXPECT_EQ(hit.action, warploom::editor::ToolbarAction::Undo);
 
   // Click inside the redo button.
   const auto& wr = tree.get(buttons[g.types().size() + 1U]);
-  hit = omnicpp::editor::hit_test_toolbar(tree, buttons, g, wr.x + 2.0F,
+  hit = warploom::editor::hit_test_toolbar(tree, buttons, g, wr.x + 2.0F,
                                           wr.y + 2.0F);
-  EXPECT_EQ(hit.action, omnicpp::editor::ToolbarAction::Redo);
+  EXPECT_EQ(hit.action, warploom::editor::ToolbarAction::Redo);
 
   // Empty space: None.
-  hit = omnicpp::editor::hit_test_toolbar(tree, buttons, g, 4000.0F, 4000.0F);
-  EXPECT_EQ(hit.action, omnicpp::editor::ToolbarAction::None);
+  hit = warploom::editor::hit_test_toolbar(tree, buttons, g, 4000.0F, 4000.0F);
+  EXPECT_EQ(hit.action, warploom::editor::ToolbarAction::None);
 }
 
 TEST(NodeEditorToolbar, AddTypeActionDrivesSession) {
@@ -572,14 +572,14 @@ TEST(NodeEditorToolbar, AddTypeActionDrivesSession) {
   WidgetTree tree;
   const auto toolbar = tree.add(warploom::ui::Widget{}, tree.root());
   const auto buttons =
-      omnicpp::editor::build_node_toolbar(tree, toolbar, doc.node_graph);
+      warploom::editor::build_node_toolbar(tree, toolbar, doc.node_graph);
   warploom::ui::compute_layout(tree, 800.0F, 600.0F, kMetrics);
   const auto& w0 = tree.get(buttons[0]);
 
-  const auto hit = omnicpp::editor::hit_test_toolbar(tree, buttons, g,
+  const auto hit = warploom::editor::hit_test_toolbar(tree, buttons, g,
                                                      w0.x + 2.0F,
                                                      w0.y + 2.0F);
-  ASSERT_EQ(hit.action, omnicpp::editor::ToolbarAction::AddType);
+  ASSERT_EQ(hit.action, warploom::editor::ToolbarAction::AddType);
   std::string err;
   auto cmd = std::make_unique<ed::AddNodeCommand>(
       doc.node_graph.types()[hit.type_index].name, 100.0, 100.0);
@@ -602,7 +602,7 @@ TEST(NodeEditorWires, LinkHitTestFindsNearestWithinThreshold) {
   float y0 = 0.0F;
   float x1 = 0.0F;
   float y1 = 0.0F;
-  omnicpp::editor::GraphLink link{1, "value", 2, "a"};
+  warploom::editor::GraphLink link{1, "value", 2, "a"};
   ASSERT_TRUE(view.link_endpoints_public(link, x0, y0, x1, y1));
 
   // Point ON the straight midpoint.

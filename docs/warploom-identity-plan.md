@@ -98,7 +98,13 @@ Cross-module spellings inside modules re-badge to **rooted**
 
 ### Phase 1b — editor merge into `warploom::editor`
 
-> **Status: IN PROGRESS.**
+> **DONE.** Widgets joined core's session types in one
+> `warploom::editor` namespace (extension blocks merged, as predicted);
+> headers repeat core's exact guarded directive
+> (`OMNICPP_COMPAT_EDITOR_NS`) so each is self-sufficient. Module tests
+> re-badged with the module (incl. cross-module spellings → rooted
+> `::warploom::anim` / `::warploom::render`). Verified: 4 legs, 6
+> consumers through the footers, 64 live proofs.
 
 Same mechanics; the footers repeat core's exact guarded statement
 (`OMNICPP_COMPAT_EDITOR_NS`) so both families resolve through one

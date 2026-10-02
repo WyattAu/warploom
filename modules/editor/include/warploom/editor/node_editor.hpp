@@ -29,7 +29,7 @@
 #include "warploom/core/node_graph.hpp"
 #include "warploom/ui/widget.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 namespace ui = ::warploom::ui;  // S1: ui module moved to the warploom namespace
 
 //! Formats a NodeValue compactly for card readouts (number/bool/string/vec3).
@@ -170,7 +170,7 @@ class NodeEditorView final {
   //! On success `out_kind`, `out_numbers`, `out_count`, `out_text` carry the
   //! exact ControlCommand payload the host should enqueue.
   [[nodiscard]] bool end_param_edit(
-      bool commit, const omnicpp::core::ControlCommand* /*unused tag*/,
+      bool commit, const ::warploom::core::ControlCommand* /*unused tag*/,
       std::uint64_t& out_node, std::string& out_param, double& out_number,
       std::string& out_text, bool& out_is_number);
   [[nodiscard]] bool param_edit_active() const noexcept {
@@ -277,4 +277,16 @@ struct ToolbarHit final {
     const std::vector<std::uint32_t>& buttons, const NodeGraph& graph,
     float x, float y);
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor
+
+// S5-B compat footer: legacy `omnicpp::editor` spellings keep resolving
+// during the transition (docs/warploom-identity-plan.md, phase 1b). This
+// is the SAME guarded directive core's headers carry (the editor
+// namespace hosts both core session types and module widgets - extension
+// blocks merge), so one include of either family suffices.
+#ifndef OMNICPP_COMPAT_EDITOR_NS
+#define OMNICPP_COMPAT_EDITOR_NS
+namespace omnicpp::editor {
+    using namespace ::warploom::editor;
+}
+#endif  // OMNICPP_COMPAT_EDITOR_NS

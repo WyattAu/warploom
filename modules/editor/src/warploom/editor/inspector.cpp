@@ -13,7 +13,7 @@
 #include <cstdio>
 #include <string>
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 namespace ui = ::warploom::ui;  // S1
 
 namespace {
@@ -213,4 +213,4 @@ std::vector<BindingAnchor> InspectorPanel::binding_anchors(
   return out;
 }
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor

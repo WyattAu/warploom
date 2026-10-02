@@ -12,9 +12,9 @@
 
 namespace {
 
-namespace ed = omnicpp::editor;
+namespace ed = warploom::editor;
 using ed::ClipTimelineView;
-namespace core = omnicpp::core;
+namespace core = ::warploom::core;
 
 //! Adds a clip directly to the document (view tests do not go through the
 //! session; the command path is proven in warploom_core_tests).

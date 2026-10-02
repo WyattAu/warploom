@@ -32,7 +32,7 @@
 #include "warploom/core/document.hpp"
 #include "warploom/ui/widget.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 namespace ui = ::warploom::ui;  // S1: ui module moved to the warploom namespace
 
 //! The clip timeline strip view: owns ONLY presentation + drag state; the
@@ -102,7 +102,7 @@ class ClipTimelineView final {
   //! Returns false when not dragging; a cancel (commit=false) returns
   //! false and clears the drag.
   [[nodiscard]] bool end_clip_drag(bool commit,
-                                   omnicpp::core::ControlCommand& out);
+                                   ::warploom::core::ControlCommand& out);
   [[nodiscard]] bool drag_active() const noexcept { return dragging_; }
 
   //! Test seams: exact geometry of the last sync without duplicating the
@@ -154,4 +154,16 @@ class ClipTimelineView final {
   std::uint64_t drag_pending_start_{0};
 };
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor
+
+// S5-B compat footer: legacy `omnicpp::editor` spellings keep resolving
+// during the transition (docs/warploom-identity-plan.md, phase 1b). This
+// is the SAME guarded directive core's headers carry (the editor
+// namespace hosts both core session types and module widgets - extension
+// blocks merge), so one include of either family suffices.
+#ifndef OMNICPP_COMPAT_EDITOR_NS
+#define OMNICPP_COMPAT_EDITOR_NS
+namespace omnicpp::editor {
+    using namespace ::warploom::editor;
+}
+#endif  // OMNICPP_COMPAT_EDITOR_NS

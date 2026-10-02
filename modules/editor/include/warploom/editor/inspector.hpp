@@ -26,7 +26,7 @@
 #include "warploom/core/property_registry.hpp"
 #include "warploom/ui/widget.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 namespace ui = ::warploom::ui;  // S1: ui module moved to the warploom namespace
 
 //! What a click on the inspector resolved to.
@@ -91,4 +91,16 @@ class InspectorPanel final {
   std::size_t binding_count_{0};
 };
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor
+
+// S5-B compat footer: legacy `omnicpp::editor` spellings keep resolving
+// during the transition (docs/warploom-identity-plan.md, phase 1b). This
+// is the SAME guarded directive core's headers carry (the editor
+// namespace hosts both core session types and module widgets - extension
+// blocks merge), so one include of either family suffices.
+#ifndef OMNICPP_COMPAT_EDITOR_NS
+#define OMNICPP_COMPAT_EDITOR_NS
+namespace omnicpp::editor {
+    using namespace ::warploom::editor;
+}
+#endif  // OMNICPP_COMPAT_EDITOR_NS

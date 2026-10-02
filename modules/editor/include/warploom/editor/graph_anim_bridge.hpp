@@ -21,7 +21,7 @@
 #include "warploom/core/input_state.hpp"
 #include "warploom/core/node_graph.hpp"
 
-namespace omnicpp::editor {
+namespace warploom::editor {
 
 //! One output-pin -> action mapping.
 struct GraphSignal {
@@ -52,8 +52,8 @@ class GraphSignalAdapter final {
   //! produces the snapshot the state machine ticks on. Unmapped actions
   //! stay unheld; missing pins/nodes leave their actions unheld (dangling
   //! mappings degrade, never throw).
-  [[nodiscard]] omnicpp::core::InputSnapshot build(const NodeGraph& graph) const {
-    omnicpp::core::InputSnapshot snap;
+  [[nodiscard]] ::warploom::core::InputSnapshot build(const NodeGraph& graph) const {
+    ::warploom::core::InputSnapshot snap;
     for (const auto& s : signals_) {
       const GraphNode* node = graph.find(s.node_id);
       if (node == nullptr) continue;
@@ -84,4 +84,16 @@ class GraphSignalAdapter final {
   std::vector<GraphSignal> signals_{};
 };
 
-}  // namespace omnicpp::editor
+}  // namespace warploom::editor
+
+// S5-B compat footer: legacy `omnicpp::editor` spellings keep resolving
+// during the transition (docs/warploom-identity-plan.md, phase 1b). This
+// is the SAME guarded directive core's headers carry (the editor
+// namespace hosts both core session types and module widgets - extension
+// blocks merge), so one include of either family suffices.
+#ifndef OMNICPP_COMPAT_EDITOR_NS
+#define OMNICPP_COMPAT_EDITOR_NS
+namespace omnicpp::editor {
+    using namespace ::warploom::editor;
+}
+#endif  // OMNICPP_COMPAT_EDITOR_NS
