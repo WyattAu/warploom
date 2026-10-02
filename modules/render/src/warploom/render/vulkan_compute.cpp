@@ -16,7 +16,7 @@
 #include <vulkan/vulkan.h>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 void cmd_signal_event(VkCommandBuffer command_buffer, VkEvent event,
                       std::uint32_t src_stage) {
@@ -155,12 +155,12 @@ void cmd_acquire_buffer_from_family(VkCommandBuffer command_buffer, VkBuffer buf
 
 AsyncComputeQueue::~AsyncComputeQueue() { cleanup(); }
 
-omnicpp::core::Result<void> AsyncComputeQueue::initialize(VkDevice device,
+::warploom::core::Result<void> AsyncComputeQueue::initialize(VkDevice device,
                                                           VkQueue compute_queue,
                                                           std::uint32_t compute_family) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !compute_queue) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   if (device_) cleanup();
   device_ = device;
@@ -173,7 +173,7 @@ omnicpp::core::Result<void> AsyncComputeQueue::initialize(VkDevice device,
   pool_info.queueFamilyIndex = compute_family;
   if (vkCreateCommandPool(device_, &pool_info, nullptr, &pool_) != VK_SUCCESS) {
     cleanup();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   VkCommandBufferAllocateInfo alloc_info{};
   alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -182,7 +182,7 @@ omnicpp::core::Result<void> AsyncComputeQueue::initialize(VkDevice device,
   alloc_info.commandBufferCount = kInFlight;
   if (vkAllocateCommandBuffers(device_, &alloc_info, buffers_) != VK_SUCCESS) {
     cleanup();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   buffer_ = buffers_[0];
 
@@ -195,7 +195,7 @@ omnicpp::core::Result<void> AsyncComputeQueue::initialize(VkDevice device,
   sem_info.pNext = &timeline_info;
   if (vkCreateSemaphore(device_, &sem_info, nullptr, &timeline_) != VK_SUCCESS) {
     cleanup();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   VkFenceCreateInfo fence_info{};
@@ -203,13 +203,13 @@ omnicpp::core::Result<void> AsyncComputeQueue::initialize(VkDevice device,
   for (auto& fence : fences_) {
     if (vkCreateFence(device_, &fence_info, nullptr, &fence) != VK_SUCCESS) {
       cleanup();
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)compute_queue; (void)compute_family;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -269,14 +269,14 @@ void AsyncComputeQueue::record(void (*record_fn)(VkCommandBuffer, void*), void* 
 #endif
 }
 
-omnicpp::core::Result<std::uint64_t> AsyncComputeQueue::submit() {
+::warploom::core::Result<std::uint64_t> AsyncComputeQueue::submit() {
 #ifdef OMNICPP_HAS_VULKAN
   if (!recording_) {
-    return omnicpp::core::Result<std::uint64_t>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<std::uint64_t>::error(::warploom::core::RuntimeError::invalid_config);
   }
   recording_ = false;
   if (vkEndCommandBuffer(buffer_) != VK_SUCCESS) {
-    return omnicpp::core::Result<std::uint64_t>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<std::uint64_t>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   const std::uint64_t signal_value = timeline_value_ + 1;
   VkFence slot_fence = fences_[timeline_value_ % kInFlight];
@@ -294,12 +294,12 @@ omnicpp::core::Result<std::uint64_t> AsyncComputeQueue::submit() {
   submit.signalSemaphoreCount = 1;
   submit.pSignalSemaphores = &timeline_;
   if (vkQueueSubmit(queue_, 1, &submit, slot_fence) != VK_SUCCESS) {
-    return omnicpp::core::Result<std::uint64_t>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<std::uint64_t>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   timeline_value_ = signal_value;
-  return omnicpp::core::Result<std::uint64_t>::ok(signal_value);
+  return ::warploom::core::Result<std::uint64_t>::ok(signal_value);
 #else
-  return omnicpp::core::Result<std::uint64_t>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<std::uint64_t>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -320,4 +320,4 @@ bool AsyncComputeQueue::wait_done(std::uint64_t timeout_ns) {
 #endif
 }
 
-}  // namespace omnicpp::render
+}  // namespace warploom::render

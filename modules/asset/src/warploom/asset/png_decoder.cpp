@@ -9,11 +9,11 @@
 #include <string>
 #include <utility>
 
-namespace omnicpp::asset {
+namespace warploom::asset {
 
 namespace {
 
-using omnicpp::core::RuntimeError;
+using ::warploom::core::RuntimeError;
 
 constexpr std::uint8_t kSignature[8] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
 
@@ -566,12 +566,12 @@ const Huffman& fixed_distance_table() noexcept {
 // Public entry point
 // ============================================================================
 
-omnicpp::core::Result<DecodedImage> decode_png(const std::uint8_t* bytes,
+::warploom::core::Result<DecodedImage> decode_png(const std::uint8_t* bytes,
                                                std::size_t length,
                                                std::string* error_detail) {
   auto fail = [error_detail](const char* message) {
     if (error_detail != nullptr) *error_detail = message;
-    return omnicpp::core::Result<DecodedImage>::error(
+    return ::warploom::core::Result<DecodedImage>::error(
         RuntimeError::malformed_asset);
   };
   if (bytes == nullptr || length == 0) {
@@ -776,7 +776,7 @@ omnicpp::core::Result<DecodedImage> decode_png(const std::uint8_t* bytes,
     std::string inflate_error;
     if (!inflate(idat.data(), idat.size(), expected, filtered, inflate_error)) {
       if (error_detail != nullptr) *error_detail = inflate_error;
-      return omnicpp::core::Result<DecodedImage>::error(
+      return ::warploom::core::Result<DecodedImage>::error(
           RuntimeError::malformed_asset);
     }
   }
@@ -802,13 +802,13 @@ omnicpp::core::Result<DecodedImage> decode_png(const std::uint8_t* bytes,
     if (!emit_row(filtered.data(), row_start, stride, colour_type, palette, trns,
                   previous.data(), row.data(), image.rgba, row_error)) {
       if (error_detail != nullptr) *error_detail = row_error;
-      return omnicpp::core::Result<DecodedImage>::error(
+      return ::warploom::core::Result<DecodedImage>::error(
           RuntimeError::malformed_asset);
     }
     std::swap(previous, row);
     std::fill(row.begin(), row.end(), 0);
   }
-  return omnicpp::core::Result<DecodedImage>::ok(std::move(image));
+  return ::warploom::core::Result<DecodedImage>::ok(std::move(image));
 }
 
-} // namespace omnicpp::asset
+} // namespace warploom::asset

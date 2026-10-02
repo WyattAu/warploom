@@ -20,7 +20,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 //! A live sub-allocation. `buffer`/`image` record what was bound (one of them).
 struct Allocation {
@@ -62,17 +62,17 @@ public:
   VulkanMemoryAllocator(VulkanMemoryAllocator&&) = delete;
   VulkanMemoryAllocator& operator=(VulkanMemoryAllocator&&) = delete;
 
-  [[nodiscard]] omnicpp::core::Result<void> initialize(
+  [[nodiscard]] ::warploom::core::Result<void> initialize(
       VkDevice device, VkPhysicalDevice physical_device);
   void cleanup() noexcept;
 
   [[nodiscard]] bool is_initialized() const noexcept { return device_ != VK_NULL_HANDLE; }
 
   //! Create a buffer and bind it to sub-allocated memory of the requested type.
-  [[nodiscard]] omnicpp::core::Result<Allocation> create_buffer(
+  [[nodiscard]] ::warploom::core::Result<Allocation> create_buffer(
       VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
   //! Bind a caller-created image to sub-allocated memory of the requested type.
-  [[nodiscard]] omnicpp::core::Result<Allocation> bind_image(
+  [[nodiscard]] ::warploom::core::Result<Allocation> bind_image(
       VkImage image, VkMemoryPropertyFlags properties);
   //! Release a live allocation (destroys the buffer if owned) and coalesce.
   void destroy_allocation(Allocation& allocation) noexcept;
@@ -98,7 +98,7 @@ private:
     std::vector<FreeRange> free_ranges;
   };
 
-  [[nodiscard]] omnicpp::core::Result<Allocation> allocate_sized(
+  [[nodiscard]] ::warploom::core::Result<Allocation> allocate_sized(
       VkDeviceSize size, VkDeviceSize alignment, std::uint32_t type_bits,
       VkMemoryPropertyFlags properties);
   [[nodiscard]] std::size_t find_or_create_block(
@@ -147,7 +147,7 @@ public:
     VkDeviceSize size{0};
   };
 
-  [[nodiscard]] omnicpp::core::Result<void> initialize(
+  [[nodiscard]] ::warploom::core::Result<void> initialize(
       VkDevice device, VkPhysicalDevice physical_device,
       std::uint32_t queue_family_index, VkDeviceSize total_size);
   void cleanup() noexcept;
@@ -155,7 +155,7 @@ public:
   [[nodiscard]] bool is_initialized() const noexcept { return ring_buffer_ != VK_NULL_HANDLE; }
 
   //! Reserve host-writable staging space, retiring in-flight regions on wrap.
-  [[nodiscard]] omnicpp::core::Result<UploadSpan> acquire(VkDeviceSize size);
+  [[nodiscard]] ::warploom::core::Result<UploadSpan> acquire(VkDeviceSize size);
   //! Record a copy from the staged span into `dst_buffer` at `dst_offset`.
   void record_copy(VkCommandBuffer command_buffer, const UploadSpan& span,
                    VkBuffer dst_buffer, VkDeviceSize dst_offset = 0) const noexcept;
@@ -166,9 +166,9 @@ public:
     return command_buffer_;
   }
   //! Begin the ring-owned command buffer for an upload batch.
-  [[nodiscard]] omnicpp::core::Result<void> begin_recording();
+  [[nodiscard]] ::warploom::core::Result<void> begin_recording();
   //! Submit the ring's one-time command buffer; the fence guards the span.
-  [[nodiscard]] omnicpp::core::Result<void> submit(VkQueue queue);
+  [[nodiscard]] ::warploom::core::Result<void> submit(VkQueue queue);
 
   //! Wait for all in-flight uploads (device quiescent w.r.t. the ring).
   void wait_idle() noexcept;
@@ -184,7 +184,7 @@ private:
     bool owns_fence{false};
   };
 
-  [[nodiscard]] omnicpp::core::Result<void> begin_commands();
+  [[nodiscard]] ::warploom::core::Result<void> begin_commands();
   void retire_completed() noexcept;
   //! Wait until the region [start, start+size) is free for overwrite.
   void wait_region_free(VkDeviceSize start, VkDeviceSize size) noexcept;
@@ -205,4 +205,17 @@ private:
   std::vector<ByteRange> staged_ranges_;
 };
 
-} // namespace omnicpp::render
+} // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

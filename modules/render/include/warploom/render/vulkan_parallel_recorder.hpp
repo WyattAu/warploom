@@ -20,14 +20,14 @@
 #include <functional>
 #include <vector>
 
-// S2-B: this header used to forward-declare `omnicpp::core::JobSystem`.
+// S2-B: this header used to forward-declare `::warploom::core::JobSystem`.
 // A real member declaration hides the compat using-directive's complete
 // type (warploom::core::JobSystem), leaving consumers with an incomplete
 // class — so the declaration is superseded by the real core header
 // (docs/warploom-core-plan.md, phase B).
 #include "warploom/core/job_system.hpp"
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 //! Per-band record job: receives the secondary buffer and the band's scissor.
 using RecordBandFn = std::function<void(VkCommandBuffer, VkRect2D)>;
@@ -41,7 +41,7 @@ public:
   VulkanParallelRecorder(VulkanParallelRecorder&&) = delete;
   VulkanParallelRecorder& operator=(VulkanParallelRecorder&&) = delete;
 
-  [[nodiscard]] omnicpp::core::Result<void> initialize(
+  [[nodiscard]] ::warploom::core::Result<void> initialize(
       VkDevice device, std::uint32_t queue_family_index,
       std::uint32_t band_count);
   void cleanup() noexcept;
@@ -61,7 +61,7 @@ public:
    * @return Secondary buffers in band order, ready for
    *         vkCmdExecuteCommands inside an active render pass.
    */
-  [[nodiscard]] omnicpp::core::Result<std::vector<VkCommandBuffer>> record_parallel(
+  [[nodiscard]] ::warploom::core::Result<std::vector<VkCommandBuffer>> record_parallel(
       std::uint32_t width, std::uint32_t height, const RecordBandFn& record_band,
       VkRenderPass compatible_pass, VkFramebuffer framebuffer = VK_NULL_HANDLE);
 
@@ -72,10 +72,10 @@ public:
    * workers (no per-frame thread creation, no per-frame allocation). When
    * null or stopped, ad-hoc threads are used (original behavior).
    */
-  void set_job_system(omnicpp::core::JobSystem* system) noexcept { job_system_ = system; }
+  void set_job_system(::warploom::core::JobSystem* system) noexcept { job_system_ = system; }
 
   //! Reset all secondary buffers for the next frame (call outside render pass).
-  [[nodiscard]] omnicpp::core::Result<void> reset();
+  [[nodiscard]] ::warploom::core::Result<void> reset();
 
   //! Per-band job payload (reused across frames; sized at initialize()).
   struct BandJob {
@@ -100,7 +100,20 @@ private:
   std::vector<Band> bands_;
   std::vector<BandJob> band_jobs_;
   std::uint32_t band_count_{0};
-  omnicpp::core::JobSystem* job_system_{nullptr};
+  ::warploom::core::JobSystem* job_system_{nullptr};
 };
 
-} // namespace omnicpp::render
+} // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

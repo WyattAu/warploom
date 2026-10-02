@@ -10,7 +10,7 @@
  * maximum value in each footprint: a smaller value is nearer.
  */
 
-namespace omnicpp::render::depth {
+namespace warploom::render::depth {
 
 //! Exact depth value for a positive view-space distance, clamped to [0, 1].
 [[nodiscard]] constexpr float ndc_from_view_distance(
@@ -38,4 +38,17 @@ namespace omnicpp::render::depth {
       near_plane, far_plane);
 }
 
-} // namespace omnicpp::render::depth
+} // namespace warploom::render::depth
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

@@ -16,7 +16,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 //! Mirrors VK_QUEUE_FAMILY_IGNORED (0xFFFFFFFF) so the Vulkan-off shim build
 //! compiles the same headers; identical value when Vulkan is enabled.
@@ -225,4 +225,17 @@ void execute_render_graph(
     const CompiledRenderGraph& compiled,
     void (*record_pass)(VkCommandBuffer, const GraphPass&, void*));
 
-} // namespace omnicpp::render
+} // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

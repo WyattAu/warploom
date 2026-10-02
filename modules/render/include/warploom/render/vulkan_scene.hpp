@@ -16,7 +16,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 using SceneMatrix = std::array<float, 16>;
 
@@ -410,7 +410,7 @@ struct VulkanPbrScene {
 //! When the active camera provides a view-projection matrix, renderables with
 //! valid bounds are culled when fully outside the frustum.
 [[nodiscard]] VulkanScene extract_vulkan_scene(
-    const omnicpp::core::World& world,
+    const ::warploom::core::World& world,
     VkPipeline pipeline = VK_NULL_HANDLE,
     VkPipelineLayout pipeline_layout = VK_NULL_HANDLE,
     SceneExtractionStats* stats = nullptr);
@@ -418,15 +418,28 @@ struct VulkanPbrScene {
 //! Convenience overload carrying no Vulkan handles (usable in headless and
 //! deterministic contexts): extraction with culling stats only.
 [[nodiscard]] VulkanScene extract_vulkan_scene(
-    const omnicpp::core::World& world, SceneExtractionStats* stats);
+    const ::warploom::core::World& world, SceneExtractionStats* stats);
 
 //! Extract using generation-checked mesh/material handles. Resolved GPU records
 //! are copied into the snapshot, so recording does not retain registry pointers.
 [[nodiscard]] VulkanScene extract_vulkan_scene(
-    const omnicpp::core::World& world,
+    const ::warploom::core::World& world,
     const VulkanSceneResourceRegistry& resources,
     VkPipeline pipeline = VK_NULL_HANDLE,
     VkPipelineLayout pipeline_layout = VK_NULL_HANDLE,
     SceneExtractionStats* stats = nullptr);
 
-} // namespace omnicpp::render
+} // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

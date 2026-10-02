@@ -13,7 +13,7 @@
 #include <vulkan/vulkan.h>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 namespace {
 #ifdef OMNICPP_HAS_VULKAN
@@ -568,4 +568,4 @@ void VulkanIblBaker::cleanup(VkDevice device) noexcept {
 #endif
 }
 
-}  // namespace omnicpp::render
+}  // namespace warploom::render

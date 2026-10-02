@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 //! Reflected shader resource binding.
 struct ReflectedBinding {
@@ -58,7 +58,7 @@ public:
   VulkanDescriptorManager(VulkanDescriptorManager&&) = delete;
   VulkanDescriptorManager& operator=(VulkanDescriptorManager&&) = delete;
 
-  [[nodiscard]] omnicpp::core::Result<void> initialize(VkDevice device);
+  [[nodiscard]] ::warploom::core::Result<void> initialize(VkDevice device);
   void cleanup() noexcept;
   [[nodiscard]] bool is_initialized() const noexcept { return device_ != VK_NULL_HANDLE; }
 
@@ -66,21 +66,21 @@ public:
   //! With `bindless` (requires device descriptor-indexing support), the layout
   //! is created partially bound with update-after-bind: descriptors may be
   //! bound as null and written any time up to draw/dispatch submission.
-  [[nodiscard]] omnicpp::core::Result<VkDescriptorSetLayout> create_layout(
+  [[nodiscard]] ::warploom::core::Result<VkDescriptorSetLayout> create_layout(
       const std::vector<ReflectedBinding>& bindings, std::uint32_t sets_to_reserve,
       bool bindless = false);
 
   //! Allocate a descriptor set from the internal pool for `layout`.
-  [[nodiscard]] omnicpp::core::Result<VkDescriptorSet> allocate_set(
+  [[nodiscard]] ::warploom::core::Result<VkDescriptorSet> allocate_set(
       VkDescriptorSetLayout layout);
 
   //! Write one buffer range into `binding` of `set`.
-  [[nodiscard]] omnicpp::core::Result<void> write_buffer(
+  [[nodiscard]] ::warploom::core::Result<void> write_buffer(
       VkDescriptorSet set, std::uint32_t binding, VkDescriptorType type,
       VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range);
 
   //! Write one image (sampler + view) into `binding` of `set`.
-  [[nodiscard]] omnicpp::core::Result<void> write_image(
+  [[nodiscard]] ::warploom::core::Result<void> write_image(
       VkDescriptorSet set, std::uint32_t binding, VkDescriptorType type,
       VkSampler sampler, VkImageView view, VkImageLayout layout,
       std::uint32_t array_element = 0);
@@ -88,7 +88,7 @@ public:
   //! Write one acceleration structure into `binding` of `set` (type must be
   //! VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR). Required for ray-query
   //! shaders that traverse a TLAS from graphics or compute stages.
-  [[nodiscard]] omnicpp::core::Result<void> write_acceleration_structure(
+  [[nodiscard]] ::warploom::core::Result<void> write_acceleration_structure(
       VkDescriptorSet set, std::uint32_t binding, VkDescriptorType type,
       VkAccelerationStructureKHR as, std::uint32_t array_element = 0);
 
@@ -105,4 +105,17 @@ private:
   std::vector<DescriptorSetLayoutInfo> layouts_;
 };
 
-} // namespace omnicpp::render
+} // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

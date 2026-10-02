@@ -71,6 +71,17 @@ Cross-module spellings inside modules re-badge to **rooted**
 
 ### Phase 1a — `warploom::render` + `warploom::asset`
 
+> **DONE.** One probe-driven correction: `vulkan_types.hpp` declares its
+> Vk* surface at GLOBAL scope — it never had a namespace block (its two
+> `omnicpp::render` hits were prose). The blanket "footer every public
+> header" rule put a `using namespace ::warploom::render` there before
+> anything declared the namespace (`'render' is not a namespace-name`).
+> Correction banked: **footers go only in headers that actually declare
+> the namespace** (append-rule now keyed on the re-badged declaration
+> being present in the file). Render: 32 headers footered, vulkan_types
+> excluded. Verified: 4 legs, 6 consumers through the footers, 64 live
+> proofs.
+
 1. Module-internal sed (line-oriented; per-file line-count assertion vs
    HEAD + appended-footer arithmetic): declarations + self-spellings
    `omnicpp::render[::depth]` → `warploom::render[::depth]`;
@@ -86,6 +97,8 @@ Cross-module spellings inside modules re-badge to **rooted**
    `omnicpp::` spellings and exercise the footers.
 
 ### Phase 1b — editor merge into `warploom::editor`
+
+> **Status: IN PROGRESS.**
 
 Same mechanics; the footers repeat core's exact guarded statement
 (`OMNICPP_COMPAT_EDITOR_NS`) so both families resolve through one

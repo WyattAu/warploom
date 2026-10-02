@@ -14,7 +14,7 @@
 #include <vulkan/vulkan.h>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 #ifdef OMNICPP_HAS_VULKAN
 
@@ -475,4 +475,4 @@ void VulkanAccelerationStructureBuilder::destroy_tlas(
 
 #endif  // OMNICPP_HAS_VULKAN
 
-}  // namespace omnicpp::render
+}  // namespace warploom::render

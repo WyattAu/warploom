@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 class VulkanHiZPyramid final {
 public:
@@ -38,7 +38,7 @@ public:
   }
 
   //! Create a pyramid. Pass levels=0 to allocate the complete runtime chain.
-  [[nodiscard]] omnicpp::core::Result<void> create(
+  [[nodiscard]] ::warploom::core::Result<void> create(
       VkDevice device, VkPhysicalDevice physical_device,
       std::uint32_t width, std::uint32_t height, std::uint32_t levels = 0,
       VulkanMemoryAllocator* allocator = nullptr);
@@ -75,4 +75,17 @@ private:
   std::uint32_t levels_{0};
 };
 
-} // namespace omnicpp::render
+} // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

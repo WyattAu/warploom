@@ -10,9 +10,9 @@
 #include <cmath>
 #include <cstring>
 
-using namespace omnicpp::asset::gltf_detail;
+using namespace warploom::asset::gltf_detail;
 
-namespace omnicpp::asset {
+namespace warploom::asset {
 namespace {
 
 constexpr std::size_t kNoIndex = static_cast<std::size_t>(-1);
@@ -871,20 +871,20 @@ void slerp_rotation(const float a[4], const float b[4], float t, float* out) {
 
 }  // namespace
 
-omnicpp::core::Result<GltfAnimationDocument> import_gltf_animation_document(
+::warploom::core::Result<GltfAnimationDocument> import_gltf_animation_document(
     const char* json_bytes, std::size_t json_len, const std::uint8_t* bin_bytes,
     std::size_t bin_len, std::string* error_detail,
     const ExternalFileLoader* loader) {
   std::string error;
   GltfAnimationDocument document;
 
-  auto finish = [&](bool ok) -> omnicpp::core::Result<GltfAnimationDocument> {
+  auto finish = [&](bool ok) -> ::warploom::core::Result<GltfAnimationDocument> {
     if (!ok) {
       if (error_detail != nullptr) *error_detail = error;
-      return omnicpp::core::Result<GltfAnimationDocument>::error(
-          omnicpp::core::RuntimeError::malformed_asset);
+      return ::warploom::core::Result<GltfAnimationDocument>::error(
+          ::warploom::core::RuntimeError::malformed_asset);
     }
-    return omnicpp::core::Result<GltfAnimationDocument>::ok(
+    return ::warploom::core::Result<GltfAnimationDocument>::ok(
         std::move(document));
   };
 
@@ -1151,4 +1151,4 @@ void sample_clip_blended(const GltfAnimationDocument& document,
   }
 }
 
-}  // namespace omnicpp::asset
+}  // namespace warploom::asset

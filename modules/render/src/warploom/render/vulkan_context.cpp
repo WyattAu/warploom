@@ -16,15 +16,15 @@
 #include <vulkan/vulkan.h>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 VulkanContext::~VulkanContext() { cleanup(); }
 
-omnicpp::core::Result<void> VulkanContext::initialize(
+::warploom::core::Result<void> VulkanContext::initialize(
     const std::string& app_name, bool enable_validation) {
 #ifdef OMNICPP_HAS_VULKAN
-  if (initialized_) return omnicpp::core::Result<void>::ok();
-  if (!is_available()) return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  if (initialized_) return ::warploom::core::Result<void>::ok();
+  if (!is_available()) return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 
   validation_enabled_ = enable_validation;
   validation_warning_count_.store(0, std::memory_order_relaxed);
@@ -83,7 +83,7 @@ omnicpp::core::Result<void> VulkanContext::initialize(
 
   VkResult result = vkCreateInstance(&create_info, nullptr, &instance_);
   if (result != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   if (validation_enabled_) {
@@ -95,7 +95,7 @@ omnicpp::core::Result<void> VulkanContext::initialize(
   // Enumerate physical devices
   std::uint32_t device_count = 0;
   vkEnumeratePhysicalDevices(instance_, &device_count, nullptr);
-  if (device_count == 0) { cleanup(); return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available); }
+  if (device_count == 0) { cleanup(); return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available); }
 
   std::vector<VkPhysicalDevice> devices(device_count);
   vkEnumeratePhysicalDevices(instance_, &device_count, devices.data());
@@ -111,7 +111,7 @@ omnicpp::core::Result<void> VulkanContext::initialize(
   }
   if (!physical_device_) {
     cleanup();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   VkPhysicalDeviceProperties props;
@@ -126,7 +126,7 @@ omnicpp::core::Result<void> VulkanContext::initialize(
   device_properties_.timestamp_period_ns = props.limits.timestampPeriod;
 
   queue_families_ = find_queue_families(physical_device_, nullptr);
-  if (!queue_families_.is_complete()) { cleanup(); return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available); }
+  if (!queue_families_.is_complete()) { cleanup(); return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available); }
 
   std::vector<VkDeviceQueueCreateInfo> queue_create_infos;
   std::set<std::int32_t> unique_families = {queue_families_.graphics_family, queue_families_.present_family};
@@ -170,7 +170,7 @@ omnicpp::core::Result<void> VulkanContext::initialize(
 
   if (!check_device_extension_support(physical_device_)) {
     cleanup();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   // Vulkan 1.3 feature negotiation: enable sync2 and timeline semaphores only
@@ -345,7 +345,7 @@ omnicpp::core::Result<void> VulkanContext::initialize(
   device_create_info.ppEnabledExtensionNames = device_extensions.data();
 
   result = vkCreateDevice(physical_device_, &device_create_info, nullptr, &device_);
-  if (result != VK_SUCCESS) { cleanup(); return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available); }
+  if (result != VK_SUCCESS) { cleanup(); return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available); }
 
   vkGetDeviceQueue(device_, static_cast<std::uint32_t>(queue_families_.graphics_family), 0, &graphics_queue_);
   vkGetDeviceQueue(device_, static_cast<std::uint32_t>(queue_families_.present_family), 0, &present_queue_);
@@ -367,33 +367,33 @@ omnicpp::core::Result<void> VulkanContext::initialize(
   }
 
   initialized_ = true;
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)app_name;
   (void)enable_validation;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanContext::create_surface(VkSurfaceKHR& surface) {
+::warploom::core::Result<void> VulkanContext::create_surface(VkSurfaceKHR& surface) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!initialized_ || !instance_ || !headless_surface_enabled_) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   auto create_headless = reinterpret_cast<PFN_vkCreateHeadlessSurfaceEXT>(
       vkGetInstanceProcAddr(instance_, "vkCreateHeadlessSurfaceEXT"));
   if (!create_headless) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   VkHeadlessSurfaceCreateInfoEXT info{};
   info.sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT;
   const VkResult result = create_headless(instance_, &info, nullptr, &surface);
   return result == VK_SUCCESS
-      ? omnicpp::core::Result<void>::ok()
-      : omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      ? ::warploom::core::Result<void>::ok()
+      : ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #else
   (void)surface;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -681,4 +681,4 @@ bool VulkanContext::device_supports_rt_pipeline_extension(VkPhysicalDevice devic
 #endif
 }
 
-} // namespace omnicpp::render
+} // namespace warploom::render

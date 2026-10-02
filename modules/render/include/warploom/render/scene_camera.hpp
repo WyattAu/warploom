@@ -27,7 +27,7 @@
 #include <array>
 #include <cstdint>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 //! Right-handed look-at view matrix (column-major, translation in [12..14]).
 //! `up` must not be parallel to eye->target.
@@ -80,7 +80,20 @@ struct OrbitCameraController {
 //! and an OrbitCameraController, then recompute that camera's
 //! view_projection. `aspect` is the render target's width / height.
 //! Inactive scene cameras are skipped. Deterministic.
-void update_orbit_cameras(omnicpp::core::World& world, float aspect,
+void update_orbit_cameras(::warploom::core::World& world, float aspect,
                           const OrbitCameraInput& input) noexcept;
 
-}  // namespace omnicpp::render
+}  // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

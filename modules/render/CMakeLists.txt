@@ -14,7 +14,7 @@ cmake_minimum_required(VERSION 3.28...4.0)
 # Standalone: find_package(WarploomRender CONFIG REQUIRED) after install.
 #
 # S3 is an include-path and packaging extraction only: public names stay
-# `omnicpp::render` (identifier migration rides with S5/S-decision; see
+# `warploom::render` since S5-B phase 1a; the compat footers keep the old
 # docs/warploom-render-plan.md §1). The compat forwarders under
 # include/engine/render/ keep all 44 existing include sites compiling.
 # ============================================================================

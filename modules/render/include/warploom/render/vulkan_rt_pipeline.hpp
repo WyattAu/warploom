@@ -31,7 +31,7 @@
 #include <string>
 #include <vector>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 //! Host-side description of one traceRays dispatch and its SBT contents.
 struct RtTracePlan {
@@ -63,7 +63,7 @@ class VulkanRtPipeline final {
   //! groups (closest-hit only, no any-hit). Max recursion comes from the
   //! pipeline, not the trace call. SBT strides/alignments are sized from
   //! `physical_device`'s ray-tracing pipeline properties.
-  [[nodiscard]] omnicpp::core::Result<void> create(
+  [[nodiscard]] ::warploom::core::Result<void> create(
       VkPhysicalDevice physical_device, VkDevice device, VkPipelineLayout layout,
       const std::vector<VkPipelineShaderStageCreateInfo>& stages,
       std::uint32_t miss_count, std::uint32_t hit_group_count,
@@ -72,7 +72,7 @@ class VulkanRtPipeline final {
   //! Fetches SBT group handles (vkGetRayTracingShaderGroupHandlesKHR) into
   //! host memory: raygen + miss + hit group handles back-to-back, each
   //! handle_size bytes. Call after create().
-  [[nodiscard]] omnicpp::core::Result<std::vector<std::uint8_t>> fetch_handles(
+  [[nodiscard]] ::warploom::core::Result<std::vector<std::uint8_t>> fetch_handles(
       VkDevice device) const;
 
   //! Host-writes the SBT into `sbt` (usage SHADER_BINDING_TABLE_BIT |
@@ -82,7 +82,7 @@ class VulkanRtPipeline final {
   //! region, then hit region, each region start aligned to
   //! shaderGroupBaseAlignment and each stride handle-aligned. Records the
   //! region device addresses for trace_rays.
-  [[nodiscard]] omnicpp::core::Result<void> write_sbt(
+  [[nodiscard]] ::warploom::core::Result<void> write_sbt(
       VkDevice device, const std::vector<std::uint8_t>& handles,
       Allocation& sbt);
 
@@ -128,4 +128,17 @@ class VulkanRtPipeline final {
   std::uint64_t hit_addr_{0};
 };
 
-}  // namespace omnicpp::render
+}  // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

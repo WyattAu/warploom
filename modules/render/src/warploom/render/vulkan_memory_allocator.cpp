@@ -8,7 +8,7 @@
 #include <vulkan/vulkan.h>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 namespace {
 constexpr VkDeviceSize round_up(VkDeviceSize value, VkDeviceSize alignment) noexcept {
@@ -22,11 +22,11 @@ constexpr VkDeviceSize round_up(VkDeviceSize value, VkDeviceSize alignment) noex
 
 VulkanMemoryAllocator::~VulkanMemoryAllocator() { cleanup(); }
 
-omnicpp::core::Result<void> VulkanMemoryAllocator::initialize(
+::warploom::core::Result<void> VulkanMemoryAllocator::initialize(
     VkDevice device, VkPhysicalDevice physical_device) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !physical_device) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   if (device_) cleanup();
   device_ = device;
@@ -66,10 +66,10 @@ omnicpp::core::Result<void> VulkanMemoryAllocator::initialize(
       }
     }
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)physical_device;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -182,17 +182,17 @@ std::size_t VulkanMemoryAllocator::find_or_create_block(
 #endif
 }
 
-omnicpp::core::Result<Allocation> VulkanMemoryAllocator::allocate_sized(
+::warploom::core::Result<Allocation> VulkanMemoryAllocator::allocate_sized(
     VkDeviceSize size, VkDeviceSize alignment, std::uint32_t type_bits,
     VkMemoryPropertyFlags properties) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device_ || size == 0) {
-    return omnicpp::core::Result<Allocation>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<Allocation>::error(::warploom::core::RuntimeError::invalid_config);
   }
   const std::size_t block_index = find_or_create_block(size, type_bits, properties);
   if (block_index == SIZE_MAX) {
-    return omnicpp::core::Result<Allocation>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<Allocation>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   Block& block = blocks_[block_index];
 
@@ -236,22 +236,22 @@ omnicpp::core::Result<Allocation> VulkanMemoryAllocator::allocate_sized(
     }
     block.used += size;
     ++allocation_count_;
-    return omnicpp::core::Result<Allocation>::ok(allocation);
+    return ::warploom::core::Result<Allocation>::ok(allocation);
   }
-  return omnicpp::core::Result<Allocation>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<Allocation>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #else
   (void)size; (void)alignment; (void)type_bits; (void)properties;
-  return omnicpp::core::Result<Allocation>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<Allocation>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<Allocation> VulkanMemoryAllocator::create_buffer(
+::warploom::core::Result<Allocation> VulkanMemoryAllocator::create_buffer(
     VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device_ || size == 0) {
-    return omnicpp::core::Result<Allocation>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<Allocation>::error(::warploom::core::RuntimeError::invalid_config);
   }
   VkBufferCreateInfo buffer_info{};
   buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -271,8 +271,8 @@ omnicpp::core::Result<Allocation> VulkanMemoryAllocator::create_buffer(
   }
   VkBuffer buffer = VK_NULL_HANDLE;
   if (vkCreateBuffer(device_, &buffer_info, nullptr, &buffer) != VK_SUCCESS) {
-    return omnicpp::core::Result<Allocation>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<Allocation>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   VkMemoryRequirements requirements{};
@@ -288,24 +288,24 @@ omnicpp::core::Result<Allocation> VulkanMemoryAllocator::create_buffer(
   if (vkBindBufferMemory(device_, buffer, alloc.memory, alloc.offset) != VK_SUCCESS) {
     destroy_allocation(alloc);
     vkDestroyBuffer(device_, buffer, nullptr);
-    return omnicpp::core::Result<Allocation>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<Allocation>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   alloc.buffer = buffer;
   live_buffers_.push_back(buffer);
-  return omnicpp::core::Result<Allocation>::ok(alloc);
+  return ::warploom::core::Result<Allocation>::ok(alloc);
 #else
   (void)size; (void)usage; (void)properties;
-  return omnicpp::core::Result<Allocation>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<Allocation>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<Allocation> VulkanMemoryAllocator::bind_image(
+::warploom::core::Result<Allocation> VulkanMemoryAllocator::bind_image(
     VkImage image, VkMemoryPropertyFlags properties) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device_ || !image) {
-    return omnicpp::core::Result<Allocation>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<Allocation>::error(::warploom::core::RuntimeError::invalid_config);
   }
   VkMemoryRequirements requirements{};
   vkGetImageMemoryRequirements(device_, image, &requirements);
@@ -315,15 +315,15 @@ omnicpp::core::Result<Allocation> VulkanMemoryAllocator::bind_image(
   Allocation alloc = allocation.value();
   if (vkBindImageMemory(device_, image, alloc.memory, alloc.offset) != VK_SUCCESS) {
     destroy_allocation(alloc);
-    return omnicpp::core::Result<Allocation>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<Allocation>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   alloc.image = image;
-  return omnicpp::core::Result<Allocation>::ok(alloc);
+  return ::warploom::core::Result<Allocation>::ok(alloc);
 #else
   (void)image; (void)properties;
-  return omnicpp::core::Result<Allocation>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<Allocation>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -394,12 +394,12 @@ AllocatorStats VulkanMemoryAllocator::stats() const noexcept {
 
 VulkanUploadRing::~VulkanUploadRing() { cleanup(); }
 
-omnicpp::core::Result<void> VulkanUploadRing::initialize(
+::warploom::core::Result<void> VulkanUploadRing::initialize(
     VkDevice device, VkPhysicalDevice physical_device,
     std::uint32_t queue_family_index, VkDeviceSize total_size) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !physical_device || total_size == 0) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   device_ = device;
 
@@ -410,7 +410,7 @@ omnicpp::core::Result<void> VulkanUploadRing::initialize(
   buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   if (vkCreateBuffer(device_, &buffer_info, nullptr, &ring_buffer_) != VK_SUCCESS) {
     cleanup();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   VkMemoryRequirements requirements{};
@@ -429,7 +429,7 @@ omnicpp::core::Result<void> VulkanUploadRing::initialize(
   }
   if (memory_type == UINT32_MAX) {
     cleanup();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   VkMemoryAllocateInfo alloc_info{};
@@ -438,12 +438,12 @@ omnicpp::core::Result<void> VulkanUploadRing::initialize(
   alloc_info.memoryTypeIndex = memory_type;
   if (vkAllocateMemory(device_, &alloc_info, nullptr, &ring_memory_) != VK_SUCCESS) {
     cleanup();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   if (vkBindBufferMemory(device_, ring_buffer_, ring_memory_, 0) != VK_SUCCESS ||
       vkMapMemory(device_, ring_memory_, 0, requirements.size, 0, &mapped_) != VK_SUCCESS) {
     cleanup();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   capacity_ = requirements.size;
 
@@ -454,7 +454,7 @@ omnicpp::core::Result<void> VulkanUploadRing::initialize(
   pool_info.queueFamilyIndex = queue_family_index;
   if (vkCreateCommandPool(device_, &pool_info, nullptr, &command_pool_) != VK_SUCCESS) {
     cleanup();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   VkCommandBufferAllocateInfo cb_info{};
   cb_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -463,12 +463,12 @@ omnicpp::core::Result<void> VulkanUploadRing::initialize(
   cb_info.commandBufferCount = 1;
   if (vkAllocateCommandBuffers(device_, &cb_info, &command_buffer_) != VK_SUCCESS) {
     cleanup();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)physical_device; (void)queue_family_index; (void)total_size;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -516,11 +516,11 @@ void VulkanUploadRing::wait_region_free(VkDeviceSize start, VkDeviceSize size) n
 #endif
 }
 
-omnicpp::core::Result<VulkanUploadRing::UploadSpan> VulkanUploadRing::acquire(
+::warploom::core::Result<VulkanUploadRing::UploadSpan> VulkanUploadRing::acquire(
     VkDeviceSize size) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!is_initialized() || size == 0 || size > capacity_) {
-    return omnicpp::core::Result<UploadSpan>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<UploadSpan>::error(::warploom::core::RuntimeError::invalid_config);
   }
   retire_completed();
   if (head_ + size > capacity_) {
@@ -537,31 +537,31 @@ omnicpp::core::Result<VulkanUploadRing::UploadSpan> VulkanUploadRing::acquire(
   // Record the exact handed-out range; submit() attaches it to the batch fence.
   staged_ranges_.push_back({head_, size});
   head_ += size;
-  return omnicpp::core::Result<UploadSpan>::ok(span);
+  return ::warploom::core::Result<UploadSpan>::ok(span);
 #else
   (void)size;
-  return omnicpp::core::Result<UploadSpan>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<UploadSpan>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanUploadRing::begin_commands() {
+::warploom::core::Result<void> VulkanUploadRing::begin_commands() {
 #ifdef OMNICPP_HAS_VULKAN
-  if (recording_) return omnicpp::core::Result<void>::ok();
+  if (recording_) return ::warploom::core::Result<void>::ok();
   VkCommandBufferBeginInfo begin{};
   begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   if (vkBeginCommandBuffer(command_buffer_, &begin) != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   recording_ = true;
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanUploadRing::begin_recording() {
+::warploom::core::Result<void> VulkanUploadRing::begin_recording() {
   return begin_commands();
 }
 void VulkanUploadRing::record_copy(VkCommandBuffer command_buffer,
@@ -579,17 +579,17 @@ void VulkanUploadRing::record_copy(VkCommandBuffer command_buffer,
 #endif
 }
 
-omnicpp::core::Result<void> VulkanUploadRing::submit(VkQueue queue) {
+::warploom::core::Result<void> VulkanUploadRing::submit(VkQueue queue) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!is_initialized() || !queue) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
-  if (!recording_) return omnicpp::core::Result<void>::ok();
+  if (!recording_) return ::warploom::core::Result<void>::ok();
 
   if (vkEndCommandBuffer(command_buffer_) != VK_SUCCESS) {
     recording_ = false;
     staged_ranges_.clear();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   recording_ = false;
 
@@ -598,7 +598,7 @@ omnicpp::core::Result<void> VulkanUploadRing::submit(VkQueue queue) {
   fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
   if (vkCreateFence(device_, &fence_info, nullptr, &fence) != VK_SUCCESS) {
     staged_ranges_.clear();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   VkSubmitInfo submit{};
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -608,11 +608,11 @@ omnicpp::core::Result<void> VulkanUploadRing::submit(VkQueue queue) {
   if (result != VK_SUCCESS) {
     vkDestroyFence(device_, fence, nullptr);
     staged_ranges_.clear();
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   if (staged_ranges_.empty()) {
     vkDestroyFence(device_, fence, nullptr);
-    return omnicpp::core::Result<void>::ok();
+    return ::warploom::core::Result<void>::ok();
   }
   // Every range handed out since the last submit is guarded by this fence.
   for (std::size_t i = 0; i < staged_ranges_.size(); ++i) {
@@ -620,10 +620,10 @@ omnicpp::core::Result<void> VulkanUploadRing::submit(VkQueue queue) {
     in_flight_.push_back({range.offset, range.size, fence, i == 0U});
   }
   staged_ranges_.clear();
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)queue;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -679,4 +679,4 @@ void VulkanUploadRing::cleanup() noexcept {
   device_ = VK_NULL_HANDLE;
 }
 
-} // namespace omnicpp::render
+} // namespace warploom::render

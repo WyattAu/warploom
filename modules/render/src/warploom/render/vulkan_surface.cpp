@@ -18,15 +18,15 @@
 #endif
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
-omnicpp::core::Result<void> create_platform_surface(
+::warploom::core::Result<void> create_platform_surface(
     VkInstance instance,
     const SurfaceCreateInfo& info,
     VkSurfaceKHR& surface) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!instance) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
 #ifdef __linux__
@@ -39,14 +39,14 @@ omnicpp::core::Result<void> create_platform_surface(
 
     auto result = vkCreateXcbSurfaceKHR(instance, &create_info, nullptr, &surface);
     if (result == VK_SUCCESS) {
-      return omnicpp::core::Result<void>::ok();
+      return ::warploom::core::Result<void>::ok();
     }
   }
 
   // Fallback: create an offscreen surface for headless rendering
   // Some drivers support this via VK_EXT_headless_surface
   surface = nullptr;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 
 #elif defined(_WIN32)
   if (info.display && info.window) {
@@ -57,27 +57,27 @@ omnicpp::core::Result<void> create_platform_surface(
 
     auto result = vkCreateWin32SurfaceKHR(instance, &create_info, nullptr, &surface);
     if (result == VK_SUCCESS) {
-      return omnicpp::core::Result<void>::ok();
+      return ::warploom::core::Result<void>::ok();
     }
   }
 
   surface = nullptr;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 
 #else
   // Unsupported platform
   (void)instance;
   (void)info;
   surface = nullptr;
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #endif
 
 #else
   (void)instance;
   (void)info;
   surface = nullptr;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-} // namespace omnicpp::render
+} // namespace warploom::render

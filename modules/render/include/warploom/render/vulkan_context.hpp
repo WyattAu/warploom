@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 struct QueueFamilyIndices {
   std::int32_t graphics_family{-1};
@@ -48,10 +48,10 @@ public:
   VulkanContext(VulkanContext&&) = delete;
   VulkanContext& operator=(VulkanContext&&) = delete;
 
-  [[nodiscard]] omnicpp::core::Result<void> initialize(
+  [[nodiscard]] ::warploom::core::Result<void> initialize(
       const std::string& app_name, bool enable_validation = false);
   //! Create a VK_EXT_headless_surface surface for GPU-only validation.
-  [[nodiscard]] omnicpp::core::Result<void> create_surface(VkSurfaceKHR& surface);
+  [[nodiscard]] ::warploom::core::Result<void> create_surface(VkSurfaceKHR& surface);
   //! Destroy a surface created by this context.
   void destroy_surface(VkSurfaceKHR& surface) noexcept;
   void cleanup() noexcept;
@@ -165,4 +165,17 @@ private:
   std::atomic<std::uint32_t> validation_error_count_{0};
 };
 
-} // namespace omnicpp::render
+} // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

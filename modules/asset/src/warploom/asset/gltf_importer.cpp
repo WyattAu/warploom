@@ -10,25 +10,25 @@
 #include <cstring>
 #include <limits>
 
-namespace omnicpp::asset {
+namespace warploom::asset {
 
 using namespace gltf_detail;
 
 
-omnicpp::core::Result<GltfMeshImport> import_gltf_mesh(
+::warploom::core::Result<GltfMeshImport> import_gltf_mesh(
     const char* json_bytes, std::size_t json_len, const std::uint8_t* bin_bytes,
     std::size_t bin_len, std::size_t mesh_index, std::string* error_detail,
     const ExternalFileLoader* loader) {
   std::string error;
   GltfMeshImport import;
 
-  auto finish = [&](bool ok) -> omnicpp::core::Result<GltfMeshImport> {
+  auto finish = [&](bool ok) -> ::warploom::core::Result<GltfMeshImport> {
     if (!ok) {
       if (error_detail != nullptr) *error_detail = error;
-      return omnicpp::core::Result<GltfMeshImport>::error(
-          omnicpp::core::RuntimeError::malformed_asset);
+      return ::warploom::core::Result<GltfMeshImport>::error(
+          ::warploom::core::RuntimeError::malformed_asset);
     }
-    return omnicpp::core::Result<GltfMeshImport>::ok(std::move(import));
+    return ::warploom::core::Result<GltfMeshImport>::ok(std::move(import));
   };
 
   if (json_bytes == nullptr && json_len != 0U) {
@@ -1030,7 +1030,7 @@ omnicpp::core::Result<GltfMeshImport> import_gltf_mesh(
 // ============================================================================
 
 
-omnicpp::core::Result<GltfSceneImport> import_gltf_scene(
+::warploom::core::Result<GltfSceneImport> import_gltf_scene(
     const char* json_bytes, std::size_t json_len,
     const std::uint8_t* bin_bytes, std::size_t bin_len,
     std::size_t scene_index, std::string* error_detail,
@@ -1038,13 +1038,13 @@ omnicpp::core::Result<GltfSceneImport> import_gltf_scene(
   std::string error;
   GltfSceneImport scene;
 
-  auto finish = [&](bool ok) -> omnicpp::core::Result<GltfSceneImport> {
+  auto finish = [&](bool ok) -> ::warploom::core::Result<GltfSceneImport> {
     if (!ok) {
       if (error_detail != nullptr) *error_detail = error;
-      return omnicpp::core::Result<GltfSceneImport>::error(
-          omnicpp::core::RuntimeError::malformed_asset);
+      return ::warploom::core::Result<GltfSceneImport>::error(
+          ::warploom::core::RuntimeError::malformed_asset);
     }
-    return omnicpp::core::Result<GltfSceneImport>::ok(std::move(scene));
+    return ::warploom::core::Result<GltfSceneImport>::ok(std::move(scene));
   };
 
   if (json_bytes == nullptr && json_len != 0U) {
@@ -1339,4 +1339,4 @@ omnicpp::core::Result<GltfSceneImport> import_gltf_scene(
   return finish(true);
 }
 
-} // namespace omnicpp::asset
+} // namespace warploom::asset

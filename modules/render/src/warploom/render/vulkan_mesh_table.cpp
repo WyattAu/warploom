@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 namespace {
 
@@ -105,4 +105,4 @@ void SceneMeshTableBuilder::clear() noexcept {
   build_ = MeshTableBuild{};
 }
 
-}  // namespace omnicpp::render
+}  // namespace warploom::render

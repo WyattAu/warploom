@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 class VulkanRenderPass final {
 public:
@@ -22,15 +22,15 @@ public:
   VulkanRenderPass(VulkanRenderPass&&) = delete;
   VulkanRenderPass& operator=(VulkanRenderPass&&) = delete;
 
-  [[nodiscard]] omnicpp::core::Result<void> create(
+  [[nodiscard]] ::warploom::core::Result<void> create(
       VkDevice device, VkFormat color_format, VkFormat depth_format,
       VkImageLayout final_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
-  [[nodiscard]] omnicpp::core::Result<void> create_framebuffers(
+  [[nodiscard]] ::warploom::core::Result<void> create_framebuffers(
       VkDevice device, const std::vector<VkImageView>& swapchain_views,
       std::uint32_t width, std::uint32_t height);
 
-  [[nodiscard]] omnicpp::core::Result<void> create_depth_resources(
+  [[nodiscard]] ::warploom::core::Result<void> create_depth_resources(
       VkDevice device, VkPhysicalDevice physical_device,
       VkFormat format, std::uint32_t width, std::uint32_t height);
 
@@ -57,4 +57,17 @@ private:
   bool depth_sampleable_{false};
 };
 
-} // namespace omnicpp::render
+} // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

@@ -6,22 +6,22 @@
 #include <vulkan/vulkan.h>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 VulkanHiZPyramid::~VulkanHiZPyramid() { cleanup(device_); }
 
-omnicpp::core::Result<void> VulkanHiZPyramid::create(
+::warploom::core::Result<void> VulkanHiZPyramid::create(
     VkDevice device, VkPhysicalDevice physical_device,
     std::uint32_t width, std::uint32_t height, std::uint32_t levels,
     VulkanMemoryAllocator* allocator) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !physical_device || width == 0 || height == 0 ||
       image_ != VK_NULL_HANDLE) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   if (levels == 0) levels = mip_levels_for_extent(width, height);
   if (levels == 0 || levels > mip_levels_for_extent(width, height)) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   device_ = device;
 
@@ -31,7 +31,7 @@ omnicpp::core::Result<void> VulkanHiZPyramid::create(
   const VkFormatFeatureFlags required =
       VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
   if ((format_properties.optimalTilingFeatures & required) != required) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
 
   VkImageCreateInfo image_info{};
@@ -48,14 +48,14 @@ omnicpp::core::Result<void> VulkanHiZPyramid::create(
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
 
   if (vkCreateImage(device, &image_info, nullptr, &image_) != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   if (allocator) {
     auto bound = allocator->bind_image(image_, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (!bound.is_ok()) {
       cleanup(device);
-      return omnicpp::core::Result<void>::error(bound.error());
+      return ::warploom::core::Result<void>::error(bound.error());
     }
     allocator_ = allocator;
     allocation_ = bound.value();
@@ -76,7 +76,7 @@ omnicpp::core::Result<void> VulkanHiZPyramid::create(
     }
     if (memory_type == UINT32_MAX) {
       cleanup(device);
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
     VkMemoryAllocateInfo alloc_info{};
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -85,7 +85,7 @@ omnicpp::core::Result<void> VulkanHiZPyramid::create(
     if (vkAllocateMemory(device, &alloc_info, nullptr, &allocation_.memory) != VK_SUCCESS ||
         vkBindImageMemory(device, image_, allocation_.memory, 0) != VK_SUCCESS) {
       cleanup(device);
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
     allocation_.size = requirements.size;
   }
@@ -100,7 +100,7 @@ omnicpp::core::Result<void> VulkanHiZPyramid::create(
   full_view_info.subresourceRange.layerCount = 1;
   if (vkCreateImageView(device, &full_view_info, nullptr, &full_view_) != VK_SUCCESS) {
     cleanup(device);
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   mip_views_.reserve(levels);
@@ -111,7 +111,7 @@ omnicpp::core::Result<void> VulkanHiZPyramid::create(
     view_info.subresourceRange.baseArrayLayer = 0;
     if (vkCreateImageView(device, &view_info, nullptr, &mip_views_.emplace_back()) != VK_SUCCESS) {
       cleanup(device);
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
   }
 
@@ -128,18 +128,18 @@ omnicpp::core::Result<void> VulkanHiZPyramid::create(
   sampler_info.maxAnisotropy = 1.0f;
   if (vkCreateSampler(device, &sampler_info, nullptr, &sampler_) != VK_SUCCESS) {
     cleanup(device);
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   format_ = VK_FORMAT_R32_SFLOAT;
   width_ = width;
   height_ = height;
   levels_ = levels;
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)physical_device; (void)width; (void)height;
   (void)levels; (void)allocator;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -182,4 +182,4 @@ void VulkanHiZPyramid::cleanup(VkDevice device) noexcept {
   levels_ = 0;
 }
 
-} // namespace omnicpp::render
+} // namespace warploom::render

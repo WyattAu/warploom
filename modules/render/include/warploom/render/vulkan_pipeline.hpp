@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 struct VertexDescription {
   struct Attribute {
@@ -36,21 +36,21 @@ public:
   VulkanPipeline(VulkanPipeline&&) = delete;
   VulkanPipeline& operator=(VulkanPipeline&&) = delete;
 
-  [[nodiscard]] omnicpp::core::Result<void> load_shader_file(
+  [[nodiscard]] ::warploom::core::Result<void> load_shader_file(
       VkDevice device, const std::string& path);
-  [[nodiscard]] omnicpp::core::Result<void> load_shader(
+  [[nodiscard]] ::warploom::core::Result<void> load_shader(
       VkDevice device, const std::uint32_t* code, std::size_t code_size_bytes);
-  [[nodiscard]] omnicpp::core::Result<void> load_shader_from_bytes(
+  [[nodiscard]] ::warploom::core::Result<void> load_shader_from_bytes(
       VkDevice device, const std::vector<std::uint8_t>& spirv_bytes);
   //! Explicitly assign a SPIR-V module to a named pipeline stage.
-  [[nodiscard]] omnicpp::core::Result<void> load_shader_stage_file(
+  [[nodiscard]] ::warploom::core::Result<void> load_shader_stage_file(
       VkDevice device, const std::string& path, const std::string& stage);
   [[nodiscard]] bool has_stage(const std::string& stage) const noexcept;
   [[nodiscard]] bool all_core_stages_loaded() const noexcept {
     return vertex_shader_ != VK_NULL_HANDLE && fragment_shader_ != VK_NULL_HANDLE;
   }
 
-  [[nodiscard]] omnicpp::core::Result<void> create_graphics_pipeline(
+  [[nodiscard]] ::warploom::core::Result<void> create_graphics_pipeline(
       VkDevice device, VkRenderPass render_pass,
       VkFormat vertex_format,
       VkPipelineLayout pipeline_layout = VK_NULL_HANDLE,
@@ -66,13 +66,13 @@ public:
   //! Create a compute pipeline from the "compute" stage module (load with
   //! load_shader_stage_file(device, path, "compute") first). Requires a
   //! caller-created layout (create_pipeline_layout).
-  [[nodiscard]] omnicpp::core::Result<void> create_compute_pipeline(
+  [[nodiscard]] ::warploom::core::Result<void> create_compute_pipeline(
       VkDevice device, VkPipelineLayout pipeline_layout = VK_NULL_HANDLE);
 
-  [[nodiscard]] omnicpp::core::Result<void> create_pipeline_layout(
+  [[nodiscard]] ::warploom::core::Result<void> create_pipeline_layout(
       VkDevice device, const void* push_constant_range = nullptr);
   //! Layout with descriptor set layouts (type-safe overload).
-  [[nodiscard]] omnicpp::core::Result<void> create_pipeline_layout(
+  [[nodiscard]] ::warploom::core::Result<void> create_pipeline_layout(
       VkDevice device, const VkDescriptorSetLayout* set_layouts,
       std::uint32_t set_layout_count, const void* push_constant_range = nullptr);
 
@@ -90,4 +90,17 @@ private:
   bool owns_layout_{false};
 };
 
-} // namespace omnicpp::render
+} // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

@@ -33,7 +33,7 @@
 #include <string>
 #include <vector>
 
-namespace omnicpp::asset {
+namespace warploom::asset {
 
 //! Index of a node with no parent (root of the node forest).
 inline constexpr std::size_t kGltfNoParent = static_cast<std::size_t>(-1);
@@ -145,7 +145,7 @@ struct GltfAnimationDocument {
  * joint indices, CUBICSPLINE samplers, duplicate (node, path) channels,
  * channel targets with a `weights` path, and non-monotonic sampler input.
  */
-[[nodiscard]] omnicpp::core::Result<GltfAnimationDocument>
+[[nodiscard]] ::warploom::core::Result<GltfAnimationDocument>
 import_gltf_animation_document(
     const char* json_bytes, std::size_t json_len, const std::uint8_t* bin_bytes,
     std::size_t bin_len, std::string* error_detail = nullptr,
@@ -190,4 +190,17 @@ void gltf_skin_matrices(const GltfAnimationDocument& document,
 void sample_gltf_channel(const GltfSampler& sampler, float time,
                          float* out) noexcept;
 
-}  // namespace omnicpp::asset
+}  // namespace warploom::asset
+
+// S5-B compat footer: legacy `omnicpp::asset` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_ASSET_NS
+#define OMNICPP_COMPAT_ASSET_NS
+namespace omnicpp::asset {
+    using namespace ::warploom::asset;
+}
+#endif  // OMNICPP_COMPAT_ASSET_NS

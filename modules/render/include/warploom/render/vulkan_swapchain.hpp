@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 struct SwapchainSupportDetails {
 #if OMNICPP_VULKAN_TYPES_AVAILABLE
@@ -44,14 +44,14 @@ public:
   VulkanSwapchain(VulkanSwapchain&&) = delete;
   VulkanSwapchain& operator=(VulkanSwapchain&&) = delete;
 
-  [[nodiscard]] omnicpp::core::Result<void> query_support(
+  [[nodiscard]] ::warploom::core::Result<void> query_support(
       VkPhysicalDevice physical_device, VkSurfaceKHR surface);
-  [[nodiscard]] omnicpp::core::Result<void> create(
+  [[nodiscard]] ::warploom::core::Result<void> create(
       VkDevice device, VkPhysicalDevice physical_device,
       VkSurfaceKHR surface, const SwapchainConfig& config);
-  [[nodiscard]] omnicpp::core::Result<void> create_image_views(VkDevice device);
+  [[nodiscard]] ::warploom::core::Result<void> create_image_views(VkDevice device);
   void cleanup(VkDevice device) noexcept;
-  [[nodiscard]] omnicpp::core::Result<void> recreate(
+  [[nodiscard]] ::warploom::core::Result<void> recreate(
       VkDevice device, VkPhysicalDevice physical_device,
       VkSurfaceKHR surface, std::uint32_t width, std::uint32_t height);
 
@@ -94,4 +94,17 @@ private:
   std::vector<VkImageView> image_views_;
 };
 
-} // namespace omnicpp::render
+} // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

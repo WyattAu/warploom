@@ -43,7 +43,7 @@ struct ImageSubresourceKeyHash {
 
 } // namespace
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 // Attachment builder helpers. Values mirror the Vulkan constants so the
 // Vulkan-off shim build resolves them; real Vulkan builds see the same bits.
@@ -535,4 +535,4 @@ void execute_graph(
 #endif
 }
 
-} // namespace omnicpp::render
+} // namespace warploom::render

@@ -4,17 +4,17 @@
 #include <vulkan/vulkan.h>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 VulkanFrameUploadArena::~VulkanFrameUploadArena() { cleanup(); }
 
-omnicpp::core::Result<void> VulkanFrameUploadArena::initialize(
+::warploom::core::Result<void> VulkanFrameUploadArena::initialize(
     VkDevice device, VkPhysicalDevice physical_device,
     std::uint32_t queue_family_index, std::uint32_t frame_count,
     VkDeviceSize bytes_per_frame) {
   cleanup();
   if (frame_count == 0U || bytes_per_frame == 0U) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   queue_ = VK_NULL_HANDLE;
   rings_.reserve(frame_count);
@@ -28,7 +28,7 @@ omnicpp::core::Result<void> VulkanFrameUploadArena::initialize(
     }
     rings_.push_back(std::move(ring));
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 }
 
 void VulkanFrameUploadArena::cleanup() noexcept {
@@ -40,10 +40,10 @@ void VulkanFrameUploadArena::cleanup() noexcept {
   active_frame_ = 0xffffffffU;
 }
 
-omnicpp::core::Result<void> VulkanFrameUploadArena::begin_frame(
+::warploom::core::Result<void> VulkanFrameUploadArena::begin_frame(
     std::uint32_t frame_index) {
   if (frame_index >= rings_.size()) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   // Wait only for this slot's prior submission. This is the per-frame
   // lifetime boundary callers use to retire staging-dependent resources:
@@ -52,18 +52,18 @@ omnicpp::core::Result<void> VulkanFrameUploadArena::begin_frame(
   // retired for the next frame.
   rings_[frame_index]->wait_idle();
   active_frame_ = frame_index;
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 }
 
-omnicpp::core::Result<VulkanUploadRing::UploadSpan> VulkanFrameUploadArena::acquire(
+::warploom::core::Result<VulkanUploadRing::UploadSpan> VulkanFrameUploadArena::acquire(
     VkDeviceSize size) {
   if (active_frame_ >= rings_.size()) {
-    return omnicpp::core::Result<VulkanUploadRing::UploadSpan>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<VulkanUploadRing::UploadSpan>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
   auto begin_result = rings_[active_frame_]->begin_recording();
   if (!begin_result.is_ok()) {
-    return omnicpp::core::Result<VulkanUploadRing::UploadSpan>::error(begin_result.error());
+    return ::warploom::core::Result<VulkanUploadRing::UploadSpan>::error(begin_result.error());
   }
   return rings_[active_frame_]->acquire(size);
 }
@@ -139,9 +139,9 @@ void VulkanFrameUploadArena::record_copy_image_rgba8(
 #endif
 }
 
-omnicpp::core::Result<void> VulkanFrameUploadArena::submit(VkQueue queue) {
+::warploom::core::Result<void> VulkanFrameUploadArena::submit(VkQueue queue) {
   if (active_frame_ >= rings_.size() || !queue) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   queue_ = queue;
   return rings_[active_frame_]->submit(queue);
@@ -153,4 +153,4 @@ void VulkanFrameUploadArena::wait_idle() noexcept {
   }
 }
 
-} // namespace omnicpp::render
+} // namespace warploom::render

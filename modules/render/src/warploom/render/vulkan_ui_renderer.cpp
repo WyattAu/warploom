@@ -18,7 +18,7 @@
 
 #include "warploom/ui/glyphs.hpp"
 
-namespace omnicpp::render {
+namespace warploom::render {
 namespace ui = ::warploom::ui;  // S1
 
 #ifdef OMNICPP_HAS_VULKAN
@@ -99,7 +99,7 @@ VkShaderModule VulkanUiRenderer::load_module(VkDevice device,
   return module;
 }
 
-omnicpp::core::Result<void> VulkanUiRenderer::initialize(
+::warploom::core::Result<void> VulkanUiRenderer::initialize(
     VkDevice device, VkPhysicalDevice physical_device,
     VkRenderPass render_pass, VulkanMemoryAllocator& allocator,
     const std::string& shader_dir) {
@@ -123,8 +123,8 @@ omnicpp::core::Result<void> VulkanUiRenderer::initialize(
   image_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
   if (vkCreateImage(device, &image_info, nullptr, &atlas_image_) !=
       VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   VkMemoryRequirements req{};
   vkGetImageMemoryRequirements(device, atlas_image_, &req);
@@ -145,18 +145,18 @@ omnicpp::core::Result<void> VulkanUiRenderer::initialize(
     }
   }
   if (!found) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   if (vkAllocateMemory(device, &alloc_info, nullptr, &atlas_memory_) !=
       VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   if (vkBindImageMemory(device, atlas_image_, atlas_memory_, 0) !=
       VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   // Host-write the atlas (LINEAR + host-visible: valid for small images on
   // desktop implementations; the engine's swapchain path uses optimal +
@@ -164,8 +164,8 @@ omnicpp::core::Result<void> VulkanUiRenderer::initialize(
   void* data = nullptr;
   if (vkMapMemory(device, atlas_memory_, 0, req.size, 0, &data) !=
       VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   VkImageSubresource sub{};
   sub.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -188,8 +188,8 @@ omnicpp::core::Result<void> VulkanUiRenderer::initialize(
   view_info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
   if (vkCreateImageView(device, &view_info, nullptr, &atlas_view_) !=
       VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   VkSamplerCreateInfo sampler_info{};
   sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -197,8 +197,8 @@ omnicpp::core::Result<void> VulkanUiRenderer::initialize(
   sampler_info.minFilter = VK_FILTER_NEAREST;
   if (vkCreateSampler(device, &sampler_info, nullptr, &sampler_) !=
       VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   // --- Descriptor set -----------------------------------------------------
@@ -214,8 +214,8 @@ omnicpp::core::Result<void> VulkanUiRenderer::initialize(
   set_layout_info.pBindings = &binding;
   if (vkCreateDescriptorSetLayout(device, &set_layout_info, nullptr,
                                   &set_layout_) != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   VkDescriptorPoolSize pool_size{};
   pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -227,8 +227,8 @@ omnicpp::core::Result<void> VulkanUiRenderer::initialize(
   pool_info.pPoolSizes = &pool_size;
   if (vkCreateDescriptorPool(device, &pool_info, nullptr, &pool_) !=
       VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   VkDescriptorSetAllocateInfo set_alloc{};
   set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -237,8 +237,8 @@ omnicpp::core::Result<void> VulkanUiRenderer::initialize(
   set_alloc.pSetLayouts = &set_layout_;
   if (vkAllocateDescriptorSets(device, &set_alloc, &atlas_set_) !=
       VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   VkDescriptorImageInfo image_desc{};
   image_desc.sampler = sampler_;
@@ -260,8 +260,8 @@ omnicpp::core::Result<void> VulkanUiRenderer::initialize(
   vert_module_ = load_module(device, shader_dir + "/ui_quad.vert.spv");
   frag_module_ = load_module(device, shader_dir + "/ui_quad.frag.spv");
   if (vert_module_ == VK_NULL_HANDLE || frag_module_ == VK_NULL_HANDLE) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   VkPushConstantRange push{};
@@ -276,8 +276,8 @@ omnicpp::core::Result<void> VulkanUiRenderer::initialize(
   pl_info.pPushConstantRanges = &push;
   if (vkCreatePipelineLayout(device, &pl_info, nullptr, &layout_) !=
       VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   VkVertexInputBindingDescription bind{};
@@ -374,8 +374,8 @@ omnicpp::core::Result<void> VulkanUiRenderer::initialize(
   pipe.renderPass = render_pass;
   if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipe, nullptr,
                                 &pipeline_) != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   // --- Quad vertex buffer (grow-on-demand, host-visible) -------------------
@@ -387,14 +387,14 @@ omnicpp::core::Result<void> VulkanUiRenderer::initialize(
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   if (!buffer_result.is_ok()) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   quad_allocation_ = std::move(buffer_result.value());
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 }
 
-omnicpp::core::Result<std::uint32_t> VulkanUiRenderer::upload_paint_list(
+::warploom::core::Result<std::uint32_t> VulkanUiRenderer::upload_paint_list(
     const warploom::ui::PaintList& paint, float viewport_w, float viewport_h) {
   (void)viewport_w;
   (void)viewport_h;
@@ -427,15 +427,15 @@ omnicpp::core::Result<std::uint32_t> VulkanUiRenderer::upload_paint_list(
   const auto bytes =
       static_cast<VkDeviceSize>(vertices_.size()) * sizeof(UiVertex);
   if (bytes == 0) {
-    return omnicpp::core::Result<std::uint32_t>::ok(0U);
+    return ::warploom::core::Result<std::uint32_t>::ok(0U);
   }
   if (quad_allocation_.mapped == nullptr) {
-    return omnicpp::core::Result<std::uint32_t>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<std::uint32_t>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   std::memcpy(quad_allocation_.mapped, vertices_.data(),
               static_cast<std::size_t>(bytes));
-  return omnicpp::core::Result<std::uint32_t>::ok(
+  return ::warploom::core::Result<std::uint32_t>::ok(
       static_cast<std::uint32_t>(vertices_.size() / 6U));
 }
 
@@ -532,4 +532,4 @@ void VulkanUiRenderer::cleanup(VkDevice device) noexcept {
 
 #endif  // OMNICPP_HAS_VULKAN
 
-}  // namespace omnicpp::render
+}  // namespace warploom::render

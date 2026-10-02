@@ -22,7 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
-namespace omnicpp::render {
+namespace warploom::render {
 
 //! One mesh-table entry (std430-aligned CPU struct; the GPU mirror packs
 //! index_count/index_offset/vertex_base first so a uvec4 load matches).
@@ -93,4 +93,17 @@ private:
   MeshTableBuild build_;
 };
 
-}  // namespace omnicpp::render
+}  // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

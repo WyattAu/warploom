@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-namespace omnicpp::asset {
+namespace warploom::asset {
 
 //! Decoded 8-bit RGBA image, straight (non-premultiplied) alpha.
 //! `rgba` is tightly packed, row-major, width*height*4 bytes.
@@ -39,8 +39,21 @@ struct DecodedImage {
  * error. This is the entry point glTF ingestion uses for `baseColorTexture`
  * and any other encoded image payload.
  */
-[[nodiscard]] omnicpp::core::Result<DecodedImage> decode_image(
+[[nodiscard]] ::warploom::core::Result<DecodedImage> decode_image(
     const std::uint8_t* bytes, std::size_t length,
     std::string* error_detail = nullptr);
 
-}  // namespace omnicpp::asset
+}  // namespace warploom::asset
+
+// S5-B compat footer: legacy `omnicpp::asset` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_ASSET_NS
+#define OMNICPP_COMPAT_ASSET_NS
+namespace omnicpp::asset {
+    using namespace ::warploom::asset;
+}
+#endif  // OMNICPP_COMPAT_ASSET_NS

@@ -30,7 +30,7 @@
 
 struct VkAccelerationStructureKHR_T;
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 class VulkanContext;
 
@@ -156,4 +156,17 @@ class VulkanAccelerationStructureBuilder final {
       VkDevice device, VkBuffer buffer) noexcept;
 };
 
-}  // namespace omnicpp::render
+}  // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

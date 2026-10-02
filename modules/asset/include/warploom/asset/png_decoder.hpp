@@ -38,7 +38,7 @@
 #include <cstdint>
 #include <string>
 
-namespace omnicpp::asset {
+namespace warploom::asset {
 
 //! Hard cap on decoded pixel memory (RGBA). 256 MiB guards the 32-bit
 //! product and keeps hostile dimensions from exhausting memory. Shared with
@@ -52,8 +52,21 @@ inline constexpr std::uint64_t kMaxDecodedPngBytes = 256ULL * 1024ULL * 1024ULL;
  * @param error_detail Optional out-parameter receiving a human-readable
  *                     reason when decoding fails (never written on success).
  */
-[[nodiscard]] omnicpp::core::Result<DecodedImage> decode_png(
+[[nodiscard]] ::warploom::core::Result<DecodedImage> decode_png(
     const std::uint8_t* bytes, std::size_t length,
     std::string* error_detail = nullptr);
 
-} // namespace omnicpp::asset
+} // namespace warploom::asset
+
+// S5-B compat footer: legacy `omnicpp::asset` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_ASSET_NS
+#define OMNICPP_COMPAT_ASSET_NS
+namespace omnicpp::asset {
+    using namespace ::warploom::asset;
+}
+#endif  // OMNICPP_COMPAT_ASSET_NS

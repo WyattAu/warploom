@@ -79,7 +79,7 @@
 #include <string_view>
 #include <vector>
 
-namespace omnicpp::asset {
+namespace warploom::asset {
 
 //! Optional callback that resolves an external image file (a glTF
 //! `images[i].uri` that is not a `data:` URI) into its raw file bytes. The
@@ -219,7 +219,7 @@ struct GltfMeshImport {
  *                    that references an external image file fails with a
  *                    diagnostic instead of touching the filesystem.
  */
-[[nodiscard]] omnicpp::core::Result<GltfMeshImport> import_gltf_mesh(
+[[nodiscard]] ::warploom::core::Result<GltfMeshImport> import_gltf_mesh(
     const char* json_bytes, std::size_t json_len,
     const std::uint8_t* bin_bytes, std::size_t bin_len,
     std::size_t mesh_index = 0, std::string* error_detail = nullptr,
@@ -269,10 +269,23 @@ struct GltfSceneImport {
  * nodes mixing `matrix` with TRS are rejected. Unreferenced meshes are not
  * imported.
  */
-[[nodiscard]] omnicpp::core::Result<GltfSceneImport> import_gltf_scene(
+[[nodiscard]] ::warploom::core::Result<GltfSceneImport> import_gltf_scene(
     const char* json_bytes, std::size_t json_len,
     const std::uint8_t* bin_bytes, std::size_t bin_len,
     std::size_t scene_index = 0, std::string* error_detail = nullptr,
     const ExternalFileLoader* loader = nullptr);
 
-} // namespace omnicpp::asset
+} // namespace warploom::asset
+
+// S5-B compat footer: legacy `omnicpp::asset` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_ASSET_NS
+#define OMNICPP_COMPAT_ASSET_NS
+namespace omnicpp::asset {
+    using namespace ::warploom::asset;
+}
+#endif  // OMNICPP_COMPAT_ASSET_NS

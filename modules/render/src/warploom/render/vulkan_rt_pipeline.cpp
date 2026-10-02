@@ -14,7 +14,7 @@
 #include <vulkan/vulkan.h>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 namespace {
 
@@ -48,19 +48,19 @@ VulkanRtPipeline::~VulkanRtPipeline() = default;
 
 #ifdef OMNICPP_HAS_VULKAN
 
-omnicpp::core::Result<void> VulkanRtPipeline::create(
+::warploom::core::Result<void> VulkanRtPipeline::create(
     VkPhysicalDevice physical_device, VkDevice device, VkPipelineLayout layout,
     const std::vector<VkPipelineShaderStageCreateInfo>& stages,
     std::uint32_t miss_count, std::uint32_t hit_group_count,
     std::uint32_t max_recursion_depth) {
   if (physical_device == VK_NULL_HANDLE || device == VK_NULL_HANDLE ||
       layout == VK_NULL_HANDLE) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
   if (stages.empty() || miss_count == 0U) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
 
   // Group topology: [0] raygen (general), [1..miss_count] miss (general),
@@ -103,14 +103,14 @@ omnicpp::core::Result<void> VulkanRtPipeline::create(
 
   auto create_fn = create_rt_pipelines_fn(device);
   if (create_fn == nullptr) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   const VkResult vr = create_fn(device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1U,
                                 &info, nullptr, &pipeline_);
   if (vr != VK_SUCCESS || pipeline_ == VK_NULL_HANDLE) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   miss_count_ = miss_count;
   hit_group_count_ = hit_group_count;
@@ -134,19 +134,19 @@ omnicpp::core::Result<void> VulkanRtPipeline::create(
   raygen_stride_ = stride;
   miss_stride_ = stride;
   hit_stride_ = stride;
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 }
 
-omnicpp::core::Result<std::vector<std::uint8_t>>
+::warploom::core::Result<std::vector<std::uint8_t>>
 VulkanRtPipeline::fetch_handles(VkDevice device) const {
   if (pipeline_ == VK_NULL_HANDLE || device == VK_NULL_HANDLE) {
-    return omnicpp::core::Result<std::vector<std::uint8_t>>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<std::vector<std::uint8_t>>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
   auto handles_fn = group_handles_fn(device);
   if (handles_fn == nullptr) {
-    return omnicpp::core::Result<std::vector<std::uint8_t>>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<std::vector<std::uint8_t>>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
   const std::uint32_t handle_count = 1U + miss_count_ + hit_group_count_;
   std::vector<std::uint8_t> out(
@@ -154,25 +154,25 @@ VulkanRtPipeline::fetch_handles(VkDevice device) const {
   const VkResult vr = handles_fn(device, pipeline_, 0U, handle_count,
                                  out.size(), out.data());
   if (vr != VK_SUCCESS) {
-    return omnicpp::core::Result<std::vector<std::uint8_t>>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<std::vector<std::uint8_t>>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
-  return omnicpp::core::Result<std::vector<std::uint8_t>>::ok(std::move(out));
+  return ::warploom::core::Result<std::vector<std::uint8_t>>::ok(std::move(out));
 }
 
-omnicpp::core::Result<void> VulkanRtPipeline::write_sbt(
+::warploom::core::Result<void> VulkanRtPipeline::write_sbt(
     VkDevice device, const std::vector<std::uint8_t>& handles,
     Allocation& sbt) {
   if (device == VK_NULL_HANDLE || sbt.mapped == nullptr ||
       handles.empty() || handle_size_ == 0) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
   const std::uint32_t handle_count = 1U + miss_count_ + hit_group_count_;
   if (handles.size() <
       static_cast<std::size_t>(handle_size_) * handle_count) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
 
   const VkDeviceSize rg_stride = raygen_stride_;
@@ -204,7 +204,7 @@ omnicpp::core::Result<void> VulkanRtPipeline::write_sbt(
   raygen_stride_ = rg_stride;
   miss_stride_ = rg_stride;
   hit_stride_ = rg_stride;
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 }
 
 VkDeviceSize VulkanRtPipeline::required_sbt_bytes(
@@ -260,4 +260,4 @@ void VulkanRtPipeline::cleanup(VkDevice device) noexcept {
 
 #endif  // OMNICPP_HAS_VULKAN
 
-}  // namespace omnicpp::render
+}  // namespace warploom::render

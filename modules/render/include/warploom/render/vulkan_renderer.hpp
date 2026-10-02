@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 //! Per-frame GPU timing telemetry in nanoseconds.
 struct GpuTiming {
@@ -116,27 +116,27 @@ public:
   VulkanRenderer(VulkanRenderer&&) = delete;
   VulkanRenderer& operator=(VulkanRenderer&&) = delete;
 
-  [[nodiscard]] omnicpp::core::Result<void> initialize(
+  [[nodiscard]] ::warploom::core::Result<void> initialize(
       VulkanContext& context,
       const VulkanSwapchain& swapchain,
       const VulkanRenderPass& render_pass,
       const RendererConfig& config = {});
 
-  [[nodiscard]] omnicpp::core::Result<std::uint32_t> begin_frame();
-  [[nodiscard]] omnicpp::core::Result<void> record_commands(
+  [[nodiscard]] ::warploom::core::Result<std::uint32_t> begin_frame();
+  [[nodiscard]] ::warploom::core::Result<void> record_commands(
       std::uint32_t image_index,
       VkFramebuffer framebuffer,
       std::uint32_t width, std::uint32_t height);
   //! Submit the acquired frame without presenting it. Keeps the image acquired.
-  [[nodiscard]] omnicpp::core::Result<void> submit_frame();
+  [[nodiscard]] ::warploom::core::Result<void> submit_frame();
   //! Present the frame previously submitted by submit_frame().
-  [[nodiscard]] omnicpp::core::Result<void> present_frame();
+  [[nodiscard]] ::warploom::core::Result<void> present_frame();
   //! Submit and present the acquired frame.
-  [[nodiscard]] omnicpp::core::Result<void> end_frame();
+  [[nodiscard]] ::warploom::core::Result<void> end_frame();
   //! Record an immutable indexed scene inside an active render pass. The
   //! scene pipeline uses the 128-byte view_projection + model push ABI;
   //! descriptor sets are supplied by the scene's mesh resource.
-  [[nodiscard]] omnicpp::core::Result<void> record_scene(
+  [[nodiscard]] ::warploom::core::Result<void> record_scene(
       VkCommandBuffer command_buffer, const VulkanScene& scene,
       std::uint32_t width, std::uint32_t height) const;
 
@@ -147,7 +147,7 @@ public:
   //! 1 = bindless sampler array (scene.texture_set, once), 2 = material SSBO
   //! (scene.material_set, once). Objects whose material_index is invalid are
   //! skipped.
-  [[nodiscard]] omnicpp::core::Result<void> record_pbr_scene(
+  [[nodiscard]] ::warploom::core::Result<void> record_pbr_scene(
       VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
       std::uint32_t width, std::uint32_t height) const;
 
@@ -177,7 +177,7 @@ public:
   //! Same draw list semantics as record_pbr_scene (skips non-drawable meshes
   //! and invalid materials); LOD selection does not apply here — the shadow
   //! of an object is drawn from its full-detail mesh.
-  [[nodiscard]] omnicpp::core::Result<void> record_shadow_pre_pass(
+  [[nodiscard]] ::warploom::core::Result<void> record_shadow_pre_pass(
       VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
       std::uint32_t width, std::uint32_t height) const;
 
@@ -185,7 +185,7 @@ public:
   //! screen triangle, depth test on / writes off, LEQUAL vs cleared 1.0).
   //! Callers recording their own scene can compose it; record_pbr_scene
   //! invokes this when scene.sky_pipeline is set. No-op Ok when unset.
-  [[nodiscard]] omnicpp::core::Result<void> record_sky_pre_draw(
+  [[nodiscard]] ::warploom::core::Result<void> record_sky_pre_draw(
       VkCommandBuffer command_buffer, const VulkanPbrScene& scene) const;
 
   //! Graph-driven whole-frame recording: compiles a [shadow pre-pass -> main
@@ -195,7 +195,7 @@ public:
   //! execute_graph in one command buffer. All other scene features (sky
   //! pre-draw, GPU LOD resolution, IBL/shadow/skin descriptor sets) behave
   //! exactly as in record_pbr_scene.
-  [[nodiscard]] omnicpp::core::Result<void> record_pbr_frame(
+  [[nodiscard]] ::warploom::core::Result<void> record_pbr_frame(
       VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
       const PbrFrameTargets& targets) const;
 
@@ -240,7 +240,7 @@ public:
   //! Record the one-submission GPU-driven frame. Validation fails with
   //! invalid_config when required handles are missing. The compute node's
   //! dispatch is ceil(object_count / 64) groups (matches the shared shader).
-  [[nodiscard]] omnicpp::core::Result<void> record_pbr_frame_gpu_driven(
+  [[nodiscard]] ::warploom::core::Result<void> record_pbr_frame_gpu_driven(
       VkCommandBuffer command_buffer, const GpuDrivenFrame& frame) const;
 
   //! One full-screen triangle sampling up to 4 source images (post-process:
@@ -276,14 +276,14 @@ public:
   //! Record one FullscreenPass inside an ACTIVE render pass (no begin/end,
   //! viewport/scissor to width x height, bind pipeline + set 0 = the caller's
   //! single set, draw). Callback-compatible with graph record hooks.
-  [[nodiscard]] omnicpp::core::Result<void> record_fullscreen_draw(
+  [[nodiscard]] ::warploom::core::Result<void> record_fullscreen_draw(
       VkCommandBuffer command_buffer, const FullscreenPass& pass,
       VkDescriptorSet set0) const;
 
   //! Graph node wrapper: records render-pass begin + record_fullscreen_draw
   //! + end. Compatible with execute_graph's record_render hook via the
   //! user_data pointer pattern.
-  [[nodiscard]] omnicpp::core::Result<void> record_fullscreen_pass(
+  [[nodiscard]] ::warploom::core::Result<void> record_fullscreen_pass(
       VkCommandBuffer command_buffer, const FullscreenPass& pass,
       VkDescriptorSet set0) const;
 
@@ -314,9 +314,9 @@ public:
   }
 
   //! Rebind to a recreated swapchain and rebuilt pass/framebuffer resources.
-  [[nodiscard]] omnicpp::core::Result<void> resync_for_swapchain(
+  [[nodiscard]] ::warploom::core::Result<void> resync_for_swapchain(
       const VulkanSwapchain& swapchain, VkRenderPass render_pass);
-  [[nodiscard]] omnicpp::core::Result<void> resync_for_swapchain(
+  [[nodiscard]] ::warploom::core::Result<void> resync_for_swapchain(
       const VulkanSwapchain& swapchain, const VulkanRenderPass& render_pass);
 
   void wait_idle() noexcept;
@@ -386,8 +386,8 @@ public:
   //! measured from begin_frame() to present completion. Windowed percentiles
   //! (p50/p90/p99/p99.9/max) over the most recent samples.
   void record_frame_latency(bool enabled) noexcept { frame_latency_enabled_ = enabled; }
-  [[nodiscard]] const omnicpp::core::LatencyStats& frame_latency_stats();
-  [[nodiscard]] const omnicpp::core::LatencyTracker<>& frame_latency_tracker() const noexcept {
+  [[nodiscard]] const ::warploom::core::LatencyStats& frame_latency_stats();
+  [[nodiscard]] const ::warploom::core::LatencyTracker<>& frame_latency_tracker() const noexcept {
     return frame_latency_;
   }
 
@@ -408,12 +408,12 @@ public:
   [[nodiscard]] const VulkanHiZPyramid* hiz_pyramid(std::uint32_t index) const noexcept;
   [[nodiscard]] VulkanHiZPyramid* hiz_pyramid(std::uint32_t index) noexcept;
 
-  [[nodiscard]] omnicpp::core::Result<void> recreate_hiz_resources(
+  [[nodiscard]] ::warploom::core::Result<void> recreate_hiz_resources(
       std::uint32_t render_width, std::uint32_t render_height);
 
-  [[nodiscard]] static omnicpp::core::Result<VkCommandPool> create_command_pool(
+  [[nodiscard]] static ::warploom::core::Result<VkCommandPool> create_command_pool(
       VkDevice device, std::uint32_t queue_family_index);
-  [[nodiscard]] static omnicpp::core::Result<VkCommandBuffer> allocate_command_buffer(
+  [[nodiscard]] static ::warploom::core::Result<VkCommandBuffer> allocate_command_buffer(
       VkDevice device, VkCommandPool pool);
 
 private:
@@ -493,8 +493,21 @@ private:
   static constexpr std::int64_t kNoTimestamp = -1;
   std::int64_t frame_begin_ns_{kNoTimestamp};
   bool frame_latency_enabled_{true};
-  omnicpp::core::LatencyTracker<> frame_latency_{};
-  omnicpp::core::LatencyStats frame_latency_stats_{};
+  ::warploom::core::LatencyTracker<> frame_latency_{};
+  ::warploom::core::LatencyStats frame_latency_stats_{};
 };
 
-} // namespace omnicpp::render
+} // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

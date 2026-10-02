@@ -15,7 +15,7 @@
 #include "warploom/render/vulkan_hiz_pyramid.hpp"
 #include <cstdint>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 enum class HiZInvalidation : std::uint32_t {
   none = 0,
@@ -46,11 +46,11 @@ struct HiZFrameToken {
 
 class VulkanHiZFrameState final {
 public:
-  [[nodiscard]] omnicpp::core::Result<void> configure(
+  [[nodiscard]] ::warploom::core::Result<void> configure(
       std::uint32_t render_width, std::uint32_t render_height,
       std::uint32_t tile_size = 32U, std::uint32_t levels = 0U) noexcept {
     if (render_width == 0U || render_height == 0U || tile_size == 0U) {
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
     }
     const std::uint32_t pyramid_width =
         (render_width + tile_size - 1U) / tile_size;
@@ -60,7 +60,7 @@ public:
         VulkanHiZPyramid::mip_levels_for_extent(pyramid_width, pyramid_height);
     if (levels == 0U) levels = legal_levels;
     if (levels == 0U || levels > legal_levels) {
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
     }
 
     const bool changed = !configured_ || render_width_ != render_width ||
@@ -74,7 +74,7 @@ public:
     levels_ = levels;
     configured_ = true;
     if (changed) invalidate(HiZInvalidation::resize);
-    return omnicpp::core::Result<void>::ok();
+    return ::warploom::core::Result<void>::ok();
   }
 
   [[nodiscard]] bool configured() const noexcept { return configured_; }
@@ -139,4 +139,17 @@ private:
   HiZInvalidation invalidation_{HiZInvalidation::first_frame};
 };
 
-} // namespace omnicpp::render
+} // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

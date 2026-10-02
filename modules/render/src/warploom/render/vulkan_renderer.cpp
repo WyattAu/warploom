@@ -12,7 +12,7 @@
 #include <vulkan/vulkan.h>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 void FrameResources::cleanup(VkDevice device) noexcept {
 #ifdef OMNICPP_HAS_VULKAN
@@ -33,14 +33,14 @@ void FrameResources::cleanup(VkDevice device) noexcept {
 
 VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
 
-omnicpp::core::Result<void> VulkanRenderer::initialize(
+::warploom::core::Result<void> VulkanRenderer::initialize(
     VulkanContext& context,
     const VulkanSwapchain& swapchain,
     const VulkanRenderPass& render_pass,
     const RendererConfig& config) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!context.is_initialized() || !context.device()) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   device_ = context.device();
@@ -55,13 +55,13 @@ omnicpp::core::Result<void> VulkanRenderer::initialize(
   auto pool_result = create_command_pool(
       device_, static_cast<std::uint32_t>(context.queue_families().graphics_family));
   if (!pool_result.is_ok()) {
-    return omnicpp::core::Result<void>::error(pool_result.error());
+    return ::warploom::core::Result<void>::error(pool_result.error());
   }
   command_pool_ = pool_result.value();
 
   if (config.max_frames_in_flight == 0 || swapchain.image_count() == 0) {
     cleanup(device_);
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
 
   frames_.resize(config.max_frames_in_flight);
@@ -100,8 +100,8 @@ omnicpp::core::Result<void> VulkanRenderer::initialize(
     if (vkCreateQueryPool(device_, &qp_info, nullptr, &timestamp_pool_) !=
         VK_SUCCESS) {
       cleanup(device_);
-      return omnicpp::core::Result<void>::error(
-          omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(
+          ::warploom::core::RuntimeError::vulkan_not_available);
     }
   }
   // Timeline pacing decision up front: it changes which resources are created.
@@ -112,7 +112,7 @@ omnicpp::core::Result<void> VulkanRenderer::initialize(
     auto cb_result = allocate_command_buffer(device_, command_pool_);
     if (!cb_result.is_ok()) {
       cleanup(device_);
-      return omnicpp::core::Result<void>::error(cb_result.error());
+      return ::warploom::core::Result<void>::error(cb_result.error());
     }
     frames_[i].command_buffer = cb_result.value();
 
@@ -122,7 +122,7 @@ omnicpp::core::Result<void> VulkanRenderer::initialize(
       fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
       if (vkCreateFence(device_, &fence_info, nullptr, &frames_[i].in_flight_fence) != VK_SUCCESS) {
         cleanup(device_);
-        return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+        return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
       }
     }
     // In timeline mode the per-frame fence is omitted entirely: the timeline
@@ -131,14 +131,14 @@ omnicpp::core::Result<void> VulkanRenderer::initialize(
 
     if (vkCreateSemaphore(device_, &sem_info, nullptr, &frames_[i].image_available_semaphore) != VK_SUCCESS) {
       cleanup(device_);
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
   }
   for (auto& semaphore : render_finished_semaphores_) {
     const VkResult result = vkCreateSemaphore(device_, &sem_info, nullptr, &semaphore);
     if (result != VK_SUCCESS) {
       cleanup(device_);
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
   }
 
@@ -153,7 +153,7 @@ omnicpp::core::Result<void> VulkanRenderer::initialize(
     timeline_info.pNext = &type_info;
     if (vkCreateSemaphore(device_, &timeline_info, nullptr, &timeline_semaphore_) != VK_SUCCESS) {
       cleanup(device_);
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
     image_last_frame_.assign(swapchain.image_count(), 0);
   }
@@ -162,8 +162,8 @@ omnicpp::core::Result<void> VulkanRenderer::initialize(
       (!render_pass_resource_ || !render_pass_resource_->depth_image() ||
        !render_pass_resource_->depth_is_sampleable())) {
     cleanup(device_);
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
 
   initialized_ = true;
@@ -175,21 +175,21 @@ omnicpp::core::Result<void> VulkanRenderer::initialize(
       return hiz_result;
     }
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)context; (void)swapchain; (void)render_pass; (void)config;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanRenderer::record_scene(
+::warploom::core::Result<void> VulkanRenderer::record_scene(
     VkCommandBuffer command_buffer, const VulkanScene& scene,
     std::uint32_t width, std::uint32_t height) const {
 #ifdef OMNICPP_HAS_VULKAN
   if (!command_buffer || !scene.pipeline || !scene.pipeline_layout ||
       width == 0U || height == 0U) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
 
   VkViewport viewport{};
@@ -256,25 +256,25 @@ omnicpp::core::Result<void> VulkanRenderer::record_scene(
                          mesh.index_offset, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0);
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)command_buffer;
   (void)scene;
   (void)width;
   (void)height;
-  return omnicpp::core::Result<void>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
+::warploom::core::Result<void> VulkanRenderer::record_pbr_scene(
     VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
     std::uint32_t width, std::uint32_t height) const {
 #ifdef OMNICPP_HAS_VULKAN
   if (!command_buffer || !scene.pipeline || !scene.pipeline_layout ||
       width == 0U || height == 0U) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
 
   VkViewport viewport{};
@@ -294,8 +294,8 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
   // through on empty pixels and behind geometry it simply loses).
   if (scene.sky_pipeline != VK_NULL_HANDLE) {
     if (!record_sky_pre_draw(command_buffer, scene).is_ok()) {
-      return omnicpp::core::Result<void>::error(
-          omnicpp::core::RuntimeError::invalid_config);
+      return ::warploom::core::Result<void>::error(
+          ::warploom::core::RuntimeError::invalid_config);
     }
     // Main pipeline rebind follows below; sky state does not leak.
   }
@@ -423,14 +423,14 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_scene(
                          mesh.index_offset, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0);
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)command_buffer;
   (void)scene;
   (void)width;
   (void)height;
-  return omnicpp::core::Result<void>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -458,15 +458,15 @@ void pbr_frame_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 
 }  // namespace
 
-omnicpp::core::Result<void> VulkanRenderer::record_shadow_pre_pass(
+::warploom::core::Result<void> VulkanRenderer::record_shadow_pre_pass(
     VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
     std::uint32_t width, std::uint32_t height) const {
 #ifdef OMNICPP_HAS_VULKAN
   if (!command_buffer || scene.shadow_pipeline == VK_NULL_HANDLE ||
       scene.shadow_pipeline_layout == VK_NULL_HANDLE || width == 0U ||
       height == 0U) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
 
   VkViewport viewport{};
@@ -521,26 +521,26 @@ omnicpp::core::Result<void> VulkanRenderer::record_shadow_pre_pass(
                          mesh.index_offset, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0);
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)command_buffer;
   (void)scene;
   (void)width;
   (void)height;
-  return omnicpp::core::Result<void>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanRenderer::record_pbr_frame(
+::warploom::core::Result<void> VulkanRenderer::record_pbr_frame(
     VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
     const PbrFrameTargets& targets) const {
 #ifdef OMNICPP_HAS_VULKAN
   if (!command_buffer || targets.render_pass == VK_NULL_HANDLE ||
       targets.framebuffer == VK_NULL_HANDLE || targets.width == 0U ||
       targets.height == 0U) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
 
   const bool shadow_active =
@@ -602,13 +602,13 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_frame(
   const CompiledGraph compiled = compile_graph(nodes);
   execute_graph(command_buffer, nodes, compiled, &pbr_frame_render_cb,
                 nullptr);
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)command_buffer;
   (void)scene;
   (void)targets;
-  return omnicpp::core::Result<void>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -675,7 +675,7 @@ void gpu_driven_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 }  // namespace
 #endif  // OMNICPP_HAS_VULKAN
 
-omnicpp::core::Result<void> VulkanRenderer::record_pbr_frame_gpu_driven(
+::warploom::core::Result<void> VulkanRenderer::record_pbr_frame_gpu_driven(
     VkCommandBuffer command_buffer, const GpuDrivenFrame& frame) const {
 #ifdef OMNICPP_HAS_VULKAN
   if (!command_buffer || frame.cull_pipeline == VK_NULL_HANDLE ||
@@ -689,8 +689,8 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_frame_gpu_driven(
       frame.render_pass == VK_NULL_HANDLE ||
       frame.framebuffer == VK_NULL_HANDLE || frame.width == 0U ||
       frame.height == 0U) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
 
   // Compute node: cull + LOD + command generation (one invocation per
@@ -729,12 +729,12 @@ omnicpp::core::Result<void> VulkanRenderer::record_pbr_frame_gpu_driven(
   const CompiledGraph compiled = compile_graph(nodes);
   execute_graph(command_buffer, nodes, compiled, &gpu_driven_render_cb,
                 &gpu_driven_compute_cb);
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)command_buffer;
   (void)frame;
-  return omnicpp::core::Result<void>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -757,14 +757,14 @@ void fullscreen_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 
 }  // namespace
 
-omnicpp::core::Result<void> VulkanRenderer::record_fullscreen_draw(
+::warploom::core::Result<void> VulkanRenderer::record_fullscreen_draw(
     VkCommandBuffer command_buffer, const FullscreenPass& pass,
     VkDescriptorSet set0) const {
 #ifdef OMNICPP_HAS_VULKAN
   if (!command_buffer || pass.pipeline == VK_NULL_HANDLE ||
       pass.pipeline_layout == VK_NULL_HANDLE) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
   // Dynamic viewport/scissor: safe inside an active render pass (graph
   // callback path) and idempotent before one (direct path).
@@ -785,25 +785,25 @@ omnicpp::core::Result<void> VulkanRenderer::record_fullscreen_draw(
                             pass.pipeline_layout, 0, 1, &set0, 0, nullptr);
   }
   vkCmdDraw(command_buffer, pass.vertex_count, pass.instance_count, 0, 0);
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)command_buffer;
   (void)pass;
   (void)set0;
-  return omnicpp::core::Result<void>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanRenderer::record_fullscreen_pass(
+::warploom::core::Result<void> VulkanRenderer::record_fullscreen_pass(
     VkCommandBuffer command_buffer, const FullscreenPass& pass,
     VkDescriptorSet set0) const {
 #ifdef OMNICPP_HAS_VULKAN
   if (!command_buffer || pass.render_pass == VK_NULL_HANDLE ||
       pass.framebuffer == VK_NULL_HANDLE || pass.width == 0U ||
       pass.height == 0U) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
 
   VkRenderPassBeginInfo begin{};
@@ -822,20 +822,20 @@ omnicpp::core::Result<void> VulkanRenderer::record_fullscreen_pass(
   (void)command_buffer;
   (void)pass;
   (void)set0;
-  return omnicpp::core::Result<void>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanRenderer::record_sky_pre_draw(
+::warploom::core::Result<void> VulkanRenderer::record_sky_pre_draw(
     VkCommandBuffer command_buffer, const VulkanPbrScene& scene) const {
 #ifdef OMNICPP_HAS_VULKAN
   if (!command_buffer) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
   if (scene.sky_pipeline == VK_NULL_HANDLE) {
-    return omnicpp::core::Result<void>::ok();  // Optional pass: no-op.
+    return ::warploom::core::Result<void>::ok();  // Optional pass: no-op.
   }
 
   struct SkyPush {
@@ -860,21 +860,21 @@ omnicpp::core::Result<void> VulkanRenderer::record_sky_pre_draw(
                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                      0, sizeof(sky_push), &sky_push);
   vkCmdDraw(command_buffer, 3, 1, 0, 0);
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)command_buffer;
   (void)scene;
-  return omnicpp::core::Result<void>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<std::uint32_t> VulkanRenderer::begin_frame() {
+::warploom::core::Result<std::uint32_t> VulkanRenderer::begin_frame() {
 #ifdef OMNICPP_HAS_VULKAN
-  if (!initialized_) return omnicpp::core::Result<std::uint32_t>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  if (!initialized_) return ::warploom::core::Result<std::uint32_t>::error(::warploom::core::RuntimeError::vulkan_not_available);
 
   auto& frame = frames_[current_frame_];
-  frame_begin_ns_ = omnicpp::core::SteadyClock::now_ns();
+  frame_begin_ns_ = ::warploom::core::SteadyClock::now_ns();
   if (gpu_timing_enabled_) {
     resolve_gpu_timestamps(current_frame_);
   }
@@ -892,7 +892,7 @@ omnicpp::core::Result<std::uint32_t> VulkanRenderer::begin_frame() {
       wait_info.pSemaphores = &timeline_semaphore_;
       wait_info.pValues = &wait_value;
       if (vkWaitSemaphores(device_, &wait_info, UINT64_MAX) != VK_SUCCESS) {
-        return omnicpp::core::Result<std::uint32_t>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+        return ::warploom::core::Result<std::uint32_t>::error(::warploom::core::RuntimeError::vulkan_not_available);
       }
     }
   } else {
@@ -905,13 +905,13 @@ omnicpp::core::Result<std::uint32_t> VulkanRenderer::begin_frame() {
       frame.image_available_semaphore, VK_NULL_HANDLE, &image_index);
 
   if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-    return omnicpp::core::Result<std::uint32_t>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<std::uint32_t>::error(::warploom::core::RuntimeError::invalid_config);
   }
   if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-    return omnicpp::core::Result<std::uint32_t>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<std::uint32_t>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   if (image_index >= images_in_flight_.size()) {
-    return omnicpp::core::Result<std::uint32_t>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<std::uint32_t>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   if (images_in_flight_[image_index] && images_in_flight_[image_index] != frame.in_flight_fence) {
     vkWaitForFences(device_, 1, &images_in_flight_[image_index], VK_TRUE, UINT64_MAX);
@@ -928,7 +928,7 @@ omnicpp::core::Result<std::uint32_t> VulkanRenderer::begin_frame() {
       wait_info.pSemaphores = &timeline_semaphore_;
       wait_info.pValues = &last_frame;
       if (vkWaitSemaphores(device_, &wait_info, UINT64_MAX) != VK_SUCCESS) {
-        return omnicpp::core::Result<std::uint32_t>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+        return ::warploom::core::Result<std::uint32_t>::error(::warploom::core::RuntimeError::vulkan_not_available);
       }
     }
   } else {
@@ -946,18 +946,18 @@ omnicpp::core::Result<std::uint32_t> VulkanRenderer::begin_frame() {
   }
   acquired_image_index_ = image_index;
   frame_acquired_ = true;
-  return omnicpp::core::Result<std::uint32_t>::ok(image_index);
+  return ::warploom::core::Result<std::uint32_t>::ok(image_index);
 #else
-  return omnicpp::core::Result<std::uint32_t>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<std::uint32_t>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanRenderer::record_commands(
+::warploom::core::Result<void> VulkanRenderer::record_commands(
     std::uint32_t image_index, VkFramebuffer framebuffer,
     std::uint32_t width, std::uint32_t height) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!initialized_ || image_index >= swapchain_->image_count()) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   auto& frame = frames_[current_frame_];
@@ -984,8 +984,8 @@ omnicpp::core::Result<void> VulkanRenderer::record_commands(
   if (frame_pre_pass_callback_ != nullptr &&
       !frame_pre_pass_callback_(cb, width, height, frame_pre_pass_user_data_)) {
     (void)vkEndCommandBuffer(cb);
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
 
   VkRenderPassBeginInfo rp_info{};
@@ -1025,8 +1025,8 @@ omnicpp::core::Result<void> VulkanRenderer::record_commands(
         hiz_state_.discard_frame(pending_hiz_token_);
         pending_hiz_frame_ = false;
       }
-      return omnicpp::core::Result<void>::error(
-          omnicpp::core::RuntimeError::invalid_config);
+      return ::warploom::core::Result<void>::error(
+          ::warploom::core::RuntimeError::invalid_config);
     }
   } else if (pipeline_) {
     // Built-in demo: three-vertex triangle (no scene callback installed).
@@ -1063,15 +1063,15 @@ omnicpp::core::Result<void> VulkanRenderer::record_commands(
       hiz_state_.discard_frame(pending_hiz_token_);
       pending_hiz_frame_ = false;
       vkEndCommandBuffer(cb);
-      return omnicpp::core::Result<void>::error(
-          omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(
+          ::warploom::core::RuntimeError::vulkan_not_available);
     }
     if (hiz_record_callback_ && !hiz_record_callback_(cb, record, hiz_record_user_data_)) {
       hiz_state_.discard_frame(pending_hiz_token_);
       pending_hiz_frame_ = false;
       vkEndCommandBuffer(cb);
-      return omnicpp::core::Result<void>::error(
-          omnicpp::core::RuntimeError::invalid_config);
+      return ::warploom::core::Result<void>::error(
+          ::warploom::core::RuntimeError::invalid_config);
     }
     pending_hiz_frame_ = true;
     pending_hiz_destination_index_ = destination_index;
@@ -1082,24 +1082,24 @@ omnicpp::core::Result<void> VulkanRenderer::record_commands(
       hiz_state_.discard_frame(pending_hiz_token_);
       pending_hiz_frame_ = false;
     }
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
 
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)image_index; (void)framebuffer; (void)width; (void)height;
-  return omnicpp::core::Result<void>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
 
-omnicpp::core::Result<void> VulkanRenderer::submit_frame() {
+::warploom::core::Result<void> VulkanRenderer::submit_frame() {
 #ifdef OMNICPP_HAS_VULKAN
   if (!initialized_ || !frame_acquired_ ||
       acquired_image_index_ >= render_finished_semaphores_.size()) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   auto& frame = frames_[current_frame_];
@@ -1161,7 +1161,7 @@ omnicpp::core::Result<void> VulkanRenderer::submit_frame() {
           hiz_state_.discard_frame(pending_hiz_token_);
           pending_hiz_frame_ = false;
         }
-        return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+        return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
       }
       frame.frame_in_flight = true;
       if (pending_hiz_frame_) {
@@ -1173,7 +1173,7 @@ omnicpp::core::Result<void> VulkanRenderer::submit_frame() {
         frame_counter_ = signal_frame;
         image_last_frame_[acquired_image_index_] = signal_frame;
       }
-      return omnicpp::core::Result<void>::ok();
+      return ::warploom::core::Result<void>::ok();
 
     }
   }
@@ -1198,7 +1198,7 @@ omnicpp::core::Result<void> VulkanRenderer::submit_frame() {
       hiz_state_.discard_frame(pending_hiz_token_);
       pending_hiz_frame_ = false;
     }
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   frame.frame_in_flight = true;
   if (pending_hiz_frame_) {
@@ -1210,16 +1210,16 @@ omnicpp::core::Result<void> VulkanRenderer::submit_frame() {
     frame_counter_ = signal_frame;
     image_last_frame_[acquired_image_index_] = signal_frame;
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanRenderer::present_frame() {
+::warploom::core::Result<void> VulkanRenderer::present_frame() {
 #ifdef OMNICPP_HAS_VULKAN
   if (!initialized_ || !frame_acquired_) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   const VkSemaphore render_finished_semaphore =
@@ -1237,12 +1237,12 @@ omnicpp::core::Result<void> VulkanRenderer::present_frame() {
   const VkResult result = vkQueuePresentKHR(present_queue_, &present_info);
   if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR && result != VK_ERROR_OUT_OF_DATE_KHR) {
     frame_acquired_ = false;
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   frame_acquired_ = false;
   if (frame_latency_enabled_ && frame_begin_ns_ >= 0) {
-    const auto now_ns = omnicpp::core::SteadyClock::now_ns();
+    const auto now_ns = ::warploom::core::SteadyClock::now_ns();
     if (now_ns >= frame_begin_ns_) {
       frame_latency_.record(static_cast<std::uint64_t>(now_ns - frame_begin_ns_));
       frame_latency_stats_ = frame_latency_.percentiles();
@@ -1251,19 +1251,19 @@ omnicpp::core::Result<void> VulkanRenderer::present_frame() {
   }
   current_frame_ = (current_frame_ + 1) % static_cast<std::uint32_t>(frames_.size());
   ++frame_count_;
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanRenderer::end_frame() {
+::warploom::core::Result<void> VulkanRenderer::end_frame() {
   auto submit_result = submit_frame();
   if (!submit_result.is_ok()) return submit_result;
   return present_frame();
 }
 
-const omnicpp::core::LatencyStats& VulkanRenderer::frame_latency_stats() {
+const ::warploom::core::LatencyStats& VulkanRenderer::frame_latency_stats() {
   return frame_latency_stats_;
 }
 
@@ -1452,13 +1452,13 @@ bool VulkanRenderer::record_hiz_reduction(
 }
 #endif
 
-omnicpp::core::Result<void> VulkanRenderer::recreate_hiz_resources(
+::warploom::core::Result<void> VulkanRenderer::recreate_hiz_resources(
     std::uint32_t render_width, std::uint32_t render_height) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device_ || !physical_device_ || render_width == 0U || render_height == 0U ||
       config_.hiz_tile_size == 0U) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
 
   vkDeviceWaitIdle(device_);
@@ -1522,7 +1522,7 @@ omnicpp::core::Result<void> VulkanRenderer::recreate_hiz_resources(
     auto layout_result = hiz_descriptor_manager_->create_layout(bindings, 2U * levels);
     if (!layout_result.is_ok()) {
       cleanup_hiz_pipeline_resources();
-      return omnicpp::core::Result<void>::error(layout_result.error());
+      return ::warploom::core::Result<void>::error(layout_result.error());
     }
     hiz_reduction_layout_ = layout_result.value();
 
@@ -1555,7 +1555,7 @@ omnicpp::core::Result<void> VulkanRenderer::recreate_hiz_resources(
         auto set_result = hiz_descriptor_manager_->allocate_set(hiz_reduction_layout_);
         if (!set_result.is_ok()) {
           cleanup_hiz_pipeline_resources();
-          return omnicpp::core::Result<void>::error(set_result.error());
+          return ::warploom::core::Result<void>::error(set_result.error());
         }
         const VkImageView preceding = level == 0U
             ? render_pass_resource_->depth_view()
@@ -1576,8 +1576,8 @@ omnicpp::core::Result<void> VulkanRenderer::recreate_hiz_resources(
           cleanup_hiz_pipeline_resources();
           for (auto& pyramid : hiz_pyramids_) pyramid.reset();
           if (hiz_allocator_) hiz_allocator_.reset();
-          return omnicpp::core::Result<void>::error(
-              omnicpp::core::RuntimeError::vulkan_not_available);
+          return ::warploom::core::Result<void>::error(
+              ::warploom::core::RuntimeError::vulkan_not_available);
         }
         sets.push_back(set_result.value());
       }
@@ -1586,30 +1586,30 @@ omnicpp::core::Result<void> VulkanRenderer::recreate_hiz_resources(
   }
   hiz_enabled_ = true;
   hiz_state_.invalidate(HiZInvalidation::resize);
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)render_width;
   (void)render_height;
-  return omnicpp::core::Result<void>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanRenderer::resync_for_swapchain(
+::warploom::core::Result<void> VulkanRenderer::resync_for_swapchain(
     const VulkanSwapchain& swapchain, const VulkanRenderPass& render_pass) {
   render_pass_resource_ = &render_pass;
   return resync_for_swapchain(swapchain, render_pass.render_pass());
 }
 
-omnicpp::core::Result<void> VulkanRenderer::resync_for_swapchain(
+::warploom::core::Result<void> VulkanRenderer::resync_for_swapchain(
     const VulkanSwapchain& swapchain, VkRenderPass render_pass) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!initialized_ || !device_ || !swapchain.is_valid() || swapchain.image_count() == 0 ||
       !render_pass) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   if (frame_acquired_) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
 
   vkDeviceWaitIdle(device_);
@@ -1637,7 +1637,7 @@ omnicpp::core::Result<void> VulkanRenderer::resync_for_swapchain(
   for (auto& semaphore : render_finished_semaphores_) {
     if (vkCreateSemaphore(device_, &sem_info, nullptr, &semaphore) != VK_SUCCESS) {
       cleanup(device_);
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
   }
   if (timeline_pacing_) {
@@ -1646,11 +1646,11 @@ omnicpp::core::Result<void> VulkanRenderer::resync_for_swapchain(
   }
   current_frame_ = 0;
   acquired_image_index_ = 0;
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)swapchain;
   (void)render_pass;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -1742,10 +1742,10 @@ void VulkanRenderer::resolve_gpu_timestamps(std::uint32_t slot) noexcept {
 #endif
 }
 
-omnicpp::core::Result<VkCommandPool> VulkanRenderer::create_command_pool(
+::warploom::core::Result<VkCommandPool> VulkanRenderer::create_command_pool(
     VkDevice device, std::uint32_t queue_family_index) {
 #ifdef OMNICPP_HAS_VULKAN
-  if (!device) return omnicpp::core::Result<VkCommandPool>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  if (!device) return ::warploom::core::Result<VkCommandPool>::error(::warploom::core::RuntimeError::vulkan_not_available);
 
   VkCommandPoolCreateInfo pool_info{};
   pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -1754,18 +1754,18 @@ omnicpp::core::Result<VkCommandPool> VulkanRenderer::create_command_pool(
 
   VkCommandPool pool = nullptr;
   VkResult result = vkCreateCommandPool(device, &pool_info, nullptr, &pool);
-  if (result != VK_SUCCESS || !pool) return omnicpp::core::Result<VkCommandPool>::error(omnicpp::core::RuntimeError::vulkan_not_available);
-  return omnicpp::core::Result<VkCommandPool>::ok(pool);
+  if (result != VK_SUCCESS || !pool) return ::warploom::core::Result<VkCommandPool>::error(::warploom::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<VkCommandPool>::ok(pool);
 #else
   (void)device; (void)queue_family_index;
-  return omnicpp::core::Result<VkCommandPool>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<VkCommandPool>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<VkCommandBuffer> VulkanRenderer::allocate_command_buffer(
+::warploom::core::Result<VkCommandBuffer> VulkanRenderer::allocate_command_buffer(
     VkDevice device, VkCommandPool pool) {
 #ifdef OMNICPP_HAS_VULKAN
-  if (!device || !pool) return omnicpp::core::Result<VkCommandBuffer>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  if (!device || !pool) return ::warploom::core::Result<VkCommandBuffer>::error(::warploom::core::RuntimeError::vulkan_not_available);
 
   VkCommandBufferAllocateInfo alloc_info{};
   alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -1775,12 +1775,12 @@ omnicpp::core::Result<VkCommandBuffer> VulkanRenderer::allocate_command_buffer(
 
   VkCommandBuffer cb = nullptr;
   VkResult result = vkAllocateCommandBuffers(device, &alloc_info, &cb);
-  if (result != VK_SUCCESS || !cb) return omnicpp::core::Result<VkCommandBuffer>::error(omnicpp::core::RuntimeError::vulkan_not_available);
-  return omnicpp::core::Result<VkCommandBuffer>::ok(cb);
+  if (result != VK_SUCCESS || !cb) return ::warploom::core::Result<VkCommandBuffer>::error(::warploom::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<VkCommandBuffer>::ok(cb);
 #else
   (void)device; (void)pool;
-  return omnicpp::core::Result<VkCommandBuffer>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<VkCommandBuffer>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-} // namespace omnicpp::render
+} // namespace warploom::render

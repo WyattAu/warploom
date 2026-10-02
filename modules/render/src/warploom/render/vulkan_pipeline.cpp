@@ -12,42 +12,42 @@
 #include <vulkan/vulkan.h>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 VulkanPipeline::~VulkanPipeline() { cleanup(nullptr); }
 
-omnicpp::core::Result<void> VulkanPipeline::load_shader_file(
+::warploom::core::Result<void> VulkanPipeline::load_shader_file(
     VkDevice device, const std::string& path) {
 #ifdef OMNICPP_HAS_VULKAN
   std::ifstream file(path, std::ios::ate | std::ios::binary);
   if (!file.is_open()) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   auto file_size = static_cast<std::size_t>(file.tellg());
   if (file_size < 4 || file_size % 4 != 0) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   std::vector<std::uint8_t> buffer(file_size);
   file.seekg(0);
   file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(file_size));
   if (!file || file.gcount() != static_cast<std::streamsize>(file_size)) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   return load_shader_from_bytes(device, buffer);
 #else
   (void)device; (void)path;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanPipeline::load_shader(
+::warploom::core::Result<void> VulkanPipeline::load_shader(
     VkDevice device, const std::uint32_t* code, std::size_t code_size_bytes) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !code || code_size_bytes < 4 || code_size_bytes % 4 != 0) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   VkShaderModuleCreateInfo create_info{};
@@ -58,13 +58,13 @@ omnicpp::core::Result<void> VulkanPipeline::load_shader(
   // We don't know if this is vertex or fragment — caller uses load_shader_from_bytes
   // which stores in the appropriate slot. This method is used internally.
   if (code[0] != 0x07230203U) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   VkShaderModule module = nullptr;
   VkResult result = vkCreateShaderModule(device, &create_info, nullptr, &module);
   if (result != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   // We store the last loaded module — caller must use create_graphics_pipeline
@@ -76,28 +76,28 @@ omnicpp::core::Result<void> VulkanPipeline::load_shader(
     fragment_shader_ = module;
   }
 
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)code; (void)code_size_bytes;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanPipeline::load_shader_from_bytes(
+::warploom::core::Result<void> VulkanPipeline::load_shader_from_bytes(
     VkDevice device, const std::vector<std::uint8_t>& spirv_bytes) {
   if (spirv_bytes.empty() || spirv_bytes.size() % 4 != 0) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   return load_shader(device,
       reinterpret_cast<const std::uint32_t*>(spirv_bytes.data()),
       spirv_bytes.size());
 }
 
-omnicpp::core::Result<void> VulkanPipeline::load_shader_stage_file(
+::warploom::core::Result<void> VulkanPipeline::load_shader_stage_file(
     VkDevice device, const std::string& path, const std::string& stage) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   VkShaderStageFlagBits stage_flag;
   if (stage == "vertex") {
@@ -107,29 +107,29 @@ omnicpp::core::Result<void> VulkanPipeline::load_shader_stage_file(
   } else if (stage == "compute") {
     stage_flag = VK_SHADER_STAGE_COMPUTE_BIT;
   } else {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   if (has_stage(stage)) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
 
   std::ifstream file(path, std::ios::ate | std::ios::binary);
   if (!file.is_open()) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   const auto file_size = static_cast<std::size_t>(file.tellg());
   if (file_size < 4 || file_size % 4 != 0) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   std::vector<std::uint8_t> buffer(file_size);
   file.seekg(0);
   file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(file_size));
   if (!file || file.gcount() != static_cast<std::streamsize>(file_size)) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   const auto* code = reinterpret_cast<const std::uint32_t*>(buffer.data());
   if (code[0] != 0x07230203U) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   VkShaderModuleCreateInfo create_info{};
@@ -138,7 +138,7 @@ omnicpp::core::Result<void> VulkanPipeline::load_shader_stage_file(
   create_info.pCode = code;
   VkShaderModule module = VK_NULL_HANDLE;
   if (vkCreateShaderModule(device, &create_info, nullptr, &module) != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   switch (stage_flag) {
@@ -153,12 +153,12 @@ omnicpp::core::Result<void> VulkanPipeline::load_shader_stage_file(
       break;
     default:
       vkDestroyShaderModule(device, module, nullptr);
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)path; (void)stage;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -169,14 +169,14 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
   return false;
 }
 
-omnicpp::core::Result<void> VulkanPipeline::create_compute_pipeline(
+::warploom::core::Result<void> VulkanPipeline::create_compute_pipeline(
     VkDevice device, VkPipelineLayout pipeline_layout) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !compute_shader_) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   if (!pipeline_layout) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   if (layout_ != pipeline_layout) {
     if (owns_layout_ && layout_ != VK_NULL_HANDLE) {
@@ -199,16 +199,16 @@ omnicpp::core::Result<void> VulkanPipeline::create_compute_pipeline(
 
   const VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &create_info, nullptr, &pipeline_);
   if (result != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)pipeline_layout;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanPipeline::create_graphics_pipeline(
+::warploom::core::Result<void> VulkanPipeline::create_graphics_pipeline(
     VkDevice device, VkRenderPass render_pass,
     VkFormat vertex_format,
     VkPipelineLayout pipeline_layout,
@@ -218,7 +218,7 @@ omnicpp::core::Result<void> VulkanPipeline::create_graphics_pipeline(
     float depth_bias_slope) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !render_pass || !vertex_shader_ || !fragment_shader_) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   // If no layout was provided, create one
@@ -230,7 +230,7 @@ omnicpp::core::Result<void> VulkanPipeline::create_graphics_pipeline(
 
     VkResult result = vkCreatePipelineLayout(device, &layout_info, nullptr, &layout_);
     if (result != VK_SUCCESS) {
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
     owns_layout_ = true;
   } else {
@@ -355,28 +355,28 @@ omnicpp::core::Result<void> VulkanPipeline::create_graphics_pipeline(
   VkResult result = vkCreateGraphicsPipelines(
       device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline_);
   if (result != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)render_pass; (void)vertex_format; (void)pipeline_layout;
   (void)enable_depth_test; (void)enable_depth_write; (void)enable_backface_cull;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanPipeline::create_pipeline_layout(
+::warploom::core::Result<void> VulkanPipeline::create_pipeline_layout(
     VkDevice device, const void* push_constant_range) {
   return create_pipeline_layout(device, nullptr, 0, push_constant_range);
 }
 
-omnicpp::core::Result<void> VulkanPipeline::create_pipeline_layout(
+::warploom::core::Result<void> VulkanPipeline::create_pipeline_layout(
     VkDevice device, const VkDescriptorSetLayout* set_layouts,
     std::uint32_t set_layout_count, const void* push_constant_range) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   if (layout_ && owns_layout_) {
     vkDestroyPipelineLayout(device, layout_, nullptr);
@@ -393,14 +393,14 @@ omnicpp::core::Result<void> VulkanPipeline::create_pipeline_layout(
 
   VkResult result = vkCreatePipelineLayout(device, &layout_info, nullptr, &layout_);
   if (result != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   owns_layout_ = true;
 
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)set_layouts; (void)set_layout_count; (void)push_constant_range;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -423,4 +423,4 @@ void VulkanPipeline::cleanup(VkDevice device) noexcept {
   owns_layout_ = false;
 }
 
-} // namespace omnicpp::render
+} // namespace warploom::render

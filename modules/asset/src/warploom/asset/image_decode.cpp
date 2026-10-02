@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <cstdint>
 
-namespace omnicpp::asset {
+namespace warploom::asset {
 
 namespace {
 constexpr std::uint8_t kPngSignature[8] = {0x89, 0x50, 0x4e, 0x47,
@@ -19,7 +19,7 @@ constexpr std::uint8_t kKtx2Signature[8] = {0xAB, 0x4B, 0x54, 0x58,
                                             0x20, 0x32, 0x30, 0xBB};
 }
 
-omnicpp::core::Result<DecodedImage> decode_image(
+::warploom::core::Result<DecodedImage> decode_image(
     const std::uint8_t* bytes, std::size_t length,
     std::string* error_detail) {
   const bool is_png =
@@ -49,8 +49,8 @@ omnicpp::core::Result<DecodedImage> decode_image(
         "payload is neither a decodable PNG (\\x89PNG signature), a "
         "baseline JPEG (FF D8 FF SOI marker), nor a KTX2 container";
   }
-  return omnicpp::core::Result<DecodedImage>::error(
-      omnicpp::core::RuntimeError::malformed_asset);
+  return ::warploom::core::Result<DecodedImage>::error(
+      ::warploom::core::RuntimeError::malformed_asset);
 }
 
-}  // namespace omnicpp::asset
+}  // namespace warploom::asset

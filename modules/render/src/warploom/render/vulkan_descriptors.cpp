@@ -8,7 +8,7 @@
 #include <vulkan/vulkan.h>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 // =============================================================================
 // Minimal SPIR-V reflection
@@ -386,16 +386,16 @@ std::vector<ReflectedBinding> reflect_spirv_resources(
 
 VulkanDescriptorManager::~VulkanDescriptorManager() { cleanup(); }
 
-omnicpp::core::Result<void> VulkanDescriptorManager::initialize(VkDevice device) {
+::warploom::core::Result<void> VulkanDescriptorManager::initialize(VkDevice device) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   device_ = device;
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -424,25 +424,25 @@ const DescriptorSetLayoutInfo* VulkanDescriptorManager::find_layout(
   return nullptr;
 }
 
-omnicpp::core::Result<VkDescriptorSetLayout> VulkanDescriptorManager::create_layout(
+::warploom::core::Result<VkDescriptorSetLayout> VulkanDescriptorManager::create_layout(
     const std::vector<ReflectedBinding>& bindings, std::uint32_t sets_to_reserve,
     bool bindless) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device_) {
-    return omnicpp::core::Result<VkDescriptorSetLayout>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<VkDescriptorSetLayout>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
   if (bindings.empty()) {
-    return omnicpp::core::Result<VkDescriptorSetLayout>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<VkDescriptorSetLayout>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
 
   std::vector<VkDescriptorSetLayoutBinding> layout_bindings;
   layout_bindings.reserve(bindings.size());
   for (const auto& binding : bindings) {
     if (binding.type == VK_DESCRIPTOR_TYPE_MAX_ENUM) {
-      return omnicpp::core::Result<VkDescriptorSetLayout>::error(
-          omnicpp::core::RuntimeError::invalid_config);
+      return ::warploom::core::Result<VkDescriptorSetLayout>::error(
+          ::warploom::core::RuntimeError::invalid_config);
     }
     VkDescriptorSetLayoutBinding lb{};
     lb.binding = binding.binding;
@@ -486,8 +486,8 @@ omnicpp::core::Result<VkDescriptorSetLayout> VulkanDescriptorManager::create_lay
   layout_info.pBindings = layout_bindings.data();
   VkDescriptorSetLayout layout = VK_NULL_HANDLE;
   if (vkCreateDescriptorSetLayout(device_, &layout_info, nullptr, &layout) != VK_SUCCESS) {
-    return omnicpp::core::Result<VkDescriptorSetLayout>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<VkDescriptorSetLayout>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   // Pool capacity from the reserved set count; one pool per layout so
@@ -516,8 +516,8 @@ omnicpp::core::Result<VkDescriptorSetLayout> VulkanDescriptorManager::create_lay
     pool_info.pPoolSizes = pool_sizes.data();
     if (vkCreateDescriptorPool(device_, &pool_info, nullptr, &pool) != VK_SUCCESS) {
       vkDestroyDescriptorSetLayout(device_, layout, nullptr);
-      return omnicpp::core::Result<VkDescriptorSetLayout>::error(
-          omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<VkDescriptorSetLayout>::error(
+          ::warploom::core::RuntimeError::vulkan_not_available);
     }
   }
 
@@ -527,21 +527,21 @@ omnicpp::core::Result<VkDescriptorSetLayout> VulkanDescriptorManager::create_lay
   info.pool = pool;
   info.bindless = bindless;
   layouts_.push_back(std::move(info));
-  return omnicpp::core::Result<VkDescriptorSetLayout>::ok(layout);
+  return ::warploom::core::Result<VkDescriptorSetLayout>::ok(layout);
 #else
   (void)bindings; (void)sets_to_reserve; (void)bindless;
-  return omnicpp::core::Result<VkDescriptorSetLayout>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<VkDescriptorSetLayout>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<VkDescriptorSet> VulkanDescriptorManager::allocate_set(
+::warploom::core::Result<VkDescriptorSet> VulkanDescriptorManager::allocate_set(
     VkDescriptorSetLayout layout) {
 #ifdef OMNICPP_HAS_VULKAN
   const DescriptorSetLayoutInfo* info = find_layout(layout);
   if (!device_ || !info || !info->pool || !layout) {
-    return omnicpp::core::Result<VkDescriptorSet>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<VkDescriptorSet>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
   VkDescriptorSetAllocateInfo alloc_info{};
   alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -550,23 +550,23 @@ omnicpp::core::Result<VkDescriptorSet> VulkanDescriptorManager::allocate_set(
   alloc_info.pSetLayouts = &layout;
   VkDescriptorSet set = VK_NULL_HANDLE;
   if (vkAllocateDescriptorSets(device_, &alloc_info, &set) != VK_SUCCESS) {
-    return omnicpp::core::Result<VkDescriptorSet>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<VkDescriptorSet>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
-  return omnicpp::core::Result<VkDescriptorSet>::ok(set);
+  return ::warploom::core::Result<VkDescriptorSet>::ok(set);
 #else
   (void)layout;
-  return omnicpp::core::Result<VkDescriptorSet>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<VkDescriptorSet>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanDescriptorManager::write_buffer(
+::warploom::core::Result<void> VulkanDescriptorManager::write_buffer(
     VkDescriptorSet set, std::uint32_t binding, VkDescriptorType type,
     VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device_ || !set || !buffer) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   VkDescriptorBufferInfo buffer_info{};
   buffer_info.buffer = buffer;
@@ -580,20 +580,20 @@ omnicpp::core::Result<void> VulkanDescriptorManager::write_buffer(
   write.descriptorType = type;
   write.pBufferInfo = &buffer_info;
   vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)set; (void)binding; (void)type; (void)buffer; (void)offset; (void)range;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanDescriptorManager::write_image(
+::warploom::core::Result<void> VulkanDescriptorManager::write_image(
     VkDescriptorSet set, std::uint32_t binding, VkDescriptorType type,
     VkSampler sampler, VkImageView view, VkImageLayout layout,
     std::uint32_t array_element) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device_ || !set || !view) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   VkDescriptorImageInfo image_info{};
   image_info.sampler = sampler;
@@ -608,22 +608,22 @@ omnicpp::core::Result<void> VulkanDescriptorManager::write_image(
   write.descriptorType = type;
   write.pImageInfo = &image_info;
   vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)set; (void)binding; (void)type; (void)sampler; (void)view; (void)layout;
-  return omnicpp::core::Result<void>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanDescriptorManager::write_acceleration_structure(
+::warploom::core::Result<void> VulkanDescriptorManager::write_acceleration_structure(
     VkDescriptorSet set, std::uint32_t binding, VkDescriptorType type,
     VkAccelerationStructureKHR as, std::uint32_t array_element) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device_ || !set || as == VK_NULL_HANDLE ||
       type != VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) {
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
   VkWriteDescriptorSetAccelerationStructureKHR as_info{};
   as_info.sType =
@@ -639,12 +639,12 @@ omnicpp::core::Result<void> VulkanDescriptorManager::write_acceleration_structur
   write.descriptorType = type;
   write.pNext = &as_info;
   vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)set; (void)binding; (void)type; (void)as; (void)array_element;
-  return omnicpp::core::Result<void>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-} // namespace omnicpp::render
+} // namespace warploom::render

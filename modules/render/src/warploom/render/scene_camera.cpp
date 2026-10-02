@@ -5,7 +5,7 @@
 
 #include <cmath>
 
-namespace omnicpp::render {
+namespace warploom::render {
 namespace {
 
 //! Column-major 4x4 multiply: out = a * b.
@@ -97,13 +97,13 @@ SceneMatrix scene_camera_view_projection(const float eye[3],
   return combined;
 }
 
-void update_orbit_cameras(omnicpp::core::World& world, float aspect,
+void update_orbit_cameras(::warploom::core::World& world, float aspect,
                           const OrbitCameraInput& input) noexcept {
   constexpr float kUp[3] = {0.0f, 1.0f, 0.0f};
   constexpr float kPi = 3.14159265358979323846f;
   constexpr float kPitchLimit = kPi * 0.499f;
 
-  auto tick = [&](omnicpp::core::Entity entity, SceneCameraComponent& camera) {
+  auto tick = [&](::warploom::core::Entity entity, SceneCameraComponent& camera) {
     if (!camera.active) return;
     if (!world.has_component<OrbitCameraController>(entity)) return;
     OrbitCameraController& controller =
@@ -176,9 +176,9 @@ void update_orbit_cameras(omnicpp::core::World& world, float aspect,
   };
 
   world.for_each<SceneCameraComponent>(
-      [&](omnicpp::core::Entity entity, SceneCameraComponent& camera) {
+      [&](::warploom::core::Entity entity, SceneCameraComponent& camera) {
         tick(entity, camera);
       });
 }
 
-}  // namespace omnicpp::render
+}  // namespace warploom::render

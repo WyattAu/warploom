@@ -25,7 +25,7 @@
 #include "warploom/render/vulkan_memory_allocator.hpp"
 #include "warploom/ui/widget.hpp"
 
-namespace omnicpp::render {
+namespace warploom::render {
 namespace ui = ::warploom::ui;  // S1
 
 class VulkanUiRenderer final {
@@ -38,14 +38,14 @@ class VulkanUiRenderer final {
   //! Creates the pipeline (pixel-space quads, no depth, no cull), layout
   //! (atlas sampler + resolution push constants), and the glyph atlas
   //! texture. `render_pass` must be compatible with the UI pass format.
-  [[nodiscard]] omnicpp::core::Result<void> initialize(
+  [[nodiscard]] ::warploom::core::Result<void> initialize(
       VkDevice device, VkPhysicalDevice physical_device,
       VkRenderPass render_pass, VulkanMemoryAllocator& allocator,
       const std::string& shader_dir);
 
   //! Converts the paint list to quad vertices and uploads them. Returns the
   //! recorded quad count. Call every frame before record().
-  [[nodiscard]] omnicpp::core::Result<std::uint32_t> upload_paint_list(
+  [[nodiscard]] ::warploom::core::Result<std::uint32_t> upload_paint_list(
       const warploom::ui::PaintList& paint, float viewport_w, float viewport_h);
 
   //! Records the one-time atlas layout barrier (host-written -> shader
@@ -105,4 +105,17 @@ class VulkanUiRenderer final {
   std::vector<UiVertex> vertices_{};
 };
 
-}  // namespace omnicpp::render
+}  // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

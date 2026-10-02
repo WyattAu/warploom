@@ -13,7 +13,7 @@ cmake_minimum_required(VERSION 3.28...4.0)
 # Standalone: find_package(WarploomAsset CONFIG REQUIRED) after install.
 #
 # S3.5 is an include-path and packaging extraction only: public names
-# stay `omnicpp::asset` (identifier migration is S5-B; see
+# re-badged to `warploom::asset` in S5-B phase 1a (see
 # docs/warploom-asset-plan.md §1). Compat forwarders under
 # include/engine/asset/ keep all 9 include sites compiling.
 # ============================================================================

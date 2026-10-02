@@ -21,7 +21,7 @@
 #include <utility>
 #include <vector>
 
-namespace omnicpp::asset::gltf_detail {
+namespace warploom::asset::gltf_detail {
 
 // ============================================================================
 // Minimal RFC 8259 JSON parser (recursive descent, strict, no exceptions)
@@ -997,4 +997,4 @@ struct DocumentPrologue {
   return true;
 }
 
-}  // namespace omnicpp::asset::gltf_detail
+}  // namespace warploom::asset::gltf_detail

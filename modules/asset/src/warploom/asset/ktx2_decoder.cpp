@@ -19,7 +19,7 @@
 
 #include <cstring>
 
-namespace omnicpp::asset {
+namespace warploom::asset {
 
 namespace {
 
@@ -52,14 +52,14 @@ constexpr std::uint32_t kFormatR8G8B8A8Srgb = 43U;    // VK_FORMAT_R8G8B8A8_SRGB
 
 }  // namespace
 
-omnicpp::core::Result<DecodedImage> decode_ktx2(
+::warploom::core::Result<DecodedImage> decode_ktx2(
     const std::uint8_t* bytes, std::size_t length,
     std::string* error_detail) {
   auto fail = [&](const std::string& message)
-      -> omnicpp::core::Result<DecodedImage> {
+      -> ::warploom::core::Result<DecodedImage> {
     if (error_detail != nullptr) *error_detail = message;
-    return omnicpp::core::Result<DecodedImage>::error(
-        omnicpp::core::RuntimeError::malformed_asset);
+    return ::warploom::core::Result<DecodedImage>::error(
+        ::warploom::core::RuntimeError::malformed_asset);
   };
 
   if (bytes == nullptr || length < 80U) {
@@ -162,7 +162,7 @@ omnicpp::core::Result<DecodedImage> decode_ktx2(
   image.rgba.resize(static_cast<std::size_t>(level0_bytes));
   std::memcpy(image.rgba.data(), bytes + level0_offset,
               static_cast<std::size_t>(level0_bytes));
-  return omnicpp::core::Result<DecodedImage>::ok(std::move(image));
+  return ::warploom::core::Result<DecodedImage>::ok(std::move(image));
 }
 
-}  // namespace omnicpp::asset
+}  // namespace warploom::asset

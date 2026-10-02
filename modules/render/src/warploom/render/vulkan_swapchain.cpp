@@ -2,36 +2,36 @@
 #include <algorithm>
 #include <limits>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 VulkanSwapchain::~VulkanSwapchain() { cleanup(VK_NULL_HANDLE); }
 
-omnicpp::core::Result<void> VulkanSwapchain::query_support(
+::warploom::core::Result<void> VulkanSwapchain::query_support(
     VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!physical_device || !surface) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   return query_swapchain_support(physical_device, surface).is_valid()
-      ? omnicpp::core::Result<void>::ok()
-      : omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      ? ::warploom::core::Result<void>::ok()
+      : ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #else
   (void)physical_device; (void)surface;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanSwapchain::create(
+::warploom::core::Result<void> VulkanSwapchain::create(
     VkDevice device, VkPhysicalDevice physical_device,
     VkSurfaceKHR surface, const SwapchainConfig& config) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !physical_device || !surface || config.width == 0 || config.height == 0) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
 
   const auto support = query_swapchain_support(physical_device, surface);
   if (!support.is_valid()) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   const auto surface_format = choose_surface_format(support.formats);
@@ -59,7 +59,7 @@ omnicpp::core::Result<void> VulkanSwapchain::create(
     }
   }
   if (graphics_family == UINT32_MAX || present_family == UINT32_MAX) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   VkSwapchainCreateInfoKHR info{};
@@ -73,7 +73,7 @@ omnicpp::core::Result<void> VulkanSwapchain::create(
   const VkImageUsageFlags required_usage =
       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
   if ((support.capabilities.supportedUsageFlags & required_usage) != required_usage) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   info.imageUsage = required_usage;
 
@@ -94,7 +94,7 @@ omnicpp::core::Result<void> VulkanSwapchain::create(
   VkSwapchainKHR new_swapchain = VK_NULL_HANDLE;
   const VkResult result = vkCreateSwapchainKHR(device, &info, nullptr, &new_swapchain);
   if (result != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   if (swapchain_) vkDestroySwapchainKHR(device, swapchain_, nullptr);
   swapchain_ = new_swapchain;
@@ -106,17 +106,17 @@ omnicpp::core::Result<void> VulkanSwapchain::create(
   vkGetSwapchainImagesKHR(device, swapchain_, &count, nullptr);
   images_.resize(count);
   vkGetSwapchainImagesKHR(device, swapchain_, &count, images_.data());
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)physical_device; (void)surface; (void)config;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanSwapchain::create_image_views(VkDevice device) {
+::warploom::core::Result<void> VulkanSwapchain::create_image_views(VkDevice device) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || images_.empty()) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   // Rebuilding views is valid only after the caller has retired any
   // framebuffers that reference the previous views.
@@ -141,13 +141,13 @@ omnicpp::core::Result<void> VulkanSwapchain::create_image_views(VkDevice device)
     const VkResult result = vkCreateImageView(device, &info, nullptr, &image_views_[i]);
     if (result != VK_SUCCESS) {
       cleanup(device);
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -166,15 +166,15 @@ void VulkanSwapchain::cleanup([[maybe_unused]] VkDevice device) noexcept {
   extent_height_ = 0;
 }
 
-omnicpp::core::Result<void> VulkanSwapchain::recreate(
+::warploom::core::Result<void> VulkanSwapchain::recreate(
     VkDevice device, VkPhysicalDevice physical_device,
     VkSurfaceKHR surface, std::uint32_t width, std::uint32_t height) {
   if (width == 0 || height == 0) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !physical_device || !surface) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   if (device) {
     for (auto view : image_views_) if (view) vkDestroyImageView(device, view, nullptr);
@@ -258,4 +258,4 @@ VkExtent2D VulkanSwapchain::choose_extent(
 }
 #endif
 
-} // namespace omnicpp::render
+} // namespace warploom::render

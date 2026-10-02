@@ -12,11 +12,11 @@
 #include <utility>
 #include <vector>
 
-namespace omnicpp::asset {
+namespace warploom::asset {
 
 namespace {
 
-using omnicpp::core::RuntimeError;
+using ::warploom::core::RuntimeError;
 
 // ============================================================================
 // Marker codes
@@ -375,17 +375,17 @@ struct FrameSpec {
 // decode_jpeg
 // ============================================================================
 
-omnicpp::core::Result<DecodedImage> decode_jpeg(
+::warploom::core::Result<DecodedImage> decode_jpeg(
     const std::uint8_t* bytes, std::size_t length,
     std::string* error_detail) {
   std::string error;
   //! Result-flavoured failure (records the first diagnostic and copies it to
   //! the caller's error_detail, which is otherwise only cleared on success).
   auto failf = [&](const std::string& message)
-      -> omnicpp::core::Result<DecodedImage> {
+      -> ::warploom::core::Result<DecodedImage> {
     if (error.empty()) error = message;
     if (error_detail != nullptr) *error_detail = error;
-    return omnicpp::core::Result<DecodedImage>::error(
+    return ::warploom::core::Result<DecodedImage>::error(
         RuntimeError::malformed_asset);
   };
 
@@ -521,7 +521,7 @@ omnicpp::core::Result<DecodedImage> decode_jpeg(
     if (marker == kEoi) {
       if (!saw_scan) return failf("EOI before any scan");
       if (error_detail != nullptr) *error_detail = std::string();
-      return omnicpp::core::Result<DecodedImage>::ok(std::move(image));
+      return ::warploom::core::Result<DecodedImage>::ok(std::move(image));
     }
 
     if (marker == kDqt) {
@@ -1114,4 +1114,4 @@ omnicpp::core::Result<DecodedImage> decode_jpeg(
   }
 }
 
-}  // namespace omnicpp::asset
+}  // namespace warploom::asset

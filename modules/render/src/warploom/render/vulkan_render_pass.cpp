@@ -10,16 +10,16 @@
 #include <vulkan/vulkan.h>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 VulkanRenderPass::~VulkanRenderPass() { cleanup(nullptr); }
 
-omnicpp::core::Result<void> VulkanRenderPass::create(
+::warploom::core::Result<void> VulkanRenderPass::create(
     VkDevice device, VkFormat color_format, VkFormat depth_format,
     VkImageLayout final_layout) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   depth_format_ = depth_format;
@@ -89,22 +89,22 @@ omnicpp::core::Result<void> VulkanRenderPass::create(
 
   VkResult result = vkCreateRenderPass(device, &render_pass_info, nullptr, &render_pass_);
   if (result != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)color_format; (void)depth_format; (void)final_layout;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanRenderPass::create_framebuffers(
+::warploom::core::Result<void> VulkanRenderPass::create_framebuffers(
     VkDevice device, const std::vector<VkImageView>& swapchain_views,
     std::uint32_t width, std::uint32_t height) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || swapchain_views.empty() || !render_pass_) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   framebuffers_.resize(swapchain_views.size());
@@ -130,23 +130,23 @@ omnicpp::core::Result<void> VulkanRenderPass::create_framebuffers(
         }
       }
       framebuffers_.clear();
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
   }
 
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)swapchain_views; (void)width; (void)height;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanRenderPass::create_depth_resources(
+::warploom::core::Result<void> VulkanRenderPass::create_depth_resources(
     VkDevice device, VkPhysicalDevice physical_device,
     VkFormat format, std::uint32_t width, std::uint32_t height) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !physical_device) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   depth_format_ = format;
@@ -188,7 +188,7 @@ omnicpp::core::Result<void> VulkanRenderPass::create_depth_resources(
 
   VkResult result = vkCreateImage(device, &image_info, nullptr, &depth_image_);
   if (result != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   // Allocate memory for depth image
@@ -213,7 +213,7 @@ omnicpp::core::Result<void> VulkanRenderPass::create_depth_resources(
   if (!found) {
     vkDestroyImage(device, depth_image_, nullptr);
     depth_image_ = nullptr;
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   VkMemoryAllocateInfo alloc_info{};
@@ -225,7 +225,7 @@ omnicpp::core::Result<void> VulkanRenderPass::create_depth_resources(
   if (result != VK_SUCCESS) {
     vkDestroyImage(device, depth_image_, nullptr);
     depth_image_ = nullptr;
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   result = vkBindImageMemory(device, depth_image_, depth_memory_, 0);
@@ -234,8 +234,8 @@ omnicpp::core::Result<void> VulkanRenderPass::create_depth_resources(
     vkDestroyImage(device, depth_image_, nullptr);
     depth_image_ = VK_NULL_HANDLE;
     depth_memory_ = VK_NULL_HANDLE;
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   // Create depth image view
@@ -257,14 +257,14 @@ omnicpp::core::Result<void> VulkanRenderPass::create_depth_resources(
     depth_image_ = VK_NULL_HANDLE;
     depth_memory_ = VK_NULL_HANDLE;
     depth_sampleable_ = false;
-    return omnicpp::core::Result<void>::error(
-        omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
 
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)physical_device; (void)format; (void)width; (void)height;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -309,4 +309,4 @@ VkFormat VulkanRenderPass::find_supported_depth_format([[maybe_unused]] VkPhysic
   return VK_FORMAT_UNDEFINED;
 }
 
-} // namespace omnicpp::render
+} // namespace warploom::render

@@ -10,7 +10,7 @@
 #include "warploom/render/vulkan_types.hpp"
 #include <cstdint>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 class VulkanOffscreenTarget final {
 public:
@@ -22,7 +22,7 @@ public:
   VulkanOffscreenTarget(VulkanOffscreenTarget&&) = delete;
   VulkanOffscreenTarget& operator=(VulkanOffscreenTarget&&) = delete;
 
-  [[nodiscard]] omnicpp::core::Result<void> create(
+  [[nodiscard]] ::warploom::core::Result<void> create(
       VkDevice device, VkPhysicalDevice physical_device,
       VkFormat format, std::uint32_t width, std::uint32_t height,
       VulkanMemoryAllocator* allocator = nullptr);
@@ -31,11 +31,11 @@ public:
   //! when present, the render pass gains a depth attachment (cleared to
   //! 1.0, stored for post-pass depth extraction) and the framebuffer includes
   //! its view.
-  [[nodiscard]] omnicpp::core::Result<void> create_depth(
+  [[nodiscard]] ::warploom::core::Result<void> create_depth(
       VkDevice device, VkPhysicalDevice physical_device, VkFormat depth_format);
 
-  [[nodiscard]] omnicpp::core::Result<void> create_render_pass(VkDevice device);
-  [[nodiscard]] omnicpp::core::Result<void> create_framebuffer(VkDevice device);
+  [[nodiscard]] ::warploom::core::Result<void> create_render_pass(VkDevice device);
+  [[nodiscard]] ::warploom::core::Result<void> create_framebuffer(VkDevice device);
   void cleanup(VkDevice device) noexcept;
 
   [[nodiscard]] VkImage image() const noexcept { return image_; }
@@ -78,4 +78,17 @@ private:
   std::uint32_t height_{0};
 };
 
-} // namespace omnicpp::render
+} // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

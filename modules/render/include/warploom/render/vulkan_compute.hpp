@@ -21,7 +21,7 @@
 #include "warploom/render/vulkan_types.hpp"
 #include <cstdint>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 //! State of one image across a queue handoff (release/acquire pair).
 struct QueueImageState {
@@ -100,7 +100,7 @@ public:
   //! `compute_queue` may be a dedicated compute queue or the graphics queue
   //! (fallback). `compute_family` is its family index. Requires a device with
   //! timeline semaphores enabled (VulkanContext negotiates them).
-  [[nodiscard]] omnicpp::core::Result<void> initialize(VkDevice device,
+  [[nodiscard]] ::warploom::core::Result<void> initialize(VkDevice device,
                                                        VkQueue compute_queue,
                                                        std::uint32_t compute_family);
   void cleanup() noexcept;
@@ -127,7 +127,7 @@ public:
   //! consumer's wait. Each submission gets its own command buffer + fence
   //! from a ring (see kInFlight), so compute for frame N+1 can be recorded
   //! and submitted while frame N is still in flight on the consumer queue.
-  [[nodiscard]] omnicpp::core::Result<std::uint64_t> submit();
+  [[nodiscard]] ::warploom::core::Result<std::uint64_t> submit();
 
   //! CPU-side wait for the last submission (fence). GPU consumers normally
   //! use the timeline value instead — this is for teardown and benchmarks.
@@ -153,4 +153,17 @@ private:
   bool recording_{false};
 };
 
-}  // namespace omnicpp::render
+}  // namespace warploom::render
+
+// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_RENDER_NS
+#define OMNICPP_COMPAT_RENDER_NS
+namespace omnicpp::render {
+    using namespace ::warploom::render;
+}
+#endif  // OMNICPP_COMPAT_RENDER_NS

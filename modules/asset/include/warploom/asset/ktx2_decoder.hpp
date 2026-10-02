@@ -22,14 +22,27 @@
 
 #include "warploom/asset/image_decode.hpp"
 
-namespace omnicpp::asset {
+namespace warploom::asset {
 
 //! Decode a KTX2 container whose payload is uncompressed R8G8B8A8.
 //! Returns the level-0 image in RGBA8 order. On any malformed input the
 //! Result carries malformed_asset and `error_detail` (when non-null) names
 //! the violated constraint.
-[[nodiscard]] omnicpp::core::Result<DecodedImage> decode_ktx2(
+[[nodiscard]] ::warploom::core::Result<DecodedImage> decode_ktx2(
     const std::uint8_t* bytes, std::size_t length,
     std::string* error_detail = nullptr);
 
-}  // namespace omnicpp::asset
+}  // namespace warploom::asset
+
+// S5-B compat footer: legacy `omnicpp::asset` spellings keep resolving during the
+// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
+// in a namespace extension (NOT a type alias - ill-formed for namespaces)
+// makes the old spellings name the SAME types. Guarded per namespace (a
+// shared guard would suppress later headers' distinct directives). The
+// nested render::depth family resolves through this directive.
+#ifndef OMNICPP_COMPAT_ASSET_NS
+#define OMNICPP_COMPAT_ASSET_NS
+namespace omnicpp::asset {
+    using namespace ::warploom::asset;
+}
+#endif  // OMNICPP_COMPAT_ASSET_NS

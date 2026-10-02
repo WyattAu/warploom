@@ -5,17 +5,17 @@
 #include <cstring>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(VK_NULL_HANDLE); }
 
-omnicpp::core::Result<void> VulkanOffscreenTarget::create(
+::warploom::core::Result<void> VulkanOffscreenTarget::create(
     VkDevice device, VkPhysicalDevice physical_device,
     VkFormat format, std::uint32_t width, std::uint32_t height,
     VulkanMemoryAllocator* allocator) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !physical_device || format == VK_FORMAT_UNDEFINED || width == 0 || height == 0) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
 
   VkImageCreateInfo image_info{};
@@ -33,7 +33,7 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create(
 
   VkResult result = vkCreateImage(device, &image_info, nullptr, &image_);
   if (result != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   if (allocator) {
@@ -41,7 +41,7 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create(
     auto allocation = allocator->bind_image(image_, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (!allocation.is_ok()) {
       cleanup(device);
-      return omnicpp::core::Result<void>::error(allocation.error());
+      return ::warploom::core::Result<void>::error(allocation.error());
     }
     allocator_ = allocator;
     allocator_allocation_ = allocation.value();
@@ -63,7 +63,7 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create(
     }
     if (!found_memory_type) {
       cleanup(device);
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
 
     VkMemoryAllocateInfo allocation{};
@@ -73,12 +73,12 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create(
     result = vkAllocateMemory(device, &allocation, nullptr, &memory_);
     if (result != VK_SUCCESS) {
       cleanup(device);
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
     result = vkBindImageMemory(device, image_, memory_, 0);
     if (result != VK_SUCCESS) {
       cleanup(device);
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
   }
 
@@ -93,25 +93,25 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create(
   result = vkCreateImageView(device, &view_info, nullptr, &image_view_);
   if (result != VK_SUCCESS) {
     cleanup(device);
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   format_ = format;
   width_ = width;
   height_ = height;
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)physical_device; (void)format; (void)width; (void)height;
   (void)allocator;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanOffscreenTarget::create_depth(
+::warploom::core::Result<void> VulkanOffscreenTarget::create_depth(
     VkDevice device, VkPhysicalDevice physical_device, VkFormat depth_format) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !physical_device || depth_format == VK_FORMAT_UNDEFINED) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   // Format must actually support depth attachment usage.
   VkImageFormatProperties fmt_props{};
@@ -120,7 +120,7 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create_depth(
   if (vkGetPhysicalDeviceImageFormatProperties(
           physical_device, depth_format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
           base_depth_usage, 0, &fmt_props) != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
 
   VkImageCreateInfo image_info{};
@@ -152,7 +152,7 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create_depth(
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
   if (vkCreateImage(device, &image_info, nullptr, &depth_image_) != VK_SUCCESS) {
     depth_sampleable_ = false;
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   if (allocator_) {
@@ -160,7 +160,7 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create_depth(
     if (!allocation.is_ok()) {
       vkDestroyImage(device, depth_image_, nullptr);
       depth_image_ = VK_NULL_HANDLE;
-      return omnicpp::core::Result<void>::error(allocation.error());
+      return ::warploom::core::Result<void>::error(allocation.error());
     }
     depth_allocation_ = allocation.value();
     depth_uses_allocator_ = true;
@@ -187,7 +187,7 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create_depth(
     if (!found) {
       vkDestroyImage(device, depth_image_, nullptr);
       depth_image_ = VK_NULL_HANDLE;
-      return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
   }
 
@@ -200,20 +200,20 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create_depth(
   view_info.subresourceRange.levelCount = 1;
   view_info.subresourceRange.layerCount = 1;
   if (vkCreateImageView(device, &view_info, nullptr, &depth_view_) != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
   depth_format_ = depth_format;
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)physical_device; (void)depth_format;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanOffscreenTarget::create_render_pass(VkDevice device) {
+::warploom::core::Result<void> VulkanOffscreenTarget::create_render_pass(VkDevice device) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !image_ || render_pass_) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
 
   VkAttachmentDescription color_attachment{};
@@ -288,19 +288,19 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create_render_pass(VkDevice d
 
   const VkResult result = vkCreateRenderPass(device, &render_pass_info, nullptr, &render_pass_);
   if (result != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanOffscreenTarget::create_framebuffer(VkDevice device) {
+::warploom::core::Result<void> VulkanOffscreenTarget::create_framebuffer(VkDevice device) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !image_view_ || !render_pass_ || framebuffer_) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   VkImageView attachment_views[2] = {image_view_, depth_view_};
   VkFramebufferCreateInfo framebuffer_info{};
@@ -318,12 +318,12 @@ omnicpp::core::Result<void> VulkanOffscreenTarget::create_framebuffer(VkDevice d
   framebuffer_info.layers = 1;
   const VkResult result = vkCreateFramebuffer(device, &framebuffer_info, nullptr, &framebuffer_);
   if (result != VK_SUCCESS) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -372,4 +372,4 @@ void VulkanOffscreenTarget::cleanup(VkDevice device) noexcept {
   height_ = 0;
 }
 
-} // namespace omnicpp::render
+} // namespace warploom::render

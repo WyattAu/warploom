@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 namespace {
 
@@ -211,7 +211,7 @@ std::size_t VulkanSceneResourceRegistry::live_texture_count() const noexcept {
 }
 
 VulkanScene extract_vulkan_scene(
-    const omnicpp::core::World& world,
+    const ::warploom::core::World& world,
     VkPipeline pipeline,
     VkPipelineLayout pipeline_layout,
     SceneExtractionStats* stats) {
@@ -220,12 +220,12 @@ VulkanScene extract_vulkan_scene(
   scene.pipeline_layout = pipeline_layout;
 
   struct CameraCandidate {
-    omnicpp::core::Entity entity{};
+    ::warploom::core::Entity entity{};
     const SceneCameraComponent* camera{nullptr};
   };
   std::vector<CameraCandidate> cameras;
   world.for_each<SceneCameraComponent>(
-      [&cameras](omnicpp::core::Entity entity, const SceneCameraComponent& camera) {
+      [&cameras](::warploom::core::Entity entity, const SceneCameraComponent& camera) {
         if (camera.active) cameras.push_back({entity, &camera});
       });
   std::sort(cameras.begin(), cameras.end(),
@@ -244,12 +244,12 @@ VulkanScene extract_vulkan_scene(
 
   std::size_t culled_objects = 0;
   struct ObjectCandidate {
-    omnicpp::core::Entity entity{};
+    ::warploom::core::Entity entity{};
     SceneObject object{};
   };
   std::vector<ObjectCandidate> objects;
   world.for_each<SceneRenderableComponent>(
-      [&](omnicpp::core::Entity entity,
+      [&](::warploom::core::Entity entity,
           const SceneRenderableComponent& renderable) {
         if (!renderable.visible || renderable.mesh == nullptr) return;
         SceneObject object;
@@ -281,13 +281,13 @@ VulkanScene extract_vulkan_scene(
   return scene;
 }
 
-VulkanScene extract_vulkan_scene(const omnicpp::core::World& world,
+VulkanScene extract_vulkan_scene(const ::warploom::core::World& world,
                                  SceneExtractionStats* stats) {
   return extract_vulkan_scene(world, VK_NULL_HANDLE, VK_NULL_HANDLE, stats);
 }
 
 VulkanScene extract_vulkan_scene(
-    const omnicpp::core::World& world,
+    const ::warploom::core::World& world,
     const VulkanSceneResourceRegistry& resources,
     VkPipeline pipeline,
     VkPipelineLayout pipeline_layout,
@@ -297,12 +297,12 @@ VulkanScene extract_vulkan_scene(
   scene.pipeline_layout = pipeline_layout;
 
   struct CameraCandidate {
-    omnicpp::core::Entity entity{};
+    ::warploom::core::Entity entity{};
     const SceneCameraComponent* camera{nullptr};
   };
   std::vector<CameraCandidate> cameras;
   world.for_each<SceneCameraComponent>(
-      [&cameras](omnicpp::core::Entity entity, const SceneCameraComponent& camera) {
+      [&cameras](::warploom::core::Entity entity, const SceneCameraComponent& camera) {
         if (camera.active) cameras.push_back({entity, &camera});
       });
   std::sort(cameras.begin(), cameras.end(),
@@ -321,12 +321,12 @@ VulkanScene extract_vulkan_scene(
 
   std::size_t culled_objects = 0;
   struct ObjectCandidate {
-    omnicpp::core::Entity entity{};
+    ::warploom::core::Entity entity{};
     SceneObject object{};
   };
   std::vector<ObjectCandidate> objects;
   world.for_each<SceneRenderableComponent>(
-      [&](omnicpp::core::Entity entity,
+      [&](::warploom::core::Entity entity,
           const SceneRenderableComponent& renderable) {
         const SceneMesh* mesh = resources.resolve(renderable.mesh_handle);
         if (!renderable.visible || mesh == nullptr) return;
@@ -377,4 +377,4 @@ VulkanScene extract_vulkan_scene(
   return scene;
 }
 
-} // namespace omnicpp::render
+} // namespace warploom::render

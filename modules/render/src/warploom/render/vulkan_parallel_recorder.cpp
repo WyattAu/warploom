@@ -9,7 +9,7 @@
 #include <vulkan/vulkan.h>
 #endif
 
-namespace omnicpp::render {
+namespace warploom::render {
 
 namespace {
 
@@ -42,11 +42,11 @@ void run_band_job(void* raw) {
 
 VulkanParallelRecorder::~VulkanParallelRecorder() { cleanup(); }
 
-omnicpp::core::Result<void> VulkanParallelRecorder::initialize(
+::warploom::core::Result<void> VulkanParallelRecorder::initialize(
     VkDevice device, std::uint32_t queue_family_index, std::uint32_t band_count) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || band_count == 0) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   if (device_) cleanup();
   device_ = device;
@@ -65,8 +65,8 @@ omnicpp::core::Result<void> VulkanParallelRecorder::initialize(
     pool_info.queueFamilyIndex = queue_family_index;
     if (vkCreateCommandPool(device_, &pool_info, nullptr, &band.pool) != VK_SUCCESS) {
       cleanup();
-      return omnicpp::core::Result<void>::error(
-          omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(
+          ::warploom::core::RuntimeError::vulkan_not_available);
     }
     VkCommandBufferAllocateInfo alloc_info{};
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -75,14 +75,14 @@ omnicpp::core::Result<void> VulkanParallelRecorder::initialize(
     alloc_info.commandBufferCount = 1;
     if (vkAllocateCommandBuffers(device_, &alloc_info, &band.buffer) != VK_SUCCESS) {
       cleanup();
-      return omnicpp::core::Result<void>::error(
-          omnicpp::core::RuntimeError::vulkan_not_available);
+      return ::warploom::core::Result<void>::error(
+          ::warploom::core::RuntimeError::vulkan_not_available);
     }
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)queue_family_index; (void)band_count;
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
@@ -100,17 +100,17 @@ void VulkanParallelRecorder::cleanup() noexcept {
   device_ = VK_NULL_HANDLE;
 }
 
-omnicpp::core::Result<std::vector<VkCommandBuffer>> VulkanParallelRecorder::record_parallel(
+::warploom::core::Result<std::vector<VkCommandBuffer>> VulkanParallelRecorder::record_parallel(
     std::uint32_t width, std::uint32_t height, const RecordBandFn& record_band,
     VkRenderPass compatible_pass, VkFramebuffer framebuffer) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device_ || !record_band || width == 0 || height == 0 || !compatible_pass) {
-    return omnicpp::core::Result<std::vector<VkCommandBuffer>>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<std::vector<VkCommandBuffer>>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
   if (height < band_count_) {
-    return omnicpp::core::Result<std::vector<VkCommandBuffer>>::error(
-        omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<std::vector<VkCommandBuffer>>::error(
+        ::warploom::core::RuntimeError::invalid_config);
   }
 
   const std::size_t band_count = bands_.size();
@@ -134,10 +134,10 @@ omnicpp::core::Result<std::vector<VkCommandBuffer>> VulkanParallelRecorder::reco
     // Persistent-workers path: fork/join through the job system. No thread
     // creation and no heap allocation per frame. Band 0 runs on the calling
     // thread (it has nothing better to do), bands 1..n-1 as raw jobs.
-    omnicpp::core::JobCounter counter;
+    ::warploom::core::JobCounter counter;
     counter.add(static_cast<int>(band_count - 1));
     for (std::size_t i = 1; i < band_count; ++i) {
-      job_system_->submit_raw(omnicpp::core::JobPriority::render, &counter,
+      job_system_->submit_raw(::warploom::core::JobPriority::render, &counter,
                               &run_band_job, &band_jobs_[i]);
     }
     run_band_job(&band_jobs_[0]);
@@ -164,27 +164,27 @@ omnicpp::core::Result<std::vector<VkCommandBuffer>> VulkanParallelRecorder::reco
   for (const auto& band : bands_) {
     buffers.push_back(band.buffer);
   }
-  return omnicpp::core::Result<std::vector<VkCommandBuffer>>::ok(buffers);
+  return ::warploom::core::Result<std::vector<VkCommandBuffer>>::ok(buffers);
 #else
   (void)width; (void)height; (void)record_band;
   (void)compatible_pass; (void)framebuffer;
-  return omnicpp::core::Result<std::vector<VkCommandBuffer>>::error(
-      omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<std::vector<VkCommandBuffer>>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-omnicpp::core::Result<void> VulkanParallelRecorder::reset() {
+::warploom::core::Result<void> VulkanParallelRecorder::reset() {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device_) {
-    return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::invalid_config);
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
   for (auto& band : bands_) {
     vkResetCommandBuffer(band.buffer, 0);
   }
-  return omnicpp::core::Result<void>::ok();
+  return ::warploom::core::Result<void>::ok();
 #else
-  return omnicpp::core::Result<void>::error(omnicpp::core::RuntimeError::vulkan_not_available);
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }
 
-} // namespace omnicpp::render
+} // namespace warploom::render
