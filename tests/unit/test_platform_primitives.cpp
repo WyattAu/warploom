@@ -2,8 +2,8 @@
 #include <atomic>
 #include <thread>
 #include <vector>
-#include "engine/core/clock.hpp"
-#include "engine/core/thread_pool.hpp"
+#include "warploom/core/clock.hpp"
+#include "warploom/core/thread_pool.hpp"
 
 namespace {
 

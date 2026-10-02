@@ -138,12 +138,11 @@ endforeach()
 # ============================================================================
 # Include Directories
 # ============================================================================
-include_directories(
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/include/OmniCppLib
-    ${CMAKE_SOURCE_DIR}/include/engine
-    ${CMAKE_SOURCE_DIR}/include/game
-)
+# Module headers are reached through each module's own PUBLIC interface
+# include directory (warploom/<module>/...). There is deliberately no
+# superproject-wide include path: the 58 engine/* compat forwarders that
+# used to live here are gone, and every in-tree consumer spells the real
+# warploom/... path.
 
 # ============================================================================
 # Qt6 Configuration

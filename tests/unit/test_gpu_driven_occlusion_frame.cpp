@@ -19,13 +19,13 @@
 #include <cstring>
 #include <vector>
 
-#include "engine/render/vulkan_descriptors.hpp"
-#include "engine/render/vulkan_memory_allocator.hpp"
-#include "engine/render/vulkan_mesh_table.hpp"
-#include "engine/render/vulkan_offscreen.hpp"
-#include "engine/render/vulkan_pipeline.hpp"
-#include "engine/render/vulkan_renderer.hpp"
-#include "engine/render/vulkan_scene.hpp"
+#include "warploom/render/vulkan_descriptors.hpp"
+#include "warploom/render/vulkan_memory_allocator.hpp"
+#include "warploom/render/vulkan_mesh_table.hpp"
+#include "warploom/render/vulkan_offscreen.hpp"
+#include "warploom/render/vulkan_pipeline.hpp"
+#include "warploom/render/vulkan_renderer.hpp"
+#include "warploom/render/vulkan_scene.hpp"
 #include "vulkan_test_readback.hpp"
 
 #ifdef WARPLOOM_HAS_VULKAN

@@ -44,8 +44,8 @@
 
 #include <vulkan/vulkan.h>
 
-#include "engine/render/vulkan_memory_allocator.hpp"
-#include "engine/render/vulkan_scene.hpp"
+#include "warploom/render/vulkan_memory_allocator.hpp"
+#include "warploom/render/vulkan_scene.hpp"
 
 // ============================================================================
 // S5-B phase 2: WARPLOOM_* env names are primary; the legacy OMNICPP_*

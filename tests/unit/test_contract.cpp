@@ -10,8 +10,8 @@
 #include <string>
 #include <vector>
 
-#include "engine/core/contract.hpp"
-#include "engine/core/ecs.hpp"
+#include "warploom/core/contract.hpp"
+#include "warploom/core/ecs.hpp"
 
 namespace {
 

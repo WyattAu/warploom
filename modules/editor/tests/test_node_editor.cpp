@@ -27,7 +27,7 @@
 #include "warploom/core/document.hpp"
 #include "warploom/core/node_graph.hpp"
 #include "warploom/editor/node_editor.hpp"
-#include "engine/render/software_rasterizer.hpp"
+#include "warploom/render/software_rasterizer.hpp"
 #include "warploom/ui/widget.hpp"
 
 namespace ed = warploom::editor;

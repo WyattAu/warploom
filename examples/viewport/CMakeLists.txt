@@ -12,10 +12,10 @@ add_executable(omnicpp_viewport main.cpp)
 set_target_properties(omnicpp_viewport PROPERTIES OUTPUT_NAME warploom_viewport)  # S5-B phase 2 binary rename
 
 # S5-A: the aggregate (Warploom::engine) replaces the deleted
-# omnicpp_runtime monolith; the include root supplies the engine/*
-# forwarder spellings main.cpp and telemetry.hpp use.
+# omnicpp_runtime monolith. Module headers arrive through each module's
+# PUBLIC interface include directory; main.cpp and telemetry.hpp spell
+# the real warploom/... paths (no superproject include shim).
 target_link_libraries(omnicpp_viewport PRIVATE Warploom::engine)
-target_include_directories(omnicpp_viewport PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_compile_features(omnicpp_viewport PRIVATE cxx_std_26)
 
 # The app owns a window, so it needs the XCB headers itself. warploom_render

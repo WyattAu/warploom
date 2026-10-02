@@ -15,8 +15,8 @@ cmake_minimum_required(VERSION 3.28...4.0)
 #
 # S3 is an include-path and packaging extraction only: public names stay
 # `warploom::render` since S5-B phase 1a; the compat footers keep the old
-# docs/warploom-render-plan.md §1). The compat forwarders under
-# include/engine/render/ keep all 44 existing include sites compiling.
+# docs/warploom-render-plan.md §1). Public headers are spellable as
+# warploom/render/*.hpp; the compat forwarders are gone.
 # ============================================================================
 
 project(WarploomRender VERSION 0.1.0 LANGUAGES CXX)

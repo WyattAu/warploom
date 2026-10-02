@@ -9,9 +9,9 @@
 
 #include <cmath>
 
-#include "engine/core/ecs.hpp"
-#include "engine/render/scene_camera.hpp"
-#include "engine/render/vulkan_scene.hpp"
+#include "warploom/core/ecs.hpp"
+#include "warploom/render/scene_camera.hpp"
+#include "warploom/render/vulkan_scene.hpp"
 
 namespace {
 

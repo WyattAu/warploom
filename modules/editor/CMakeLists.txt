@@ -14,8 +14,8 @@ cmake_minimum_required(VERSION 3.28...4.0)
 # Standalone: find_package(WarploomEditor CONFIG REQUIRED) after install.
 #
 # Namespaces are warploom::* since S5-B phase 1b (identifier migration,
-# S2-B / S-decision pass); the compat forwarders under
-# include/engine/editor/ keep every existing include site compiling.
+# S2-B / S-decision pass). Public headers are spellable as
+# warploom/editor/*.hpp; the compat forwarders are gone.
 # ============================================================================
 
 project(WarploomEditor VERSION 0.1.0 LANGUAGES CXX)

@@ -94,7 +94,6 @@ if(WARPLOOM_USE_VULKAN AND Vulkan_FOUND)
     target_sources(warploom_unit_tests PRIVATE ${WARPLOOM_GPU_TEST_SOURCES})
 endif()
 target_link_libraries(warploom_unit_tests PRIVATE Warploom::engine Threads::Threads gtest gtest_main)
-target_include_directories(warploom_unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/include)
 # Asset directory for file-based tests (mannequin model); shader-dir define
 # only applies when the test shader targets exist (GPU presets).
 target_compile_definitions(warploom_unit_tests PRIVATE
@@ -135,7 +134,6 @@ endif()
 add_executable(warploom_contract_violator unit/contract_violator.cpp)
 set_target_properties(warploom_contract_violator PROPERTIES OUTPUT_NAME warploom_contract_violator)  # S5-B phase 2 binary rename
 target_link_libraries(warploom_contract_violator PRIVATE Warploom::engine)
-target_include_directories(warploom_contract_violator PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dependencies(warploom_unit_tests warploom_contract_violator)
 if(TARGET warploom_shaders)
     add_dependencies(warploom_unit_tests warploom_shaders)
@@ -148,14 +146,12 @@ add_executable(warploom_runtime_only_tests
 )
 set_target_properties(warploom_runtime_only_tests PROPERTIES OUTPUT_NAME warploom_runtime_only_tests)  # S5-B phase 2 binary rename
 target_link_libraries(warploom_runtime_only_tests PRIVATE Warploom::engine Threads::Threads gtest gtest_main)
-target_include_directories(warploom_runtime_only_tests PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 add_executable(warploom_deterministic_runtime_benchmark
     performance/deterministic_runtime_benchmark.cpp
 )
 set_target_properties(warploom_deterministic_runtime_benchmark PROPERTIES OUTPUT_NAME warploom_deterministic_runtime_benchmark)  # S5-B phase 2 binary rename
 target_link_libraries(warploom_deterministic_runtime_benchmark PRIVATE Warploom::engine Threads::Threads)
-target_include_directories(warploom_deterministic_runtime_benchmark PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 # ============================================================================
 # Test registration

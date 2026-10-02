@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "engine/render/vulkan_mesh_table.hpp"
+#include "warploom/render/vulkan_mesh_table.hpp"
 
 namespace {
 

@@ -13,14 +13,14 @@
 #include <iterator>
 #include <vector>
 
-#include "engine/render/vulkan_compute.hpp"
-#include "engine/render/vulkan_context.hpp"
-#include "engine/render/vulkan_descriptors.hpp"
-#include "engine/render/vulkan_memory_allocator.hpp"
-#include "engine/render/vulkan_offscreen.hpp"
-#include "engine/render/vulkan_pipeline.hpp"
-#include "engine/render/vulkan_render_graph.hpp"
-#include "engine/render/vulkan_renderer.hpp"
+#include "warploom/render/vulkan_compute.hpp"
+#include "warploom/render/vulkan_context.hpp"
+#include "warploom/render/vulkan_descriptors.hpp"
+#include "warploom/render/vulkan_memory_allocator.hpp"
+#include "warploom/render/vulkan_offscreen.hpp"
+#include "warploom/render/vulkan_pipeline.hpp"
+#include "warploom/render/vulkan_render_graph.hpp"
+#include "warploom/render/vulkan_renderer.hpp"
 
 #ifdef WARPLOOM_HAS_VULKAN
 #include "vulkan_test_readback.hpp"

@@ -5,8 +5,8 @@
 
 #include <cmath>
 
-#include "engine/render/depth_convention.hpp"
-#include "engine/render/vulkan_hiz_pyramid.hpp"
+#include "warploom/render/depth_convention.hpp"
+#include "warploom/render/vulkan_hiz_pyramid.hpp"
 
 TEST(DepthConvention, MatchesCanonicalProjection) {
   using omnicpp::render::depth::ndc_from_view_distance;

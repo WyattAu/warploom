@@ -16,8 +16,8 @@
 #include <string>
 #include <vector>
 
-#include "engine/asset/image_decode.hpp"
-#include "engine/asset/jpeg_decoder.hpp"
+#include "warploom/asset/image_decode.hpp"
+#include "warploom/asset/jpeg_decoder.hpp"
 
 namespace {
 

@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 
-#include "engine/render/vulkan_hiz_frame_state.hpp"
-#include "engine/render/vulkan_render_graph.hpp"
+#include "warploom/render/vulkan_hiz_frame_state.hpp"
+#include "warploom/render/vulkan_render_graph.hpp"
 
 TEST(HiZFrameState, ConfiguresRuntimeExtentAndInvalidatesFirstFrame) {
   omnicpp::render::VulkanHiZFrameState state;

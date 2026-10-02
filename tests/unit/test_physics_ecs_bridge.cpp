@@ -9,8 +9,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "engine/core/ecs.hpp"
-#include "engine/core/physics_world.hpp"
+#include "warploom/core/ecs.hpp"
+#include "warploom/core/physics_world.hpp"
 
 namespace {
 

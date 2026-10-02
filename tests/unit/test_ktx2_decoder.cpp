@@ -11,8 +11,8 @@
 #include <string>
 #include <vector>
 
-#include "engine/asset/image_decode.hpp"
-#include "engine/asset/ktx2_decoder.hpp"
+#include "warploom/asset/image_decode.hpp"
+#include "warploom/asset/ktx2_decoder.hpp"
 
 namespace {
 

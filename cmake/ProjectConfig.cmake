@@ -7,11 +7,10 @@
 # Project metadata
 set(WARPLOOM_PROJECT_NAME "Warploom" CACHE STRING "Project name")
 set(WARPLOOM_PROJECT_VERSION "1.0.0" CACHE STRING "Project version")
-set(WARPLOOM_PROJECT_DESCRIPTION "OmniCpp Template Project" CACHE STRING "Project description")
+set(WARPLOOM_PROJECT_DESCRIPTION "Warploom — data-oriented C++ engine with deterministic simulation and Vulkan rendering" CACHE STRING "Project description")
 
 # Source directories
 set(WARPLOOM_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH "Source directory")
-set(WARPLOOM_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include" CACHE PATH "Include directory")
 set(WARPLOOM_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src" CACHE PATH "Source code directory")
 set(WARPLOOM_TESTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests" CACHE PATH "Tests directory")
 set(WARPLOOM_EXAMPLES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/examples" CACHE PATH "Examples directory")
@@ -44,10 +43,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Validate configuration
 if(NOT EXISTS "${WARPLOOM_SOURCE_DIR}")
     message(FATAL_ERROR "Source directory does not exist: ${WARPLOOM_SOURCE_DIR}")
-endif()
-
-if(NOT EXISTS "${WARPLOOM_INCLUDE_DIR}")
-    message(FATAL_ERROR "Include directory does not exist: ${WARPLOOM_INCLUDE_DIR}")
 endif()
 
 message(STATUS "Project configuration loaded successfully")

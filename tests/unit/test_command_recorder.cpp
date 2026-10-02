@@ -14,8 +14,8 @@
 #include <fstream>
 #include <string>
 
-#include "engine/core/command_recorder.hpp"
-#include "engine/core/editor_session.hpp"
+#include "warploom/core/command_recorder.hpp"
+#include "warploom/core/editor_session.hpp"
 
 namespace {
 

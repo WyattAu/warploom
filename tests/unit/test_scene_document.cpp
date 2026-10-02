@@ -11,8 +11,8 @@
 #include <cstdint>
 #include <string>
 
-#include "engine/core/document.hpp"
-#include "engine/core/property_registry.hpp"
+#include "warploom/core/document.hpp"
+#include "warploom/core/property_registry.hpp"
 
 namespace {
 

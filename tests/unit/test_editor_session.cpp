@@ -15,8 +15,8 @@
 #include <cstdio>
 #include <string>
 
-#include "engine/core/control_server.hpp"
-#include "engine/core/editor_session.hpp"
+#include "warploom/core/control_server.hpp"
+#include "warploom/core/editor_session.hpp"
 
 namespace {
 

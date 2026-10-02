@@ -9,12 +9,12 @@
 #include <cstdint>
 #include <string>
 
-#include "engine/core/control_server.hpp"
-#include "engine/core/document.hpp"
-#include "engine/core/editor_session.hpp"
-#include "engine/core/node_graph.hpp"
-#include "engine/core/property_registry.hpp"
-#include "engine/core/script_module.hpp"
+#include "warploom/core/control_server.hpp"
+#include "warploom/core/document.hpp"
+#include "warploom/core/editor_session.hpp"
+#include "warploom/core/node_graph.hpp"
+#include "warploom/core/property_registry.hpp"
+#include "warploom/core/script_module.hpp"
 
 namespace {
 

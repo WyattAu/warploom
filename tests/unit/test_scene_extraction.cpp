@@ -5,9 +5,9 @@
 
 #include <cmath>
 
-#include "engine/core/ecs.hpp"
-#include "engine/render/frustum.hpp"
-#include "engine/render/vulkan_scene.hpp"
+#include "warploom/core/ecs.hpp"
+#include "warploom/render/frustum.hpp"
+#include "warploom/render/vulkan_scene.hpp"
 
 namespace {
 

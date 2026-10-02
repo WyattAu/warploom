@@ -3,8 +3,8 @@
 #include <thread>
 #include <cstdio>
 #include <fstream>
-#include "engine/core/deterministic_runtime.hpp"
-#include "engine/core/replay.hpp"
+#include "warploom/core/deterministic_runtime.hpp"
+#include "warploom/core/replay.hpp"
 
 namespace {
 

@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-#include "engine/render/software_rasterizer.hpp"
+#include "warploom/render/software_rasterizer.hpp"
 #include "warploom/ui/widget.hpp"
 
 namespace {

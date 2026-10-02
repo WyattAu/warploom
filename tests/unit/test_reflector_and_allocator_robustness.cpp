@@ -15,10 +15,10 @@
 #include <random>
 #include <vector>
 
-#include "engine/render/vulkan_descriptors.hpp"
+#include "warploom/render/vulkan_descriptors.hpp"
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE
-#include "engine/render/vulkan_context.hpp"
-#include "engine/render/vulkan_memory_allocator.hpp"
+#include "warploom/render/vulkan_context.hpp"
+#include "warploom/render/vulkan_memory_allocator.hpp"
 #endif
 
 namespace {

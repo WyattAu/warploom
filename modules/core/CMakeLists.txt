@@ -10,9 +10,9 @@ cmake_minimum_required(VERSION 3.28...4.0)
 # In-tree:    add_subdirectory(modules/core) from the root project.
 # Standalone: find_package(WarploomCore CONFIG REQUIRED) after install.
 #
-# Phase A keeps the omnicpp::* namespaces (identifier migration is phase B,
-# wired to the S-decision pass); the compat forwarders under
-# include/engine/core/ keep every existing include site compiling.
+# Public headers are spellable as warploom/core/*.hpp. The Phase-A compat
+# forwarders under include/engine/core/ are gone: every in-tree consumer
+# names the real path, so the superproject has no include shim at all.
 # ============================================================================
 
 project(WarploomCore VERSION 0.1.0 LANGUAGES CXX)

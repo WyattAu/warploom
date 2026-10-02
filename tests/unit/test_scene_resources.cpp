@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include "engine/render/vulkan_scene.hpp"
+#include "warploom/render/vulkan_scene.hpp"
 
 namespace {
 

@@ -37,12 +37,12 @@
 #include <vulkan/vulkan.h>
 #endif
 
-#include "engine/render/vulkan_acceleration_structure.hpp"
-#include "engine/render/vulkan_context.hpp"
-#include "engine/render/vulkan_descriptors.hpp"
-#include "engine/render/vulkan_memory_allocator.hpp"
-#include "engine/render/vulkan_renderer.hpp"
-#include "engine/render/vulkan_rt_pipeline.hpp"
+#include "warploom/render/vulkan_acceleration_structure.hpp"
+#include "warploom/render/vulkan_context.hpp"
+#include "warploom/render/vulkan_descriptors.hpp"
+#include "warploom/render/vulkan_memory_allocator.hpp"
+#include "warploom/render/vulkan_renderer.hpp"
+#include "warploom/render/vulkan_rt_pipeline.hpp"
 #include "vulkan_test_readback.hpp"
 
 #ifdef WARPLOOM_HAS_VULKAN

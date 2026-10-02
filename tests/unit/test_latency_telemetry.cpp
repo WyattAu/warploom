@@ -9,7 +9,7 @@
 #include <numeric>
 #include <vector>
 
-#include "engine/core/latency_telemetry.hpp"
+#include "warploom/core/latency_telemetry.hpp"
 
 namespace {
 

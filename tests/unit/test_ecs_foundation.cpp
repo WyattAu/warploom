@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <string>
 #include <vector>
-#include "engine/core/ecs.hpp"
+#include "warploom/core/ecs.hpp"
 
 namespace {
 

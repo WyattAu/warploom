@@ -16,12 +16,12 @@
 #include <string_view>
 #include <vector>
 
-#include "engine/asset/gltf_animation.hpp"
+#include "warploom/asset/gltf_animation.hpp"
 
 #ifndef WARPLOOM_TEST_ASSET_DIR
 #define WARPLOOM_TEST_ASSET_DIR "assets/models"
 #endif
-#include "engine/asset/gltf_importer.hpp"
+#include "warploom/asset/gltf_importer.hpp"
 
 namespace {
 

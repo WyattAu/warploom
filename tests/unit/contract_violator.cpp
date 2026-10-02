@@ -1,6 +1,6 @@
 #include <sys/resource.h>
 
-#include "engine/core/contract.hpp"
+#include "warploom/core/contract.hpp"
 
 int main() {
   // Keep the abort fast: no 35 MB core dump through systemd-coredump on

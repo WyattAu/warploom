@@ -12,8 +12,8 @@
 #include <thread>
 #include <vector>
 
-#include "engine/core/clock.hpp"
-#include "engine/core/job_system.hpp"
+#include "warploom/core/clock.hpp"
+#include "warploom/core/job_system.hpp"
 
 #if defined(__SANITIZE_THREAD__)
 #define WARPLOOM_TSAN 1

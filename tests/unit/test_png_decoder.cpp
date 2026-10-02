@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include "engine/asset/png_decoder.hpp"
+#include "warploom/asset/png_decoder.hpp"
 
 namespace {
 

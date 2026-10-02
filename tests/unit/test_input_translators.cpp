@@ -14,8 +14,8 @@
 #include <cmath>
 #include <cstdint>
 
-#include "engine/core/input_state.hpp"
-#include "engine/core/input_translators.hpp"
+#include "warploom/core/input_state.hpp"
+#include "warploom/core/input_translators.hpp"
 
 namespace {
 

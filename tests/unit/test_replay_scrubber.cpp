@@ -15,8 +15,8 @@
 
 #include <string>
 
-#include "engine/core/editor_session.hpp"
-#include "engine/core/replay_scrubber.hpp"
+#include "warploom/core/editor_session.hpp"
+#include "warploom/core/replay_scrubber.hpp"
 
 namespace {
 

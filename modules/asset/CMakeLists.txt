@@ -14,8 +14,8 @@ cmake_minimum_required(VERSION 3.28...4.0)
 #
 # S3.5 is an include-path and packaging extraction only: public names
 # re-badged to `warploom::asset` in S5-B phase 1a (see
-# docs/warploom-asset-plan.md §1). Compat forwarders under
-# include/engine/asset/ keep all 9 include sites compiling.
+# docs/warploom-asset-plan.md §1). Public headers are spellable as
+# warploom/asset/*.hpp; the compat forwarders are gone.
 # ============================================================================
 
 project(WarploomAsset VERSION 0.1.0 LANGUAGES CXX)

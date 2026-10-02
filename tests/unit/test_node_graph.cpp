@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "engine/core/node_graph.hpp"
+#include "warploom/core/node_graph.hpp"
 
 namespace {
 

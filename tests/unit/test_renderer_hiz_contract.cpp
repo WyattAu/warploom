@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include "engine/render/vulkan_renderer.hpp"
+#include "warploom/render/vulkan_renderer.hpp"
 
 TEST(VulkanRendererHiZ, DisabledByDefaultAndSafeBeforeInitialization) {
   omnicpp::render::VulkanRenderer renderer;

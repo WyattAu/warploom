@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-#include "engine/asset/gltf_importer.hpp"
+#include "warploom/asset/gltf_importer.hpp"
 
 namespace {
 

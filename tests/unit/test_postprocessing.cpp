@@ -17,16 +17,16 @@
 #include <string>
 #include <vector>
 
-#include "engine/render/vulkan_context.hpp"
-#include "engine/render/vulkan_render_graph.hpp"
-#include "engine/render/vulkan_renderer.hpp"
-#include "engine/render/vulkan_descriptors.hpp"
-#include "engine/render/vulkan_frame_upload.hpp"
-#include "engine/render/vulkan_memory_allocator.hpp"
-#include "engine/render/vulkan_offscreen.hpp"
-#include "engine/render/vulkan_pipeline.hpp"
-#include "engine/render/vulkan_renderer.hpp"
-#include "engine/render/vulkan_scene.hpp"
+#include "warploom/render/vulkan_context.hpp"
+#include "warploom/render/vulkan_render_graph.hpp"
+#include "warploom/render/vulkan_renderer.hpp"
+#include "warploom/render/vulkan_descriptors.hpp"
+#include "warploom/render/vulkan_frame_upload.hpp"
+#include "warploom/render/vulkan_memory_allocator.hpp"
+#include "warploom/render/vulkan_offscreen.hpp"
+#include "warploom/render/vulkan_pipeline.hpp"
+#include "warploom/render/vulkan_renderer.hpp"
+#include "warploom/render/vulkan_scene.hpp"
 #include "vulkan_test_readback.hpp"
 
 #if defined(WARPLOOM_HAS_VULKAN)
