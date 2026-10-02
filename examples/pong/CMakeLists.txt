@@ -53,13 +53,13 @@ target_link_libraries(omnicpp_pong_example PRIVATE
 )
 
 # Qt6 Vulkan integration
-target_compile_definitions(omnicpp_pong_example PRIVATE OMNICPP_HAS_QT_VULKAN)
+target_compile_definitions(omnicpp_pong_example PRIVATE WARPLOOM_HAS_QT_VULKAN)
 
 # Link Vulkan if available
 if(Vulkan_FOUND)
     target_include_directories(omnicpp_pong_example PRIVATE ${Vulkan_INCLUDE_DIRS})
     target_link_libraries(omnicpp_pong_example PRIVATE ${VULKAN_LIBRARIES})
-    target_compile_definitions(omnicpp_pong_example PRIVATE OMNICPP_HAS_VULKAN)
+    target_compile_definitions(omnicpp_pong_example PRIVATE WARPLOOM_HAS_VULKAN)
     message(STATUS "Vulkan support enabled for pong example")
 endif()
 
@@ -73,8 +73,8 @@ if(glm_FOUND)
 endif()
 
 # Wayland-specific settings
-if(OMNICPP_HAS_WAYLAND)
-    target_compile_definitions(omnicpp_pong_example PRIVATE OMNICPP_HAS_WAYLAND)
+if(WARPLOOM_HAS_WAYLAND)
+    target_compile_definitions(omnicpp_pong_example PRIVATE WARPLOOM_HAS_WAYLAND)
     message(STATUS "Wayland support enabled for pong example")
 endif()
 

@@ -37,22 +37,26 @@ namespace warploom::contract {
 
 }  // namespace warploom::contract
 
-#if defined(OMNICPP_CONTRACT_MODE_ASSUME)
+#if defined(WARPLOOM_CONTRACT_MODE_ASSUME) || defined(OMNICPP_CONTRACT_MODE_ASSUME)
 
-#define OMNICPP_CONTRACT(...) [[assume(__VA_ARGS__)]]
+#define WARPLOOM_CONTRACT(...) [[assume(__VA_ARGS__)]]
 
-#elif defined(OMNICPP_CONTRACT_MODE_OFF)
+#elif defined(WARPLOOM_CONTRACT_MODE_OFF) || defined(OMNICPP_CONTRACT_MODE_OFF)
 
-#define OMNICPP_CONTRACT(...)
+#define WARPLOOM_CONTRACT(...)
 
 #else
 
-#define OMNICPP_CONTRACT(...)                     \
+#define WARPLOOM_CONTRACT(...)                    \
   do {                                            \
     if (!(__VA_ARGS__)) {                         \
       ::warploom::contract::violate(#__VA_ARGS__, __FILE__, __LINE__); \
     }                                             \
   } while (false)
+
+// S5-B phase 2 shim: the legacy macro name expands to the new one
+// (docs/warploom-identity-plan.md); removed post-0.1.
+#define OMNICPP_CONTRACT WARPLOOM_CONTRACT
 
 #endif
 // S2-B compat footer: legacy `omnicpp::*` spellings keep resolving
@@ -64,9 +68,9 @@ namespace warploom::contract {
 // blocks merge). One directive per namespace THIS header declares,
 // each under its OWN guard (a shared guard would suppress later
 // headers' distinct directives).
-#ifndef OMNICPP_COMPAT_CONTRACT_NS
-#define OMNICPP_COMPAT_CONTRACT_NS
+#ifndef WARPLOOM_COMPAT_CONTRACT_NS
+#define WARPLOOM_COMPAT_CONTRACT_NS
 namespace omnicpp::contract {
     using namespace ::warploom::contract;
 }
-#endif  // OMNICPP_COMPAT_CONTRACT_NS
+#endif  // WARPLOOM_COMPAT_CONTRACT_NS

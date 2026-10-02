@@ -8,48 +8,48 @@
 # Platform Detection
 # ============================================================================
 if(WIN32)
-    set(OMNICPP_PLATFORM_WINDOWS ON)
-    set(OMNICPP_PLATFORM_NAME "Windows")
+    set(WARPLOOM_PLATFORM_WINDOWS ON)
+    set(WARPLOOM_PLATFORM_NAME "Windows")
 elseif(UNIX AND NOT APPLE)
-    set(OMNICPP_PLATFORM_LINUX ON)
-    set(OMNICPP_PLATFORM_NAME "Linux")
+    set(WARPLOOM_PLATFORM_LINUX ON)
+    set(WARPLOOM_PLATFORM_NAME "Linux")
 elseif(APPLE)
-    set(OMNICPP_PLATFORM_MACOS ON)
-    set(OMNICPP_PLATFORM_NAME "macOS")
+    set(WARPLOOM_PLATFORM_MACOS ON)
+    set(WARPLOOM_PLATFORM_NAME "macOS")
 elseif(EMSCRIPTEN)
-    set(OMNICPP_PLATFORM_WASM ON)
-    set(OMNICPP_PLATFORM_NAME "WASM")
+    set(WARPLOOM_PLATFORM_WASM ON)
+    set(WARPLOOM_PLATFORM_NAME "WASM")
 else()
     message(WARNING "Unknown platform: ${CMAKE_SYSTEM_NAME}")
-    set(OMNICPP_PLATFORM_NAME "Unknown")
+    set(WARPLOOM_PLATFORM_NAME "Unknown")
 endif()
 
 # ============================================================================
 # Architecture Detection
 # ============================================================================
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|x64")
-    set(OMNICPP_ARCH_X64 ON)
-    set(OMNICPP_ARCH_NAME "x64")
+    set(WARPLOOM_ARCH_X64 ON)
+    set(WARPLOOM_ARCH_NAME "x64")
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "i386|i686|x86")
-    set(OMNICPP_ARCH_X86 ON)
-    set(OMNICPP_ARCH_NAME "x86")
+    set(WARPLOOM_ARCH_X86 ON)
+    set(WARPLOOM_ARCH_NAME "x86")
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
-    set(OMNICPP_ARCH_ARM64 ON)
-    set(OMNICPP_ARCH_NAME "arm64")
+    set(WARPLOOM_ARCH_ARM64 ON)
+    set(WARPLOOM_ARCH_NAME "arm64")
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm|ARM")
-    set(OMNICPP_ARCH_ARM ON)
-    set(OMNICPP_ARCH_NAME "arm")
+    set(WARPLOOM_ARCH_ARM ON)
+    set(WARPLOOM_ARCH_NAME "arm")
 else()
     message(WARNING "Unknown architecture: ${CMAKE_SYSTEM_PROCESSOR}")
-    set(OMNICPP_ARCH_NAME "Unknown")
+    set(WARPLOOM_ARCH_NAME "Unknown")
 endif()
 
 # ============================================================================
 # Windows-Specific Configuration
 # ============================================================================
-if(OMNICPP_PLATFORM_WINDOWS)
+if(WARPLOOM_PLATFORM_WINDOWS)
     # Windows libraries
-    set(OMNICPP_PLATFORM_LIBRARIES "ws2_32;winmm;version")
+    set(WARPLOOM_PLATFORM_LIBRARIES "ws2_32;winmm;version")
 
     # Windows definitions
     add_definitions(-DWIN32_LEAN_AND_MEAN)
@@ -59,14 +59,14 @@ if(OMNICPP_PLATFORM_WINDOWS)
     add_definitions(-D_SCL_SECURE_NO_WARNINGS)
 
     # Windows subsystem
-    if(OMNICPP_PLATFORM_WASM)
+    if(WARPLOOM_PLATFORM_WASM)
         # WASM doesn't use Windows subsystem
     else()
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:CONSOLE")
     endif()
 
     # Windows-specific paths
-    set(OMNICPP_PATH_SEPARATOR "\\")
+    set(WARPLOOM_PATH_SEPARATOR "\\")
 
     # Windows-specific compiler flags
     if(MSVC)
@@ -77,16 +77,16 @@ endif()
 # ============================================================================
 # Linux-Specific Configuration
 # ============================================================================
-if(OMNICPP_PLATFORM_LINUX)
+if(WARPLOOM_PLATFORM_LINUX)
     # Linux libraries
-    set(OMNICPP_PLATFORM_LIBRARIES "pthread;dl;rt")
+    set(WARPLOOM_PLATFORM_LIBRARIES "pthread;dl;rt")
 
     # Linux definitions
     add_definitions(-D_POSIX_C_SOURCE=200809L)
     add_definitions(-D_XOPEN_SOURCE=700)
 
     # Linux-specific paths
-    set(OMNICPP_PATH_SEPARATOR "/")
+    set(WARPLOOM_PATH_SEPARATOR "/")
 
     # Linux-specific compiler flags
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -101,15 +101,15 @@ endif()
 # ============================================================================
 # WASM-Specific Configuration
 # ============================================================================
-if(OMNICPP_PLATFORM_WASM)
+if(WARPLOOM_PLATFORM_WASM)
     # WASM libraries (Emscripten provides most)
-    set(OMNICPP_PLATFORM_LIBRARIES "")
+    set(WARPLOOM_PLATFORM_LIBRARIES "")
 
     # WASM definitions
     add_definitions(-D__EMSCRIPTEN__)
 
     # WASM-specific paths
-    set(OMNICPP_PATH_SEPARATOR "/")
+    set(WARPLOOM_PATH_SEPARATOR "/")
 
     # WASM-specific compiler flags
     add_compile_options(-s USE_SDL=2)
@@ -130,15 +130,15 @@ endif()
 # ============================================================================
 # macOS-Specific Configuration
 # ============================================================================
-if(OMNICPP_PLATFORM_MACOS)
+if(WARPLOOM_PLATFORM_MACOS)
     # macOS libraries
-    set(OMNICPP_PLATFORM_LIBRARIES "-framework Cocoa -framework IOKit -framework CoreVideo")
+    set(WARPLOOM_PLATFORM_LIBRARIES "-framework Cocoa -framework IOKit -framework CoreVideo")
 
     # macOS definitions
     add_definitions(-D__APPLE__)
 
     # macOS-specific paths
-    set(OMNICPP_PATH_SEPARATOR "/")
+    set(WARPLOOM_PATH_SEPARATOR "/")
 
     # macOS-specific compiler flags
     add_compile_options(-fPIC)
@@ -151,23 +151,23 @@ endif()
 # Cross-Compilation Detection
 # ============================================================================
 if(CMAKE_CROSSCOMPILING)
-    set(OMNICPP_CROSS_COMPILING ON)
+    set(WARPLOOM_CROSS_COMPILING ON)
     message(STATUS "Cross-compiling for ${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 else()
-    set(OMNICPP_CROSS_COMPILING OFF)
+    set(WARPLOOM_CROSS_COMPILING OFF)
 endif()
 
 # ============================================================================
 # Platform-Specific Libraries
 # ============================================================================
-if(OMNICPP_PLATFORM_WINDOWS)
+if(WARPLOOM_PLATFORM_WINDOWS)
     find_library(WS2_32_LIBRARY ws2_32)
     find_library(WINMM_LIBRARY winmm)
     find_library(VERSION_LIBRARY version)
-    list(APPEND OMNICPP_PLATFORM_LIBRARIES ${WS2_32_LIBRARY} ${WINMM_LIBRARY} ${VERSION_LIBRARY})
-elseif(OMNICPP_PLATFORM_LINUX)
+    list(APPEND WARPLOOM_PLATFORM_LIBRARIES ${WS2_32_LIBRARY} ${WINMM_LIBRARY} ${VERSION_LIBRARY})
+elseif(WARPLOOM_PLATFORM_LINUX)
     find_package(Threads REQUIRED)
-    list(APPEND OMNICPP_PLATFORM_LIBRARIES Threads::Threads)
+    list(APPEND WARPLOOM_PLATFORM_LIBRARIES Threads::Threads)
 endif()
 
-message(STATUS "Platform configuration loaded: ${OMNICPP_PLATFORM_NAME}-${OMNICPP_ARCH_NAME}")
+message(STATUS "Platform configuration loaded: ${WARPLOOM_PLATFORM_NAME}-${WARPLOOM_ARCH_NAME}")

@@ -25,15 +25,15 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # archived legacy headers (engine/graphics/renderer.hpp), which no longer
 # exist in this tree, so it is opt-in until it is ported to the current
 # engine modules.
-option(OMNICPP_BUILD_PONG "Build the legacy pong example" OFF)
-if(OMNICPP_BUILD_PONG)
+option(WARPLOOM_BUILD_PONG "Build the legacy pong example" OFF)
+if(WARPLOOM_BUILD_PONG)
     if(Qt6_FOUND AND quill_FOUND)
         add_subdirectory(pong)
     else()
         message(STATUS "Examples: pong requested but Qt6/quill unavailable")
     endif()
 else()
-    message(STATUS "Examples: pong skipped (legacy headers; -DOMNICPP_BUILD_PONG=ON to force)")
+    message(STATUS "Examples: pong skipped (legacy headers; -DWARPLOOM_BUILD_PONG=ON to force)")
 endif()
 
 # Viewport (windowed PBR scene on the current engine stack)

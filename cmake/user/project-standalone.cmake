@@ -110,10 +110,10 @@ endif()
 
 # Conditionally enable Qt GUI support based on Qt6 availability
 if(Qt6_FOUND)
-    target_compile_definitions(${STANDALONE_NAME} PRIVATE OMNICPP_QT_VULKAN_AVAILABLE=1)
+    target_compile_definitions(${STANDALONE_NAME} PRIVATE WARPLOOM_QT_VULKAN_AVAILABLE=1)
     target_compile_definitions(${STANDALONE_NAME} PRIVATE QT_GUI_ENABLED=1)
 else()
-    target_compile_definitions(${STANDALONE_NAME} PRIVATE OMNICPP_QT_VULKAN_AVAILABLE=0)
+    target_compile_definitions(${STANDALONE_NAME} PRIVATE WARPLOOM_QT_VULKAN_AVAILABLE=0)
     target_compile_definitions(${STANDALONE_NAME} PRIVATE QT_GUI_ENABLED=0)
 endif()
 

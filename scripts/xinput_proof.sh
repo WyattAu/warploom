@@ -10,10 +10,10 @@ SPVDIR=$(find "$(pwd)/build/vulkan-validation" -name '*.spv' | head -1 | xargs d
 
 VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation \
 OMNICPP_SHADER_DIR="$SPVDIR" \
-OMNICPP_MAX_FRAMES=4000 \
+WARPLOOM_MAX_FRAMES=4000 \
 OMNICPP_FIXED_DT=0.01666667 \
 OMNICPP_TELEMETRY_DIR="$DIR" \
-  ./build/vulkan-validation/bin/omnicpp_viewport > "$DIR/run.log" 2>&1 &
+  ./build/vulkan-validation/bin/warploom_viewport > "$DIR/run.log" 2>&1 &
 VP_PID=$!
 echo "$VP_PID" > "$DIR/pid"
 

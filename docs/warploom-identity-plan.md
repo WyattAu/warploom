@@ -113,6 +113,33 @@ directive. 14 self-spellings → `warploom::editor`; module tests
 
 ### Phase 2 — build surface
 
+> **DONE.** CMake: all options/vars renamed to `WARPLOOM_*` primaries
+> with a `_warploom_compat_option` shim block (22 legacy names mirror to
+> the new when the new is unset — proven by configure: BOTH
+> `-DOMNICPP_USE_VULKAN=OFF` and `-DWARPLOOM_USE_VULKAN=OFF` produce
+> `WARPLOOM_RENDER_USE_VULKAN=OFF`); presets swept; root package name
+> now installs as `Warploom` on fresh configures. Defines:
+> `WARPLOOM_HAS_VULKAN` primary with BOTH-name emission for one window,
+> `WARPLOOM_VULKAN_TYPES_AVAILABLE` + `OMNICPP_` alias normalized in
+> vulkan_types.hpp, `WARPLOOM_CONTRACT` primary with an expanding legacy
+> alias. Env vars: viewport reads `WARPLOOM_*` first with legacy
+> fallback (warploom_env helper, 37 sites). Binaries + tests renamed
+> (`warploom_unit_tests`, `warploom_headless_host`, `warploom_viewport`,
+> `warploom_contract_violator`, `warploom_runtime_only_tests`,
+> `warploom_deterministic_runtime_benchmark`; ctest names
+> `Warploom*`); CI + scripts + README/living docs updated — old binary
+> names are NOT aliased on disk (pre-publish, references updated in
+> repo; deviation from the planned one-window copies recorded). Footer
+> guards → `WARPLOOM_COMPAT_*_NS` (57 headers). conan recipe +
+> config/project.json re-identified. Probe corrections: (1) the
+> repo-internal test helpers gate on the define name — re-badged with
+> the CMake sweep, dual-gate kept where both spellings are legitimate;
+> (2) sed `&` in the replacement expanded the match and mangled
+> test_contract's command line — repaired, lesson banked (never put a
+> bare `&` in a sed replacement). Verified: 4 legs × 6 suites, six
+> consumer proofs, fresh-configure install under the new name, 64 live
+> proofs.
+
 1. Code defines → `WARPLOOM_*` primaries; CMake defines BOTH
    (`OMNICPP_X` alias retained for one window). `OMNICPP_CONTRACT` →
    `WARPLOOM_CONTRACT` with a compat `#define` in contract.hpp.

@@ -22,7 +22,7 @@
 #include "warploom/ui/widget.hpp"
 #include "vulkan_test_readback.hpp"
 
-#if defined(OMNICPP_HAS_VULKAN)
+#if defined(WARPLOOM_HAS_VULKAN)
 #include <vulkan/vulkan.h>
 
 namespace {
@@ -55,7 +55,7 @@ struct UiGpuHarness {
         !target.create_framebuffer(ctx.device()).is_ok()) {
       return false;
     }
-    std::string sd = OMNICPP_TEST_SHADER_DIR;
+    std::string sd = WARPLOOM_TEST_SHADER_DIR;
     return ui.initialize(ctx.device(), ctx.physical_device(),
                          target.render_pass(), alloc, sd).is_ok();
   }
@@ -210,4 +210,4 @@ TEST(UiGpu, DeterministicAcrossRuns) {
 }
 
 }  // namespace
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN

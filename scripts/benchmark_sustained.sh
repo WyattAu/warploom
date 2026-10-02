@@ -4,7 +4,7 @@
 # Runs the windowed app offscreen-deterministically for N frames (long enough
 # to pass the vsync warm-up and reach steady state), once per draw path:
 #   A) per-draw composed path (baseline)
-#   B) OMNICPP_GPU_DRIVEN=1 (cull/LOD on the GPU, one indirect draw)
+#   B) WARPLOOM_GPU_DRIVEN=1 (cull/LOD on the GPU, one indirect draw)
 # Then runs scripts/analyze_telemetry.py (including the GPU-timestamp gates)
 # on both and prints a CPU/GPU timing comparison table.
 #
@@ -12,7 +12,7 @@
 set -u
 FRAMES="${1:-600}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT/build/vulkan-validation/bin/omnicpp_viewport"
+BIN="$ROOT/build/vulkan-validation/bin/warploom_viewport"
 SPVDIR="$(find "$ROOT/build/vulkan-validation" -name pbr_full.frag.spv | head -1 | xargs dirname)"
 if [ -z "$SPVDIR" ] || [ ! -x "$BIN" ]; then
   echo "benchmark: build the vulkan-validation preset first" >&2
@@ -23,10 +23,10 @@ run_one() {
   local dir="$1" mode="$2"  # mode: "" (per-draw) or "1" (gpu-driven)
   rm -rf "$dir"; mkdir -p "$dir"
   local env_extra=()
-  if [ -n "$mode" ]; then env_extra=(OMNICPP_GPU_DRIVEN="$mode"); fi
+  if [ -n "$mode" ]; then env_extra=(WARPLOOM_GPU_DRIVEN="$mode"); fi
   env VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation \
       OMNICPP_SHADER_DIR="$SPVDIR" \
-      OMNICPP_MAX_FRAMES="$FRAMES" \
+      WARPLOOM_MAX_FRAMES="$FRAMES" \
       OMNICPP_FIXED_DT=0.01666667 \
       OMNICPP_TELEMETRY_DIR="$dir" \
       OMNICPP_MODEL=/nonexistent/cubes_only \

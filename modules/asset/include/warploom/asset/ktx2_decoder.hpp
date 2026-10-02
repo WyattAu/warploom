@@ -40,9 +40,9 @@ namespace warploom::asset {
 // makes the old spellings name the SAME types. Guarded per namespace (a
 // shared guard would suppress later headers' distinct directives). The
 // nested render::depth family resolves through this directive.
-#ifndef OMNICPP_COMPAT_ASSET_NS
-#define OMNICPP_COMPAT_ASSET_NS
+#ifndef WARPLOOM_COMPAT_ASSET_NS
+#define WARPLOOM_COMPAT_ASSET_NS
 namespace omnicpp::asset {
     using namespace ::warploom::asset;
 }
-#endif  // OMNICPP_COMPAT_ASSET_NS
+#endif  // WARPLOOM_COMPAT_ASSET_NS

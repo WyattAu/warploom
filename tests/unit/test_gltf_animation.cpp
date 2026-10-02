@@ -18,15 +18,15 @@
 
 #include "engine/asset/gltf_animation.hpp"
 
-#ifndef OMNICPP_TEST_ASSET_DIR
-#define OMNICPP_TEST_ASSET_DIR "assets/models"
+#ifndef WARPLOOM_TEST_ASSET_DIR
+#define WARPLOOM_TEST_ASSET_DIR "assets/models"
 #endif
 #include "engine/asset/gltf_importer.hpp"
 
 namespace {
 
 //! Directory of the generated mannequin asset: provided at configure time
-//! (like OMNICPP_TEST_SHADER_DIR) with a repo-relative fallback.
+//! (like WARPLOOM_TEST_SHADER_DIR) with a repo-relative fallback.
 std::string read_file(const std::string& path, std::vector<char>& bytes) {
   std::ifstream file(path, std::ios::binary);
   if (!file) return "cannot open " + path;
@@ -46,7 +46,7 @@ Mannequin load_mannequin() {
   Mannequin mannequin;
   std::vector<char> json_bytes;
   const std::string asset_dir =
-      OMNICPP_TEST_ASSET_DIR[0] != 0 ? OMNICPP_TEST_ASSET_DIR
+      WARPLOOM_TEST_ASSET_DIR[0] != 0 ? WARPLOOM_TEST_ASSET_DIR
                                      : "assets/models";
   if (const std::string error =
           read_file(asset_dir + "/mannequin.gltf", json_bytes);
@@ -611,15 +611,15 @@ TEST(GltfAnimation, CesiumManRealAssetImports) {
   // 19-joint skin, 2 s 57-channel walk cycle, external JPEG texture
   // (repacked as PNG for the engine's baseline-only decoder).
   std::vector<char> json_bytes;
-  ASSERT_TRUE(read_file(std::string(OMNICPP_TEST_ASSET_DIR) +
+  ASSERT_TRUE(read_file(std::string(WARPLOOM_TEST_ASSET_DIR) +
                             "/cesiumman/CesiumMan.gltf",
                         json_bytes).empty());
   std::vector<char> bin_bytes;
-  ASSERT_TRUE(read_file(std::string(OMNICPP_TEST_ASSET_DIR) +
+  ASSERT_TRUE(read_file(std::string(WARPLOOM_TEST_ASSET_DIR) +
                             "/cesiumman/CesiumMan_data.bin",
                         bin_bytes).empty());
   const std::string asset_dir =
-      std::string(OMNICPP_TEST_ASSET_DIR) + "/cesiumman/";
+      std::string(WARPLOOM_TEST_ASSET_DIR) + "/cesiumman/";
   const omnicpp::asset::ExternalFileLoader loader =
       [&asset_dir](const std::string& uri, std::string& load_error,
                    std::vector<std::uint8_t>& out_bytes) {

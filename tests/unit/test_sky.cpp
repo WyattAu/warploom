@@ -20,7 +20,7 @@
 #include "engine/render/vulkan_renderer.hpp"
 #include "vulkan_test_readback.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 namespace {
 
@@ -94,7 +94,7 @@ struct SkyHarness {
         !target.create_render_pass(ctx.device()).is_ok() ||
         !target.create_framebuffer(ctx.device()).is_ok()) return false;
 
-    std::string sd = OMNICPP_TEST_SHADER_DIR;
+    std::string sd = WARPLOOM_TEST_SHADER_DIR;
     if (!pipe.load_shader_stage_file(ctx.device(), sd + "/sky.vert.spv",
                                      "vertex").is_ok() ||
         !pipe.load_shader_stage_file(ctx.device(), sd + "/sky.frag.spv",
@@ -271,4 +271,4 @@ TEST(VulkanHardware, SkySunDisc) {
   EXPECT_GT(toward.bright_pixels, 10U) << "no sun disc highlight";
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN

@@ -32,7 +32,7 @@
 #include "engine/render/vulkan_scene.hpp"
 #include "vulkan_test_readback.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 namespace {
 
@@ -467,7 +467,7 @@ TEST(VulkanHardware, GpuDrivenVertexPullMatchesPerDrawPixels) {
 
   // ---- Pipelines ----------------------------------------------------------
   omnicpp::render::VulkanPipeline pipe_a, pipe_b;
-  const std::string sd = OMNICPP_TEST_SHADER_DIR;
+  const std::string sd = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipe_a
                   .load_shader_stage_file(
                       context.device(), sd + "/pbr_scene.vert.spv", "vertex")
@@ -681,4 +681,4 @@ TEST(VulkanHardware, GpuDrivenVertexPullMatchesPerDrawPixels) {
   context.cleanup();
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN

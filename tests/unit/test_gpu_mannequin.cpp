@@ -37,11 +37,11 @@
 #include "engine/render/vulkan_scene.hpp"
 #include "vulkan_test_readback.hpp"
 
-#if defined(OMNICPP_HAS_VULKAN)
+#if defined(WARPLOOM_HAS_VULKAN)
 #include <vulkan/vulkan.h>
 
-#ifndef OMNICPP_TEST_ASSET_DIR
-#define OMNICPP_TEST_ASSET_DIR "assets/models"
+#ifndef WARPLOOM_TEST_ASSET_DIR
+#define WARPLOOM_TEST_ASSET_DIR "assets/models"
 #endif
 
 namespace {
@@ -82,7 +82,7 @@ struct MannequinAsset {
 MannequinAsset load_asset() {
   MannequinAsset asset;
   const std::string dir =
-      OMNICPP_TEST_ASSET_DIR[0] != 0 ? OMNICPP_TEST_ASSET_DIR
+      WARPLOOM_TEST_ASSET_DIR[0] != 0 ? WARPLOOM_TEST_ASSET_DIR
                                      : "assets/models";
   std::ifstream json_file(dir + "/mannequin.gltf", std::ios::binary);
   if (!json_file) return asset;
@@ -359,7 +359,7 @@ struct MannequinHarness {
       return false;
     }
 
-    std::string sd = OMNICPP_TEST_SHADER_DIR;
+    std::string sd = WARPLOOM_TEST_SHADER_DIR;
     if (!pipe.load_shader_stage_file(dev, sd + "/skinned_scene.vert.spv",
                                      "vertex").is_ok() ||
         !pipe.load_shader_stage_file(dev, sd + "/pbr_scene.frag.spv",
@@ -817,4 +817,4 @@ TEST(VulkanHardware, GpuMannequinThroughRecordPbrScene) {
       << "record_pbr_scene path: animation had no effect";
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN

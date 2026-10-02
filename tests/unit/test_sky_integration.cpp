@@ -23,7 +23,7 @@
 #include "engine/render/vulkan_scene.hpp"
 #include "vulkan_test_readback.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 namespace {
 
@@ -206,7 +206,7 @@ struct SkyIntegrationHarness {
       return false;
     }
 
-    const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+    const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
     // Lit cube pipeline (3 sets, same ABI as the lit tests).
     if (!pipeline
              .load_shader_stage_file(context.device(),
@@ -501,4 +501,4 @@ TEST(VulkanHardware, SkyIntegratesBehindLitCube) {
       << "sky background is not blue-dominant";
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN

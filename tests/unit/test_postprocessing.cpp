@@ -29,7 +29,7 @@
 #include "engine/render/vulkan_scene.hpp"
 #include "vulkan_test_readback.hpp"
 
-#if defined(OMNICPP_HAS_VULKAN)
+#if defined(WARPLOOM_HAS_VULKAN)
 #include <vulkan/vulkan.h>
 
 namespace {
@@ -250,7 +250,7 @@ struct PostProcessHarness {
 
   bool create_bloom_pipelines(VkRenderPass a_rp, VkRenderPass b_rp, VkFormat fmt) {
     VkDevice dev = ctx.device();
-    std::string sd = OMNICPP_TEST_SHADER_DIR;
+    std::string sd = WARPLOOM_TEST_SHADER_DIR;
     if (!bloom_down_pipe.load_shader_stage_file(dev, sd+"/fullscreen.vert.spv","vertex").is_ok() ||
         !bloom_down_pipe.load_shader_stage_file(dev, sd+"/bloom_downsample.frag.spv","fragment").is_ok()) return false;
     VkDescriptorSetLayout dl[1] = {bloom_layout};
@@ -384,7 +384,7 @@ struct PostProcessHarness {
   // Create the tonemap pipeline with a specific render pass.
   bool create_tonemap_pipeline(VkRenderPass rp, VkFormat format) {
     VkDevice dev = ctx.device();
-    std::string sd = OMNICPP_TEST_SHADER_DIR;
+    std::string sd = WARPLOOM_TEST_SHADER_DIR;
     if (!tonemap_pipe.load_shader_stage_file(dev, sd+"/fullscreen.vert.spv","vertex").is_ok()||
         !tonemap_pipe.load_shader_stage_file(dev, sd+"/tonemap_fxaa.frag.spv","fragment").is_ok()) return false;
     VkDescriptorSetLayout tl[1] = {post_layout};
@@ -557,7 +557,7 @@ TEST(VulkanHardware, PostProcessTonemapFxaa) {
 
   // Scene pipeline: renders to hdr_rp (R16G16B16A16_SFLOAT, no depth).
   omnicpp::render::VulkanPipeline scene_pipe;
-  std::string sd = OMNICPP_TEST_SHADER_DIR;
+  std::string sd = WARPLOOM_TEST_SHADER_DIR;
   if (!scene_pipe.load_shader_stage_file(h.ctx.device(), sd+"/pbr_scene.vert.spv","vertex").is_ok()||
       !scene_pipe.load_shader_stage_file(h.ctx.device(), sd+"/pbr_scene.frag.spv","fragment").is_ok()) {
     h.cleanup(); out.cleanup(h.ctx.device());
@@ -731,7 +731,7 @@ TEST(VulkanHardware, BloomExtractsAndSpreadsBrightEnergy) {
     GTEST_SKIP() << "Bloom pipelines failed";
   }
   omnicpp::render::VulkanPipeline scene_pipe;
-  std::string sd = OMNICPP_TEST_SHADER_DIR;
+  std::string sd = WARPLOOM_TEST_SHADER_DIR;
   if (!scene_pipe.load_shader_stage_file(h.ctx.device(), sd+"/pbr_scene.vert.spv","vertex").is_ok() ||
       !scene_pipe.load_shader_stage_file(h.ctx.device(), sd+"/pbr_scene.frag.spv","fragment").is_ok()) {
     h.cleanup(); out.cleanup(h.ctx.device()); GTEST_SKIP() << "Scene pipeline failed";
@@ -780,4 +780,4 @@ TEST(VulkanHardware, BloomExtractsAndSpreadsBrightEnergy) {
   EXPECT_LT(bloom.peak_luma, 765U) << "bloom not filtered (raw copy)";
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN

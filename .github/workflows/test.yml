@@ -36,7 +36,7 @@ jobs:
 
       - name: Benchmark
         run: |
-          build/headless-debug/bin/omnicpp_deterministic_runtime_benchmark --output benchmark.json
+          build/headless-debug/bin/warploom_deterministic_runtime_benchmark --output benchmark.json
           cat benchmark.json
 
   # ============================================================================
@@ -189,8 +189,8 @@ jobs:
 
       - name: Start headless hosts
         run: |
-          build/headless-debug/bin/omnicpp_headless_host /tmp/proof_a.sock 2>/tmp/proof_a.log &
-          build/headless-debug/bin/omnicpp_headless_host /tmp/proof_b.sock 2>/tmp/proof_b.log &
+          build/headless-debug/bin/warploom_headless_host /tmp/proof_a.sock 2>/tmp/proof_a.log &
+          build/headless-debug/bin/warploom_headless_host /tmp/proof_b.sock 2>/tmp/proof_b.log &
           for i in $(seq 1 50); do
             [ -S /tmp/proof_a.sock ] && [ -S /tmp/proof_b.sock ] && break
             sleep 0.2

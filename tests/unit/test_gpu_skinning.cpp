@@ -31,7 +31,7 @@
 #include "engine/render/vulkan_scene.hpp"
 #include "vulkan_test_readback.hpp"
 
-#if defined(OMNICPP_HAS_VULKAN)
+#if defined(WARPLOOM_HAS_VULKAN)
 #include <vulkan/vulkan.h>
 
 namespace {
@@ -246,7 +246,7 @@ struct SkinningHarness {
         !target.create_framebuffer(dev).is_ok()) return false;
 
     // Skinned pipeline: 4 sets (mesh, textures, material, bones).
-    std::string sd = OMNICPP_TEST_SHADER_DIR;
+    std::string sd = WARPLOOM_TEST_SHADER_DIR;
     if (!pipe.load_shader_stage_file(dev, sd+"/skinned_scene.vert.spv","vertex").is_ok()||
         !pipe.load_shader_stage_file(dev, sd+"/pbr_scene.frag.spv","fragment").is_ok()) return false;
     VkDescriptorSetLayout layouts[4] = {mesh_layout, tex_layout, mat_layout, bone_layout};
@@ -396,4 +396,4 @@ TEST(VulkanHardware, GpuSkinningBendsBar) {
       << "bent pose image identical to rest pose — skinning had no effect";
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN

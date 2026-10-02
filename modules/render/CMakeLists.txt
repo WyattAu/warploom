@@ -22,8 +22,10 @@ cmake_minimum_required(VERSION 3.28...4.0)
 project(WarploomRender VERSION 0.1.0 LANGUAGES CXX)
 
 # S3: honor the superproject's Vulkan switch (headless legs build with
-# OMNICPP_USE_VULKAN=OFF and must stay GPU-free); standalone default ON.
-if(DEFINED OMNICPP_USE_VULKAN)
+# WARPLOOM_USE_VULKAN=OFF and must stay GPU-free); standalone default ON.
+if(DEFINED WARPLOOM_USE_VULKAN)
+    set(WARPLOOM_RENDER_USE_VULKAN_DEFAULT ${WARPLOOM_USE_VULKAN})
+elseif(DEFINED OMNICPP_USE_VULKAN)
     set(WARPLOOM_RENDER_USE_VULKAN_DEFAULT ${OMNICPP_USE_VULKAN})
 else()
     set(WARPLOOM_RENDER_USE_VULKAN_DEFAULT ON)
@@ -93,7 +95,7 @@ target_link_libraries(warploom_render PUBLIC Threads::Threads)
 # Vulkan plumbing (the S3-specific contract, docs/warploom-render-plan.md §2.2)
 #
 # vulkan_types.hpp includes <vulkan/vulkan.h>, so the dependency is PUBLIC;
-# OMNICPP_HAS_VULKAN gates declarations in 3 public headers
+# WARPLOOM_HAS_VULKAN gates declarations in 3 public headers
 # (vulkan_types/vulkan_context/vulkan_renderer), so it is a PUBLIC compile
 # definition — PRIVATE here would change what consumers see per-TU (ODR).
 # xcb/win32 and their platform definitions appear in TUs only -> PRIVATE.
@@ -105,7 +107,7 @@ find_package(Vulkan QUIET)
 if(WARPLOOM_RENDER_USE_VULKAN AND Vulkan_FOUND)
     message(STATUS "warploom-render: Vulkan found: ${Vulkan_LIBRARIES}")
     target_link_libraries(warploom_render PUBLIC Vulkan::Vulkan)
-    target_compile_definitions(warploom_render PUBLIC OMNICPP_HAS_VULKAN)
+    target_compile_definitions(warploom_render PUBLIC WARPLOOM_HAS_VULKAN OMNICPP_HAS_VULKAN) # OMNICPP alias: one-window compat (S5-B phase 2)
     if(UNIX AND NOT APPLE)
         find_package(PkgConfig QUIET)
         if(PkgConfig_FOUND)

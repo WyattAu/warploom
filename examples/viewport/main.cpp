@@ -60,6 +60,7 @@
 #include "engine/render/vulkan_ui_renderer.hpp"
 #include "telemetry.hpp"
 
+
 using SceneMatrix = omnicpp::render::SceneMatrix;
 
 namespace {
@@ -344,10 +345,10 @@ struct ViewportApp {
   //! True when the composed lighting stack initialized (graceful fallback:
   //! false keeps the basic pbr_scene path and no shadow map).
   bool lighting_ready{false};
-  //! Forced legacy path (OMNICPP_LEGACY_LIGHTING=1) for A/B proofs.
+  //! Forced legacy path (WARPLOOM_LEGACY_LIGHTING=1) for A/B proofs.
   bool legacy_lighting{false};
   //! Diagnostic toggle: composed shading with the shadow term removed
-  //! (OMNICPP_NO_SHADOW=1). The pixel diff vs the composed run is then the
+  //! (WARPLOOM_NO_SHADOW=1). The pixel diff vs the composed run is then the
   //! exact shadow footprint.
   bool no_shadow{false};
   //! Diagnostic: dump the raw shadow map (kShadowRes^2 float32) after a
@@ -357,7 +358,7 @@ struct ViewportApp {
   std::uint32_t dump_shadow_frame{0};
   VkBuffer dump_shadow_buffer{VK_NULL_HANDLE};
   omnicpp::render::Allocation dump_shadow_allocation{};
-  //! GPU-driven draw path (OMNICPP_GPU_DRIVEN=1, cubes scene only): the
+  //! GPU-driven draw path (WARPLOOM_GPU_DRIVEN=1, cubes scene only): the
   //! compute cull/LOD pass writes indirect draw commands and the main pass
   //! draws the whole scene with ONE vkCmdDrawIndexedIndirect — no CPU
   //! visibility, LOD, or per-draw submission inside the frame.
@@ -465,7 +466,7 @@ struct ViewportApp {
   MeshBuffers ground{};
   std::vector<MeshBuffers> mannequin_meshes;
 
-  // --- City scene (OMNICPP_SCENE=city) --------------------------------------
+  // --- City scene (WARPLOOM_SCENE=city) --------------------------------------
   // Static meshes (buildings, streetlights, each Sponza material-split slice)
   // plus their material slots; the record path swaps the whole object list
   // and camera framing for the city.
@@ -485,7 +486,7 @@ struct ViewportApp {
   };
   std::vector<CityLight> city_lights;
 
-  // --- Sponza landmark (OMNICPP_SPONZA=1, city scene) ----------------------
+  // --- Sponza landmark (WARPLOOM_SPONZA=1, city scene) ----------------------
   // One shared vertex/index pair; one draw per glTF primitive (SceneMesh
   // index_offset/count slices sharing a single mesh SSBO descriptor set).
   struct SponzaLandmark {
@@ -572,7 +573,7 @@ struct ViewportApp {
   //! the IBL bake, and telemetry.
   std::array<float, 3> sun_direction{0.45f, 0.7f, 0.55f};
 
-  // --- RT mode (OMNICPP_RT_MODE=1): hard ray-query shadows. --------------
+  // --- RT mode (WARPLOOM_RT_MODE=1): hard ray-query shadows. --------------
   //! The scene TLAS replaces the shadow map entirely: the composed fragment
   //! stage traces one occlusion ray per pixel (pbr_rt_full.frag, set 4),
   //! the shadow pre-pass and depth map are skipped, and BLASes are built
@@ -1332,7 +1333,7 @@ bool make_mesh(ViewportApp& app, const std::vector<float>& vertices,
                const std::vector<std::uint32_t>& indices,
                ViewportApp::MeshBuffers& out);
 
-//! City scene (OMNICPP_SCENE=city): defined after the RT helpers.
+//! City scene (WARPLOOM_SCENE=city): defined after the RT helpers.
 bool setup_city_scene(ViewportApp& app);
 
 //! Frames of payload copies (must match the renderer's frames in flight).
@@ -1384,14 +1385,14 @@ bool setup_mannequin(ViewportApp& app) {
   // Buffer 0 and image files are resolved relative to the document's own
   // directory, exactly as glTF URIs are specified.
   // OMNICPP_NO_MODEL forces the cubes-only scene (A/B harness hook).
-  if (std::getenv("OMNICPP_NO_MODEL") != nullptr) {
+  if (warploom_env("WARPLOOM_NO_MODEL", "OMNICPP_NO_MODEL") != nullptr) {
     std::fprintf(stderr,
                  "viewport: OMNICPP_NO_MODEL set; rendering cubes only\n");
     return true;  // non-fatal: cubes-only scene
   }
-  const char* model_env = std::getenv("OMNICPP_MODEL");
+  const char* model_env = warploom_env("WARPLOOM_MODEL", "OMNICPP_MODEL");
   const std::string model = model_env != nullptr ? model_env : "mannequin";
-  const char* asset_dir_env = std::getenv("OMNICPP_ASSET_DIR");
+  const char* asset_dir_env = warploom_env("WARPLOOM_ASSET_DIR", "OMNICPP_ASSET_DIR");
   std::vector<std::string> candidates;
   if (asset_dir_env != nullptr) candidates.emplace_back(asset_dir_env);
   candidates.insert(candidates.end(), {"assets/models", "../assets/models",
@@ -1514,7 +1515,7 @@ bool setup_mannequin(ViewportApp& app) {
 
   // Skinned pipeline (4 sets: mesh / textures / material / bones) over the
   // swapchain render pass.
-  const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
+  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
   const std::string shader_dir =
       shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
   if (!app.skinned_pipeline
@@ -1813,7 +1814,7 @@ bool setup_scene(ViewportApp& app) {
 
   // PBR pipeline over the swapchain's render pass. Shader paths are
   // relative to the build's compiled-shader output directory.
-  const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
+  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
   const std::string shader_dir =
       shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
   if (!app.pbr_pipeline
@@ -1897,7 +1898,7 @@ bool setup_gpu_driven(ViewportApp& app) {
   // tan/viewport + LOD thresholds (matches cull_and_draw_lod.comp).
   const VkPushConstantRange kGdCullPush{VK_SHADER_STAGE_COMPUTE_BIT, 0U, 144U};
   VkDevice dev = app.context.device();
-  const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
+  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
   const std::string shader_dir =
       shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
 
@@ -2245,7 +2246,7 @@ void write_gpu_driven_payload(ViewportApp& app, std::uint32_t frame_slot,
 //! falls back to the basic pbr_scene path (no IBL/shadow), which keeps the
 //! cubes-only mode and CI environments without the new shaders working.
 // ============================================================================
-// RT mode (OMNICPP_RT_MODE=1): hard ray-query shadows against a scene TLAS.
+// RT mode (WARPLOOM_RT_MODE=1): hard ray-query shadows against a scene TLAS.
 // ============================================================================
 
 std::uint64_t rt_device_address(const ViewportApp& app, VkBuffer buffer) {
@@ -2312,7 +2313,7 @@ bool setup_rt_shadows(ViewportApp& app) {
                          "VK_KHR_acceleration_structure/ray_query\n");
     return false;
   }
-  const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
+  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
   const std::string shader_dir =
       shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
 
@@ -2382,7 +2383,7 @@ bool setup_rt_shadows(ViewportApp& app) {
     return false;
   }
 
-  // --- 1b. Many-light RT variants (OMNICPP_SCENE=city + OMNICPP_RT_MODE).
+  // --- 1b. Many-light RT variants (WARPLOOM_SCENE=city + OMNICPP_RT_MODE).
   // Built here because app.rt_layout exists only after RT setup; same
   // 7-set shape as the PCF-ML family with set 4 = TLAS.
   if (app.city_scene) {
@@ -2839,7 +2840,7 @@ bool setup_lighting(ViewportApp& app) {
   VkDevice dev = app.context.device();
   const std::uint32_t queue_family =
       static_cast<std::uint32_t>(app.context.queue_families().graphics_family);
-  const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
+  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
   const std::string shader_dir =
       shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
   std::string bake_error;
@@ -3194,7 +3195,7 @@ bool setup_lighting(ViewportApp& app) {
     std::fprintf(stderr, "viewport: static shadow pipeline failed\n");
     std::fprintf(stderr, "viewport: setup_lighting failed at line 1265\n"); return false;
   }
-  // --- 3b. Many-light city variant (OMNICPP_SCENE=city). ----------------
+  // --- 3b. Many-light city variant (WARPLOOM_SCENE=city). ----------------
   // pbr_full_ml.frag adds the point-lights SSBO at set 6; the skinned
   // vertex stages only declare sets 0-3, so one 7-entry layout serves both
   // static and skinned draws. Same geometry/push contract as the composed
@@ -3287,13 +3288,13 @@ bool setup_lighting(ViewportApp& app) {
 }
 
 // ============================================================================
-// City scene (OMNICPP_SCENE=city): procedural street + multiple animated
+// City scene (WARPLOOM_SCENE=city): procedural street + multiple animated
 // actors + many dynamic point lights. Replaces the single-actor scene's
 // object list and camera framing when active.
 // ============================================================================
 
 // ============================================================================
-// Sponza landmark (OMNICPP_SPONZA=1, city scene): whole-scene glTF import of
+// Sponza landmark (WARPLOOM_SPONZA=1, city scene): whole-scene glTF import of
 // the CC0 Sponza atrium (assets/models/sponza). One shared vertex/index
 // buffer pair; one draw per glTF primitive as a SceneMesh index slice over
 // the single mesh SSBO descriptor set (SceneMesh::index_offset/count already
@@ -3310,7 +3311,7 @@ constexpr std::uint32_t kSponzaTextureBase = 8U;
 bool setup_sponza(ViewportApp& app) {
   // Resolve assets/models/sponza/Sponza.gltf (+ .bin + 69 external images
   // relative to the document dir), mirroring the mannequin loader.
-  const char* asset_dir_env = std::getenv("OMNICPP_ASSET_DIR");
+  const char* asset_dir_env = warploom_env("WARPLOOM_ASSET_DIR", "OMNICPP_ASSET_DIR");
   std::vector<std::string> candidates;
   if (asset_dir_env != nullptr) candidates.emplace_back(asset_dir_env);
   candidates.insert(candidates.end(), {"assets/models", "../assets/models",
@@ -3620,7 +3621,7 @@ bool setup_city_scene(ViewportApp& app) {
   }
   if (app.mannequin.skins.empty()) return false;
   VkDevice dev = app.context.device();
-  const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
+  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
   const std::string shader_dir =
       shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
 
@@ -3914,7 +3915,7 @@ bool setup_city_scene(ViewportApp& app) {
                                static_cast<float>(a) * 0.37f});
   }
 
-  // Sponza landmark (OMNICPP_SPONZA=1): CC0 atrium centred at the origin,
+  // Sponza landmark (WARPLOOM_SPONZA=1): CC0 atrium centred at the origin,
   // actors walking its courtyard. Local-space vertices + per-draw model;
   // world-space BLAS triangles were baked inside setup_sponza.
   if (app.sponza_enabled && !setup_sponza(app)) {
@@ -4327,7 +4328,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
           ? app.shadow_pipeline_static.pipeline_layout()
           : VK_NULL_HANDLE;
 
-  // RT mode (OMNICPP_RT_MODE=1): swap the composed pipelines for the
+  // RT mode (WARPLOOM_RT_MODE=1): swap the composed pipelines for the
   // pbr_rt_full family, bind the TLAS at set 4, and skip the shadow-map
   // pre-pass (the fragment stage traces occlusion rays against the TLAS
   // instead of PCF-sampling a depth map).
@@ -4552,7 +4553,7 @@ bool setup_node_editor(ViewportApp& app) {
     app.inspector_root = app.inspector.panel_handle();
   }
 
-  const char* shader_dir_env = std::getenv("OMNICPP_SHADER_DIR");
+  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
   const std::string shader_dir =
       shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
   return app.ui_renderer
@@ -4731,7 +4732,7 @@ bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
 bool ViewportApp::initialize() {
   run_config = viewport::RunConfig::from_environment();
   // M13 fusion: enable graph->animation signal projection.
-  graph_anim_enabled = std::getenv("OMNICPP_GRAPH_ANIM") != nullptr;
+  graph_anim_enabled = warploom_env("WARPLOOM_GRAPH_ANIM", "OMNICPP_GRAPH_ANIM") != nullptr;
   // M11: resolve the document cube type id for the render mirror.
   if (const auto* cube_type =
           omnicpp::editor::default_registry().find_by_name(
@@ -4741,26 +4742,26 @@ bool ViewportApp::initialize() {
   }
   // A/B selection must be known BEFORE setup_lighting() picks the pipeline
   // family; the flag read later in this function only adds telemetry.
-  legacy_lighting = std::getenv("OMNICPP_LEGACY_LIGHTING") != nullptr;
-  no_shadow = std::getenv("OMNICPP_NO_SHADOW") != nullptr;
+  legacy_lighting = warploom_env("WARPLOOM_LEGACY_LIGHTING", "OMNICPP_LEGACY_LIGHTING") != nullptr;
+  no_shadow = warploom_env("WARPLOOM_NO_SHADOW", "OMNICPP_NO_SHADOW") != nullptr;
   // RT mode: hard ray-query shadows (requires composed lighting; setup
   // happens after setup_lighting builds the IBL stack it composes on).
-  rt_mode = std::getenv("OMNICPP_RT_MODE") != nullptr;
+  rt_mode = warploom_env("WARPLOOM_RT_MODE", "OMNICPP_RT_MODE") != nullptr;
   // City scene selection (must precede setup_scene: setup_mannequin loads
   // the actor asset, setup_city_scene builds on it, and setup_lighting
   // needs to know which fragment family to build).
-  city_scene = std::getenv("OMNICPP_SCENE") != nullptr &&
-               std::string_view(std::getenv("OMNICPP_SCENE")) == "city";
+  city_scene = warploom_env("WARPLOOM_SCENE", "OMNICPP_SCENE") != nullptr &&
+               std::string_view(warploom_env("WARPLOOM_SCENE", "OMNICPP_SCENE")) == "city";
   // Sponza landmark inside the city scene (CC0 asset vendored under
   // assets/models/sponza).
-  sponza_enabled = std::getenv("OMNICPP_SPONZA") != nullptr;
-  if (const char* ds = std::getenv("OMNICPP_DUMP_SHADOW")) {
+  sponza_enabled = warploom_env("WARPLOOM_SPONZA", "OMNICPP_SPONZA") != nullptr;
+  if (const char* ds = warploom_env("WARPLOOM_DUMP_SHADOW", "OMNICPP_DUMP_SHADOW")) {
     dump_shadow = true;
     dump_shadow_frame = static_cast<std::uint32_t>(std::atoi(ds));
   }
   // Sun direction override — scenario control for shadow proofs (two suns
   // must move the shadow region). Normalized on read; kept above the horizon.
-  if (const char* sun = std::getenv("OMNICPP_SUN_DIRECTION")) {
+  if (const char* sun = warploom_env("WARPLOOM_SUN_DIRECTION", "OMNICPP_SUN_DIRECTION")) {
     float x = 0.0f, y = 0.0f, z = 0.0f;
     if (std::sscanf(sun, "%f,%f,%f", &x, &y, &z) == 3 && x > 0.0f &&
         y > 0.05f && z > 0.0f) {
@@ -4858,14 +4859,14 @@ bool ViewportApp::initialize() {
     // GPU-driven draw path (cubes scene only): cull/LOD on the GPU, one
     // indirect draw per frame. Requires composed lighting (the driven
     // fragment shader statically uses the shadow + IBL sets).
-    const char* gd_env = std::getenv("OMNICPP_GPU_DRIVEN");
+    const char* gd_env = warploom_env("WARPLOOM_GPU_DRIVEN", "OMNICPP_GPU_DRIVEN");
     if (gd_env != nullptr && gd_env[0] == '1' && !has_mannequin &&
         !rt_mode &&  // GPU-driven fragment is the PCF variant; exclusive
         setup_gpu_driven(*this)) {
       gpu_driven = true;
       // Instance-count override: grows the payload past the static trio
-      // (benchmarks; requires OMNICPP_GPU_DRIVEN=1).
-      if (const char* count_env = std::getenv("OMNICPP_INSTANCE_COUNT")) {
+      // (benchmarks; requires WARPLOOM_GPU_DRIVEN=1).
+      if (const char* count_env = warploom_env("WARPLOOM_INSTANCE_COUNT", "OMNICPP_INSTANCE_COUNT")) {
         const long parsed = std::strtol(count_env, nullptr, 10);
         if (parsed >= 1L &&
             parsed <= static_cast<long>(kGdMaxInstances) - 1L) {
@@ -4875,7 +4876,7 @@ bool ViewportApp::initialize() {
       // Physics-driven scene: N falling/rolling cubes integrated on the CPU
       // (deterministic PhysicsWorld), streamed into the payload, drawn by
       // the same one-indirect-draw path. instanceCount = bodies + ground.
-      if (std::getenv("OMNICPP_PHYSICS") != nullptr) {
+      if (warploom_env("WARPLOOM_PHYSICS", "OMNICPP_PHYSICS") != nullptr) {
         const std::uint32_t body_count =
             gd_instance_count > 1U ? gd_instance_count - 1U : 3U;
         physics_bodies.reserve(body_count);
@@ -4900,12 +4901,12 @@ bool ViewportApp::initialize() {
   // failure leaves the plain scene (logged, not fatal). The pre-pass hook
   // is REPLACED by the chained wrapper so the atlas barrier is recorded
   // before the main render pass (and the lighting pre-pass still runs).
-  if (std::getenv("OMNICPP_NODE_EDITOR") != nullptr) {
+  if (warploom_env("WARPLOOM_NODE_EDITOR", "OMNICPP_NODE_EDITOR") != nullptr) {
     // M8: OMNICPP_DOC=<path> loads a saved document BEFORE the demo graph
     // is authored, so a persisted scene replaces the demo (missing file is
     // a warning, not fatal — the demo still comes up).
     doc_path = [] {
-      const char* p = std::getenv("OMNICPP_DOC");
+      const char* p = warploom_env("WARPLOOM_DOC", "OMNICPP_DOC");
       return p != nullptr ? std::string(p) : std::string();
     }();
     if (!doc_path.empty()) {
@@ -5055,7 +5056,7 @@ bool ViewportApp::initialize() {
           "animated TLAS: skinned parts follow bones_j(t))");
     }
   }
-  if (const char* script = std::getenv("OMNICPP_INPUT_SCRIPT")) {
+  if (const char* script = warploom_env("WARPLOOM_INPUT_SCRIPT", "OMNICPP_INPUT_SCRIPT")) {
     std::string script_error;
     if (virtual_input.load_script(script, script_error)) {
       input_scripted = true;
@@ -5072,7 +5073,7 @@ bool ViewportApp::initialize() {
   // channel will run (a capture command must be servable without cadence
   // config). The server starts later, in run(), so probe the env here.
   const bool control_requested =
-      std::getenv("OMNICPP_CONTROL_SOCKET") != nullptr;
+      warploom_env("WARPLOOM_CONTROL_SOCKET", "OMNICPP_CONTROL_SOCKET") != nullptr;
   if (run_config.capture_every != 0U || control_requested) {
     const VkFormat depth_format =
         omnicpp::render::VulkanRenderPass::find_supported_depth_format(
@@ -5097,7 +5098,7 @@ void ViewportApp::run() {
   // M0 control channel: OMNICPP_CONTROL_SOCKET=<path> hosts the JSONL
   // control server (pause/step/camera/sun/cube/capture) polled once per
   // frame. Purely additive — unset leaves the loop unchanged.
-  if (const char* sock = std::getenv("OMNICPP_CONTROL_SOCKET"); sock != nullptr && *sock != '\0') {
+  if (const char* sock = warploom_env("WARPLOOM_CONTROL_SOCKET", "OMNICPP_CONTROL_SOCKET"); sock != nullptr && *sock != '\0') {
     control_host = std::make_unique<ViewportControlHost>(*this);
     control_server = std::make_unique<omnicpp::core::ControlServer>();
     std::string error;
@@ -5436,7 +5437,7 @@ void ViewportApp::shutdown() {
   gd_draw_pipeline.cleanup(context.device());
   rt_full_skinned_pipeline.cleanup(context.device());
   rt_full_pipeline.cleanup(context.device());
-  // Many-light city variants (only created when OMNICPP_SCENE=city).
+  // Many-light city variants (only created when WARPLOOM_SCENE=city).
   rt_full_ml_skinned_pipeline.cleanup(context.device());
   rt_full_ml_pipeline.cleanup(context.device());
   full_ml_skinned_pipeline.cleanup(context.device());
@@ -5505,7 +5506,7 @@ void ViewportApp::shutdown() {
   if (bone_allocation.is_valid()) {
     allocator.destroy_allocation(bone_allocation);
   }
-  // Sponza landmark resources (only when OMNICPP_SPONZA=1).
+  // Sponza landmark resources (only when WARPLOOM_SPONZA=1).
   for (auto& t : sponza_textures) {
     if (t.scene.view != VK_NULL_HANDLE) {
       vkDestroyImageView(context.device(), t.scene.view, nullptr);

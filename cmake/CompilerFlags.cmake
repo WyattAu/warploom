@@ -13,34 +13,34 @@
 # ============================================================================
 # Build Options
 # ============================================================================
-option(OMNICPP_WARNINGS_AS_ERRORS "Treat all warnings as errors" ON)
-option(OMNICPP_ENABLE_SANITIZERS "Enable sanitizers in Debug builds" OFF)
+option(WARPLOOM_WARNINGS_AS_ERRORS "Treat all warnings as errors" ON)
+option(WARPLOOM_ENABLE_SANITIZERS "Enable sanitizers in Debug builds" OFF)
 option(ENABLE_LTO "Enable Link-Time Optimization in Release builds" OFF)
 
 # ============================================================================
 # Compiler Detection
 # ============================================================================
 if(MSVC)
-    set(OMNICPP_COMPILER_MSVC ON)
-    set(OMNICPP_COMPILER_NAME "MSVC")
+    set(WARPLOOM_COMPILER_MSVC ON)
+    set(WARPLOOM_COMPILER_NAME "MSVC")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MSVC)
-    set(OMNICPP_COMPILER_MSVC_CLANG ON)
-    set(OMNICPP_COMPILER_NAME "MSVC-Clang")
+    set(WARPLOOM_COMPILER_MSVC_CLANG ON)
+    set(WARPLOOM_COMPILER_NAME "MSVC-Clang")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MINGW)
-    set(OMNICPP_COMPILER_MINGW_CLANG ON)
-    set(OMNICPP_COMPILER_NAME "MinGW-Clang")
+    set(WARPLOOM_COMPILER_MINGW_CLANG ON)
+    set(WARPLOOM_COMPILER_NAME "MinGW-Clang")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND MINGW)
-    set(OMNICPP_COMPILER_MINGW_GCC ON)
-    set(OMNICPP_COMPILER_NAME "MinGW-GCC")
+    set(WARPLOOM_COMPILER_MINGW_GCC ON)
+    set(WARPLOOM_COMPILER_NAME "MinGW-GCC")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-    set(OMNICPP_COMPILER_GCC ON)
-    set(OMNICPP_COMPILER_NAME "GCC")
+    set(WARPLOOM_COMPILER_GCC ON)
+    set(WARPLOOM_COMPILER_NAME "GCC")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(OMNICPP_COMPILER_CLANG ON)
-    set(OMNICPP_COMPILER_NAME "Clang")
+    set(WARPLOOM_COMPILER_CLANG ON)
+    set(WARPLOOM_COMPILER_NAME "Clang")
 else()
     message(WARNING "Unknown compiler: ${CMAKE_CXX_COMPILER_ID}")
-    set(OMNICPP_COMPILER_NAME "Unknown")
+    set(WARPLOOM_COMPILER_NAME "Unknown")
 endif()
 
 # ============================================================================
@@ -48,7 +48,7 @@ endif()
 # NOTE: Warnings are NOT treated as errors globally to avoid breaking external dependencies
 # Use omnicpp_set_strict_warnings(target) to apply strict flags to project targets only
 # ============================================================================
-if(MSVC OR OMNICPP_COMPILER_MSVC_CLANG)
+if(MSVC OR WARPLOOM_COMPILER_MSVC_CLANG)
     # MSVC warning flags - Maximum strictness (but not global Werror)
     add_compile_options(
         /W4                    # Warning level 4
@@ -123,7 +123,7 @@ endif()
 
 # Function to apply strict warnings (including -Werror) to specific targets only
 function(omnicpp_set_strict_warnings target)
-    if(MSVC OR OMNICPP_COMPILER_MSVC_CLANG)
+    if(MSVC OR WARPLOOM_COMPILER_MSVC_CLANG)
         target_compile_options(${target} PRIVATE /WX)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(${target} PRIVATE -Werror)
@@ -134,7 +134,7 @@ endfunction()
 # Sanitizer Configuration (Phase 1 Compliance)
 # CI must run: ASAN+UBSAN, TSAN, Release
 # ============================================================================
-if(OMNICPP_ENABLE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+if(WARPLOOM_ENABLE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     message(STATUS "Sanitizers enabled for Debug build")
     
     # Common sanitizer flags
@@ -142,19 +142,19 @@ if(OMNICPP_ENABLE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         # Address Sanitizer + Undefined Behavior Sanitizer (default)
-        if(NOT DEFINED OMNICPP_SANITIZER_TYPE OR OMNICPP_SANITIZER_TYPE STREQUAL "address")
+        if(NOT DEFINED WARPLOOM_SANITIZER_TYPE OR WARPLOOM_SANITIZER_TYPE STREQUAL "address")
             message(STATUS "Enabling AddressSanitizer + UndefinedBehaviorSanitizer")
             string(APPEND SANITIZER_FLAGS " -fsanitize=address,undefined")
             add_link_options(-fsanitize=address,undefined)
         
         # Thread Sanitizer
-        elseif(OMNICPP_SANITIZER_TYPE STREQUAL "thread")
+        elseif(WARPLOOM_SANITIZER_TYPE STREQUAL "thread")
             message(STATUS "Enabling ThreadSanitizer")
             string(APPEND SANITIZER_FLAGS " -fsanitize=thread")
             add_link_options(-fsanitize=thread)
         
         # Memory Sanitizer (Clang only)
-        elseif(OMNICPP_SANITIZER_TYPE STREQUAL "memory" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        elseif(WARPLOOM_SANITIZER_TYPE STREQUAL "memory" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
             message(STATUS "Enabling MemorySanitizer")
             string(APPEND SANITIZER_FLAGS " -fsanitize=memory -fPIE")
             add_link_options(-fsanitize=memory -pie)
@@ -167,7 +167,7 @@ endif()
 # ============================================================================
 # MSVC-Specific Flags
 # ============================================================================
-if(MSVC OR OMNICPP_COMPILER_MSVC_CLANG)
+if(MSVC OR WARPLOOM_COMPILER_MSVC_CLANG)
     # Disable specific warnings that are acceptable
     add_compile_options(
         /wd4251   # class needs to have dll-interface
@@ -200,7 +200,7 @@ endif()
 # ============================================================================
 # GCC-Specific Flags
 # ============================================================================
-if(OMNICPP_COMPILER_GCC OR OMNICPP_COMPILER_MINGW_GCC)
+if(WARPLOOM_COMPILER_GCC OR WARPLOOM_COMPILER_MINGW_GCC)
     # Enable color diagnostics
     add_compile_options(-fdiagnostics-color=always)
 
@@ -225,7 +225,7 @@ endif()
 # ============================================================================
 # Clang-Specific Flags
 # ============================================================================
-if(OMNICPP_COMPILER_CLANG OR OMNICPP_COMPILER_MSVC_CLANG OR OMNICPP_COMPILER_MINGW_CLANG)
+if(WARPLOOM_COMPILER_CLANG OR WARPLOOM_COMPILER_MSVC_CLANG OR WARPLOOM_COMPILER_MINGW_CLANG)
     # Enable color diagnostics
     add_compile_options(-fcolor-diagnostics)
 
@@ -305,9 +305,9 @@ endif()
 find_program(CLANG_TIDY_EXE NAMES clang-tidy clang-tidy-19 clang-tidy-18 clang-tidy-17)
 
 if(CLANG_TIDY_EXE)
-    option(OMNICPP_ENABLE_CLANG_TIDY "Enable clang-tidy during compilation" ON)
+    option(WARPLOOM_ENABLE_CLANG_TIDY "Enable clang-tidy during compilation" ON)
     
-    if(OMNICPP_ENABLE_CLANG_TIDY)
+    if(WARPLOOM_ENABLE_CLANG_TIDY)
         # Define a function to enable clang-tidy for specific targets only
         # This prevents clang-tidy from running on external dependencies
         function(omnicpp_enable_clang_tidy target)
@@ -337,9 +337,9 @@ endif()
 find_program(IWYU_EXE NAMES include-what-you-use)
 
 if(IWYU_EXE)
-    option(OMNICPP_ENABLE_IWYU "Enable include-what-you-use" OFF)
+    option(WARPLOOM_ENABLE_IWYU "Enable include-what-you-use" OFF)
     
-    if(OMNICPP_ENABLE_IWYU)
+    if(WARPLOOM_ENABLE_IWYU)
         set(CMAKE_CXX_INCLUDE_WHAT_YOU_USE ${IWYU_EXE})
         message(STATUS "include-what-you-use enabled: ${IWYU_EXE}")
     endif()
@@ -348,8 +348,8 @@ endif()
 # ============================================================================
 # Additional Compiler Flags
 # ============================================================================
-if(OMNICPP_COMPILER_FLAGS)
-    add_compile_options(${OMNICPP_COMPILER_FLAGS})
+if(WARPLOOM_COMPILER_FLAGS)
+    add_compile_options(${WARPLOOM_COMPILER_FLAGS})
 endif()
 
 # ============================================================================
@@ -357,9 +357,9 @@ endif()
 # ============================================================================
 message(STATUS "")
 message(STATUS "=== Compiler Flags Summary ===")
-message(STATUS "Compiler: ${OMNICPP_COMPILER_NAME}")
+message(STATUS "Compiler: ${WARPLOOM_COMPILER_NAME}")
 message(STATUS "Warnings as Errors: Per-target (use omnicpp_set_strict_warnings)")
-message(STATUS "Sanitizers: ${OMNICPP_ENABLE_SANITIZERS}")
+message(STATUS "Sanitizers: ${WARPLOOM_ENABLE_SANITIZERS}")
 message(STATUS "LTO: ${ENABLE_LTO}")
 message(STATUS "Clang-Tidy: Per-target (use omnicpp_enable_clang_tidy)")
 message(STATUS "==============================")

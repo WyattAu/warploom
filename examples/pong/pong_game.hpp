@@ -11,7 +11,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
 #include <QDialog>
 #include <QWidget>
 #include <QVBoxLayout>
@@ -105,7 +105,7 @@ struct GameStatistics {
     float total_time{ 0.0f };
 };
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
 /**
  * @brief Qt6 configuration window for game settings
  */
@@ -204,7 +204,7 @@ public:
     // Game state access (for renderer)
     GameState get_game_state() const { return m_state; }
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
     // Qt6 UI integration
     void show_config_dialog();
     void set_stats_overlay(StatsOverlay* overlay);
@@ -230,7 +230,7 @@ private:
     InputState m_input;
     GameStatistics m_stats;
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
     StatsOverlay* m_stats_overlay{ nullptr };
 #endif
 };

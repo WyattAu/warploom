@@ -32,7 +32,7 @@
 #include "engine/render/vulkan_offscreen.hpp"
 #include "engine/render/vulkan_pipeline.hpp"
 #include "engine/render/vulkan_renderer.hpp"
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include "vulkan_test_readback.hpp"
 
 using omnicpp_test::readback_swapchain_image;
@@ -88,7 +88,7 @@ void make_perspective(float fov_y, float aspect, float znear, float zfar,
 }  // namespace
 
 TEST(VulkanHardware, RealDepthPyramidOcclusion) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -190,7 +190,7 @@ TEST(VulkanHardware, RealDepthPyramidOcclusion) {
                                    static_cast<VkDeviceSize>(kWordPyramid) * 4U,
                                    static_cast<VkDeviceSize>(kTilesX * kTilesY) * 4U).is_ok());
 
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   const VkPushConstantRange reduce_push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 16U};
   omnicpp::render::VulkanPipeline reduce_pipe;
   ASSERT_TRUE(reduce_pipe.load_shader_stage_file(

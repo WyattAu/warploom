@@ -46,6 +46,16 @@
 #include "engine/render/vulkan_memory_allocator.hpp"
 #include "engine/render/vulkan_scene.hpp"
 
+// ============================================================================
+// S5-B phase 2: WARPLOOM_* env names are primary; the legacy OMNICPP_*
+// names keep working until post-0.1 (docs/warploom-identity-plan.md).
+// ============================================================================
+inline const char* warploom_env(const char* primary, const char* legacy) {
+  if (const char* v = std::getenv(primary)) return v;
+  return std::getenv(legacy);
+}
+
+
 namespace viewport {
 
 // ============================================================================
@@ -65,32 +75,32 @@ struct RunConfig {
 
   [[nodiscard]] static RunConfig from_environment() {
     RunConfig config;
-    if (const char* dir = std::getenv("OMNICPP_TELEMETRY_DIR")) {
+    if (const char* dir = warploom_env("WARPLOOM_TELEMETRY_DIR", "OMNICPP_TELEMETRY_DIR")) {
       config.telemetry_dir = dir;
     }
-    if (const char* frames = std::getenv("OMNICPP_MAX_FRAMES")) {
+    if (const char* frames = warploom_env("WARPLOOM_MAX_FRAMES", "OMNICPP_MAX_FRAMES")) {
       config.max_frames = static_cast<std::uint32_t>(std::atoi(frames));
     }
-    if (const char* dt = std::getenv("OMNICPP_FIXED_DT")) {
+    if (const char* dt = warploom_env("WARPLOOM_FIXED_DT", "OMNICPP_FIXED_DT")) {
       const float parsed = static_cast<float>(std::atof(dt));
       if (parsed > 0.0f) config.fixed_dt = parsed;
     }
-    if (const char* every = std::getenv("OMNICPP_CAPTURE_EVERY")) {
+    if (const char* every = warploom_env("WARPLOOM_CAPTURE_EVERY", "OMNICPP_CAPTURE_EVERY")) {
       config.capture_every = static_cast<std::uint32_t>(std::atoi(every));
     }
-    if (const char* limit = std::getenv("OMNICPP_CAPTURE_LIMIT")) {
+    if (const char* limit = warploom_env("WARPLOOM_CAPTURE_LIMIT", "OMNICPP_CAPTURE_LIMIT")) {
       config.capture_limit = static_cast<std::uint32_t>(std::atoi(limit));
     }
-    if (const char* start = std::getenv("OMNICPP_START_TIME")) {
+    if (const char* start = warploom_env("WARPLOOM_START_TIME", "OMNICPP_START_TIME")) {
       config.start_time = static_cast<float>(std::atof(start));
     }
-    if (const char* radius = std::getenv("OMNICPP_CAMERA_RADIUS")) {
+    if (const char* radius = warploom_env("WARPLOOM_CAMERA_RADIUS", "OMNICPP_CAMERA_RADIUS")) {
       config.camera_radius = static_cast<float>(std::atof(radius));
     }
-    if (const char* height = std::getenv("OMNICPP_CAMERA_HEIGHT")) {
+    if (const char* height = warploom_env("WARPLOOM_CAMERA_HEIGHT", "OMNICPP_CAMERA_HEIGHT")) {
       config.camera_height = static_cast<float>(std::atof(height));
     }
-    if (const char* crossfade = std::getenv("OMNICPP_CROSSFADE")) {
+    if (const char* crossfade = warploom_env("WARPLOOM_CROSSFADE", "OMNICPP_CROSSFADE")) {
       const float parsed = static_cast<float>(std::atof(crossfade));
       if (parsed > 0.0f) config.crossfade_period = parsed;
     }

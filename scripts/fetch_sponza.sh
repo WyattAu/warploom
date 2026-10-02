@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fetch the CC0 Sponza landmark (Khronos glTF sample) into assets/models/sponza.
 # Total ~53 MB: Sponza.gltf + Sponza.bin + 69 textures + LICENSE.md.
-# The scene activates with OMNICPP_SPONZA=1 on the city viewport
+# The scene activates with WARPLOOM_SPONZA=1 on the city viewport
 # (examples/viewport). License: assets/models/sponza/LICENSE.md (CC0 1.0).
 set -euo pipefail
 
@@ -44,4 +44,4 @@ for n in $names; do
 done
 
 echo "Sponza landmark ready in $DEST ($(ls "$DEST" | wc -l) files)."
-echo "Run: OMNICPP_SCENE=city OMNICPP_SPONZA=1 ./build/vulkan-validation/bin/omnicpp_viewport"
+echo "Run: WARPLOOM_SCENE=city WARPLOOM_SPONZA=1 ./build/vulkan-validation/bin/warploom_viewport"

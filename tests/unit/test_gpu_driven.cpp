@@ -24,7 +24,7 @@
 #include "engine/render/vulkan_offscreen.hpp"
 #include "engine/render/vulkan_pipeline.hpp"
 #include "engine/render/vulkan_renderer.hpp"
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include "vulkan_test_readback.hpp"
 using omnicpp_test::readback_swapchain_image;
 #endif
@@ -85,7 +85,7 @@ std::vector<std::uint8_t> load_spv(const std::string& path) {
 }  // namespace
 
 TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -199,7 +199,7 @@ TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
                                    inst_buf.value().buffer, 0, VK_WHOLE_SIZE).is_ok());
 
   // --- Pipelines. ---
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   const VkPushConstantRange comp_push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 8};
   omnicpp::render::VulkanPipeline comp_pipe;
   ASSERT_TRUE(comp_pipe.load_shader_stage_file(
@@ -428,7 +428,7 @@ TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
 //! fence-signaled is captured per frame and summarized with windowed
 //! percentiles (p50/p90/p99/p99.9/max) from LatencyTracker.
 TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -439,7 +439,7 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
   omnicpp::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
-  std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
 
   omnicpp::render::VulkanPipeline comp_pipe;
   ASSERT_TRUE(comp_pipe.load_shader_stage_file(

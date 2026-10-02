@@ -57,7 +57,7 @@ struct ScenePush {
   std::uint32_t pad0;
 };
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 void transition_hiz(VkCommandBuffer command_buffer, VkImage image,
                    std::uint32_t level, VkImageLayout old_layout,
@@ -86,7 +86,7 @@ void transition_hiz(VkCommandBuffer command_buffer, VkImage image,
 } // namespace
 
 TEST(VulkanHardware, SampledHiZPreviousFramePingPong) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -172,7 +172,7 @@ TEST(VulkanHardware, SampledHiZPreviousFramePingPong) {
 
   omnicpp::render::VulkanDescriptorManager descriptors;
   ASSERT_TRUE(descriptors.initialize(context.device()).is_ok());
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
 
   // Scene pipeline.
   std::vector<omnicpp::render::ReflectedBinding> scene_bindings = {

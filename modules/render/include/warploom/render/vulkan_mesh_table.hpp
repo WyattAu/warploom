@@ -101,9 +101,9 @@ private:
 // makes the old spellings name the SAME types. Guarded per namespace (a
 // shared guard would suppress later headers' distinct directives). The
 // nested render::depth family resolves through this directive.
-#ifndef OMNICPP_COMPAT_RENDER_NS
-#define OMNICPP_COMPAT_RENDER_NS
+#ifndef WARPLOOM_COMPAT_RENDER_NS
+#define WARPLOOM_COMPAT_RENDER_NS
 namespace omnicpp::render {
     using namespace ::warploom::render;
 }
-#endif  // OMNICPP_COMPAT_RENDER_NS
+#endif  // WARPLOOM_COMPAT_RENDER_NS

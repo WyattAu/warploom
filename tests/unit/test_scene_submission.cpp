@@ -16,7 +16,7 @@
 #include "engine/render/vulkan_scene.hpp"
 #include "engine/core/ecs.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include "vulkan_test_readback.hpp"
 #endif
 
@@ -100,7 +100,7 @@ constexpr std::uint32_t kCubeIndices[36] = {
 }  // namespace
 
 TEST(VulkanHardware, RendererIndexedSceneSubmission) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -154,7 +154,7 @@ TEST(VulkanHardware, RendererIndexedSceneSubmission) {
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
   omnicpp::render::VulkanPipeline pipeline;
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_stage_file(
       context.device(), shader_dir + "/indexed_scene.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(pipeline.load_shader_stage_file(

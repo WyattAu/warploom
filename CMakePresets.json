@@ -15,20 +15,20 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "OFF",
-        "OMNICPP_LEGACY_ENGINE": "OFF",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "OFF",
-        "OMNICPP_USE_VULKAN": "OFF",
-        "OMNICPP_USE_QT6": "OFF",
-        "OMNICPP_USE_GLFW": "OFF",
-        "OMNICPP_USE_QUILL": "OFF",
-        "OMNICPP_USE_GLM": "OFF",
-        "OMNICPP_USE_STB": "OFF",
-        "OMNICPP_USE_NLOHMANN_JSON": "OFF",
-        "OMNICPP_ENABLE_FORMATTING": "OFF",
-        "OMNICPP_ENABLE_LINTING": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "OFF",
+        "WARPLOOM_LEGACY_ENGINE": "OFF",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF",
+        "WARPLOOM_USE_VULKAN": "OFF",
+        "WARPLOOM_USE_QT6": "OFF",
+        "WARPLOOM_USE_GLFW": "OFF",
+        "WARPLOOM_USE_QUILL": "OFF",
+        "WARPLOOM_USE_GLM": "OFF",
+        "WARPLOOM_USE_STB": "OFF",
+        "WARPLOOM_USE_NLOHMANN_JSON": "OFF",
+        "WARPLOOM_ENABLE_FORMATTING": "OFF",
+        "WARPLOOM_ENABLE_LINTING": "OFF"
       }
     },
     {
@@ -49,8 +49,8 @@
       "inherits": "headless-debug",
       "binaryDir": "${sourceDir}/build/asan-ubsan",
       "cacheVariables": {
-        "OMNICPP_ENABLE_ASAN": "ON",
-        "OMNICPP_ENABLE_UBSAN": "ON"
+        "WARPLOOM_ENABLE_ASAN": "ON",
+        "WARPLOOM_ENABLE_UBSAN": "ON"
       }
     },
     {
@@ -60,7 +60,7 @@
       "inherits": "headless-debug",
       "binaryDir": "${sourceDir}/build/tsan",
       "cacheVariables": {
-        "OMNICPP_ENABLE_TSAN": "ON"
+        "WARPLOOM_ENABLE_TSAN": "ON"
       }
     },
     {
@@ -70,14 +70,14 @@
       "inherits": "headless-debug",
       "binaryDir": "${sourceDir}/build/vulkan-validation",
       "cacheVariables": {
-        "OMNICPP_USE_VULKAN": "ON",
-        "OMNICPP_VULKAN_VALIDATION_TESTS": "ON",
-        "OMNICPP_USE_QT6": "OFF",
-        "OMNICPP_USE_GLFW": "OFF",
-        "OMNICPP_USE_QUILL": "OFF",
-        "OMNICPP_USE_GLM": "OFF",
-        "OMNICPP_USE_STB": "OFF",
-        "OMNICPP_USE_NLOHMANN_JSON": "OFF"
+        "WARPLOOM_USE_VULKAN": "ON",
+        "WARPLOOM_VULKAN_VALIDATION_TESTS": "ON",
+        "WARPLOOM_USE_QT6": "OFF",
+        "WARPLOOM_USE_GLFW": "OFF",
+        "WARPLOOM_USE_QUILL": "OFF",
+        "WARPLOOM_USE_GLM": "OFF",
+        "WARPLOOM_USE_STB": "OFF",
+        "WARPLOOM_USE_NLOHMANN_JSON": "OFF"
       }
     },
     {
@@ -107,23 +107,23 @@
         "CMAKE_PREFIX_PATH": "/nix/var/nix/profiles/default",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_BUILD_PARALLEL_LEVEL": "$(nproc)",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "ON",
-        "OMNICPP_USE_VULKAN": "ON",
-        "OMNICPP_USE_QT6": "ON",
-        "OMNICPP_USE_OPENGL": "OFF",
-        "OMNICPP_USE_GLFW": "OFF",
-        "OMNICPP_USE_SPDLOG": "ON",
-        "OMNICPP_USE_GLM": "ON",
-        "OMNICPP_USE_STB": "ON",
-        "OMNICPP_ENABLE_COVERAGE": "OFF",
-        "OMNICPP_ENABLE_FORMATTING": "ON",
-        "OMNICPP_ENABLE_LINTING": "ON",
-        "OMNICPP_USE_CONAN": "OFF",
-        "OMNICPP_USE_VCPKG": "OFF",
-        "OMNICPP_USE_CPM": "ON",
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "ON",
+        "WARPLOOM_USE_VULKAN": "ON",
+        "WARPLOOM_USE_QT6": "ON",
+        "WARPLOOM_USE_OPENGL": "OFF",
+        "WARPLOOM_USE_GLFW": "OFF",
+        "WARPLOOM_USE_SPDLOG": "ON",
+        "WARPLOOM_USE_GLM": "ON",
+        "WARPLOOM_USE_STB": "ON",
+        "WARPLOOM_ENABLE_COVERAGE": "OFF",
+        "WARPLOOM_ENABLE_FORMATTING": "ON",
+        "WARPLOOM_ENABLE_LINTING": "ON",
+        "WARPLOOM_USE_CONAN": "OFF",
+        "WARPLOOM_USE_VCPKG": "OFF",
+        "WARPLOOM_USE_CPM": "ON",
         "Qt6_DIR": "/nix/store/kavwy4v9p1jhf952dzipkjj5l1hjx110-qtbase-6.10.1/lib/cmake/Qt6"
       }
     },
@@ -134,23 +134,23 @@
       "binaryDir": "${sourceDir}/build",
       "generator": "Ninja",
       "cacheVariables": {
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "OFF",
-        "OMNICPP_USE_VULKAN": "ON",
-        "OMNICPP_USE_QT6": "ON",
-        "OMNICPP_USE_OPENGL": "OFF",
-        "OMNICPP_USE_GLFW": "OFF",
-        "OMNICPP_USE_SPDLOG": "ON",
-        "OMNICPP_USE_GLM": "ON",
-        "OMNICPP_USE_STB": "ON",
-        "OMNICPP_ENABLE_COVERAGE": "OFF",
-        "OMNICPP_ENABLE_FORMATTING": "ON",
-        "OMNICPP_ENABLE_LINTING": "ON",
-        "OMNICPP_USE_CONAN": "OFF",
-        "OMNICPP_USE_VCPKG": "OFF",
-        "OMNICPP_USE_CPM": "ON"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF",
+        "WARPLOOM_USE_VULKAN": "ON",
+        "WARPLOOM_USE_QT6": "ON",
+        "WARPLOOM_USE_OPENGL": "OFF",
+        "WARPLOOM_USE_GLFW": "OFF",
+        "WARPLOOM_USE_SPDLOG": "ON",
+        "WARPLOOM_USE_GLM": "ON",
+        "WARPLOOM_USE_STB": "ON",
+        "WARPLOOM_ENABLE_COVERAGE": "OFF",
+        "WARPLOOM_ENABLE_FORMATTING": "ON",
+        "WARPLOOM_ENABLE_LINTING": "ON",
+        "WARPLOOM_USE_CONAN": "OFF",
+        "WARPLOOM_USE_VCPKG": "OFF",
+        "WARPLOOM_USE_CPM": "ON"
       }
     },
     {
@@ -160,23 +160,23 @@
       "binaryDir": "${sourceDir}/build",
       "generator": "Ninja",
       "cacheVariables": {
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "ON",
-        "OMNICPP_USE_VULKAN": "ON",
-        "OMNICPP_USE_QT6": "ON",
-        "OMNICPP_USE_OPENGL": "OFF",
-        "OMNICPP_USE_GLFW": "OFF",
-        "OMNICPP_USE_SPDLOG": "ON",
-        "OMNICPP_USE_GLM": "ON",
-        "OMNICPP_USE_STB": "ON",
-        "OMNICPP_ENABLE_COVERAGE": "OFF",
-        "OMNICPP_ENABLE_FORMATTING": "ON",
-        "OMNICPP_ENABLE_LINTING": "ON",
-        "OMNICPP_USE_CONAN": "OFF",
-        "OMNICPP_USE_VCPKG": "OFF",
-        "OMNICPP_USE_CPM": "ON",
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "ON",
+        "WARPLOOM_USE_VULKAN": "ON",
+        "WARPLOOM_USE_QT6": "ON",
+        "WARPLOOM_USE_OPENGL": "OFF",
+        "WARPLOOM_USE_GLFW": "OFF",
+        "WARPLOOM_USE_SPDLOG": "ON",
+        "WARPLOOM_USE_GLM": "ON",
+        "WARPLOOM_USE_STB": "ON",
+        "WARPLOOM_ENABLE_COVERAGE": "OFF",
+        "WARPLOOM_ENABLE_FORMATTING": "ON",
+        "WARPLOOM_ENABLE_LINTING": "ON",
+        "WARPLOOM_USE_CONAN": "OFF",
+        "WARPLOOM_USE_VCPKG": "OFF",
+        "WARPLOOM_USE_CPM": "ON",
         "Qt6_DIR": "/nix/store/kavwy4v9p1jhf952dzipkjj5l1hjx110-qtbase-6.10.1/lib/cmake/Qt6"
       }
     },
@@ -187,23 +187,23 @@
       "binaryDir": "${sourceDir}/build",
       "generator": "Ninja",
       "cacheVariables": {
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "ON",
-        "OMNICPP_USE_VULKAN": "ON",
-        "OMNICPP_USE_QT6": "ON",
-        "OMNICPP_USE_OPENGL": "OFF",
-        "OMNICPP_USE_GLFW": "OFF",
-        "OMNICPP_USE_SPDLOG": "ON",
-        "OMNICPP_USE_GLM": "ON",
-        "OMNICPP_USE_STB": "ON",
-        "OMNICPP_ENABLE_COVERAGE": "OFF",
-        "OMNICPP_ENABLE_FORMATTING": "ON",
-        "OMNICPP_ENABLE_LINTING": "ON",
-        "OMNICPP_USE_CONAN": "OFF",
-        "OMNICPP_USE_VCPKG": "OFF",
-        "OMNICPP_USE_CPM": "ON"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "ON",
+        "WARPLOOM_USE_VULKAN": "ON",
+        "WARPLOOM_USE_QT6": "ON",
+        "WARPLOOM_USE_OPENGL": "OFF",
+        "WARPLOOM_USE_GLFW": "OFF",
+        "WARPLOOM_USE_SPDLOG": "ON",
+        "WARPLOOM_USE_GLM": "ON",
+        "WARPLOOM_USE_STB": "ON",
+        "WARPLOOM_ENABLE_COVERAGE": "OFF",
+        "WARPLOOM_ENABLE_FORMATTING": "ON",
+        "WARPLOOM_ENABLE_LINTING": "ON",
+        "WARPLOOM_USE_CONAN": "OFF",
+        "WARPLOOM_USE_VCPKG": "OFF",
+        "WARPLOOM_USE_CPM": "ON"
       }
     },
     {
@@ -213,23 +213,23 @@
       "binaryDir": "${sourceDir}/build",
       "generator": "Ninja",
       "cacheVariables": {
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "ON",
-        "OMNICPP_USE_VULKAN": "ON",
-        "OMNICPP_USE_QT6": "ON",
-        "OMNICPP_USE_OPENGL": "OFF",
-        "OMNICPP_USE_GLFW": "OFF",
-        "OMNICPP_USE_SPDLOG": "ON",
-        "OMNICPP_USE_GLM": "ON",
-        "OMNICPP_USE_STB": "ON",
-        "OMNICPP_ENABLE_COVERAGE": "OFF",
-        "OMNICPP_ENABLE_FORMATTING": "ON",
-        "OMNICPP_ENABLE_LINTING": "ON",
-        "OMNICPP_USE_CONAN": "OFF",
-        "OMNICPP_USE_VCPKG": "OFF",
-        "OMNICPP_USE_CPM": "ON"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "ON",
+        "WARPLOOM_USE_VULKAN": "ON",
+        "WARPLOOM_USE_QT6": "ON",
+        "WARPLOOM_USE_OPENGL": "OFF",
+        "WARPLOOM_USE_GLFW": "OFF",
+        "WARPLOOM_USE_SPDLOG": "ON",
+        "WARPLOOM_USE_GLM": "ON",
+        "WARPLOOM_USE_STB": "ON",
+        "WARPLOOM_ENABLE_COVERAGE": "OFF",
+        "WARPLOOM_ENABLE_FORMATTING": "ON",
+        "WARPLOOM_ENABLE_LINTING": "ON",
+        "WARPLOOM_USE_CONAN": "OFF",
+        "WARPLOOM_USE_VCPKG": "OFF",
+        "WARPLOOM_USE_CPM": "ON"
       }
     },
     {
@@ -239,10 +239,10 @@
       "binaryDir": "${sourceDir}/build/debug/engine",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "OFF",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "OFF",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -252,10 +252,10 @@
       "binaryDir": "${sourceDir}/build/release/engine",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "OFF",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "OFF",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -265,10 +265,10 @@
       "binaryDir": "${sourceDir}/build/debug/game",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "OMNICPP_BUILD_ENGINE": "OFF",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "OFF",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -278,10 +278,10 @@
       "binaryDir": "${sourceDir}/build/release/game",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "OMNICPP_BUILD_ENGINE": "OFF",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "OFF",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -294,9 +294,9 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON"
       }
     },
     {
@@ -309,9 +309,9 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -324,9 +324,9 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -339,9 +339,9 @@
         "CMAKE_BUILD_TYPE": "MinSizeRel",
         "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -354,9 +354,9 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "clang-cl",
         "CMAKE_CXX_COMPILER": "clang-cl",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON"
       }
     },
     {
@@ -369,9 +369,9 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "clang-cl",
         "CMAKE_CXX_COMPILER": "clang-cl",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -384,9 +384,9 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_C_COMPILER": "clang-cl",
         "CMAKE_CXX_COMPILER": "clang-cl",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -399,9 +399,9 @@
         "CMAKE_BUILD_TYPE": "MinSizeRel",
         "CMAKE_C_COMPILER": "clang-cl",
         "CMAKE_CXX_COMPILER": "clang-cl",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -414,9 +414,9 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON"
       }
     },
     {
@@ -429,9 +429,9 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -444,9 +444,9 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -459,9 +459,9 @@
         "CMAKE_BUILD_TYPE": "MinSizeRel",
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -474,9 +474,9 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON"
       }
     },
     {
@@ -489,9 +489,9 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -504,9 +504,9 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -519,9 +519,9 @@
         "CMAKE_BUILD_TYPE": "MinSizeRel",
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -534,9 +534,9 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON"
       }
     },
     {
@@ -549,9 +549,9 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -564,9 +564,9 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -579,9 +579,9 @@
         "CMAKE_BUILD_TYPE": "MinSizeRel",
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -594,9 +594,9 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON"
       }
     },
     {
@@ -609,9 +609,9 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -624,9 +624,9 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -639,9 +639,9 @@
         "CMAKE_BUILD_TYPE": "MinSizeRel",
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -651,24 +651,24 @@
       "binaryDir": "${sourceDir}/build",
       "generator": "Ninja",
       "cacheVariables": {
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "ON",
-        "OMNICPP_USE_VULKAN": "ON",
-        "OMNICPP_USE_QT6": "ON",
-        "OMNICPP_USE_OPENGL": "OFF",
-        "OMNICPP_USE_GLFW": "OFF",
-        "OMNICPP_USE_SPDLOG": "ON",
-        "OMNICPP_USE_GLM": "ON",
-        "OMNICPP_USE_STB": "ON",
-        "OMNICPP_USE_NLOHMANN_JSON": "ON",
-        "OMNICPP_ENABLE_COVERAGE": "OFF",
-        "OMNICPP_ENABLE_FORMATTING": "ON",
-        "OMNICPP_ENABLE_LINTING": "ON",
-        "OMNICPP_USE_CONAN": "OFF",
-        "OMNICPP_USE_VCPKG": "OFF",
-        "OMNICPP_USE_CPM": "ON"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "ON",
+        "WARPLOOM_USE_VULKAN": "ON",
+        "WARPLOOM_USE_QT6": "ON",
+        "WARPLOOM_USE_OPENGL": "OFF",
+        "WARPLOOM_USE_GLFW": "OFF",
+        "WARPLOOM_USE_SPDLOG": "ON",
+        "WARPLOOM_USE_GLM": "ON",
+        "WARPLOOM_USE_STB": "ON",
+        "WARPLOOM_USE_NLOHMANN_JSON": "ON",
+        "WARPLOOM_ENABLE_COVERAGE": "OFF",
+        "WARPLOOM_ENABLE_FORMATTING": "ON",
+        "WARPLOOM_ENABLE_LINTING": "ON",
+        "WARPLOOM_USE_CONAN": "OFF",
+        "WARPLOOM_USE_VCPKG": "OFF",
+        "WARPLOOM_USE_CPM": "ON"
       }
     },
     {
@@ -678,24 +678,24 @@
       "binaryDir": "${sourceDir}/build",
       "generator": "Ninja",
       "cacheVariables": {
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "ON",
-        "OMNICPP_USE_VULKAN": "ON",
-        "OMNICPP_USE_QT6": "ON",
-        "OMNICPP_USE_OPENGL": "OFF",
-        "OMNICPP_USE_GLFW": "OFF",
-        "OMNICPP_USE_SPDLOG": "ON",
-        "OMNICPP_USE_GLM": "ON",
-        "OMNICPP_USE_STB": "ON",
-        "OMNICPP_USE_NLOHMANN_JSON": "ON",
-        "OMNICPP_ENABLE_COVERAGE": "OFF",
-        "OMNICPP_ENABLE_FORMATTING": "ON",
-        "OMNICPP_ENABLE_LINTING": "ON",
-        "OMNICPP_USE_CONAN": "OFF",
-        "OMNICPP_USE_VCPKG": "OFF",
-        "OMNICPP_USE_CPM": "ON"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "ON",
+        "WARPLOOM_USE_VULKAN": "ON",
+        "WARPLOOM_USE_QT6": "ON",
+        "WARPLOOM_USE_OPENGL": "OFF",
+        "WARPLOOM_USE_GLFW": "OFF",
+        "WARPLOOM_USE_SPDLOG": "ON",
+        "WARPLOOM_USE_GLM": "ON",
+        "WARPLOOM_USE_STB": "ON",
+        "WARPLOOM_USE_NLOHMANN_JSON": "ON",
+        "WARPLOOM_ENABLE_COVERAGE": "OFF",
+        "WARPLOOM_ENABLE_FORMATTING": "ON",
+        "WARPLOOM_ENABLE_LINTING": "ON",
+        "WARPLOOM_USE_CONAN": "OFF",
+        "WARPLOOM_USE_VCPKG": "OFF",
+        "WARPLOOM_USE_CPM": "ON"
       }
     },
     {
@@ -713,10 +713,10 @@
         "CMAKE_C_FLAGS": "-march=native -g -Wall -Wextra -Wpedantic",
         "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined",
         "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -734,10 +734,10 @@
         "CMAKE_C_FLAGS": "-march=native -O3 -flto -DNDEBUG -Wall -Wextra -Wpedantic",
         "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
         "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -755,10 +755,10 @@
         "CMAKE_C_FLAGS": "-march=native -O2 -g -flto -Wall -Wextra -Wpedantic",
         "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
         "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -776,10 +776,10 @@
         "CMAKE_C_FLAGS": "-march=native -Os -flto -DNDEBUG -Wall -Wextra -Wpedantic",
         "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto -Wl,-s",
         "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto -Wl,-s",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -797,10 +797,10 @@
         "CMAKE_C_FLAGS": "-march=native -g -Wall -Wextra -Wpedantic",
         "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined",
         "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -818,10 +818,10 @@
         "CMAKE_C_FLAGS": "-march=native -O3 -flto -DNDEBUG -Wall -Wextra -Wpedantic",
         "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
         "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -839,10 +839,10 @@
         "CMAKE_C_FLAGS": "-march=native -O2 -g -flto -Wall -Wextra -Wpedantic",
         "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
         "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -860,10 +860,10 @@
         "CMAKE_C_FLAGS": "-march=native -Os -flto -DNDEBUG -Wall -Wextra -Wpedantic",
         "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto -Wl,-s",
         "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto -Wl,-s",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -874,10 +874,10 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/emscripten.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -888,10 +888,10 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/emscripten.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -902,10 +902,10 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/emscripten.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -916,10 +916,10 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/emscripten.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "MinSizeRel",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -930,10 +930,10 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/x86-linux-gnu.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -944,10 +944,10 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/x86-linux-gnu.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -958,10 +958,10 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/arm64-linux-gnu.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -972,10 +972,10 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/arm64-linux-gnu.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -986,10 +986,10 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/arm64-windows-msvc.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -1000,10 +1000,10 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/arm64-windows-msvc.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -1019,10 +1019,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1048,10 +1048,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1077,10 +1077,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1106,10 +1106,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1135,10 +1135,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1164,10 +1164,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1193,10 +1193,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1222,10 +1222,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1254,10 +1254,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1287,10 +1287,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1320,10 +1320,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1353,10 +1353,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1386,10 +1386,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1419,10 +1419,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1452,10 +1452,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1485,10 +1485,10 @@
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1516,10 +1516,10 @@
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_PREFIX_PATH": "${sourceDir}/.nix-profile/qt6:${sourceDir}/.nix-profile/vulkan",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "ON",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",
@@ -1554,10 +1554,10 @@
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_PREFIX_PATH": "${sourceDir}/.nix-profile/qt6:${sourceDir}/.nix-profile/vulkan",
-        "OMNICPP_BUILD_ENGINE": "ON",
-        "OMNICPP_BUILD_GAME": "ON",
-        "OMNICPP_BUILD_TESTS": "OFF",
-        "OMNICPP_BUILD_EXAMPLES": "OFF"
+        "WARPLOOM_BUILD_ENGINE": "ON",
+        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
       "environment": {
         "IN_NIX_SHELL": "1",

@@ -33,7 +33,7 @@
 
 #include "vulkan_test_readback.hpp"
 
-#if defined(OMNICPP_HAS_VULKAN)
+#if defined(WARPLOOM_HAS_VULKAN)
 #include <vulkan/vulkan.h>
 
 namespace {
@@ -413,7 +413,7 @@ struct PbrSceneHarness {
       return false;
     }
 
-    const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+    const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
     if (!pipeline
              .load_shader_stage_file(context.device(),
                                      shader_dir + "/pbr_scene.vert.spv", "vertex")
@@ -771,4 +771,4 @@ TEST(VulkanHardware, PbrAlbedoTextureTintsLitCube) {
   EXPECT_LT(g, 60U);
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN

@@ -2,11 +2,18 @@
 
 #include <cstdint>
 
-#if defined(OMNICPP_HAS_VULKAN)
+// S5-B phase 2 name normalization (docs/warploom-identity-plan.md): the
+// new primary name is WARPLOOM_HAS_VULKAN; the legacy name is honored so
+// existing build definitions keep working (removed post-0.1).
+#if !defined(WARPLOOM_HAS_VULKAN) && defined(OMNICPP_HAS_VULKAN)
+#define WARPLOOM_HAS_VULKAN
+#endif
+
+#if defined(WARPLOOM_HAS_VULKAN)
 #include <vulkan/vulkan.h>
-#define OMNICPP_VULKAN_TYPES_AVAILABLE 1
+#define WARPLOOM_VULKAN_TYPES_AVAILABLE 1
 #else
-#define OMNICPP_VULKAN_TYPES_AVAILABLE 0
+#define WARPLOOM_VULKAN_TYPES_AVAILABLE 0
 
 typedef struct VkInstance_T* VkInstance;
 typedef struct VkPhysicalDevice_T* VkPhysicalDevice;
@@ -167,4 +174,10 @@ constexpr VkImageLayout VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL = 7;
 constexpr VkImageLayout VK_IMAGE_LAYOUT_PRESENT_SRC_KHR = 1000001002;
 constexpr std::uint32_t VK_COLOR_SPACE_SRGB_NONLINEAR_KHR = 0;
 
+#endif
+
+// S5-B phase 2 shim: legacy availability flag aliases the new one
+// (docs/warploom-identity-plan.md); removed post-0.1.
+#ifndef OMNICPP_VULKAN_TYPES_AVAILABLE
+#define OMNICPP_VULKAN_TYPES_AVAILABLE WARPLOOM_VULKAN_TYPES_AVAILABLE
 #endif

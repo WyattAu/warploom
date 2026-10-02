@@ -4,11 +4,11 @@
 # Configures code coverage tools and targets
 # ============================================================================
 
-if(OMNICPP_ENABLE_COVERAGE)
+if(WARPLOOM_ENABLE_COVERAGE)
     # Coverage only supported with GCC and Clang
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         message(WARNING "Code coverage only supported with GCC and Clang")
-        set(OMNICPP_ENABLE_COVERAGE OFF)
+        set(WARPLOOM_ENABLE_COVERAGE OFF)
         return()
     endif()
 
@@ -31,13 +31,13 @@ if(OMNICPP_ENABLE_COVERAGE)
 
     if(NOT GCOV_EXECUTABLE)
         message(WARNING "gcov not found, coverage disabled")
-        set(OMNICPP_ENABLE_COVERAGE OFF)
+        set(WARPLOOM_ENABLE_COVERAGE OFF)
         return()
     endif()
 
     if(NOT LCOV_EXECUTABLE)
         message(WARNING "lcov not found, coverage disabled")
-        set(OMNICPP_ENABLE_COVERAGE OFF)
+        set(WARPLOOM_ENABLE_COVERAGE OFF)
         return()
     endif()
 

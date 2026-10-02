@@ -6,9 +6,9 @@
 # changing > to >= or returning 0 instead of 1 causes tests to fail.
 # ============================================================================
 
-option(OMNICPP_ENABLE_MUTATION_TESTING "Enable mutation testing with Mull" OFF)
+option(WARPLOOM_ENABLE_MUTATION_TESTING "Enable mutation testing with Mull" OFF)
 
-if(OMNICPP_ENABLE_MUTATION_TESTING)
+if(WARPLOOM_ENABLE_MUTATION_TESTING)
     message(STATUS "Mutation testing enabled")
     
     # Find Mull mutation testing tools
@@ -20,13 +20,13 @@ if(OMNICPP_ENABLE_MUTATION_TESTING)
             "Mull mutation testing tools not found. "
             "Install Mull from https://github.com/mull-project/mull"
         )
-        set(OMNICPP_ENABLE_MUTATION_TESTING OFF)
+        set(WARPLOOM_ENABLE_MUTATION_TESTING OFF)
     else()
         message(STATUS "Found mull-runner: ${MULL_RUNNER}")
         message(STATUS "Found mull-cxx: ${MULL_CXX}")
         
         # Mutation testing configuration
-        set(OMNICPP_MUTATION_OPERATORS
+        set(WARPLOOM_MUTATION_OPERATORS
             "math_add_mutator"
             "math_div_mutator"
             "math_mul_mutator"
@@ -56,16 +56,16 @@ if(OMNICPP_ENABLE_MUTATION_TESTING)
         CACHE STRING "Mutation operators to use")
         
         # Timeout for mutation tests (in seconds)
-        set(OMNICPP_MUTATION_TIMEOUT 60 CACHE STRING "Timeout per mutation test")
+        set(WARPLOOM_MUTATION_TIMEOUT 60 CACHE STRING "Timeout per mutation test")
         
         # Minimum mutation score required (0-100)
-        set(OMNICPP_MIN_MUTATION_SCORE 80 CACHE STRING "Minimum mutation score required")
+        set(WARPLOOM_MIN_MUTATION_SCORE 80 CACHE STRING "Minimum mutation score required")
         
         # Create mutation testing target
         add_custom_target(mutation-test
             COMMAND ${MULL_RUNNER}
-                -mutators=${OMNICPP_MUTATION_OPERATORS}
-                -timeout=${OMNICPP_MUTATION_TIMEOUT}
+                -mutators=${WARPLOOM_MUTATION_OPERATORS}
+                -timeout=${WARPLOOM_MUTATION_TIMEOUT}
                 -reporters=Elements,IDE
                 -report-dir=${CMAKE_BINARY_DIR}/mutation-reports
                 $<TARGET_FILE:omnicpp_unit_tests>
@@ -77,8 +77,8 @@ if(OMNICPP_ENABLE_MUTATION_TESTING)
         # Mutation test with coverage filter
         add_custom_target(mutation-test-coverage
             COMMAND ${MULL_RUNNER}
-                -mutators=${OMNICPP_MUTATION_OPERATORS}
-                -timeout=${OMNICPP_MUTATION_TIMEOUT}
+                -mutators=${WARPLOOM_MUTATION_OPERATORS}
+                -timeout=${WARPLOOM_MUTATION_TIMEOUT}
                 -reporters=Elements,IDE,Coverage
                 -report-dir=${CMAKE_BINARY_DIR}/mutation-reports
                 -coverage-info=${CMAKE_BINARY_DIR}/coverage.info
@@ -92,8 +92,8 @@ if(OMNICPP_ENABLE_MUTATION_TESTING)
         add_custom_target(mutation-report
             COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/mutation-reports
             COMMAND ${MULL_RUNNER}
-                -mutators=${OMNICPP_MUTATION_OPERATORS}
-                -timeout=${OMNICPP_MUTATION_TIMEOUT}
+                -mutators=${WARPLOOM_MUTATION_OPERATORS}
+                -timeout=${WARPLOOM_MUTATION_TIMEOUT}
                 -reporters=Elements,IDE,SQLite
                 -report-dir=${CMAKE_BINARY_DIR}/mutation-reports
                 $<TARGET_FILE:omnicpp_unit_tests>
@@ -106,15 +106,15 @@ if(OMNICPP_ENABLE_MUTATION_TESTING)
         # CI target that enforces minimum mutation score
         add_custom_target(mutation-test-ci
             COMMAND ${MULL_RUNNER}
-                -mutators=${OMNICPP_MUTATION_OPERATORS}
-                -timeout=${OMNICPP_MUTATION_TIMEOUT}
+                -mutators=${WARPLOOM_MUTATION_OPERATORS}
+                -timeout=${WARPLOOM_MUTATION_TIMEOUT}
                 -reporters=Elements,SQLite
                 -report-dir=${CMAKE_BINARY_DIR}/mutation-reports
-                -min-score=${OMNICPP_MIN_MUTATION_SCORE}
+                -min-score=${WARPLOOM_MIN_MUTATION_SCORE}
                 $<TARGET_FILE:omnicpp_unit_tests>
             RESULT_VARIABLE MUTATION_RESULT
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-            COMMENT "Running mutation tests for CI (min score: ${OMNICPP_MIN_MUTATION_SCORE}%)"
+            COMMENT "Running mutation tests for CI (min score: ${WARPLOOM_MIN_MUTATION_SCORE}%)"
             VERBATIM
         )
         
@@ -125,15 +125,15 @@ if(OMNICPP_ENABLE_MUTATION_TESTING)
         message(STATUS "  - mutation-test-ci: CI target with score enforcement")
     endif()
 else()
-    message(STATUS "Mutation testing disabled (set OMNICPP_ENABLE_MUTATION_TESTING=ON to enable)")
+    message(STATUS "Mutation testing disabled (set WARPLOOM_ENABLE_MUTATION_TESTING=ON to enable)")
 endif()
 
 # ============================================================================
 # Property-Based Testing Configuration
 # ============================================================================
-option(OMNICPP_ENABLE_PROPERTY_TESTING "Enable property-based testing with RapidCheck" OFF)
+option(WARPLOOM_ENABLE_PROPERTY_TESTING "Enable property-based testing with RapidCheck" OFF)
 
-if(OMNICPP_ENABLE_PROPERTY_TESTING)
+if(WARPLOOM_ENABLE_PROPERTY_TESTING)
     message(STATUS "Property-based testing enabled")
     
     # Find RapidCheck
@@ -158,72 +158,72 @@ if(OMNICPP_ENABLE_PROPERTY_TESTING)
         message(STATUS "RapidCheck available for property-based testing")
         
         # Number of test cases to generate per property
-        set(OMNICPP_PROPERTY_TEST_CASES 1000 CACHE STRING "Number of property test cases")
+        set(WARPLOOM_PROPERTY_TEST_CASES 1000 CACHE STRING "Number of property test cases")
         
         # Enable verbose output
-        option(OMNICPP_PROPERTY_TEST_VERBOSE "Enable verbose property test output" OFF)
+        option(WARPLOOM_PROPERTY_TEST_VERBOSE "Enable verbose property test output" OFF)
         
-        message(STATUS "Property test cases per property: ${OMNICPP_PROPERTY_TEST_CASES}")
+        message(STATUS "Property test cases per property: ${WARPLOOM_PROPERTY_TEST_CASES}")
     else()
         message(WARNING "RapidCheck could not be configured")
-        set(OMNICPP_ENABLE_PROPERTY_TESTING OFF)
+        set(WARPLOOM_ENABLE_PROPERTY_TESTING OFF)
     endif()
 else()
-    message(STATUS "Property-based testing disabled (set OMNICPP_ENABLE_PROPERTY_TESTING=ON to enable)")
+    message(STATUS "Property-based testing disabled (set WARPLOOM_ENABLE_PROPERTY_TESTING=ON to enable)")
 endif()
 
 # ============================================================================
 # Fuzz Testing Configuration  
 # ============================================================================
-option(OMNICPP_ENABLE_FUZZ_TESTING "Enable fuzz testing with libFuzzer" OFF)
+option(WARPLOOM_ENABLE_FUZZ_TESTING "Enable fuzz testing with libFuzzer" OFF)
 
-if(OMNICPP_ENABLE_FUZZ_TESTING)
+if(WARPLOOM_ENABLE_FUZZ_TESTING)
     message(STATUS "Fuzz testing enabled")
     
     # Check for Clang (libFuzzer requires Clang)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         message(WARNING "libFuzzer requires Clang compiler. Current: ${CMAKE_CXX_COMPILER_ID}")
         message(STATUS "Fuzz testing will be disabled")
-        set(OMNICPP_ENABLE_FUZZ_TESTING OFF)
+        set(WARPLOOM_ENABLE_FUZZ_TESTING OFF)
     else()
         # Fuzzer flags
-        set(OMNICPP_FUZZ_FLAGS
+        set(WARPLOOM_FUZZ_FLAGS
             -fsanitize=fuzzer,address,undefined
             -fno-omit-frame-pointer
         )
         
         # Fuzzer corpus directory
-        set(OMNICPP_FUZZ_CORPUS_DIR ${CMAKE_SOURCE_DIR}/tests/fuzz/corpus)
+        set(WARPLOOM_FUZZ_CORPUS_DIR ${CMAKE_SOURCE_DIR}/tests/fuzz/corpus)
         
         # Fuzzer dictionary (optional)
-        set(OMNICPP_FUZZ_DICT ${CMAKE_SOURCE_DIR}/tests/fuzz/dictionary.txt)
+        set(WARPLOOM_FUZZ_DICT ${CMAKE_SOURCE_DIR}/tests/fuzz/dictionary.txt)
         
         # Maximum iterations (0 = unlimited)
-        set(OMNICPP_FUZZ_MAX_ITERATIONS 0 CACHE STRING "Maximum fuzz iterations (0=unlimited)")
+        set(WARPLOOM_FUZZ_MAX_ITERATIONS 0 CACHE STRING "Maximum fuzz iterations (0=unlimited)")
         
         # Fuzzer timeout (in seconds)
-        set(OMNICPP_FUZZ_TIMEOUT 60 CACHE STRING "Timeout per fuzz test")
+        set(WARPLOOM_FUZZ_TIMEOUT 60 CACHE STRING "Timeout per fuzz test")
         
         # Create corpus directory if it doesn't exist
-        file(MAKE_DIRECTORY ${OMNICPP_FUZZ_CORPUS_DIR})
+        file(MAKE_DIRECTORY ${WARPLOOM_FUZZ_CORPUS_DIR})
         
         # Function to add a fuzz test target
         function(add_fuzz_test TARGET_NAME SOURCE_FILE)
             add_executable(${TARGET_NAME} ${SOURCE_FILE})
-            target_compile_options(${TARGET_NAME} PRIVATE ${OMNICPP_FUZZ_FLAGS})
+            target_compile_options(${TARGET_NAME} PRIVATE ${WARPLOOM_FUZZ_FLAGS})
             target_link_options(${TARGET_NAME} PRIVATE -fsanitize=fuzzer)
             target_link_libraries(${TARGET_NAME} PRIVATE
                 omnicpp_engine
-                $<$<BOOL:${OMNICPP_ENABLE_SANITIZERS}>:-fsanitize=address,undefined>
+                $<$<BOOL:${WARPLOOM_ENABLE_SANITIZERS}>:-fsanitize=address,undefined>
             )
             
             # Add custom target to run the fuzzer
             add_custom_target(run_${TARGET_NAME}
                 COMMAND ${TARGET_NAME}
-                    -max_total_time=${OMNICPP_FUZZ_TIMEOUT}
+                    -max_total_time=${WARPLOOM_FUZZ_TIMEOUT}
                     -max_len=4096
                     -print_final_stats=1
-                    ${OMNICPP_FUZZ_CORPUS_DIR}
+                    ${WARPLOOM_FUZZ_CORPUS_DIR}
                 WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/bin
                 COMMENT "Running fuzz test: ${TARGET_NAME}"
                 VERBATIM
@@ -231,12 +231,12 @@ if(OMNICPP_ENABLE_FUZZ_TESTING)
         endfunction()
         
         message(STATUS "Fuzz testing configured:")
-        message(STATUS "  - Corpus dir: ${OMNICPP_FUZZ_CORPUS_DIR}")
-        message(STATUS "  - Timeout: ${OMNICPP_FUZZ_TIMEOUT}s")
+        message(STATUS "  - Corpus dir: ${WARPLOOM_FUZZ_CORPUS_DIR}")
+        message(STATUS "  - Timeout: ${WARPLOOM_FUZZ_TIMEOUT}s")
         message(STATUS "  - Use add_fuzz_test() to create fuzz targets")
     endif()
 else()
-    message(STATUS "Fuzz testing disabled (set OMNICPP_ENABLE_FUZZ_TESTING=ON to enable)")
+    message(STATUS "Fuzz testing disabled (set WARPLOOM_ENABLE_FUZZ_TESTING=ON to enable)")
 endif()
 
 # ============================================================================
@@ -244,8 +244,8 @@ endif()
 # ============================================================================
 message(STATUS "")
 message(STATUS "=== Testing Configuration Summary ===")
-message(STATUS "Mutation Testing: ${OMNICPP_ENABLE_MUTATION_TESTING}")
-message(STATUS "Property Testing: ${OMNICPP_ENABLE_PROPERTY_TESTING}")
-message(STATUS "Fuzz Testing: ${OMNICPP_ENABLE_FUZZ_TESTING}")
+message(STATUS "Mutation Testing: ${WARPLOOM_ENABLE_MUTATION_TESTING}")
+message(STATUS "Property Testing: ${WARPLOOM_ENABLE_PROPERTY_TESTING}")
+message(STATUS "Fuzz Testing: ${WARPLOOM_ENABLE_FUZZ_TESTING}")
 message(STATUS "====================================")
 message(STATUS "")

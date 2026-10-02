@@ -27,7 +27,7 @@
 #include "engine/render/vulkan_offscreen.hpp"
 #include "engine/render/vulkan_pipeline.hpp"
 #include "engine/render/vulkan_renderer.hpp"
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include "vulkan_test_readback.hpp"
 using omnicpp_test::readback_swapchain_image;
 #endif
@@ -88,7 +88,7 @@ void make_perspective(float fov_y, float aspect, float znear, float zfar,
 }  // namespace
 
 TEST(VulkanHardware, GpuLodOcclusionCounters) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -175,7 +175,7 @@ TEST(VulkanHardware, GpuLodOcclusionCounters) {
                                    inst_buf.value().buffer, 0, VK_WHOLE_SIZE).is_ok());
 
   // --- Pipelines. ---
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   const VkPushConstantRange comp_push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 56U};
   omnicpp::render::VulkanPipeline comp_pipe;
   ASSERT_TRUE(comp_pipe.load_shader_stage_file(

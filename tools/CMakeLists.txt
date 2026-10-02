@@ -6,6 +6,7 @@ cmake_minimum_required(VERSION 3.20)
 # ============================================================================
 
 add_executable(omnicpp_headless_host headless_host.cpp)
+set_target_properties(omnicpp_headless_host PROPERTIES OUTPUT_NAME warploom_headless_host)  # S5-B phase 2 binary rename
 target_include_directories(omnicpp_headless_host PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )

@@ -16,18 +16,18 @@
 #include "engine/core/job_system.hpp"
 
 #if defined(__SANITIZE_THREAD__)
-#define OMNICPP_TSAN 1
+#define WARPLOOM_TSAN 1
 #elif defined(__clang__) && defined(__has_feature)
 #if __has_feature(thread_sanitizer)
-#define OMNICPP_TSAN 1
+#define WARPLOOM_TSAN 1
 #endif
 #endif
 
 #if defined(__SANITIZE_ADDRESS__)
-#define OMNICPP_ASAN 1
+#define WARPLOOM_ASAN 1
 #elif defined(__clang__) && defined(__has_feature)
 #if __has_feature(address_sanitizer)
-#define OMNICPP_ASAN 1
+#define WARPLOOM_ASAN 1
 #endif
 #endif
 
@@ -227,10 +227,10 @@ TEST(JobSystem, DispatchOverheadIsSubMicrosecond) {
 // Optimized builds schedule fewer -O0 instrumentation stalls on the submit
 // path, but CI Release VMs still measure ~5x a workstation (noisy vCPUs), so
 // the plain tier splits on CI while Release collapses sanitizer variance.
-#if defined(OMNICPP_TSAN)
+#if defined(WARPLOOM_TSAN)
   const std::uint64_t kMedianBudget = 5'000U;
   const std::uint64_t kP99Budget = 500'000U;
-#elif defined(OMNICPP_ASAN)
+#elif defined(WARPLOOM_ASAN)
   const std::uint64_t kMedianBudget = 2'000U;
   const std::uint64_t kP99Budget = 250'000U;
 #elif defined(NDEBUG)

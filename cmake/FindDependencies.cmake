@@ -8,7 +8,7 @@
 # ============================================================================
 # Quill is a high-performance, C++17/20/23 compatible logging library
 # https://github.com/odygrd/quill
-if(OMNICPP_USE_QUILL)
+if(WARPLOOM_USE_QUILL)
     CPMAddPackage(
         NAME quill
         VERSION 8.2.0
@@ -21,14 +21,14 @@ if(OMNICPP_USE_QUILL)
         message(STATUS "Found quill: ${quill_VERSION}")
     else()
         message(WARNING "Quill not found, logging will be disabled")
-        set(OMNICPP_USE_QUILL OFF CACHE BOOL "Use Quill logging" FORCE)
+        set(WARPLOOM_USE_QUILL OFF CACHE BOOL "Use Quill logging" FORCE)
     endif()
 endif()
 
 # ============================================================================
 # GLM (Math Library)
 # ============================================================================
-if(OMNICPP_USE_GLM)
+if(WARPLOOM_USE_GLM)
     CPMAddPackage(
         NAME glm
         GIT_TAG 1.0.3
@@ -42,7 +42,7 @@ endif()
 # ============================================================================
 # STB (Image Library)
 # ============================================================================
-if(OMNICPP_USE_STB)
+if(WARPLOOM_USE_STB)
     CPMAddPackage(
         NAME stb
         GITHUB_REPOSITORY nothings/stb
@@ -55,7 +55,7 @@ endif()
 # ============================================================================
 # GLFW (Windowing Library)
 # ============================================================================
-if(OMNICPP_USE_GLFW)
+if(WARPLOOM_USE_GLFW)
     CPMAddPackage(
         NAME glfw
         GIT_TAG 3.4
@@ -70,8 +70,8 @@ endif()
 # ============================================================================
 # Vulkan (Graphics API)
 # ============================================================================
-message(STATUS "OMNICPP_USE_VULKAN: ${OMNICPP_USE_VULKAN}")
-if(OMNICPP_USE_VULKAN)
+message(STATUS "WARPLOOM_USE_VULKAN: ${WARPLOOM_USE_VULKAN}")
+if(WARPLOOM_USE_VULKAN)
     message(STATUS "Processing Vulkan configuration...")
     
     # First try standard find_package
@@ -126,7 +126,7 @@ if(OMNICPP_USE_VULKAN)
                 message(STATUS "  Library: ${Vulkan_LIBRARIES}")
             else()
                 message(WARNING "Vulkan not found. Install Vulkan SDK or set VULKAN_SDK environment variable")
-                set(OMNICPP_USE_VULKAN OFF CACHE BOOL "Use Vulkan" FORCE)
+                set(WARPLOOM_USE_VULKAN OFF CACHE BOOL "Use Vulkan" FORCE)
             endif()
         endif()
     endif()
@@ -142,26 +142,26 @@ if(OMNICPP_USE_VULKAN)
         message(STATUS "After Vulkan cache set: _vulkan_include_after = ${_vulkan_include_after}")
     endif()
 else()
-    message(STATUS "Skipping Vulkan configuration (OMNICPP_USE_VULKAN is OFF)")
+    message(STATUS "Skipping Vulkan configuration (WARPLOOM_USE_VULKAN is OFF)")
 endif()
 
 # ============================================================================
 # OpenGL (Graphics API)
 # ============================================================================
-if(OMNICPP_USE_OPENGL)
+if(WARPLOOM_USE_OPENGL)
     find_package(OpenGL QUIET)
     if(OPENGL_FOUND)
         message(STATUS "Found OpenGL: ${OpenGL_VERSION}")
     else()
         message(WARNING "OpenGL requested but not found")
-        set(OMNICPP_USE_OPENGL OFF)
+        set(WARPLOOM_USE_OPENGL OFF)
     endif()
 endif()
 
 # ============================================================================
 # Qt6 (GUI Framework)
 # ============================================================================
-if(OMNICPP_USE_QT6)
+if(WARPLOOM_USE_QT6)
     find_package(Qt6 COMPONENTS Core Gui Widgets QUIET)
     
     # Restore Vulkan variables after Qt6 might have reset them
@@ -176,14 +176,14 @@ if(OMNICPP_USE_QT6)
         message(STATUS "Found Qt6: ${Qt6_VERSION}")
     else()
         message(WARNING "Qt6 requested but not found")
-        set(OMNICPP_USE_QT6 OFF)
+        set(WARPLOOM_USE_QT6 OFF)
     endif()
 endif()
 
 # ============================================================================
 # nlohmann/json (JSON Library)
 # ============================================================================
-if(OMNICPP_USE_NLOHMANN_JSON)
+if(WARPLOOM_USE_NLOHMANN_JSON)
     CPMAddPackage(
         NAME nlohmann_json
         VERSION 3.11.3
@@ -195,7 +195,7 @@ endif()
 # ============================================================================
 # Google Test (Testing Framework)
 # ============================================================================
-if(OMNICPP_BUILD_TESTS)
+if(WARPLOOM_BUILD_TESTS)
     CPMAddPackage(
         NAME googletest
         VERSION 1.14.0

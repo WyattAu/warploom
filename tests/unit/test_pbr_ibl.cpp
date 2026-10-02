@@ -40,7 +40,7 @@
 
 #include "vulkan_test_readback.hpp"
 
-#if defined(OMNICPP_HAS_VULKAN)
+#if defined(WARPLOOM_HAS_VULKAN)
 #include <vulkan/vulkan.h>
 
 namespace {
@@ -528,7 +528,7 @@ struct IblResources {
     }
 
     // --- Compute pipelines. --------------------------------------------
-    const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+    const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
     if (!sky_pipeline
              .load_shader_stage_file(device, shader_dir + "/ibl_sky.comp.spv",
                                      "compute")
@@ -981,7 +981,7 @@ struct PbrIblHarness {
       return false;
     }
 
-    const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+    const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
 
     // 3-set control pipeline (pbr_scene.frag — no IBL set).
     if (!pipeline
@@ -1321,4 +1321,4 @@ TEST(VulkanHardware, PbrIblRedSkyTintsWhiteDielectric) {
   EXPECT_GT(r, b + 40U);
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN

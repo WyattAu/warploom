@@ -32,7 +32,7 @@ target_compile_features(warploom_engine INTERFACE cxx_std_23)
 
 # The five real modules, in dependency order. Threads flows transitively
 # from core/ui/asset; Vulkan from render (with the PUBLIC
-# OMNICPP_HAS_VULKAN definition that gates render public headers).
+# WARPLOOM_HAS_VULKAN definition that gates render public headers).
 target_link_libraries(warploom_engine
     INTERFACE
         Warploom::core

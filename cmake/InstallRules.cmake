@@ -10,12 +10,12 @@ include(GNUInstallDirs)
 # ============================================================================
 # Installation Paths
 # ============================================================================
-set(CMAKE_INSTALL_BINDIR ${OMNICPP_INSTALL_BIN_DIR} CACHE PATH "Binary installation directory")
-set(CMAKE_INSTALL_LIBDIR ${OMNICPP_INSTALL_LIB_DIR} CACHE PATH "Library installation directory")
-set(CMAKE_INSTALL_INCLUDEDIR ${OMNICPP_INSTALL_INCLUDE_DIR} CACHE PATH "Header installation directory")
-set(CMAKE_INSTALL_DATAROOTDIR ${OMNICPP_INSTALL_DATA_DIR} CACHE PATH "Data installation directory")
-set(CMAKE_INSTALL_DOCDIR ${OMNICPP_INSTALL_DOC_DIR} CACHE PATH "Documentation installation directory")
-set(CMAKE_INSTALL_CMAKEDIR ${OMNICPP_INSTALL_CMAKE_DIR} CACHE PATH "CMake config installation directory")
+set(CMAKE_INSTALL_BINDIR ${WARPLOOM_INSTALL_BIN_DIR} CACHE PATH "Binary installation directory")
+set(CMAKE_INSTALL_LIBDIR ${WARPLOOM_INSTALL_LIB_DIR} CACHE PATH "Library installation directory")
+set(CMAKE_INSTALL_INCLUDEDIR ${WARPLOOM_INSTALL_INCLUDE_DIR} CACHE PATH "Header installation directory")
+set(CMAKE_INSTALL_DATAROOTDIR ${WARPLOOM_INSTALL_DATA_DIR} CACHE PATH "Data installation directory")
+set(CMAKE_INSTALL_DOCDIR ${WARPLOOM_INSTALL_DOC_DIR} CACHE PATH "Documentation installation directory")
+set(CMAKE_INSTALL_CMAKEDIR ${WARPLOOM_INSTALL_CMAKE_DIR} CACHE PATH "CMake config installation directory")
 
 # ============================================================================
 # Engine Installation
@@ -30,13 +30,13 @@ if(TARGET OmniCppEngine)
     )
 
     # Install engine headers
-    install(DIRECTORY ${OMNICPP_INCLUDE_DIR}/engine/
+    install(DIRECTORY ${WARPLOOM_INCLUDE_DIR}/engine/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/engine
         FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
     )
 
     # Install engine headers (OmniCppLib)
-    install(DIRECTORY ${OMNICPP_INCLUDE_DIR}/OmniCppLib/
+    install(DIRECTORY ${WARPLOOM_INCLUDE_DIR}/OmniCppLib/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/OmniCppLib
         FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
     )
@@ -52,7 +52,7 @@ if(TARGET OmniCppGame)
     )
 
     # Install game headers
-    install(DIRECTORY ${OMNICPP_INCLUDE_DIR}/game/
+    install(DIRECTORY ${WARPLOOM_INCLUDE_DIR}/game/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/game
         FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
     )
@@ -61,8 +61,8 @@ endif()
 # ============================================================================
 # Assets Installation
 # ============================================================================
-if(EXISTS ${OMNICPP_ASSETS_DIR})
-    install(DIRECTORY ${OMNICPP_ASSETS_DIR}/
+if(EXISTS ${WARPLOOM_ASSETS_DIR})
+    install(DIRECTORY ${WARPLOOM_ASSETS_DIR}/
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/assets
         USE_SOURCE_PERMISSIONS
     )
@@ -110,20 +110,20 @@ install(FILES
 # ============================================================================
 # Platform-Specific Installation
 # ============================================================================
-if(OMNICPP_PLATFORM_WINDOWS)
+if(WARPLOOM_PLATFORM_WINDOWS)
     # Windows-specific installation
     if(EXISTS ${CMAKE_SOURCE_DIR}/assets/DotNameCppLogo.svg)
         install(FILES ${CMAKE_SOURCE_DIR}/assets/DotNameCppLogo.svg
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}
         )
     endif()
-elseif(OMNICPP_PLATFORM_LINUX)
+elseif(WARPLOOM_PLATFORM_LINUX)
     # Linux-specific installation
     install(CODE "
         execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/share/applications\")
         execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/share/icons/hicolor/256x256/apps\")
     ")
-elseif(OMNICPP_PLATFORM_WASM)
+elseif(WARPLOOM_PLATFORM_WASM)
     # WASM-specific installation (web files)
     if(EXISTS ${CMAKE_SOURCE_DIR}/assets/ems-mini.html)
         install(FILES ${CMAKE_SOURCE_DIR}/assets/ems-mini.html

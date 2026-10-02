@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "engine/render/vulkan_descriptors.hpp"
-#if OMNICPP_VULKAN_TYPES_AVAILABLE
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE
 #include "engine/render/vulkan_context.hpp"
 #include "engine/render/vulkan_memory_allocator.hpp"
 #endif
@@ -77,9 +77,9 @@ TEST(SpirvReflector, ByteOverloadRejectsBadLengths) {
   }
 }
 
-#ifdef OMNICPP_TEST_SHADER_DIR
+#ifdef WARPLOOM_TEST_SHADER_DIR
 TEST(SpirvReflector, SurvivesTruncationOfRealShader) {
-  const auto words = load_shader_words(OMNICPP_TEST_SHADER_DIR "/ubo_triangle.frag.spv");
+  const auto words = load_shader_words(WARPLOOM_TEST_SHADER_DIR "/ubo_triangle.frag.spv");
   ASSERT_GE(words.size(), 10U);
   EXPECT_FALSE(omnicpp::render::reflect_spirv_resources(words.data(), words.size()).empty());
   // Truncate at every boundary: the parser must stop cleanly each time.
@@ -90,7 +90,7 @@ TEST(SpirvReflector, SurvivesTruncationOfRealShader) {
 }
 
 TEST(SpirvReflector, SurvivesWordCountLies) {
-  const auto words = load_shader_words(OMNICPP_TEST_SHADER_DIR "/ubo_triangle.frag.spv");
+  const auto words = load_shader_words(WARPLOOM_TEST_SHADER_DIR "/ubo_triangle.frag.spv");
   ASSERT_GE(words.size(), 10U);
   // A hostile producer may claim any word count per instruction. The parser
   // must treat claims past the end of the stream as terminators.
@@ -104,7 +104,7 @@ TEST(SpirvReflector, SurvivesWordCountLies) {
 }
 
 TEST(SpirvReflector, SurvivesRandomByteCorruption) {
-  const auto words = load_shader_words(OMNICPP_TEST_SHADER_DIR "/ubo_triangle.frag.spv");
+  const auto words = load_shader_words(WARPLOOM_TEST_SHADER_DIR "/ubo_triangle.frag.spv");
   ASSERT_GE(words.size(), 10U);
   std::mt19937 rng(0xC0FFEEU);  // fixed seed: deterministic, reproducible
   for (int iteration = 0; iteration < 2000; ++iteration) {
@@ -120,13 +120,13 @@ TEST(SpirvReflector, SurvivesRandomByteCorruption) {
     EXPECT_NO_FATAL_FAILURE(omnicpp::render::reflect_spirv_resources(mutated.data(), mutated.size()));
   }
 }
-#endif  // OMNICPP_TEST_SHADER_DIR
+#endif  // WARPLOOM_TEST_SHADER_DIR
 
 // =============================================================================
 // Memory allocator: randomized property tests
 // =============================================================================
 
-#if OMNICPP_VULKAN_TYPES_AVAILABLE
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE
 namespace {
 
 struct LiveAlloc {
@@ -211,4 +211,4 @@ TEST(VulkanAllocator, RandomizedAllocFreePreservesDisjointness) {
   allocator.cleanup();
   context.cleanup();
 }
-#endif  // OMNICPP_VULKAN_TYPES_AVAILABLE
+#endif  // WARPLOOM_VULKAN_TYPES_AVAILABLE

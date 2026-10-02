@@ -8,9 +8,9 @@
 
 cmake_minimum_required(VERSION 4.0)
 
-option(OMNICPP_ENABLE_PROPERTY_TESTING "Enable property-based testing with RapidCheck" ON)
+option(WARPLOOM_ENABLE_PROPERTY_TESTING "Enable property-based testing with RapidCheck" ON)
 
-if(OMNICPP_ENABLE_PROPERTY_TESTING)
+if(WARPLOOM_ENABLE_PROPERTY_TESTING)
     message(STATUS "Property-based testing enabled")
     
     # RapidCheck is a header-only library,    # We'll use CPM to fetch it
@@ -49,20 +49,20 @@ endif()
 # Fuzz Testing Configuration
 # ============================================================================
 
-option(OMNICPP_ENABLE_FUZZ_TESTING "Enable fuzz testing with libFuzzer" OFF)
+option(WARPLOOM_ENABLE_FUZZ_TESTING "Enable fuzz testing with libFuzzer" OFF)
 
-if(OMNICPP_ENABLE_FUZZ_TESTING)
+if(WARPLOOM_ENABLE_FUZZ_TESTING)
     message(STATUS "Fuzz testing enabled")
     
     # Check for libFuzzer support (Clang only)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         message(WARNING "Fuzz testing requires Clang compiler. Disabling.")
-        set(OMNICPP_ENABLE_FUZZ_TESTING OFF)
+        set(WARPLOOM_ENABLE_FUZZ_TESTING OFF)
     else()
         # Fuzzer test options
-        set(OMNICPP_FUZZ_TIMEOUT 60 CACHE STRING "Timeout per fuzz test in seconds")
-        set(OMNICPP_FUZZ_MAX_LEN 4096 CACHE STRING "Maximum input length for fuzz tests")
-        set(OMNICPP_FUZZ_CORPUS_DIR "${CMAKE_SOURCE_DIR}/tests/fuzz/corpus" CACHE PATH "Directory containing seed corpus")
+        set(WARPLOOM_FUZZ_TIMEOUT 60 CACHE STRING "Timeout per fuzz test in seconds")
+        set(WARPLOOM_FUZZ_MAX_LEN 4096 CACHE STRING "Maximum input length for fuzz tests")
+        set(WARPLOOM_FUZZ_CORPUS_DIR "${CMAKE_SOURCE_DIR}/tests/fuzz/corpus" CACHE PATH "Directory containing seed corpus")
         
         # Common fuzzer flags
         set(FUZZER_FLAGS
@@ -101,10 +101,10 @@ if(OMNICPP_ENABLE_FUZZ_TESTING)
         # Custom target to run all fuzzers
         add_custom_target(fuzz-all
             COMMAND ${CMAKE_COMMAND} -E echo "Running all fuzz tests..."
-            COMMAND fuzz_string_utils -max_total_time=${OMNICPP_FUZZ_TIMEOUT}
-            COMMAND fuzz_json_parser -max_total_time=${OMNICPP_FUZZ_TIMEOUT}
-            COMMAND fuzz_input_handler -max_total_time=${OMNICPP_FUZZ_TIMEOUT}
-            COMMAND fuzz_resource_loader -max_total_time=${OMNICPP_FUZZ_TIMEOUT}
+            COMMAND fuzz_string_utils -max_total_time=${WARPLOOM_FUZZ_TIMEOUT}
+            COMMAND fuzz_json_parser -max_total_time=${WARPLOOM_FUZZ_TIMEOUT}
+            COMMAND fuzz_input_handler -max_total_time=${WARPLOOM_FUZZ_TIMEOUT}
+            COMMAND fuzz_resource_loader -max_total_time=${WARPLOOM_FUZZ_TIMEOUT}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/bin
             COMMENT "Running all fuzz tests"
             VERBATIM

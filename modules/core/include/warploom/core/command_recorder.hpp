@@ -98,9 +98,9 @@ class CommandRecorder final {
 // blocks merge). One directive per namespace THIS header declares,
 // each under its OWN guard (a shared guard would suppress later
 // headers' distinct directives).
-#ifndef OMNICPP_COMPAT_EDITOR_NS
-#define OMNICPP_COMPAT_EDITOR_NS
+#ifndef WARPLOOM_COMPAT_EDITOR_NS
+#define WARPLOOM_COMPAT_EDITOR_NS
 namespace omnicpp::editor {
     using namespace ::warploom::editor;
 }
-#endif  // OMNICPP_COMPAT_EDITOR_NS
+#endif  // WARPLOOM_COMPAT_EDITOR_NS

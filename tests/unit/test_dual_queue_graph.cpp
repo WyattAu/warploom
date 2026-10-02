@@ -32,7 +32,7 @@
 #include "engine/render/vulkan_render_graph.hpp"
 #include "engine/render/vulkan_renderer.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include "vulkan_test_readback.hpp"
 using omnicpp_test::readback_swapchain_image;
 #endif
@@ -94,7 +94,7 @@ void make_frustum_planes(float fov_y, float aspect, float znear, float zfar,
   plane(0, -znear, -t, 0, p24 + 20);
 }
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 //! Recording callback for AsyncComputeQueue::record: animates frame N's
 //! instance data, then runs the frustum cull + indirect-command update.
 struct FrameComputeCtx {
@@ -141,12 +141,12 @@ void record_frame_compute(VkCommandBuffer cb, void* user) {
                      sizeof(cull_push), cull_push);
   vkCmdDispatch(cb, (kCubes + 63U) / 64U, 1, 1);
 }
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN
 
 }  // namespace
 
 TEST(VulkanHardware, DualQueuePipelinedGraph) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -256,7 +256,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
   }
 
   // --- Pipelines. ---
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
 
   const VkPushConstantRange gen_push_range{VK_SHADER_STAGE_COMPUTE_BIT, 0, 8U};
   omnicpp::render::VulkanPipeline gen_pipe;

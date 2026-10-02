@@ -29,7 +29,7 @@
 #include "engine/render/vulkan_renderer.hpp"
 #include "engine/render/vulkan_rt_query.hpp"
 
-#if defined(OMNICPP_HAS_VULKAN) && defined(OMNICPP_TEST_SHADER_DIR)
+#if defined(WARPLOOM_HAS_VULKAN) && defined(WARPLOOM_TEST_SHADER_DIR)
 
 namespace {
 
@@ -226,7 +226,7 @@ TEST(ray_query_first_contact, blas_tlas_build_and_ray_query) {
 
   // ---- Compute pipeline -------------------------------------------------------
   omnicpp::render::VulkanPipeline pipe;
-  const std::string sd = OMNICPP_TEST_SHADER_DIR;
+  const std::string sd = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipe
                   .load_shader_stage_file(context.device(),
                                           sd + "/ray_query_first.comp.spv",
@@ -394,4 +394,4 @@ TEST(ray_query_first_contact, blas_tlas_build_and_ray_query) {
   builder.destroy_tlas(context.device(), allocator, out_t);
 }
 
-#endif  // OMNICPP_HAS_VULKAN && OMNICPP_TEST_SHADER_DIR
+#endif  // WARPLOOM_HAS_VULKAN && WARPLOOM_TEST_SHADER_DIR

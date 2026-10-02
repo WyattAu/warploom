@@ -19,11 +19,11 @@
 #include "engine/render/vulkan_compute.hpp"
 #include "engine/render/vulkan_parallel_recorder.hpp"
 #include "engine/render/software_rasterizer.hpp"
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(VK_USE_PLATFORM_XCB_KHR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(VK_USE_PLATFORM_XCB_KHR)
 #include <xcb/xcb.h>
 #endif
 
-#if OMNICPP_VULKAN_TYPES_AVAILABLE
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE
 namespace {
 
 struct HiZCallbackState {
@@ -151,7 +151,7 @@ TEST(VulkanSwapchain, QuerySupportReturnsEmptyWithoutVulkan) {
 }
 
 TEST(VulkanHardware, HeadlessSwapchainAndRenderSubmission) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(VK_USE_PLATFORM_XCB_KHR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(VK_USE_PLATFORM_XCB_KHR)
   if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
   const char* display_name = std::getenv("DISPLAY");
   if (!display_name) GTEST_SKIP() << "DISPLAY is unavailable";
@@ -215,8 +215,8 @@ TEST(VulkanHardware, HeadlessSwapchainAndRenderSubmission) {
                                               swapchain.extent_width(), swapchain.extent_height()).is_ok());
 
   omnicpp::render::VulkanPipeline pipeline;
-#ifdef OMNICPP_TEST_SHADER_DIR
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+#ifdef WARPLOOM_TEST_SHADER_DIR
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_file(context.device(), shader_dir + "/triangle.vert.spv").is_ok());
   ASSERT_TRUE(pipeline.load_shader_file(context.device(), shader_dir + "/triangle.frag.spv").is_ok());
   ASSERT_TRUE(pipeline.create_graphics_pipeline(context.device(), render_pass.render_pass(),
@@ -230,9 +230,9 @@ TEST(VulkanHardware, HeadlessSwapchainAndRenderSubmission) {
   omnicpp::render::RendererConfig renderer_config;
   renderer_config.enable_hiz = true;
   renderer_config.hiz_tile_size = 32U;
-#ifdef OMNICPP_TEST_SHADER_DIR
+#ifdef WARPLOOM_TEST_SHADER_DIR
   renderer_config.hiz_reduction_shader_path =
-      std::string(OMNICPP_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
+      std::string(WARPLOOM_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
 #endif
   omnicpp::render::VulkanRenderer renderer;
   renderer.set_timeline_pacing(context.has_timeline_semaphores());
@@ -350,7 +350,7 @@ TEST(VulkanMemoryAllocator, UninitializedCreateBufferFails) {
 }
 
 TEST(VulkanHardware, AllocatorSubAllocationAndUploadRing) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE
   if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
   omnicpp::render::VulkanContext context;
@@ -494,14 +494,14 @@ TEST(SpirvReflection, RejectsInvalidCode) {
 }
 
 TEST(VulkanHardware, DescriptorReflectionAndUboRender) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
   omnicpp::render::VulkanContext context;
   ASSERT_TRUE(context.initialize("OmniCppDescriptorTest", true).is_ok());
 
   // --- Load the UBO fragment shader and reflect it. ---
-  std::ifstream frag_file(std::string(OMNICPP_TEST_SHADER_DIR) + "/ubo_triangle.frag.spv",
+  std::ifstream frag_file(std::string(WARPLOOM_TEST_SHADER_DIR) + "/ubo_triangle.frag.spv",
                           std::ios::binary);
   ASSERT_TRUE(frag_file.good());
   const std::vector<std::uint8_t> frag_spirv(
@@ -546,7 +546,7 @@ TEST(VulkanHardware, DescriptorReflectionAndUboRender) {
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
   omnicpp::render::VulkanPipeline pipeline;
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
                                               shader_dir + "/triangle.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
@@ -647,7 +647,7 @@ TEST(VulkanHardware, AllocatorAlignmentPadSubAllocation) {
 // any allocation that needed alignment padding (e.g. a 128 B buffer at block
 // offset 0 followed by a 1024-aligned image). Exercises the padded path with
 // remainder, the padded path consuming the whole range, and the plain carve.
-#if OMNICPP_VULKAN_TYPES_AVAILABLE
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE
   if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
   omnicpp::render::VulkanContext context;
@@ -714,7 +714,7 @@ TEST(VulkanHardware, AllocatorAlignmentPadSubAllocation) {
 }
 
 TEST(VulkanHardware, BindlessDescriptorIndexingRender) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
   omnicpp::render::VulkanContext context;
@@ -724,7 +724,7 @@ TEST(VulkanHardware, BindlessDescriptorIndexingRender) {
   }
 
   // --- Reflect the bindless shader: runtime-sized SSBO array at set 0 binding 0. ---
-  std::ifstream frag_file(std::string(OMNICPP_TEST_SHADER_DIR) + "/bindless_palette.frag.spv",
+  std::ifstream frag_file(std::string(WARPLOOM_TEST_SHADER_DIR) + "/bindless_palette.frag.spv",
                           std::ios::binary);
   ASSERT_TRUE(frag_file.good());
   const std::vector<std::uint8_t> frag_spirv(
@@ -825,7 +825,7 @@ TEST(VulkanHardware, BindlessDescriptorIndexingRender) {
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
   omnicpp::render::VulkanPipeline pipeline;
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
                                               shader_dir + "/triangle.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
@@ -931,7 +931,7 @@ TEST(VulkanHardware, BindlessDescriptorIndexingRender) {
 // shader). Content check: each draw's target shows the sampled texture's
 // color — proving per-element descriptor writes and the non-uniform path.
 TEST(VulkanHardware, BindlessTextureArrayRender) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
   omnicpp::render::VulkanContext context;
@@ -941,7 +941,7 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
   }
 
   // --- Reflect the texture-bindless shader. ---
-  std::ifstream frag_file(std::string(OMNICPP_TEST_SHADER_DIR) + "/bindless_textures.frag.spv",
+  std::ifstream frag_file(std::string(WARPLOOM_TEST_SHADER_DIR) + "/bindless_textures.frag.spv",
                           std::ios::binary);
   ASSERT_TRUE(frag_file.good());
   const std::vector<std::uint8_t> frag_spirv(
@@ -1128,7 +1128,7 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
   omnicpp::render::VulkanPipeline pipeline;
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
                                               shader_dir + "/triangle.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
@@ -1238,7 +1238,7 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
 // event ordering) and draws the gradient to screen. Content check proves the
 // graphics pass consumed compute's data through GPU-side synchronization.
 TEST(VulkanHardware, ComputeToGraphicsEventHandoff) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
   omnicpp::render::VulkanContext context;
@@ -1261,7 +1261,7 @@ TEST(VulkanHardware, ComputeToGraphicsEventHandoff) {
   ASSERT_TRUE(gradient.is_ok());
 
   // --- Reflect the compute shader's SSBO and build the layout. ---
-  std::ifstream comp_file(std::string(OMNICPP_TEST_SHADER_DIR) + "/fill_gradient.comp.spv",
+  std::ifstream comp_file(std::string(WARPLOOM_TEST_SHADER_DIR) + "/fill_gradient.comp.spv",
                           std::ios::binary);
   ASSERT_TRUE(comp_file.good());
   const std::vector<std::uint8_t> comp_spirv(
@@ -1284,7 +1284,7 @@ TEST(VulkanHardware, ComputeToGraphicsEventHandoff) {
 
   // --- Compute pipeline. ---
   omnicpp::render::VulkanPipeline compute_pipeline;
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(compute_pipeline.load_shader_stage_file(
       context.device(), shader_dir + "/fill_gradient.comp.spv", "compute").is_ok());
   const VkPushConstantRange comp_push{
@@ -1447,7 +1447,7 @@ TEST(VulkanHardware, ComputeToGraphicsEventHandoff) {
 }
 
 TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
   omnicpp::render::VulkanContext context;
@@ -1481,7 +1481,7 @@ TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
   ASSERT_TRUE(async.initialize(context.device(), context.compute_queue(), comp_family).is_ok());
 
   // --- Compute pipeline: gen_triangle writes positions + hues. ---
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   std::ifstream comp_file(shader_dir + "/gen_triangle.comp.spv", std::ios::binary);
   ASSERT_TRUE(comp_file.good());
   const std::vector<std::uint8_t> comp_spirv(
@@ -1705,7 +1705,7 @@ TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
 }
 
 TEST(VulkanHardware, RenderGraphTwoPassBarriersAndRender) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
   omnicpp::render::VulkanContext context;
@@ -1730,8 +1730,8 @@ TEST(VulkanHardware, RenderGraphTwoPassBarriersAndRender) {
   ASSERT_TRUE(target_b.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target_b.create_framebuffer(context.device()).is_ok());
 
-#ifdef OMNICPP_TEST_SHADER_DIR
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+#ifdef WARPLOOM_TEST_SHADER_DIR
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   omnicpp::render::VulkanPipeline pipeline;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
                                               shader_dir + "/triangle.vert.spv", "vertex").is_ok());
@@ -1857,7 +1857,7 @@ TEST(VulkanHardware, RenderGraphTwoPassBarriersAndRender) {
 }
 
 TEST(VulkanHardware, ParallelRecorderMultithreadedBands) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
   omnicpp::render::VulkanContext context;
@@ -1875,7 +1875,7 @@ TEST(VulkanHardware, ParallelRecorderMultithreadedBands) {
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   omnicpp::render::VulkanPipeline pipeline;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
                                               shader_dir + "/triangle.vert.spv", "vertex").is_ok());
@@ -1983,7 +1983,7 @@ TEST(VulkanHardware, ParallelRecorderMultithreadedBands) {
 // submitted before the next wave — the pattern race detectors need sustained
 // interleaving pressure to surface latent data races.
 TEST(VulkanHardware, ParallelRecorderContentionStress) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
   omnicpp::render::VulkanContext context;
@@ -2004,7 +2004,7 @@ TEST(VulkanHardware, ParallelRecorderContentionStress) {
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   omnicpp::render::VulkanPipeline pipeline;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
                                               shader_dir + "/triangle.vert.spv", "vertex").is_ok());
@@ -2114,7 +2114,7 @@ TEST(VulkanHardware, ParallelRecorderContentionStress) {
 }
 
 TEST(VulkanHardware, OffscreenTriangleReadback) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE
   if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
   omnicpp::render::VulkanContext context;
@@ -2139,8 +2139,8 @@ TEST(VulkanHardware, OffscreenTriangleReadback) {
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
   omnicpp::render::VulkanPipeline pipeline;
-#ifdef OMNICPP_TEST_SHADER_DIR
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+#ifdef WARPLOOM_TEST_SHADER_DIR
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_file(context.device(), shader_dir + "/triangle.vert.spv").is_ok());
   ASSERT_TRUE(pipeline.load_shader_file(context.device(), shader_dir + "/triangle.frag.spv").is_ok());
   ASSERT_TRUE(pipeline.create_graphics_pipeline(
@@ -2247,7 +2247,7 @@ TEST(VulkanHardware, OffscreenTriangleReadback) {
 }
 
 TEST(VulkanHardware, SwapchainRecreationStress) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(VK_USE_PLATFORM_XCB_KHR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(VK_USE_PLATFORM_XCB_KHR)
   if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
   const char* display_name = std::getenv("DISPLAY");
   if (!display_name) GTEST_SKIP() << "DISPLAY is unavailable";
@@ -2301,8 +2301,8 @@ TEST(VulkanHardware, SwapchainRecreationStress) {
                                               swapchain.extent_width(), swapchain.extent_height()).is_ok());
 
   omnicpp::render::VulkanPipeline pipeline;
-#ifdef OMNICPP_TEST_SHADER_DIR
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+#ifdef WARPLOOM_TEST_SHADER_DIR
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(), shader_dir + "/triangle.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(), shader_dir + "/triangle.frag.spv", "fragment").is_ok());
   ASSERT_TRUE(pipeline.all_core_stages_loaded());
@@ -2362,7 +2362,7 @@ TEST(VulkanHardware, SwapchainRecreationStress) {
 }
 
 TEST(VulkanSwapchain, ChooseSurfaceFormatPrefersSRGB) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE
   std::vector<VkSurfaceFormatKHR> formats = {
       VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
       VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}};

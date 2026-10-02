@@ -33,7 +33,7 @@
 #include <string>
 #include <vector>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -45,7 +45,7 @@
 #include "engine/render/vulkan_rt_pipeline.hpp"
 #include "vulkan_test_readback.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 namespace {
 
@@ -671,7 +671,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
                   .is_ok());
 
   // ---- RT pipeline + SBT (recursion depth 1: loop-driven paths) --------------
-  const std::string sd = OMNICPP_TEST_SHADER_DIR;
+  const std::string sd = WARPLOOM_TEST_SHADER_DIR;
   VkShaderModule mods[3] = {};
   const char* files[3] = {"/pt_real.rgen.spv", "/pt_real.rmiss.spv",
                           "/pt_real.rchit.spv"};
@@ -876,7 +876,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   const std::vector<float> img = run_pass();
 
   // TEMP DEBUG: classify every pixel by red-channel mean.
-  if (std::getenv("OMNICPP_PT_DEBUG") != nullptr) {
+  if (std::getenv("WARPLOOM_PT_DEBUG") != nullptr) {
     for (std::uint32_t y = 0; y < kImg; ++y) {
       std::string row;
       for (std::uint32_t x = 0; x < kImg; ++x) {
@@ -1010,10 +1010,10 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   ctx.cleanup();
 }
 
-#else  // !OMNICPP_HAS_VULKAN
+#else  // !WARPLOOM_HAS_VULKAN
 
 TEST(path_tracing_real, disabled_without_vulkan) {
   GTEST_SKIP() << "Vulkan not available";
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN

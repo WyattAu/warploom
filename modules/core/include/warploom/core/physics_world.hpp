@@ -196,9 +196,9 @@ class PhysicsWorld final {
 // blocks merge). One directive per namespace THIS header declares,
 // each under its OWN guard (a shared guard would suppress later
 // headers' distinct directives).
-#ifndef OMNICPP_COMPAT_PHYSICS_NS
-#define OMNICPP_COMPAT_PHYSICS_NS
+#ifndef WARPLOOM_COMPAT_PHYSICS_NS
+#define WARPLOOM_COMPAT_PHYSICS_NS
 namespace omnicpp::physics {
     using namespace ::warploom::physics;
 }
-#endif  // OMNICPP_COMPAT_PHYSICS_NS
+#endif  // WARPLOOM_COMPAT_PHYSICS_NS

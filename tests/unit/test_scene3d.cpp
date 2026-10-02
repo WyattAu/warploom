@@ -26,7 +26,7 @@
 #include "engine/render/vulkan_offscreen.hpp"
 #include "engine/render/vulkan_pipeline.hpp"
 #include "engine/render/vulkan_renderer.hpp"
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include "vulkan_test_readback.hpp"
 using omnicpp_test::readback_swapchain_image;
 #endif
@@ -90,7 +90,7 @@ void mat4_multiply(const float* a, const float* b, float* out) {
 }  // namespace
 
 TEST(VulkanHardware, Scene3DObjectsLightingAnimation) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -147,7 +147,7 @@ TEST(VulkanHardware, Scene3DObjectsLightingAnimation) {
   ASSERT_TRUE(manager.write_buffer(dset.value(), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                    inst_buf.value().buffer, 0, VK_WHOLE_SIZE).is_ok());
 
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   // Push block: view_proj (64) + 4 words (vertex part) + camera (16) +
   // sphere (16) + light (16) = 128 bytes.
   // C++ struct packs vec3+pad as 12+4 with no extra padding: total 124.

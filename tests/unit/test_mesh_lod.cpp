@@ -16,7 +16,7 @@
 #include "engine/render/vulkan_memory_allocator.hpp"
 #include "engine/render/vulkan_pipeline.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 namespace {
 
@@ -47,7 +47,7 @@ struct LodPush {
 //! LOD 0 / 1 / 2 respectively; the sphere behind the camera is culled and
 //! the GPU-visible count is exactly 3.
 TEST(VulkanHardware, LodSelectByDistance) {
-#ifdef OMNICPP_TEST_SHADER_DIR
+#ifdef WARPLOOM_TEST_SHADER_DIR
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -135,7 +135,7 @@ TEST(VulkanHardware, LodSelectByDistance) {
   omnicpp::render::VulkanPipeline pipeline;
   ASSERT_TRUE(pipeline
                   .load_shader_stage_file(context.device(),
-                                          OMNICPP_TEST_SHADER_DIR
+                                          WARPLOOM_TEST_SHADER_DIR
                                               "/lod_select.comp.spv",
                                           "compute")
                   .is_ok());
@@ -242,4 +242,4 @@ TEST(VulkanHardware, LodSelectByDistance) {
 #endif
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN

@@ -43,14 +43,14 @@ app-facing**.
 
 ## App-facing surface
 
-`omnicpp_viewport` (examples/viewport, built with `-DOMNICPP_BUILD_EXAMPLES=ON`):
+`warploom_viewport` (examples/viewport, built with `-DWARPLOOM_BUILD_EXAMPLES=ON`):
 a real window (XCB) showing a lit PBR scene — spinning metal cube, rough cube,
 ground slab — with an orbiting camera, presented via vsync. It renders through
 the same `record_pbr_scene` and swapchain paths the tests prove, using the
 renderer's `set_scene_record_callback` frame hook. Run:
 
 ```sh
-OMNICPP_SHADER_DIR=<build>/tests/shaders ./build/<preset>/bin/omnicpp_viewport
+WARPLOOM_SHADER_DIR=<build>/tests/shaders ./build/<preset>/bin/warploom_viewport
 ```
 
 Verified live on hardware (RTX 2060, X11): window maps, frames present, the
@@ -138,7 +138,7 @@ under validation, 0 VUIDs.
 
 ## GPU-driven draw path (C2) — DONE
 
-`OMNICPP_GPU_DRIVEN=1` (cubes scene) moves the entire visibility/LOD/draw
+`WARPLOOM_GPU_DRIVEN=1` (cubes scene) moves the entire visibility/LOD/draw
 pipeline onto the GPU: the frame's object transforms go into a per-image
 payload, the `cull_and_draw_lod` compute pass (recorded in the renderer's
 pre-pass hook, after the shadow pass) writes every
@@ -191,14 +191,14 @@ claim below is backed by a live run under `VK_LAYER_KHRONOS_validation`
 |---|---|---|
 | IBL baked from our own analytic sky | `VulkanIblBaker` one-shot compute bake (equirect -> prefiltered cube + irradiance + BRDF LUT) feeds set 5 of the composed pipeline | `src/engine/render/vulkan_ibl_baker.cpp` |
 | Shadow-mapped figure on ground | Shadow pre-pass renders depth-only into a 2048² map; `OMNICPP_DUMP_SHADOW` readback shows 45% occupied texels | `shadow_pre_pass_cb` + `shadow_skinned.vert` |
-| Shadow footprint isolated pixel-exactly | `OMNICPP_NO_SHADOW=1` binds a neutral 1×1 cleared map; diff vs composed run = **10,874 px** darkened ≥2 levels | A/B capture diff |
+| Shadow footprint isolated pixel-exactly | `WARPLOOM_NO_SHADOW=1` binds a neutral 1×1 cleared map; diff vs composed run = **10,874 px** darkened ≥2 levels | A/B capture diff |
 | Composed vs legacy differ | 13.5% / 7.8% of pixels differ at frames 60/120; composed mean brighter (IBL ambient) | A/B capture diff |
 | A/B mode logged, not assumed | telemetry records `lighting_mode`, `sun_direction`, `shadow_mode` events | `telemetry.jsonl` |
-| Shadows follow the sun | `OMNICPP_SUN_DIRECTION` sweep: 24,696 px darken under sun B where sun A was lit | two-sun capture diff |
+| Shadows follow the sun | `WARPLOOM_SUN_DIRECTION` sweep: 24,696 px darken under sun B where sun A was lit | two-sun capture diff |
 | Regressions guarded | 410/410 unit tests under validation; scenario runner 13/13 + byte-identical determinism double-run | CI matrix |
 
-Diagnostic env vars (all telemetry-logged): `OMNICPP_LEGACY_LIGHTING=1`,
-`OMNICPP_NO_SHADOW=1`, `OMNICPP_SUN_DIRECTION=x,y,z`,
+Diagnostic env vars (all telemetry-logged): `WARPLOOM_LEGACY_LIGHTING=1`,
+`WARPLOOM_NO_SHADOW=1`, `WARPLOOM_SUN_DIRECTION=x,y,z`,
 `OMNICPP_DUMP_SHADOW=<frame>` (writes `/tmp/shadowmap.f32`).
 
 ## Ray-tracing phase 2 (E4/E5) — DONE
@@ -208,11 +208,11 @@ RTX 2060 under `VK_LAYER_KHRONOS_validation` with **0 VUIDs**.
 
 | Claim | Proof | Commit |
 |---|---|---|
-| Ray-query shadows in the live viewport | `OMNICPP_RT_MODE=1` swaps pbr_rt_full (TLAS set 4) for the PCF fragment; RT vs PCF differ on 0.62% of pixels, all inside the cube/shadow band (max channel-sum 37, penumbra signature); sky/ground/geometry byte-identical | `646cfb1` |
+| Ray-query shadows in the live viewport | `WARPLOOM_RT_MODE=1` swaps pbr_rt_full (TLAS set 4) for the PCF fragment; RT vs PCF differ on 0.62% of pixels, all inside the cube/shadow band (max channel-sum 37, penumbra signature); sky/ground/geometry byte-identical | `646cfb1` |
 | Real path tracing (loop-PT, production pattern) | `pt_real.rgen`: N-bounce iterative loop, per-pixel PCG streams, cosine-weighted sampling, 64-frame accumulation in a sky-lit Lambertian room; validated against an independent fp64 MC integrator (262k samples) + byte-identical determinism + exact open-sky probe | `c9cd9b7` |
 | Driver payload-aliasing trap documented | Two `rayPayloadEXT` locations alias onto location 0 on this stack — rchit returns (normal, t); albedo lives in the raygen | `c9cd9b7` |
 | Animated TLAS | Skinned parts: TLAS instance transform = `object_model * bones_j(t)` (static BLASes, no per-frame rebuild); ground shadow motion frame30→90 matches skinned-PCF motion with **jaccard 1.000** (1606/1606 px) | `142c9c1` |
 | Full suite | 430/430 unit tests under validation | CI matrix |
 
-Diagnostic env vars added: `OMNICPP_RT_MODE=1` (ray-query shadows +
+Diagnostic env vars added: `WARPLOOM_RT_MODE=1` (ray-query shadows +
 animated TLAS), `OMNICPP_NO_MODEL=1` (cubes-only scene for exact A/Bs).

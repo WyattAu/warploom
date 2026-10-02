@@ -54,7 +54,7 @@ function(omnicpp_add_cpm_package PACKAGE_NAME)
         ${ARGN}
     )
 
-    if(OMNICPP_USE_CPM)
+    if(WARPLOOM_USE_CPM)
         if(ARGS_REQUIRED)
             CPMAddPackage(
                 NAME ${PACKAGE_NAME}

@@ -8,7 +8,7 @@
 #include <cstring>
 #include <vector>
 
-#ifdef OMNICPP_HAS_VULKAN
+#if defined(WARPLOOM_HAS_VULKAN) || defined(OMNICPP_HAS_VULKAN)
 #include <vulkan/vulkan.h>
 
 namespace omnicpp_test {

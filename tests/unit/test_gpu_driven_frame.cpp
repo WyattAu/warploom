@@ -28,7 +28,7 @@
 #include "engine/render/vulkan_scene.hpp"
 #include "vulkan_test_readback.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 namespace {
 
@@ -422,7 +422,7 @@ TEST(VulkanHardware, RendererGpuDrivenFrameOneSubmission) {
 
   // ---- Pipelines (identical to the proven harness path) ----
   omnicpp::render::VulkanPipeline cull_pipe, gfx_pipe;
-  const std::string sd = OMNICPP_TEST_SHADER_DIR;
+  const std::string sd = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(cull_pipe
                   .load_shader_stage_file(context.device(),
                                           sd + "/cull_and_draw_lod.comp.spv",
@@ -642,10 +642,10 @@ TEST(VulkanHardware, RendererGpuDrivenFrameOneSubmission) {
   context.cleanup();
 }
 
-#else  // !OMNICPP_HAS_VULKAN
+#else  // !WARPLOOM_HAS_VULKAN
 
 TEST(VulkanHardware, RendererGpuDrivenFrameOneSubmission) {
   GTEST_SKIP() << "Vulkan unavailable";
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN

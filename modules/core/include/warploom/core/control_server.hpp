@@ -257,9 +257,9 @@ class ControlServer final {
 // blocks merge). One directive per namespace THIS header declares,
 // each under its OWN guard (a shared guard would suppress later
 // headers' distinct directives).
-#ifndef OMNICPP_COMPAT_CORE_NS
-#define OMNICPP_COMPAT_CORE_NS
+#ifndef WARPLOOM_COMPAT_CORE_NS
+#define WARPLOOM_COMPAT_CORE_NS
 namespace omnicpp::core {
     using namespace ::warploom::core;
 }
-#endif  // OMNICPP_COMPAT_CORE_NS
+#endif  // WARPLOOM_COMPAT_CORE_NS

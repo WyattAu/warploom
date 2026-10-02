@@ -4,7 +4,7 @@
 # Defines code formatting targets (clang-format, black)
 # ============================================================================
 
-if(OMNICPP_ENABLE_FORMATTING)
+if(WARPLOOM_ENABLE_FORMATTING)
     # Find clang-format
     find_program(CLANG_FORMAT_EXECUTABLE clang-format)
 
@@ -14,15 +14,15 @@ if(OMNICPP_ENABLE_FORMATTING)
     # C++ formatting
     if(CLANG_FORMAT_EXECUTABLE)
         # Get clang-format style
-        set(OMNICPP_CLANG_FORMAT_STYLE "file" CACHE STRING "Clang-format style")
-        set_property(CACHE OMNICPP_CLANG_FORMAT_STYLE PROPERTY STRINGS "file" "llvm" "google" "chromium" "mozilla" "webkit")
+        set(WARPLOOM_CLANG_FORMAT_STYLE "file" CACHE STRING "Clang-format style")
+        set_property(CACHE WARPLOOM_CLANG_FORMAT_STYLE PROPERTY STRINGS "file" "llvm" "google" "chromium" "mozilla" "webkit")
 
         # Custom target to format C++ files
         add_custom_target(format-cpp
             COMMAND ${CMAKE_COMMAND} -E echo "Formatting C++ files..."
             COMMAND ${CLANG_FORMAT_EXECUTABLE}
             -i
-            --style=${OMNICPP_CLANG_FORMAT_STYLE}
+            --style=${WARPLOOM_CLANG_FORMAT_STYLE}
             ${CMAKE_SOURCE_DIR}/include/**/*.hpp
             ${CMAKE_SOURCE_DIR}/include/**/*.h
             ${CMAKE_SOURCE_DIR}/src/**/*.cpp
@@ -36,7 +36,7 @@ if(OMNICPP_ENABLE_FORMATTING)
             COMMAND ${CLANG_FORMAT_EXECUTABLE}
             --dry-run
             --Werror
-            --style=${OMNICPP_CLANG_FORMAT_STYLE}
+            --style=${WARPLOOM_CLANG_FORMAT_STYLE}
             ${CMAKE_SOURCE_DIR}/include/**/*.hpp
             ${CMAKE_SOURCE_DIR}/include/**/*.h
             ${CMAKE_SOURCE_DIR}/src/**/*.cpp

@@ -32,7 +32,7 @@
 #include "engine/render/vulkan_scene.hpp"
 #include "vulkan_test_readback.hpp"
 
-#if defined(OMNICPP_HAS_VULKAN)
+#if defined(WARPLOOM_HAS_VULKAN)
 #include <vulkan/vulkan.h>
 
 namespace {
@@ -343,7 +343,7 @@ struct ShadowHarness {
         VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, 0).is_ok()) return false;
 
     // pipelines
-    std::string sd_path = OMNICPP_TEST_SHADER_DIR;
+    std::string sd_path = WARPLOOM_TEST_SHADER_DIR;
 
     // shadow pipeline (depth-only, 128-byte push)
     if (!shadow_pipe.load_shader_stage_file(ctx.device(), sd_path+"/shadow.vert.spv","vertex").is_ok()||

@@ -20,7 +20,7 @@
 #include "engine/render/vulkan_offscreen.hpp"
 #include "engine/render/vulkan_pipeline.hpp"
 #include "engine/render/vulkan_renderer.hpp"
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include "vulkan_test_readback.hpp"
 using omnicpp_test::readback_swapchain_image;
 #endif
@@ -125,7 +125,7 @@ void build_cube_mesh(float half, const float color[3], float* out288) {
 }  // namespace
 
 TEST(VulkanHardware, CubeMeshDepthOcclusionAnimation) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -171,7 +171,7 @@ TEST(VulkanHardware, CubeMeshDepthOcclusionAnimation) {
   ASSERT_TRUE(manager.write_buffer(dset_b.value(), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                    mesh_b.value().buffer, 0, VK_WHOLE_SIZE).is_ok());
 
-  const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   constexpr VkDeviceSize kPushBytes = 128U;  // two mat4
   const VkPushConstantRange push_range{VK_SHADER_STAGE_VERTEX_BIT, 0, kPushBytes};
   omnicpp::render::VulkanPipeline gfx_pipe;

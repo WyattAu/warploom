@@ -284,9 +284,9 @@ struct ToolbarHit final {
 // is the SAME guarded directive core's headers carry (the editor
 // namespace hosts both core session types and module widgets - extension
 // blocks merge), so one include of either family suffices.
-#ifndef OMNICPP_COMPAT_EDITOR_NS
-#define OMNICPP_COMPAT_EDITOR_NS
+#ifndef WARPLOOM_COMPAT_EDITOR_NS
+#define WARPLOOM_COMPAT_EDITOR_NS
 namespace omnicpp::editor {
     using namespace ::warploom::editor;
 }
-#endif  // OMNICPP_COMPAT_EDITOR_NS
+#endif  // WARPLOOM_COMPAT_EDITOR_NS

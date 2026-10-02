@@ -48,7 +48,7 @@
 #include "engine/render/vulkan_scene.hpp"
 #include "vulkan_test_readback.hpp"
 
-#if defined(OMNICPP_HAS_VULKAN)
+#if defined(WARPLOOM_HAS_VULKAN)
 #include <vulkan/vulkan.h>
 
 namespace {
@@ -500,7 +500,7 @@ struct RtShadowHarness {
     }
 
     // Depth-only shadow pipeline (128-byte push: light VP + model).
-    const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+    const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
     if (!shadow_pipe.load_shader_stage_file(ctx.device(),
             shader_dir + "/shadow.vert.spv", "vertex").is_ok() ||
         !shadow_pipe.load_shader_stage_file(ctx.device(),
@@ -728,7 +728,7 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
   ASSERT_TRUE(scratch_addr.is_ok());
 
   // ---- Pipelines -----------------------------------------------------------
-  const std::string sd = OMNICPP_TEST_SHADER_DIR;
+  const std::string sd = WARPLOOM_TEST_SHADER_DIR;
 
   VulkanPipeline pipe_a;  // PCF
   ASSERT_TRUE(pipe_a.load_shader_stage_file(h.ctx.device(),
@@ -914,7 +914,7 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
   }
   EXPECT_GT(near_hits, 0U) << "tracer never hit the near cube";
   EXPECT_GT(far_hits, 0U) << "tracer never hit the far cube";
-  if (std::getenv("OMNICPP_RT_SHADOW_DEBUG") != nullptr) {
+  if (std::getenv("WARPLOOM_RT_SHADOW_DEBUG") != nullptr) {
     const auto* p = static_cast<const float*>(payload.value().mapped);
     std::printf("tracer grid (custom index per ray, .=miss):\n");
     for (std::uint32_t row = 0; row < kTracerDim; ++row) {
@@ -1079,7 +1079,7 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
   // TEMP DIAGNOSTIC: exact geometry of the PCF readback. Prints per-object
   // bounding boxes of non-black pixels (row extents at each occupied row are
   // summarized as min/max), plus luminance at the probe sites.
-  if (std::getenv("OMNICPP_RT_SHADOW_DEBUG") != nullptr) {
+  if (std::getenv("WARPLOOM_RT_SHADOW_DEBUG") != nullptr) {
     int min_px = kImg, max_px = -1, min_py = kImg, max_py = -1;
     for (int py = 0; py < static_cast<int>(kImg); ++py) {
       int row_min = kImg, row_max = -1;

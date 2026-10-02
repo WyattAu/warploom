@@ -10,7 +10,7 @@
 #include <random>
 #include "engine/logging/Log.hpp"
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
 #include <QMessageBox>
 #include <QApplication>
 #include <QKeyEvent>
@@ -23,7 +23,7 @@ namespace Pong {
 // ConfigDialog Implementation
 // ============================================================================
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
 ConfigDialog::ConfigDialog(const GameConfig& current_config, QWidget* parent)
     : QDialog(parent), m_config(current_config) {
 
@@ -487,7 +487,7 @@ void PongGame::reset_game() {
                  m_state.ball_position.x, m_state.ball_position.y,
                  m_state.ball_velocity.x, m_state.ball_velocity.y);
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
     if (m_stats_overlay) {
         m_stats_overlay->update_score(0, 0);
         m_stats_overlay->set_game_over(false);
@@ -526,7 +526,7 @@ GameStatistics PongGame::get_statistics() const {
     return m_stats;
 }
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
 void PongGame::show_config_dialog() {
     ConfigDialog dialog(m_config, nullptr);
     if (dialog.exec() == QDialog::Accepted) {
@@ -712,7 +712,7 @@ void PongGame::check_scoring() {
             0.0f
         );
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
         if (m_stats_overlay) {
             m_stats_overlay->update_score(m_state.left_score, m_state.right_score);
         }
@@ -722,7 +722,7 @@ void PongGame::check_scoring() {
         if (m_state.right_score >= m_config.win_score) {
             m_state.game_over = true;
             omnicpp::log::info("PongGame: Game over! Right player wins!");
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
             if (m_stats_overlay) {
                 m_stats_overlay->set_game_over(true);
             }
@@ -751,7 +751,7 @@ void PongGame::check_scoring() {
             0.0f
         );
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
         if (m_stats_overlay) {
             m_stats_overlay->update_score(m_state.left_score, m_state.right_score);
         }
@@ -761,7 +761,7 @@ void PongGame::check_scoring() {
         if (m_state.left_score >= m_config.win_score) {
             m_state.game_over = true;
             omnicpp::log::info("PongGame: Game over! Left player wins!");
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
             if (m_stats_overlay) {
                 m_stats_overlay->set_game_over(true);
             }

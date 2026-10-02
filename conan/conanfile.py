@@ -22,7 +22,7 @@ except ImportError:
     UTILITIES_AVAILABLE = False
 
 
-class OmniCppTemplate(ConanFile):
+class Warploom(ConanFile):
     """
     Conan recipe for OmniCpp - Advanced C++ Development Template.
 
@@ -31,7 +31,7 @@ class OmniCppTemplate(ConanFile):
     """
 
     # Package metadata
-    name = "omnicpp-template"
+    name = "warploom"
     version = "0.0.3"
     description = "OmniCpp - Advanced C++ Development Template with C++23 support"
     topics = ("cpp", "template", "cmake", "cpp23")
@@ -301,6 +301,6 @@ class OmniCppTemplate(ConanFile):
 
     def package_info(self):
         """Define package information."""
-        self.cpp_info.libs = ["omnicpp"]
+        self.cpp_info.libs = ["warploom_core", "warploom_ui", "warploom_editor", "warploom_render", "warploom_asset"]
         self.cpp_info.includedirs = ["include"]
         self.cpp_info.defines = ["OMNICPP_CXX23_ENABLED"]

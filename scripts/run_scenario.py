@@ -45,7 +45,7 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-VIEWPORT = REPO / "build" / "vulkan-validation" / "bin" / "omnicpp_viewport"
+VIEWPORT = REPO / "build" / "vulkan-validation" / "bin" / "warploom_viewport"
 ANALYZER = REPO / "scripts" / "analyze_telemetry.py"
 MODELS = {
     # OMNICPP_MODEL is a path WITHOUT the .gltf extension (the viewport

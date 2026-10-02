@@ -123,7 +123,7 @@ TEST(ScriptModule, BuiltinDuplicateNameRejected) {
 TEST(ScriptModule, SharedObjectWellFormed) {
   std::string error;
   auto module =
-      ScriptModule::load_shared(OMNICPP_TEST_MODULE_OK, error);
+      ScriptModule::load_shared(WARPLOOM_TEST_MODULE_OK, error);
   ASSERT_NE(module, nullptr) << error;
   EXPECT_EQ(module->module_name(), "fixture_ok");
 
@@ -142,7 +142,7 @@ TEST(ScriptModule, SharedObjectWellFormed) {
 TEST(ScriptModule, SharedObjectMissingFile) {
   std::string error;
   auto module = ScriptModule::load_shared(
-      OMNICPP_TEST_BIN_DIR "/no_such_module.so", error);
+      WARPLOOM_TEST_BIN_DIR "/no_such_module.so", error);
   EXPECT_EQ(module, nullptr);
   EXPECT_NE(error.find("dlopen failed"), std::string::npos);
 }
@@ -150,7 +150,7 @@ TEST(ScriptModule, SharedObjectMissingFile) {
 TEST(ScriptModule, SharedObjectMissingSymbol) {
   std::string error;
   auto module =
-      ScriptModule::load_shared(OMNICPP_TEST_MODULE_MISSING, error);
+      ScriptModule::load_shared(WARPLOOM_TEST_MODULE_MISSING, error);
   EXPECT_EQ(module, nullptr);
   EXPECT_NE(error.find("missing symbol"), std::string::npos);
   EXPECT_NE(error.find("omnicpp_module_tick"), std::string::npos);
@@ -158,7 +158,7 @@ TEST(ScriptModule, SharedObjectMissingSymbol) {
 
 TEST(ScriptModule, SharedObjectAbiMismatch) {
   std::string error;
-  auto module = ScriptModule::load_shared(OMNICPP_TEST_MODULE_ABI, error);
+  auto module = ScriptModule::load_shared(WARPLOOM_TEST_MODULE_ABI, error);
   EXPECT_EQ(module, nullptr);
   EXPECT_NE(error.find("ABI"), std::string::npos);
 }
@@ -169,10 +169,10 @@ TEST(ScriptModule, SharedObjectAbiMismatch) {
 // Proves the C ABI contract is language-agnostic: a Rust module loads,
 // ticks, and behaves identically to the C++ fixtures.
 
-#if defined(OMNICPP_TEST_RUST_MODULE)
+#if defined(WARPLOOM_TEST_RUST_MODULE)
 TEST(ScriptModule, RustModuleLoadsAndTicks) {
   std::string error;
-  auto module = ScriptModule::load_shared(OMNICPP_TEST_RUST_MODULE, error);
+  auto module = ScriptModule::load_shared(WARPLOOM_TEST_RUST_MODULE, error);
   ASSERT_NE(module, nullptr) << error;
   EXPECT_EQ(module->module_name(), "rust_example");
 
@@ -186,7 +186,7 @@ TEST(ScriptModule, RustModuleLoadsAndTicks) {
 
 TEST(ScriptModule, RustModuleDeterministic) {
   std::string error;
-  auto module = ScriptModule::load_shared(OMNICPP_TEST_RUST_MODULE, error);
+  auto module = ScriptModule::load_shared(WARPLOOM_TEST_RUST_MODULE, error);
   ASSERT_NE(module, nullptr) << error;
 
   const double inputs[] = {0.5, -1.25, 3.75, 1e12};
@@ -196,4 +196,4 @@ TEST(ScriptModule, RustModuleDeterministic) {
   ASSERT_EQ(module->tick(1.0 / 60.0, inputs, 4U, b, 4U), 4);
   EXPECT_EQ(std::memcmp(a, b, sizeof(a)), 0);
 }
-#endif  // OMNICPP_TEST_RUST_MODULE
+#endif  // WARPLOOM_TEST_RUST_MODULE

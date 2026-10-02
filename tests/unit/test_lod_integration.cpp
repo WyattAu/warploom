@@ -21,7 +21,7 @@
 #include "engine/render/vulkan_scene.hpp"
 #include "vulkan_test_readback.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 namespace {
 
@@ -260,7 +260,7 @@ struct LodIntegrationHarness {
         !target.create_framebuffer(context.device()).is_ok()) {
       return false;
     }
-    const std::string sd = OMNICPP_TEST_SHADER_DIR;
+    const std::string sd = WARPLOOM_TEST_SHADER_DIR;
     if (!lit_pipeline
              .load_shader_stage_file(context.device(),
                                      sd + "/pbr_scene.vert.spv", "vertex")
@@ -568,4 +568,4 @@ TEST(VulkanHardware, LodIntegrationSelectsVariants) {
   SUCCEED();
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN

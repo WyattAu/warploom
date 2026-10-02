@@ -19,8 +19,8 @@ TEST(Contract, ViolationAborts) {
   // The violation path prints to stderr and aborts (verified exit status in
   // CI); run it in a child process so the test binary survives.
   const std::string cmd =
-      "/bin/sh -c '" OMNICPP_TEST_BIN_DIR
-      "/omnicpp_contract_violator 2>&1'";  // violator reports on stderr
+      "/bin/sh -c '" WARPLOOM_TEST_BIN_DIR
+      "/warploom_contract_violator 2>&1'";  // violator reports on stderr
   std::array<char, 128> buf{};
   std::string output;
   FILE* pipe = popen(cmd.c_str(), "r");

@@ -251,7 +251,7 @@ void make_translation(float x, float y, float z, SceneMatrix& m) {
 
 }  // namespace
 
-#if defined(OMNICPP_HAS_VULKAN)
+#if defined(WARPLOOM_HAS_VULKAN)
 namespace {  // (helpers)
 // ============================================================================
 // Texture upload helpers (test-side stand-ins for the app's upload layer).
@@ -576,7 +576,7 @@ struct GpuSceneHarness {
       return false;
     }
 
-    const std::string shader_dir = OMNICPP_TEST_SHADER_DIR;
+    const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
     if (!pipeline
              .load_shader_stage_file(context.device(),
                                      shader_dir + "/indexed_scene_material.vert.spv",
@@ -744,7 +744,7 @@ struct GpuMeshUpload {
 };
 
 }  // namespace (helpers)
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN
 
 // ============================================================================
 // End-to-end glTF scene tests
@@ -757,7 +757,7 @@ struct GpuMeshUpload {
 //! lit scene path samples it through the bindless albedo array. Readback must
 //! show red where the plain white material showed neutral gray.
 TEST(VulkanHardware, GltfBaseColorTextureEndToEnd) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -886,7 +886,7 @@ TEST(VulkanHardware, GltfBaseColorTextureEndToEnd) {
 //! the cube's material so the lit scene path samples it through the bindless
 //! albedo array — the same proof the PNG sibling runs, but for JPEG payloads.
 TEST(VulkanHardware, GltfJpegBaseColorTextureEndToEnd) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -1022,7 +1022,7 @@ TEST(VulkanHardware, GltfJpegBaseColorTextureEndToEnd) {
 //! sRGB-format texture; byte-close centre pixels prove the representations of
 //! the same linear value meet, and the analytic window proves the value.
 TEST(VulkanHardware, SrgbBaseColorTextureLinearisesAtSample) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -1153,7 +1153,7 @@ TEST(VulkanHardware, SrgbBaseColorTextureLinearisesAtSample) {
 //! depth ordering and per-object materials — and the transform change between
 //! frames is the engine's animation hook.
 TEST(VulkanHardware, GltfImportedSceneWithRegistryMaterials) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -1269,7 +1269,7 @@ TEST(VulkanHardware, GltfImportedSceneWithRegistryMaterials) {
 //! record (solid red 1x1, bindless element 1) turns that cube red under
 //! lambert while its untextured neighbour stays neutral gray.
 TEST(VulkanHardware, AlbedoTextureTintsLitMaterialScene) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -1374,7 +1374,7 @@ TEST(VulkanHardware, AlbedoTextureTintsLitMaterialScene) {
 //! lambert. Readback must show both colours, proving the scene-graph import
 //! feeds the registry scene path.
 TEST(VulkanHardware, GltfSceneGraphRendersInstances) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -1478,7 +1478,7 @@ TEST(VulkanHardware, GltfSceneGraphRendersInstances) {
 //! own renderable (CPU-side slice copy) so both decoded textures reach the
 //! framebuffer in one frame.
 TEST(VulkanHardware, MultiMaterialGltfMeshRendersBothPrimitiveTextures) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
@@ -1684,7 +1684,7 @@ constexpr std::uint8_t kGreen1x1Png[] = {
 //! ranges via index_offset) and per-primitive materials — so one glTF mesh
 //! renders as N scene draws without CPU-side geometry copies.
 TEST(VulkanHardware, MultiMaterialMeshSplitsIntoSharedBufferDraws) {
-#if OMNICPP_VULKAN_TYPES_AVAILABLE && defined(OMNICPP_TEST_SHADER_DIR)
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
   if (!omnicpp::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }

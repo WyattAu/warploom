@@ -619,7 +619,7 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
                               cb.value()));
 
   // ---- Pipelines ------------------------------------------------------------
-  const std::string sd = OMNICPP_TEST_SHADER_DIR;
+  const std::string sd = WARPLOOM_TEST_SHADER_DIR;
   VulkanPipeline pipe;
   ASSERT_TRUE(pipe.load_shader_stage_file(h.ctx.device(),
       sd + "/pbr_scene.vert.spv", "vertex").is_ok());
@@ -764,7 +764,7 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
   const auto control = channels(rb, qx, qy);
   const auto direct = channels(rb, cx2, cy2);
 
-  if (std::getenv("OMNICPP_RT_REFLECT_DEBUG") != nullptr) {
+  if (std::getenv("WARPLOOM_RT_REFLECT_DEBUG") != nullptr) {
     // Empirical: reddest pixel in the frame + probe values.
     int best_x = -1, best_y = -1;
     float best_gap = -1.0f;

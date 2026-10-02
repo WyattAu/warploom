@@ -3,7 +3,7 @@
 ## Setup
 
 - Hardware: NVIDIA GeForce RTX 2060 (6 GB), driver 615.71.09
-- Run: `OMNICPP_GPU_DRIVEN=1 OMNICPP_INSTANCE_COUNT=10000 OMNICPP_MAX_FRAMES=600`
+- Run: `WARPLOOM_GPU_DRIVEN=1 WARPLOOM_INSTANCE_COUNT=10000 WARPLOOM_MAX_FRAMES=600`
   (compute cull/LOD -> ONE indirect draw; 1280x720)
 - Source: viewport telemetry (per-frame `total_us`, `record_us`, `gpu_ns`)
 
@@ -32,10 +32,10 @@
 
 ```bash
 mkdir -p /tmp/bench_tel
-OMNICPP_GPU_DRIVEN=1 OMNICPP_INSTANCE_COUNT=10000 OMNICPP_MAX_FRAMES=600 \
+WARPLOOM_GPU_DRIVEN=1 WARPLOOM_INSTANCE_COUNT=10000 WARPLOOM_MAX_FRAMES=600 \
 OMNICPP_SHADER_DIR=build/vulkan-validation/tests/shaders \
 OMNICPP_TELEMETRY_DIR=/tmp/bench_tel \
-build/vulkan-validation/bin/omnicpp_viewport
+build/vulkan-validation/bin/warploom_viewport
 ```
 
 Analyze: filter `type == "frame"` rows in `<telemetry_dir>/telemetry.jsonl`

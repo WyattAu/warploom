@@ -21,19 +21,19 @@ set(CPACK_PACKAGE_LICENSE_FILE "${CMAKE_SOURCE_DIR}/LICENSE")
 # ============================================================================
 # Package Generators
 # ============================================================================
-if(OMNICPP_PLATFORM_WINDOWS)
+if(WARPLOOM_PLATFORM_WINDOWS)
     # Windows package generators
     set(CPACK_GENERATOR "ZIP;NSIS;WIX")
     set(CPACK_SOURCE_GENERATOR "ZIP")
-elseif(OMNICPP_PLATFORM_LINUX)
+elseif(WARPLOOM_PLATFORM_LINUX)
     # Linux package generators
     set(CPACK_GENERATOR "DEB;RPM;TGZ")
     set(CPACK_SOURCE_GENERATOR "TGZ")
-elseif(OMNICPP_PLATFORM_MACOS)
+elseif(WARPLOOM_PLATFORM_MACOS)
     # macOS package generators
     set(CPACK_GENERATOR "DragNDrop;TGZ")
     set(CPACK_SOURCE_GENERATOR "TGZ")
-elseif(OMNICPP_PLATFORM_WASM)
+elseif(WARPLOOM_PLATFORM_WASM)
     # WASM package generators
     set(CPACK_GENERATOR "ZIP;TGZ")
     set(CPACK_SOURCE_GENERATOR "TGZ")
@@ -75,7 +75,7 @@ set(CPACK_COMPONENT_DATA_DESCRIPTION "Data files (assets and configuration)")
 # ============================================================================
 # Platform-Specific Package Configuration
 # ============================================================================
-if(OMNICPP_PLATFORM_WINDOWS)
+if(WARPLOOM_PLATFORM_WINDOWS)
     # Windows-specific configuration
     set(CPACK_NSIS_DISPLAY_NAME "${PROJECT_NAME}")
     set(CPACK_NSIS_PACKAGE_NAME "${PROJECT_NAME}")
@@ -90,7 +90,7 @@ if(OMNICPP_PLATFORM_WINDOWS)
     set(CPACK_WIX_UI_BANNER "${CMAKE_SOURCE_DIR}/assets/banner.bmp")
     set(CPACK_WIX_UI_DIALOG "${CMAKE_SOURCE_DIR}/assets/dialog.bmp")
 
-elseif(OMNICPP_PLATFORM_LINUX)
+elseif(WARPLOOM_PLATFORM_LINUX)
     # Linux-specific configuration
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 libstdc++6")
     set(CPACK_DEBIAN_PACKAGE_SECTION "devel")
@@ -102,13 +102,13 @@ elseif(OMNICPP_PLATFORM_LINUX)
     set(CPACK_RPM_PACKAGE_URL "${CPACK_PACKAGE_HOMEPAGE_URL}")
     set(CPACK_RPM_PACKAGE_REQUIRES "glibc libstdc++")
 
-elseif(OMNICPP_PLATFORM_MACOS)
+elseif(WARPLOOM_PLATFORM_MACOS)
     # macOS-specific configuration
     set(CPACK_DRAGNDROP_COMPONENTS "Runtime")
     set(CPACK_MACOSX_BUNDLE_NAME "${PROJECT_NAME}.app")
     set(CPACK_MACOSX_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/assets/icon.icns")
 
-elseif(OMNICPP_PLATFORM_WASM)
+elseif(WARPLOOM_PLATFORM_WASM)
     # WASM-specific configuration
     set(CPACK_ARCHIVE_COMPONENT_INSTALL "Runtime;Data")
 endif()

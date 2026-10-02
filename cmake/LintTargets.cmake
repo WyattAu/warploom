@@ -4,7 +4,7 @@
 # Defines code linting targets (clang-tidy, pylint, mypy)
 # ============================================================================
 
-if(OMNICPP_ENABLE_LINTING)
+if(WARPLOOM_ENABLE_LINTING)
     # Find clang-tidy
     find_program(CLANG_TIDY_EXECUTABLE clang-tidy)
 
@@ -20,13 +20,13 @@ if(OMNICPP_ENABLE_LINTING)
     # C++ linting
     if(CLANG_TIDY_EXECUTABLE)
         # Get clang-tidy checks
-        set(OMNICPP_CLANG_TIDY_CHECKS "*" CACHE STRING "Clang-tidy checks to run")
+        set(WARPLOOM_CLANG_TIDY_CHECKS "*" CACHE STRING "Clang-tidy checks to run")
 
         # Custom target to lint C++ files
         add_custom_target(lint-cpp
             COMMAND ${CMAKE_COMMAND} -E echo "Linting C++ files..."
             COMMAND ${CLANG_TIDY_EXECUTABLE}
-            -checks=${OMNICPP_CLANG_TIDY_CHECKS}
+            -checks=${WARPLOOM_CLANG_TIDY_CHECKS}
             -p ${CMAKE_BINARY_DIR}
             ${CMAKE_SOURCE_DIR}/include/**/*.hpp
             ${CMAKE_SOURCE_DIR}/include/**/*.h
@@ -39,7 +39,7 @@ if(OMNICPP_ENABLE_LINTING)
         add_custom_target(lint-cpp-fix
             COMMAND ${CMAKE_COMMAND} -E echo "Linting C++ files with auto-fix..."
             COMMAND ${CLANG_TIDY_EXECUTABLE}
-            -checks=${OMNICPP_CLANG_TIDY_CHECKS}
+            -checks=${WARPLOOM_CLANG_TIDY_CHECKS}
             -p ${CMAKE_BINARY_DIR}
             -fix
             -format-style=file

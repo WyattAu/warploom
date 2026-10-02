@@ -41,7 +41,7 @@
 #include <utility>
 #include <vector>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -53,7 +53,7 @@
 #include "engine/render/vulkan_rt_pipeline.hpp"
 #include "vulkan_test_readback.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 namespace {
 
@@ -580,7 +580,7 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
                   .is_ok());
 
   // ---- RT pipeline + SBT -----------------------------------------------------
-  const std::string sd = OMNICPP_TEST_SHADER_DIR;
+  const std::string sd = WARPLOOM_TEST_SHADER_DIR;
   VkShaderModule mods[5] = {};
   const char* files[5] = {"/pt_pathtrace.rgen.spv", "/pt_pathtrace.rmiss.spv",
                           "/pt_pathtrace_leaf.rmiss.spv",
@@ -936,7 +936,7 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
   ctx.cleanup();
 }
 
-#else  // !OMNICPP_HAS_VULKAN
+#else  // !WARPLOOM_HAS_VULKAN
 
 TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
   GTEST_SKIP() << "Vulkan not available in this build";

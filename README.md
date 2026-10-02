@@ -121,8 +121,8 @@ All lock-free, header-only, TSan-validated with `halt_on_error=1`:
 ## Benchmark
 
 ```bash
-build/headless-debug/bin/omnicpp_deterministic_runtime_benchmark
-build/headless-debug/bin/omnicpp_deterministic_runtime_benchmark --output results.json
+build/headless-debug/bin/warploom_deterministic_runtime_benchmark
+build/headless-debug/bin/warploom_deterministic_runtime_benchmark --output results.json
 ```
 
 ## Validation

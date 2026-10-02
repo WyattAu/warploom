@@ -14,7 +14,7 @@
 #include <cstring>
 #include "engine/logging/Log.hpp"
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
 #include <QApplication>
 #include <QPointer>
 #include <QMainWindow>
@@ -34,7 +34,7 @@ using namespace Pong;
 // MainWindow class - Combines game window with Qt6 UI
 // ============================================================================
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
 class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWindow* vulkan_window, QWidget* parent = nullptr);
@@ -296,7 +296,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
     // Initialize Qt6 application only if not in headless mode
     QPointer<QApplication> app = nullptr;
     if (!headless_mode) {
@@ -353,7 +353,7 @@ int main(int argc, char* argv[]) {
 
     // Detect Wayland platform for logging
     bool is_wayland = false;
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
     const char* qt_platform = std::getenv("QT_QPA_PLATFORM");
     is_wayland = (qt_platform && (std::strcmp(qt_platform, "wayland") == 0));
     if (is_wayland) {
@@ -374,7 +374,7 @@ int main(int argc, char* argv[]) {
 
     OmniCpp::Engine::Window::WindowManager window_manager;
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
     // Pass the Qt6 application to the window manager
     window_manager.set_qt_application(app.data());
 
@@ -436,7 +436,7 @@ int main(int argc, char* argv[]) {
     std::cout << "  F1 - Open settings dialog" << std::endl;
     std::cout << std::endl;
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
     // Create Qt6 main window with UI
     QWindow* vulkan_window = window_manager.get_qt_window();
     if (!vulkan_window) {
@@ -549,7 +549,7 @@ int main(int argc, char* argv[]) {
     }
     window_manager.shutdown();
 
-#ifdef OMNICPP_HAS_QT_VULKAN
+#ifdef WARPLOOM_HAS_QT_VULKAN
     // Qt6 cleanup - MainWindow will be deleted automatically
     delete app.data();
 #endif
