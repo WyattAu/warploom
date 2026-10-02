@@ -1,5 +1,5 @@
 //! @file test_module_missing.cpp
-//! @brief Malformed fixture: exports abi + name but NOT omnicpp_module_tick —
+//! @brief Malformed fixture (LEGACY family): exports abi + name but NOT the tick symbol —
 //!        the host must reject it with a precise "missing symbol" error.
 
 #include <cstdint>

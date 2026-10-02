@@ -30,7 +30,7 @@ namespace warploom::contract {
 //! the guarded path entirely, so the check costs one predictable branch.
 [[noreturn]] inline void violate(const char* expression, const char* file,
                                  int line) noexcept {
-  std::fprintf(stderr, "omnicpp contract violation: %s (%s:%d)\n", expression,
+  std::fprintf(stderr, "warploom contract violation: %s (%s:%d)\n", expression,
                file, line);
   std::abort();
 }

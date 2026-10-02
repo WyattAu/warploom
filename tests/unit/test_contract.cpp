@@ -30,7 +30,7 @@ TEST(Contract, ViolationAborts) {
   }
   const int rc = pclose(pipe);
   EXPECT_TRUE(WIFEXITED(rc) || WIFSIGNALED(rc));
-  EXPECT_NE(output.find("omnicpp contract violation"), std::string::npos)
+  EXPECT_NE(output.find("warploom contract violation"), std::string::npos)
       << "stderr was: " << output;
   EXPECT_NE(output.find("1 == 2"), std::string::npos) << output;
   // popen reports signal death as 128+SIGABRT through the shell.

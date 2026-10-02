@@ -1,15 +1,15 @@
 //! @file test_module_ok.cpp
 //! @brief Well-formed script-module fixture (real .so for the dlopen path).
-//! Contract: omnicpp_module_abi / omnicpp_module_name / omnicpp_module_tick.
+//! Contract: warploom_module_abi / warploom_module_name / warploom_module_tick.
 
 #include <cstdint>
 
-extern "C" std::int32_t omnicpp_module_abi() { return 1; }
+extern "C" std::int32_t warploom_module_abi() { return 1; }
 
-extern "C" const char* omnicpp_module_name() { return "fixture_ok"; }
+extern "C" const char* warploom_module_name() { return "fixture_ok"; }
 
 //! Pure function of (dt, inputs): outputs[i] = inputs[i] * 2 + dt.
-extern "C" std::int32_t omnicpp_module_tick(double dt, const double* inputs,
+extern "C" std::int32_t warploom_module_tick(double dt, const double* inputs,
                                             std::uint32_t input_count,
                                             double* outputs,
                                             std::uint32_t output_capacity) {

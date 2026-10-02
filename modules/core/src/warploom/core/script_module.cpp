@@ -58,25 +58,31 @@ std::unique_ptr<ScriptModule> ScriptModule::load_shared(
     error = "dlopen failed: " + std::string(dlerror());
     return nullptr;
   }
-  const auto resolve = [&](const char* symbol) {
-    void* ptr = dlsym(handle, symbol);
+  // S5-B phase 3 (docs/warploom-identity-plan.md): the warploom_module_*
+  // C ABI family is primary; legacy omnicpp_module_* modules keep loading
+  // through the per-symbol fallback (removed post-0.1).
+  const auto resolve = [&](const char* suffix) {
+    void* ptr = dlsym(handle, (std::string("warploom_module_") + suffix).c_str());
+    if (ptr != nullptr) return ptr;
+    ptr = dlsym(handle, (std::string("omnicpp_module_") + suffix).c_str());
     if (ptr == nullptr) {
-      error = std::string("missing symbol ") + symbol + " in " + path;
+      error = std::string("missing symbol warploom_module_") + suffix +
+              " (and legacy omnicpp_module_" + suffix + ") in " + path;
     }
     return ptr;
   };
   ScriptModuleApi api;
-  *reinterpret_cast<void**>(&api.abi_version) = resolve("omnicpp_module_abi");
+  *reinterpret_cast<void**>(&api.abi_version) = resolve("abi");
   if (!error.empty()) {
     dlclose(handle);
     return nullptr;
   }
-  *reinterpret_cast<void**>(&api.name) = resolve("omnicpp_module_name");
+  *reinterpret_cast<void**>(&api.name) = resolve("name");
   if (!error.empty()) {
     dlclose(handle);
     return nullptr;
   }
-  *reinterpret_cast<void**>(&api.tick) = resolve("omnicpp_module_tick");
+  *reinterpret_cast<void**>(&api.tick) = resolve("tick");
   if (!error.empty()) {
     dlclose(handle);
     return nullptr;
