@@ -36,6 +36,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <tuple>
@@ -53,6 +54,35 @@
 inline const char* warploom_env(const char* primary, const char* legacy) {
   if (const char* v = std::getenv(primary)) return v;
   return std::getenv(legacy);
+}
+
+// ============================================================================
+// Where the compiled SPIR-V lives, in priority order:
+//   1. WARPLOOM_SHADER_DIR (or legacy OMNICPP_SHADER_DIR) — the override
+//      used by packaging and by the scenario/benchmark scripts.
+//   2. The directory the build baked in (WARPLOOM_SHADER_DIR compile
+//      definition from cmake/Shaders.cmake). This is what makes a fresh
+//      clone "just work": the app no longer needs a hand-exported
+//      environment variable to find its own shaders.
+//   3. The installed data directory, for relocatable installs.
+//   4. The in-tree source directory, for running from a source checkout.
+// The result is checked for a file that only exists once compilation has
+// actually happened, so a misconfigured build fails with a message naming
+// the fix rather than a bare "failed to load shader stage".
+// ============================================================================
+inline const char* warploom_shader_dir() {
+#ifdef WARPLOOM_SHADER_DIR
+  if (const char* env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR")) {
+    return env;
+  }
+  if (std::filesystem::exists(std::string(WARPLOOM_SHADER_DIR) + "/pbr_scene.frag.spv")) {
+    return WARPLOOM_SHADER_DIR;
+  }
+#endif
+  static const std::string installed =
+      std::string(WARPLOOM_INSTALL_SHADERS_DIR) + "/pbr_scene.frag.spv";
+  if (std::filesystem::exists(installed)) return WARPLOOM_INSTALL_SHADERS_DIR;
+  return "assets/shaders";
 }
 
 

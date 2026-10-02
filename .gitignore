@@ -135,3 +135,17 @@ assets/models/sponza/
 
 # Rust module build artifacts
 examples/rust_module/target/
+
+# --- Phase 0 hygiene (2026-10) -------------------------------------------
+# Compiled SPIR-V is a build product of cmake/Shaders.cmake, not a source.
+assets/shaders/*.spv
+
+# Pre-rename Python build controller artifacts (omni_scripts is retired)
+omni_scripts/**/__pycache__/
+*.egg-info/
+.pytest_cache/
+
+# Stale packaging output from the pre-rename era
+packages/
+validation_reports/
+*_CPack_Packages/

@@ -18,53 +18,25 @@ set(CMAKE_INSTALL_DOCDIR ${WARPLOOM_INSTALL_DOC_DIR} CACHE PATH "Documentation i
 set(CMAKE_INSTALL_CMAKEDIR ${WARPLOOM_INSTALL_CMAKE_DIR} CACHE PATH "CMake config installation directory")
 
 # ============================================================================
-# Engine Installation
-# ============================================================================
-if(TARGET OmniCppEngine)
-    # Install engine library
-    install(TARGETS OmniCppEngine
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    )
-
-    # Install engine headers
-    install(DIRECTORY ${WARPLOOM_INCLUDE_DIR}/engine/
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/engine
-        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
-    )
-
-    # Install engine headers (OmniCppLib)
-    install(DIRECTORY ${WARPLOOM_INCLUDE_DIR}/OmniCppLib/
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/OmniCppLib
-        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
-    )
-endif()
-
-# ============================================================================
-# Game Installation
-# ============================================================================
-if(TARGET OmniCppGame)
-    # Install game executable
-    install(TARGETS OmniCppGame
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    )
-
-    # Install game headers
-    install(DIRECTORY ${WARPLOOM_INCLUDE_DIR}/game/
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/game
-        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
-    )
-endif()
-
-# ============================================================================
 # Assets Installation
 # ============================================================================
 if(EXISTS ${WARPLOOM_ASSETS_DIR})
     install(DIRECTORY ${WARPLOOM_ASSETS_DIR}/
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/assets
         USE_SOURCE_PERMISSIONS
+    )
+endif()
+
+# ============================================================================
+# Shader Installation
+# ============================================================================
+# The compiled SPIR-V is what the app actually runs. Install it alongside
+# the binary so a relocatable install can find it via
+# WARPLOOM_INSTALL_SHADERS_DIR without a build tree present.
+if(WARPLOOM_SHADER_OUTPUT_DIR AND EXISTS "${WARPLOOM_SHADER_OUTPUT_DIR}")
+    install(DIRECTORY "${WARPLOOM_SHADER_OUTPUT_DIR}/"
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/shaders
+        COMPONENT Runtime
     )
 endif()
 
@@ -102,10 +74,10 @@ endif()
 # ============================================================================
 # CMake Configuration Installation
 # ============================================================================
-install(FILES
-    ${CMAKE_SOURCE_DIR}/cmake/OmniCppEngineConfig.cmake.in
-    DESTINATION ${CMAKE_INSTALL_CMAKEDIR}
-)
+# The five modules and the headerless aggregate each install their own
+# Warploom<Name>Config.cmake + version file from modules/*/CMakeLists.txt.
+# There is no root-level target to export: the S5-A aggregate replaced the
+# omnicpp_runtime monolith, so the old OmniCppEngine export block is gone.
 
 # ============================================================================
 # Platform-Specific Installation
@@ -117,12 +89,6 @@ if(WARPLOOM_PLATFORM_WINDOWS)
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}
         )
     endif()
-elseif(WARPLOOM_PLATFORM_LINUX)
-    # Linux-specific installation
-    install(CODE "
-        execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/share/applications\")
-        execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/share/icons/hicolor/256x256/apps\")
-    ")
 elseif(WARPLOOM_PLATFORM_WASM)
     # WASM-specific installation (web files)
     if(EXISTS ${CMAKE_SOURCE_DIR}/assets/ems-mini.html)
@@ -130,40 +96,6 @@ elseif(WARPLOOM_PLATFORM_WASM)
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}
         )
     endif()
-endif()
-
-# ============================================================================
-# Export Configuration
-# ============================================================================
-if(TARGET OmniCppEngine)
-    # Export engine targets
-    install(EXPORT OmniCppEngineTargets
-        FILE OmniCppEngineTargets.cmake
-        NAMESPACE OmniCpp::
-        DESTINATION ${CMAKE_INSTALL_CMAKEDIR}
-    )
-
-    # Create config file
-    include(CMakePackageConfigHelpers)
-    configure_package_config_file(
-        ${CMAKE_SOURCE_DIR}/cmake/OmniCppEngineConfig.cmake.in
-        ${CMAKE_CURRENT_BINARY_DIR}/OmniCppEngineConfig.cmake
-        INSTALL_DESTINATION ${CMAKE_INSTALL_CMAKEDIR}
-    )
-
-    # Create version file
-    write_basic_package_version_file(
-        ${CMAKE_CURRENT_BINARY_DIR}/OmniCppEngineConfigVersion.cmake
-        VERSION ${PROJECT_VERSION}
-        COMPATIBILITY SameMajorVersion
-    )
-
-    # Install config and version files
-    install(FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/OmniCppEngineConfig.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/OmniCppEngineConfigVersion.cmake
-        DESTINATION ${CMAKE_INSTALL_CMAKEDIR}
-    )
 endif()
 
 # ============================================================================

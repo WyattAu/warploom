@@ -1515,9 +1515,7 @@ bool setup_mannequin(ViewportApp& app) {
 
   // Skinned pipeline (4 sets: mesh / textures / material / bones) over the
   // swapchain render pass.
-  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
-  const std::string shader_dir =
-      shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
+  const std::string shader_dir = warploom_shader_dir();
   if (!app.skinned_pipeline
            .load_shader_stage_file(device,
                                    shader_dir + "/skinned_scene.vert.spv",
@@ -1814,9 +1812,7 @@ bool setup_scene(ViewportApp& app) {
 
   // PBR pipeline over the swapchain's render pass. Shader paths are
   // relative to the build's compiled-shader output directory.
-  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
-  const std::string shader_dir =
-      shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
+  const std::string shader_dir = warploom_shader_dir();
   if (!app.pbr_pipeline
            .load_shader_stage_file(app.context.device(),
                                    shader_dir + "/pbr_scene.vert.spv",
@@ -1898,9 +1894,7 @@ bool setup_gpu_driven(ViewportApp& app) {
   // tan/viewport + LOD thresholds (matches cull_and_draw_lod.comp).
   const VkPushConstantRange kGdCullPush{VK_SHADER_STAGE_COMPUTE_BIT, 0U, 144U};
   VkDevice dev = app.context.device();
-  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
-  const std::string shader_dir =
-      shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
+  const std::string shader_dir = warploom_shader_dir();
 
   // --- Shared geometry through the mesh table ----------------------------
   // Host-side copies of the unit-cube geometry (same 11-float layout as the
@@ -2313,9 +2307,7 @@ bool setup_rt_shadows(ViewportApp& app) {
                          "VK_KHR_acceleration_structure/ray_query\n");
     return false;
   }
-  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
-  const std::string shader_dir =
-      shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
+  const std::string shader_dir = warploom_shader_dir();
 
   // --- 1. Composed RT pipelines (same 6-set layout shape as the PCF
   //        family; set 4 is the TLAS layout). ----------------------------
@@ -2840,9 +2832,7 @@ bool setup_lighting(ViewportApp& app) {
   VkDevice dev = app.context.device();
   const std::uint32_t queue_family =
       static_cast<std::uint32_t>(app.context.queue_families().graphics_family);
-  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
-  const std::string shader_dir =
-      shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
+  const std::string shader_dir = warploom_shader_dir();
   std::string bake_error;
 
   // --- 1. IBL bake from the analytic sky. --------------------------------
@@ -3621,9 +3611,7 @@ bool setup_city_scene(ViewportApp& app) {
   }
   if (app.mannequin.skins.empty()) return false;
   VkDevice dev = app.context.device();
-  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
-  const std::string shader_dir =
-      shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
+  const std::string shader_dir = warploom_shader_dir();
 
   // ------------------------------------------------------------------
   // Lights SSBO (set 6): 32 warm point lights along both streets.
@@ -4553,9 +4541,7 @@ bool setup_node_editor(ViewportApp& app) {
     app.inspector_root = app.inspector.panel_handle();
   }
 
-  const char* shader_dir_env = warploom_env("WARPLOOM_SHADER_DIR", "OMNICPP_SHADER_DIR");
-  const std::string shader_dir =
-      shader_dir_env != nullptr ? shader_dir_env : "assets/shaders";
+  const std::string shader_dir = warploom_shader_dir();
   return app.ui_renderer
       .initialize(app.context.device(), app.context.physical_device(),
                   app.render_pass.render_pass(), app.allocator, shader_dir)
