@@ -108,6 +108,27 @@ declares a slot 3.
       the HDR image. The fix is to make the compose chain instantiable per
       target rather than per renderer (its own intermediate set), plus a
       format-aware readback. Until then, capture runs with `WARPLOOM_NO_HDR=1`.
+
+      Scope measured while attempting it, so the next attempt is sized right.
+      The chain is not three self-contained methods: `record_commands()` also
+      re-seeds `hdr_layout_` after the scene pass (layout bookkeeping lives
+      there, not in the chain), the chain owns its own `VulkanMemoryAllocator`
+      and `VulkanDescriptorManager`, and its bloom stages call the renderer's
+      private static `create_command_pool`/`allocate_command_buffer` plus the
+      nested `FullscreenPass` and `record_fullscreen_draw`. So extraction means
+      four things, not one:
+        1. Promote `FullscreenPass` + `record_fullscreen_draw` into shared
+           infrastructure (both the graph callbacks and the chain need them,
+           and neither should own the other's helpers).
+        2. Give the chain a queue handle and its own layout tracker, and move
+           the post-scene `hdr_layout_` re-seed into `record()`.
+        3. Move the chain's allocator/descriptor-manager ownership wholesale
+           rather than sharing the renderer's.
+        4. Then a second instance is instantiable and B3b follows.
+
+      Note for whoever does it: the project defines `OMNICPP_HAS_VULKAN` with
+      no value, so `#if OMNICPP_HAS_VULKAN` silently evaluates false. Use
+      `#ifdef`.
 - [ ] **B5 H-Z occlusion on** — `enable_hiz` is currently only ever set in
       tests.
 - [x] **B6 no duplicated Vulkan in the app** — raw `vkCmd*` calls in the
