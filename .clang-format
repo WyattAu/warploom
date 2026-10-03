@@ -79,11 +79,15 @@ AllowShortLambdasOnASingleLine: All
 AllowShortLoopsOnASingleLine: false
 AlwaysBreakAfterDefinitionReturnType: All
 AlwaysBreakBeforeMultilineStrings: false
+# The entries MUST be quoted. Unquoted [[nodiscard]] is a YAML flow sequence
+# containing another sequence, which clang-format rejects with
+# "unexpected scalar" -- and that is why `format-check` had never once run in
+# this repository.
 AttributeMacros:
   - __capability
-  - [[nodiscard]]
-  - [[maybe_unused]]
-  - [[deprecated]]
+  - '[[nodiscard]]'
+  - '[[maybe_unused]]'
+  - '[[deprecated]]'
 BinPackArguments: true
 BinPackParameters: true
 BitFieldColonSpacing: Both
@@ -259,7 +263,9 @@ SpacesInParensOptions:
   InEmptyParentheses: false
   Other: false
 SpacesInSquareBrackets: false
-Standard: c++23
+# The build compiles C++26 (tests and viewport); this clang-format has no
+# c++26 dialect, and 'Latest' tracks the newest one it does know.
+Standard: Latest
 StatementAttributeLikeMacros:
   - Q_EMIT
 StatementMacros:

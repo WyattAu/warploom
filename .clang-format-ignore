@@ -1,6 +1,7 @@
-src/bindings/emscripten_mainloop_stub.h
-src/bindings/imgui_impl_opengl3_loader.h
-src/bindings/imgui_impl_opengl3.cpp
-src/bindings/imgui_impl_opengl3.h
-src/bindings/imgui_impl_sdl2.cpp
-src/bindings/imgui_impl_sdl2.h
+# Paths are relative to the repository root and are matched as prefixes.
+#
+# The previous contents listed src/bindings/*, a directory that has never
+# existed in this tree, so every entry was dead and nothing was excluded.
+#
+# Vendored / generated code we do not reformat:
+conan/

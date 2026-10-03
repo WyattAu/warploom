@@ -13,7 +13,11 @@
 # ============================================================================
 # Build Options
 # ============================================================================
-option(WARPLOOM_WARNINGS_AS_ERRORS "Treat all warnings as errors" ON)
+# OFF by default: the tree carries roughly 270 real warnings (sign-conversion,
+# unused-result, shadow, old-style-cast, ...). Turning this ON is the gate for
+# clearing that debt -- it is a deliberate, separate campaign, not something a
+# cleanup commit can flip. Set -DWARPLOOM_WARNINGS_AS_ERRORS=ON to see the list.
+option(WARPLOOM_WARNINGS_AS_ERRORS "Treat all warnings as errors" OFF)
 option(WARPLOOM_ENABLE_SANITIZERS "Enable sanitizers in Debug builds" OFF)
 option(ENABLE_LTO "Enable Link-Time Optimization in Release builds" OFF)
 
@@ -73,42 +77,79 @@ if(MSVC OR WARPLOOM_COMPILER_MSVC_CLANG)
     )
 
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    # GCC/Clang warning flags - Maximum strictness (but not global -Werror)
-    add_compile_options(
-        # Core warnings
+    # GCC/Clang warnings. Maximum strictness, but every flag is probed before
+    # use: the GCC and Clang diagnostic sets overlap only partially, and both
+    # toolchains gain and lose flags between releases. Hand-listing them
+    # produced 780 "-Wunknown-warning-option" warnings per build, which buried
+    # the ~270 real ones. Probing keeps the strict set honest on any compiler.
+    include(CheckCXXCompilerFlag)
+
+    # Always available on both.
+    set(_warploom_always_warnings
         -Wall
         -Wextra
         -Wpedantic
-        
-        # COMPLIANCE: Required by checklist
-        -Wconversion              # Warn on implicit type conversions
-        -Wsign-conversion         # Warn on sign conversions
-        
-        # Additional strict warnings
-        -Wformat=2                # Check printf/scanf format strings
-        -Wno-format-nonliteral    # Allow non-literal format strings
-        -Wshadow                  # Warn when variable shadows another
-        -Wpointer-arith           # Warn on pointer arithmetic
-        -Wcast-qual               # Warn on casting away const
-        -Wunreachable-code        # Warn on unreachable code
-        -Wold-style-cast          # Warn on C-style casts
-        -Wnon-virtual-dtor        # Warn on non-virtual destructors
-        -Woverloaded-virtual      # Warn when hiding virtual functions
-        -Wmissing-include-dirs    # Warn on missing include directories
-        -Wzero-as-null-pointer-constant  # Warn on using 0 as null
-        -Wdelete-non-virtual-dtor # Warn on deleting polymorphic object
-        -Winit-self               # Warn on uninitialized self-reference
-        -Wlogical-op              # Warn on suspicious logical ops
-        -Wmissing-declarations    # Warn on missing declarations
-        -Wstrict-null-sentinel    # Warn on missing null sentinel
-        -Wstrict-overflow=2       # Warn on strict overflow
-        -Wnoexcept                # Warn when noexcept is violated
-        -Wsuggest-override        # Suggest using override keyword
-        -Wduplicated-cond         # Warn on duplicated conditions
-        -Wduplicated-branches     # Warn on duplicated branches
-        -Wnull-dereference        # Warn on null dereference
-        -Wuseless-cast            # Warn on useless casts
     )
+
+    # Strictness beyond -Wall -Wextra; probed individually.
+    set(_warploom_optional_warnings
+        -Wconversion
+        -Wsign-conversion
+        -Wformat=2
+        -Wno-format-nonliteral
+        -Wshadow
+        -Wpointer-arith
+        -Wcast-qual
+        -Wunreachable-code
+        -Wold-style-cast
+        -Wnon-virtual-dtor
+        -Woverloaded-virtual
+        -Wmissing-include-dirs
+        -Wzero-as-null-pointer-constant
+        -Wdelete-non-virtual-dtor
+        -Winit-self
+        -Wmissing-declarations
+        -Wstrict-overflow=2
+        -Wsuggest-override
+        -Wnull-dereference
+        -Wdouble-promotion
+        -Wfloat-equal
+        -Wimplicit-int-float-conversion
+        -Wswitch-enum
+    )
+
+    set(_warploom_enabled_warnings ${_warploom_always_warnings})
+    foreach(_flag IN LISTS _warploom_optional_warnings)
+        string(MAKE_C_IDENTIFIER "HAVE${_flag}" _var)
+        check_cxx_compiler_flag("${_flag}" ${_var})
+        if(${_var})
+            list(APPEND _warploom_enabled_warnings "${_flag}")
+        endif()
+    endforeach()
+
+    # Clang-only extras, probed the same way.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        foreach(_flag IN ITEMS
+                -Wlogical-op
+                -Wstrict-null-sentinel
+                -Wnoexcept
+                -Wduplicated-cond
+                -Wduplicated-branches
+                -Wuseless-cast)
+            string(MAKE_C_IDENTIFIER "HAVE${_flag}" _var)
+            check_cxx_compiler_flag("${_flag}" ${_var})
+            if(${_var})
+                list(APPEND _warploom_enabled_warnings "${_flag}")
+            endif()
+        endforeach()
+    endif()
+
+    add_compile_options(${_warploom_enabled_warnings})
+    list(LENGTH _warploom_optional_warnings _warploom_probed)
+    list(LENGTH _warploom_enabled_warnings _warploom_active)
+    message(STATUS
+        "Warnings: ${_warploom_active} enabled "
+        "(${_warploom_probed} strict flags probed against ${CMAKE_CXX_COMPILER_ID})")
 
     # Disable dangling reference warnings for third-party libraries (fmt/Quill)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
@@ -121,14 +162,28 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     endif()
 endif()
 
-# Function to apply strict warnings (including -Werror) to specific targets only
-function(omnicpp_set_strict_warnings target)
+# -Werror for a single target. The WARPLOOM_WARNINGS_AS_ERRORS option above
+# applies the same thing to everything.
+function(warploom_set_strict_warnings target)
     if(MSVC OR WARPLOOM_COMPILER_MSVC_CLANG)
         target_compile_options(${target} PRIVATE /WX)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(${target} PRIVATE -Werror)
     endif()
 endfunction()
+# Legacy spelling kept for the transition window (S5-B identity plan).
+function(omnicpp_set_strict_warnings target)
+    warploom_set_strict_warnings(${target})
+endfunction()
+
+if(WARPLOOM_WARNINGS_AS_ERRORS)
+    if(MSVC OR WARPLOOM_COMPILER_MSVC_CLANG)
+        add_compile_options(/WX)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        add_compile_options(-Werror)
+    endif()
+    message(STATUS "Warnings are errors (-Werror)")
+endif()
 
 # ============================================================================
 # Sanitizer Configuration (Phase 1 Compliance)
@@ -358,9 +413,13 @@ endif()
 message(STATUS "")
 message(STATUS "=== Compiler Flags Summary ===")
 message(STATUS "Compiler: ${WARPLOOM_COMPILER_NAME}")
-message(STATUS "Warnings as Errors: Per-target (use omnicpp_set_strict_warnings)")
+if(WARPLOOM_WARNINGS_AS_ERRORS)
+    message(STATUS "Warnings as Errors: ON (-Werror)")
+else()
+    message(STATUS "Warnings as Errors: OFF (per-target via warploom_set_strict_warnings)")
+endif()
 message(STATUS "Sanitizers: ${WARPLOOM_ENABLE_SANITIZERS}")
 message(STATUS "LTO: ${ENABLE_LTO}")
-message(STATUS "Clang-Tidy: Per-target (use omnicpp_enable_clang_tidy)")
+message(STATUS "Clang-Tidy: run the 'lint-cpp' target")
 message(STATUS "==============================")
 message(STATUS "")

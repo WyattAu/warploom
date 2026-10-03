@@ -20,10 +20,16 @@ InlayHints:
   DeducedTypes: Yes
   TypeNameLimit: 0
 
+# The build uses C++26 (see modules/*/CMakeLists.txt and the tests).
+# clangd was told c++17, which made every standard-library intrinsic look
+# unimplemented.
 CompileFlags:
-  Add: [-Wall, -Wextra, -std=c++17]
+  Add: [-Wall, -Wextra, -std=c++26]
   Remove: [-W*]
-  CompilationDatabase: build/standalone/default/debug/
+# build/standalone/default/debug/ never existed -- there is no `standalone`
+# preset, so a new contributor got no IntelliSense at all until they
+# configured by hand. `default` is the documented entry point.
+CompilationDatabase: build/default
 
 Completion:
   AllScopes: true

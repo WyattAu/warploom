@@ -187,7 +187,7 @@ include(cmake/Coverage.cmake)
 # ============================================================================
 # Code Quality Targets
 # ============================================================================
-include(cmake/FormatTargets.cmake)
+# clang-tidy, clang-format, and their targets all live in LintTargets.cmake.
 include(cmake/LintTargets.cmake)
 
 # ============================================================================

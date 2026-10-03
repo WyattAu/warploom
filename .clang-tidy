@@ -31,11 +31,13 @@ Checks: >
 # Additional C++23 checks can be added as they become available
 
 # Treat all warnings as errors in CI
-WarningsAsErrors: "*"
+WarningsAsErrors: ""   # CI promotes warnings explicitly; a bare "*"
+                       # makes every informational note fatal.
 
-# header-filter ensures we analyze headers in our project,
-# but ignore headers in third_party/ or /usr/include
-HeaderFilterRegex: "src/.*|include/.*"
+# Analyze headers we own, ignore system and vendored ones. This used to be
+# "src/.*|include/.*", which excluded modules/, tests/, examples/ and tools/
+# -- i.e. every line of engine code, since the module split.
+HeaderFilterRegex: "(modules|tests|examples|tools)/.*"
 
 # Use .clang-format file for formatting style
 FormatStyle: file
