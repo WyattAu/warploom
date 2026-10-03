@@ -1,6 +1,0 @@
-[settings]
-os=Windows
-arch=x86_64
-compiler=gcc
-compiler.version=13.0.0
-build_type=Release
