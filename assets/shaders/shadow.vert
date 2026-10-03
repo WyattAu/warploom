@@ -10,9 +10,14 @@ layout(set = 0, binding = 0, std430) readonly buffer MeshVertices {
   float values[];
 } mesh;
 
+// Kept layout-compatible with shadow_skinned.vert: same two matrices plus a
+// trailing uvec4. shadow.vert ignores it, but sharing one 144-byte block lets
+// the renderer use a single push-constant range for both vertex stages -- and
+// therefore a single pipeline layout for the static and skinned variants.
 layout(push_constant) uniform Push {
   mat4 light_vp;       // light-space view-projection (64 bytes)
   mat4 model;          // object-to-world (64 bytes)
+  uvec4 joint_base;    // unused here; present for layout compatibility
 } pc;
 
 void main() {

@@ -3975,6 +3975,19 @@ bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
     return true;
   }
 
+  // Shadow depth pre-pass: now the engine's, not a second hand-rolled copy.
+  // It takes the same VulkanPbrScene the lit pass will use, including the
+  // per-object `skinned` flag, so the static and rigged ground/actor split is
+  // decided in one place rather than re-guessed here.
+  app.scene.shadow_pipeline = app.shadow_pipeline_static.pipeline();
+  app.scene.shadow_pipeline_layout = app.shadow_pipeline_static.pipeline_layout();
+  app.scene.shadow_skinned_pipeline =
+      app.has_mannequin ? app.shadow_pipeline_skinned.pipeline()
+                        : VK_NULL_HANDLE;
+  app.scene.shadow_skinned_pipeline_layout =
+      app.has_mannequin ? app.shadow_pipeline_skinned.pipeline_layout()
+                        : VK_NULL_HANDLE;
+
   VkClearValue shadow_clear{};
   shadow_clear.depthStencil = {1.0f, 0U};
   VkRenderPassBeginInfo rpb{};
@@ -3985,56 +3998,16 @@ bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
   rpb.clearValueCount = 1;
   rpb.pClearValues = &shadow_clear;
   vkCmdBeginRenderPass(command_buffer, &rpb, VK_SUBPASS_CONTENTS_INLINE);
-
-  VkViewport viewport{};
-  viewport.width = static_cast<float>(ViewportApp::kShadowRes);
-  viewport.height = static_cast<float>(ViewportApp::kShadowRes);
-  viewport.minDepth = 0.0f;
-  viewport.maxDepth = 1.0f;
-  vkCmdSetViewport(command_buffer, 0, 1, &viewport);
-  VkRect2D scissor{};
-  scissor.extent = {ViewportApp::kShadowRes, ViewportApp::kShadowRes};
-  vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-
-  struct ShadowPush {
-    omnicpp::render::SceneMatrix light_vp;
-    omnicpp::render::SceneMatrix model;
-    std::uint32_t joint_base;
-    std::uint32_t pad[3];
-  } push{};
-  push.light_vp = app.scene.shadow_light_vp;
-
-  for (const auto& object : app.scene.objects) {
-    if (object.mesh == nullptr || !object.mesh->is_drawable()) continue;
-    const bool skinned = app.has_mannequin &&
-                         object.mesh != &app.ground.mesh;
-    const omnicpp::render::VulkanPipeline& pipe =
-        skinned ? app.shadow_pipeline_skinned : app.shadow_pipeline_static;
-    push.model = object.model;
-    push.joint_base = object.joint_base;
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      pipe.pipeline());
-    // Slope-scaled depth bias, recorded once per draw after the bind. The
-    // shadow pipelines declare VK_DYNAMIC_STATE_DEPTH_BIAS, and the shader's
-    // own fixed PCF bias alone was not enough to keep large, near-grazing
-    // ground surfaces free of acne.
-    vkCmdSetDepthBias(command_buffer, 2.0f, 0.0f, 4.0f);
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipe.pipeline_layout(), 0, 1,
-                            &object.mesh->descriptor_set, 0, nullptr);
-    if (skinned) {
-      vkCmdBindDescriptorSets(command_buffer,
-                              VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              pipe.pipeline_layout(), 3, 1, &app.bone_set, 0,
-                              nullptr);
-    }
-    vkCmdPushConstants(command_buffer, pipe.pipeline_layout(),
-                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
-    vkCmdBindIndexBuffer(command_buffer, object.mesh->index_buffer,
-                         object.mesh->index_offset, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(command_buffer, object.mesh->index_count, 1, 0, 0, 0);
-  }
+  const auto shadow_r = omnicpp::render::VulkanRenderer{}.record_shadow_pre_pass(
+      command_buffer, app.scene, ViewportApp::kShadowRes,
+      ViewportApp::kShadowRes);
   vkCmdEndRenderPass(command_buffer);
+  if (!shadow_r.is_ok()) {
+    std::fprintf(stderr,
+                 "viewport: record_shadow_pre_pass failed (%d)\n",
+                 static_cast<int>(shadow_r.error()));
+    return false;
+  }
   return true;
 }
 

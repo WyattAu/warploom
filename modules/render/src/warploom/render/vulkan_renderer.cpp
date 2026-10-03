@@ -330,7 +330,10 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
   VkPipelineLayout bound_layout = scene.pipeline_layout;
   constexpr std::uint32_t kInvalidMaterial = 0xffffffffU;
 
-  const auto bind_scene_descriptors = [&](VkPipelineLayout layout) {
+  // As in the shadow pass: the bone SSBO belongs to the skinned layout, and
+  // the default lit layout may not have a set 3 at all.
+  const auto bind_scene_descriptors = [&](VkPipelineLayout layout,
+                                          bool has_bone_slot) {
     if (scene.texture_set != VK_NULL_HANDLE) {
       vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               layout, 1, 1, &scene.texture_set, 0, nullptr);
@@ -368,7 +371,7 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
       vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               layout, rt_slot, 1, &scene.rt_set, 0, nullptr);
     }
-    if (scene.bone_set != VK_NULL_HANDLE) {
+    if (has_bone_slot && scene.bone_set != VK_NULL_HANDLE) {
       // Skinned variant (skinned_scene.vert): one 64-byte joint matrix per
       // joint at set 3.
       vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -385,7 +388,7 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
     }
   };
 
-  bind_scene_descriptors(bound_layout);
+  bind_scene_descriptors(bound_layout, scene.skinned_pipeline == VK_NULL_HANDLE);
 
   constexpr VkShaderStageFlags kPushStages =
       static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT |
@@ -441,7 +444,7 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
             : scene.pipeline_layout;
     if (bound_layout != want_layout) {
       // A different layout drops every previously bound set.
-      bind_scene_descriptors(want_layout);
+      bind_scene_descriptors(want_layout, want_skinned);
       bound_layout = want_layout;
     }
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -528,17 +531,28 @@ void pbr_frame_render_cb(VkCommandBuffer cb, const GraphPass& pass,
   // Set 3 carries the joint matrices for the skinned vertex stage. Tracked
   // per-layout: swapping to a layout that differs drops all bound sets.
   VkPipelineLayout bound_shadow_layout = scene.shadow_pipeline_layout;
-  const auto bind_shadow_descriptors = [&](VkPipelineLayout layout) {
-    if (scene.bone_set != VK_NULL_HANDLE) {
+  // The bone SSBO lives at set 3 of the *skinned* shadow layout only. The
+  // static shadow layout is often a single-set layout, and binding set 3
+  // against it is out of range -- which faults the driver rather than
+  // failing validation. So the caller's choice of layout decides whether
+  // bones are bound, not merely whether bone_set is non-null.
+  const auto bind_shadow_descriptors = [&](VkPipelineLayout layout,
+                                           bool has_bone_slot) {
+    if (has_bone_slot && scene.bone_set != VK_NULL_HANDLE) {
       vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               layout, 3, 1, &scene.bone_set, 0, nullptr);
     }
   };
-  bind_shadow_descriptors(bound_shadow_layout);
+  bind_shadow_descriptors(bound_shadow_layout,
+                         scene.shadow_skinned_pipeline == VK_NULL_HANDLE);
 
+  // 144 bytes: light VP + model + joint base. Matches shadow_skinned.vert
+  // exactly, and shadow.vert ignores the trailing word, so one push-constant
+  // range -- and therefore one pipeline layout -- serves both vertex stages.
   struct ShadowPush {
     SceneMatrix light_view_projection;
     SceneMatrix model;
+    std::array<std::uint32_t, 4> joint_base{{0U, 0U, 0U, 0U}};
   } push{};
   push.light_view_projection = scene.shadow_light_vp;
   for (const ScenePbrObject& object : scene.objects) {
@@ -549,6 +563,7 @@ void pbr_frame_render_cb(VkCommandBuffer cb, const GraphPass& pass,
     }
     const SceneMesh& mesh = *mesh_ptr;
     push.model = object.model;
+    push.joint_base[0] = object.joint_base;
     // A rigged actor's shadow needs the skinned vertex stage, exactly as the
     // lit pass does. See ScenePbrObject::skinned.
     const bool want_skinned =
@@ -568,7 +583,7 @@ void pbr_frame_render_cb(VkCommandBuffer cb, const GraphPass& pass,
             ? scene.shadow_skinned_pipeline_layout
             : scene.shadow_pipeline_layout;
     if (bound_shadow_layout != want_layout) {
-      bind_shadow_descriptors(want_layout);
+      bind_shadow_descriptors(want_layout, want_skinned);
       bound_shadow_layout = want_layout;
     }
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
