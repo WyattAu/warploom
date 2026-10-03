@@ -5078,13 +5078,16 @@ bool ViewportApp::initialize() {
   // intermediate, so that target no longer matches and the readback would be
   // garbage. Refuse up front rather than write a corrupt file; wiring the
   // compose chain to a caller-supplied target is roadmap item B3b.
+  // Frame capture re-records the scene into its own offscreen target, which
+  // cannot sample the renderer's HDR intermediate. The compose chain's
+  // intermediates are per-renderer, so an off-screen consumer would have to
+  // share them -- and the bloom upsample writes the HDR image, so a capture
+  // would overwrite the live frame. Refuse rather than corrupt either.
   if ((run_config.capture_every != 0U || control_requested) &&
       renderer.hdr_compose_active()) {
     std::fprintf(stderr,
                  "viewport: frame capture is unavailable while HDR compose is "
-                 "active (the scene renders into a float intermediate the "
-                 "capture target cannot sample). Re-run with "
-                 "WARPLOOM_NO_HDR=1 to capture, or omit capture entirely.\n");
+                 "active. Re-run with WARPLOOM_NO_HDR=1 to capture.\n");
     return false;
   }
 
@@ -5093,8 +5096,8 @@ bool ViewportApp::initialize() {
         omnicpp::render::VulkanRenderPass::find_supported_depth_format(
             context.physical_device());
     if (!capture.initialize(
-            context.device(), allocator, scene_render_pass(),
-            scene_color_format(), depth_format, kWidth, kHeight,
+            context.device(), allocator, render_pass.render_pass(),
+            swapchain.image_format(), depth_format, kWidth, kHeight,
             context.queue_families().graphics_family)) {
       std::fprintf(stderr, "viewport: frame capture initialization failed\n");
       return false;

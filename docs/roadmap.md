@@ -100,11 +100,14 @@ declares a slot 3.
       validation layer in eight configurations (default, no-HDR, bloom, RT,
       RT+bloom, GPU-driven, node editor, city), 0 diagnostics. Exposure is
       `WARPLOOM_EXPOSURE`.
-- [ ] **B3b frame capture through the compose chain** — the capture path
-      re-records the scene into its own 8-bit target and cannot sample a float
-      intermediate, so it refuses with a clear message while compose is on. It
-      needs a format-aware readback plus a compose-into-caller-target entry
-      point.
+- [ ] **B3b frame capture through the compose chain** — the capture
+      re-records the scene into its own 8-bit target, which cannot sample a
+      float intermediate, so it refuses with a clear message while compose is
+      on. A first attempt was reverted: pointing the capture at the renderer's
+      intermediates corrupts the live frame, because the bloom upsample writes
+      the HDR image. The fix is to make the compose chain instantiable per
+      target rather than per renderer (its own intermediate set), plus a
+      format-aware readback. Until then, capture runs with `WARPLOOM_NO_HDR=1`.
 - [ ] **B5 H-Z occlusion on** — `enable_hiz` is currently only ever set in
       tests.
 - [x] **B6 no duplicated Vulkan in the app** — raw `vkCmd*` calls in the
