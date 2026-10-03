@@ -1,13 +1,24 @@
 #version 450
 
 // tonemap_fxaa.frag — ACES filmic tonemapping + FXAA anti-aliasing.
-// Input: HDR linear RGB texture (set 0, binding 0).
+// Input: HDR linear RGB texture (set 0, binding 0), and an additive bloom
+//        texture (set 0, binding 1) sampled AFTER the tonemap curve.
 // Output: LDR sRGB tonemapped + FXAA-smoothed color.
+//
+// binding 1 is always declared and always bound. When bloom is off the
+// renderer binds a 1x1 black texture, so the term contributes exactly
+// nothing and this stays a single shader rather than a variant pair.
 
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
 layout(set = 0, binding = 0) uniform sampler2D hdr_image;
+layout(set = 0, binding = 1) uniform sampler2D bloom_image;
+
+layout(push_constant) uniform Compose {
+  float exposure;
+  float pad[3];
+} pc;
 
 // ACES filmic tonemapping (Narkowicz 2015).
 vec3 aces_tonemap(vec3 x) {
@@ -83,8 +94,16 @@ void main() {
   // FXAA first (operates on linear HDR).
   vec3 hdr = fxaa(hdr_image, v_uv, texel_size);
 
+  // Exposure, applied in linear HDR before the curve.
+  hdr *= pc.exposure;
+
   // ACES filmic tonemapping.
   vec3 mapped = aces_tonemap(hdr);
+
+  // Bloom is added after the curve: it is already an energy-like blurred
+  // signal, and adding it in HDR would just change where the curve rolls
+  // off. Black when bloom is disabled.
+  mapped += texture(bloom_image, v_uv).rgb;
 
   // Linear -> sRGB gamma.
   mapped = pow(mapped, vec3(1.0 / 2.2));

@@ -331,6 +331,20 @@ struct ViewportApp {
   omnicpp::render::VulkanSwapchain swapchain;
   omnicpp::render::VulkanRenderPass render_pass;
   omnicpp::render::VulkanRenderer renderer;
+
+  //! Render pass and format the SCENE pipelines must be built against.
+  //! Normally the swapchain's; when HDR compose is enabled the scene renders
+  //! into the renderer's intermediate instead, and every scene pipeline has to
+  //! be built for that target or Vulkan rejects it. Centralised here so the
+  //! eleven create_graphics_pipeline call sites cannot drift apart.
+  [[nodiscard]] VkRenderPass scene_render_pass() const noexcept {
+    const VkRenderPass hdr = renderer.hdr_render_pass();
+    return hdr != VK_NULL_HANDLE ? hdr : render_pass.render_pass();
+  }
+  [[nodiscard]] VkFormat scene_color_format() const noexcept {
+    const VkFormat hdr = renderer.hdr_format();
+    return hdr != VK_FORMAT_UNDEFINED ? hdr : swapchain.image_format();
+  }
   omnicpp::render::VulkanMemoryAllocator allocator;
   omnicpp::render::VulkanDescriptorManager descriptors;
 
@@ -1542,8 +1556,8 @@ bool setup_mannequin(ViewportApp& app) {
            .is_ok() ||
       !app.skinned_pipeline
            .create_graphics_pipeline(
-               device, app.render_pass.render_pass(),
-               app.swapchain.image_format(),
+               device, app.scene_render_pass(),
+               app.scene_color_format(),
                app.skinned_pipeline.pipeline_layout(), true, true, false)
            .is_ok()) {
     return false;
@@ -1842,8 +1856,8 @@ bool setup_scene(ViewportApp& app) {
            .is_ok() ||
       !app.pbr_pipeline
            .create_graphics_pipeline(
-               app.context.device(), app.render_pass.render_pass(),
-               app.swapchain.image_format(), app.pbr_pipeline.pipeline_layout(),
+               app.context.device(), app.scene_render_pass(),
+               app.scene_color_format(), app.pbr_pipeline.pipeline_layout(),
                true, true, false)
            .is_ok()) {
     return false;
@@ -2078,8 +2092,8 @@ bool setup_gpu_driven(ViewportApp& app) {
            .create_pipeline_layout(               dev, draw_layouts, 6U, &draw_push)
            .is_ok() ||
       !app.gd_draw_pipeline
-           .create_graphics_pipeline(dev, app.render_pass.render_pass(),
-                                     app.swapchain.image_format(),
+           .create_graphics_pipeline(dev, app.scene_render_pass(),
+                                     app.scene_color_format(),
                                      app.gd_draw_pipeline.pipeline_layout(),
                                      /*depth_test=*/true,
                                      /*depth_write=*/true, /*cull=*/true)
@@ -2340,8 +2354,8 @@ bool setup_rt_shadows(ViewportApp& app) {
            .create_pipeline_layout(dev, rt_layouts, 6U, &push_range)
            .is_ok() ||
       !app.rt_full_pipeline
-           .create_graphics_pipeline(dev, app.render_pass.render_pass(),
-                                     app.swapchain.image_format(),
+           .create_graphics_pipeline(dev, app.scene_render_pass(),
+                                     app.scene_color_format(),
                                      app.rt_full_pipeline.pipeline_layout(),
                                      /*depth_test=*/true, /*depth_write=*/true,
                                      /*cull=*/true)
@@ -2364,8 +2378,8 @@ bool setup_rt_shadows(ViewportApp& app) {
                .create_pipeline_layout(dev, rt_layouts, 6U, &push_range)
                .is_ok() ||
        !app.rt_full_skinned_pipeline
-               .create_graphics_pipeline(dev, app.render_pass.render_pass(),
-                                         app.swapchain.image_format(),
+               .create_graphics_pipeline(dev, app.scene_render_pass(),
+                                         app.scene_color_format(),
                                          app.rt_full_skinned_pipeline
                                              .pipeline_layout(),
                                          /*depth_test=*/true,
@@ -2395,8 +2409,8 @@ bool setup_rt_shadows(ViewportApp& app) {
              .create_pipeline_layout(dev, ml_rt_layouts, 7U, &push_range)
              .is_ok() ||
         !app.rt_full_ml_pipeline
-             .create_graphics_pipeline(dev, app.render_pass.render_pass(),
-                                       app.swapchain.image_format(),
+             .create_graphics_pipeline(dev, app.scene_render_pass(),
+                                       app.scene_color_format(),
                                        app.rt_full_ml_pipeline.pipeline_layout(),
                                        true, true, true)
              .is_ok()) {
@@ -2417,8 +2431,8 @@ bool setup_rt_shadows(ViewportApp& app) {
                  .is_ok() ||
          !app.rt_full_ml_skinned_pipeline
                  .create_graphics_pipeline(
-                     dev, app.render_pass.render_pass(),
-                     app.swapchain.image_format(),
+                     dev, app.scene_render_pass(),
+                     app.scene_color_format(),
                      app.rt_full_ml_skinned_pipeline.pipeline_layout(), true,
                      true, true)
                  .is_ok())) {
@@ -3130,8 +3144,8 @@ bool setup_lighting(ViewportApp& app) {
            .create_pipeline_layout(dev, full_layouts, 6U, &push_range)
            .is_ok() ||
       !app.full_pipeline
-           .create_graphics_pipeline(dev, app.render_pass.render_pass(),
-                                     app.swapchain.image_format(),
+           .create_graphics_pipeline(dev, app.scene_render_pass(),
+                                     app.scene_color_format(),
                                      app.full_pipeline.pipeline_layout(),
                                      /*depth_test=*/true, /*depth_write=*/true,
                                      /*cull=*/true)
@@ -3151,8 +3165,8 @@ bool setup_lighting(ViewportApp& app) {
            .create_pipeline_layout(dev, full_layouts, 6U, &push_range)
            .is_ok() ||
       !app.full_skinned_pipeline
-           .create_graphics_pipeline(dev, app.render_pass.render_pass(),
-                                     app.swapchain.image_format(),
+           .create_graphics_pipeline(dev, app.scene_render_pass(),
+                                     app.scene_color_format(),
                                      app.full_skinned_pipeline.pipeline_layout(),
                                      /*depth_test=*/true, /*depth_write=*/true,
                                      /*cull=*/true)
@@ -3211,8 +3225,8 @@ bool setup_lighting(ViewportApp& app) {
              .create_pipeline_layout(dev, ml_layouts, 7U, &push_range)
              .is_ok() ||
         !app.full_ml_pipeline
-             .create_graphics_pipeline(dev, app.render_pass.render_pass(),
-                                       app.swapchain.image_format(),
+             .create_graphics_pipeline(dev, app.scene_render_pass(),
+                                       app.scene_color_format(),
                                        app.full_ml_pipeline.pipeline_layout(),
                                        true, true, true)
              .is_ok()) {
@@ -3235,8 +3249,8 @@ bool setup_lighting(ViewportApp& app) {
                  .is_ok() ||
          !app.full_ml_skinned_pipeline
                  .create_graphics_pipeline(
-                     dev, app.render_pass.render_pass(),
-                     app.swapchain.image_format(),
+                     dev, app.scene_render_pass(),
+                     app.scene_color_format(),
                      app.full_ml_skinned_pipeline.pipeline_layout(), true,
                      true, true)
                  .is_ok())) {
@@ -4525,7 +4539,7 @@ bool setup_node_editor(ViewportApp& app) {
   const std::string shader_dir = warploom_shader_dir();
   return app.ui_renderer
       .initialize(app.context.device(), app.context.physical_device(),
-                  app.render_pass.render_pass(), app.allocator, shader_dir)
+                  app.scene_render_pass(), app.allocator, shader_dir)
       .is_ok();
 }
 
@@ -4791,6 +4805,24 @@ bool ViewportApp::initialize() {
   omnicpp::render::RendererConfig renderer_config;
   // GPU timestamp queries: per-frame device-side duration in telemetry.
   renderer_config.enable_gpu_timing = true;
+  // HDR compose: render into a float intermediate, then tonemap + FXAA into
+  // the swapchain. Without it the scene is written straight to 8 bits and
+  // anything above 1.0 clips, so the only response to a bright key light is
+  // to dim the whole frame. Set WARPLOOM_NO_HDR=1 to render directly, which
+  // is the A/B baseline.
+  if (warploom_env("WARPLOOM_NO_HDR", "OMNICPP_NO_HDR") == nullptr) {
+    renderer_config.enable_hdr_compose = true;
+    renderer_config.compose_shader_dir = warploom_shader_dir();
+    renderer_config.exposure = 1.0f;
+    // R4: exposure as a runtime control. Read once at start-up for now --
+    // making it a protocol command is roadmap item E1.
+    if (const char* ev = warploom_env("WARPLOOM_EXPOSURE", "OMNICPP_EXPOSURE")) {
+      renderer_config.exposure = std::strtof(ev, nullptr);
+    }
+    if (warploom_env("WARPLOOM_BLOOM", "OMNICPP_BLOOM") != nullptr) {
+      renderer_config.enable_bloom = true;
+    }
+  }
   if (!renderer.initialize(context, swapchain, render_pass, renderer_config)
            .is_ok()) {
     std::fprintf(stderr, "viewport: renderer initialization failed\n");
@@ -5041,13 +5073,28 @@ bool ViewportApp::initialize() {
   // config). The server starts later, in run(), so probe the env here.
   const bool control_requested =
       warploom_env("WARPLOOM_CONTROL_SOCKET", "OMNICPP_CONTROL_SOCKET") != nullptr;
+  // Frame capture re-records the scene into its own offscreen LDR target. With
+  // HDR compose on, the scene pipelines are built for the renderer's float
+  // intermediate, so that target no longer matches and the readback would be
+  // garbage. Refuse up front rather than write a corrupt file; wiring the
+  // compose chain to a caller-supplied target is roadmap item B3b.
+  if ((run_config.capture_every != 0U || control_requested) &&
+      renderer.hdr_compose_active()) {
+    std::fprintf(stderr,
+                 "viewport: frame capture is unavailable while HDR compose is "
+                 "active (the scene renders into a float intermediate the "
+                 "capture target cannot sample). Re-run with "
+                 "WARPLOOM_NO_HDR=1 to capture, or omit capture entirely.\n");
+    return false;
+  }
+
   if (run_config.capture_every != 0U || control_requested) {
     const VkFormat depth_format =
         omnicpp::render::VulkanRenderPass::find_supported_depth_format(
             context.physical_device());
     if (!capture.initialize(
-            context.device(), allocator, render_pass.render_pass(),
-            swapchain.image_format(), depth_format, kWidth, kHeight,
+            context.device(), allocator, scene_render_pass(),
+            scene_color_format(), depth_format, kWidth, kHeight,
             context.queue_families().graphics_family)) {
       std::fprintf(stderr, "viewport: frame capture initialization failed\n");
       return false;

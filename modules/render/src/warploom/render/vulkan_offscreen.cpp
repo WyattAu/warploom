@@ -12,7 +12,7 @@ VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(); }
 ::warploom::core::Result<void> VulkanOffscreenTarget::create(
     VkDevice device, VkPhysicalDevice physical_device,
     VkFormat format, std::uint32_t width, std::uint32_t height,
-    VulkanMemoryAllocator* allocator) {
+    VulkanMemoryAllocator* allocator, VkImageUsageFlags extra_image_usage) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !physical_device || format == VK_FORMAT_UNDEFINED || width == 0 || height == 0) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
@@ -28,7 +28,8 @@ VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(); }
   image_info.format = format;
   image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
   image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT | extra_image_usage;
   image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
 
@@ -212,7 +213,8 @@ VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(); }
 #endif
 }
 
-::warploom::core::Result<void> VulkanOffscreenTarget::create_render_pass(VkDevice device) {
+::warploom::core::Result<void> VulkanOffscreenTarget::create_render_pass(
+    VkDevice device, VkImageLayout color_final_layout) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !image_ || render_pass_) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
@@ -227,7 +229,7 @@ VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(); }
   color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
   color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  color_attachment.finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  color_attachment.finalLayout = color_final_layout_ = color_final_layout;
 
   VkAttachmentDescription depth_attachment{};
   depth_attachment.format = depth_format_;
@@ -239,7 +241,8 @@ VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(); }
   depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
   depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  depth_attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  depth_attachment.finalLayout = depth_final_layout_ =
+      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
   VkAttachmentReference color_reference{};
   color_reference.attachment = 0;

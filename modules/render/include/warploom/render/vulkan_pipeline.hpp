@@ -82,12 +82,17 @@ public:
       VkDevice device, const VkDescriptorSetLayout* set_layouts,
       std::uint32_t set_layout_count, const void* push_constant_range = nullptr);
 
-  void cleanup(VkDevice device) noexcept;
+  void cleanup(VkDevice device = VK_NULL_HANDLE) noexcept;
 
   [[nodiscard]] VkPipeline pipeline() const noexcept { return pipeline_; }
   [[nodiscard]] VkPipelineLayout pipeline_layout() const noexcept { return layout_; }
 
 private:
+  //! Device that owns every handle below, recorded so cleanup() works from
+  //! the destructor. Previously the destructor passed VK_NULL_HANDLE, which
+  //! cleanup() ignores, so every pipeline leaked its VkPipeline, layout and
+  //! shader modules.
+  VkDevice device_{VK_NULL_HANDLE};
   VkShaderModule vertex_shader_{VK_NULL_HANDLE};
   VkShaderModule fragment_shader_{VK_NULL_HANDLE};
   VkShaderModule compute_shader_{VK_NULL_HANDLE};

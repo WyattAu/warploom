@@ -89,12 +89,22 @@ declares a slot 3.
       because the driven path binds 0,1,2 then 4,5. Verified: 921,600 of
       921,600 pixels byte-identical against the previous commit, 0 VUIDs.
 - [ ] **B2 render graph in the app** — the app still records into a render
-      pass the renderer opened, so the graph's computed barriers do not
-      apply. Requires the HDR target below first.
-- [ ] **B3 HDR target + post chain** — the app renders straight to the
-      swapchain, so highlights clip and there is no exposure control. Brings
-      ACES, FXAA and bloom from test-only to shipped. **This is the largest
-      remaining Phase B item.**
+      pass the renderer opened, so the graph's computed barriers do not apply.
+      The compose chain now hand-writes its own layout barriers (tracked per
+      target); folding those into `execute_graph` is what this item means.
+- [x] **B3 HDR target + post chain** — the renderer now owns an HDR
+      intermediate plus a bloom and tonemap/FXAA chain
+      (`RendererConfig::enable_hdr_compose`), and the application's scene
+      pipelines are built for that intermediate rather than the swapchain. The
+      app no longer presents clipped linear radiance. Verified under the
+      validation layer in eight configurations (default, no-HDR, bloom, RT,
+      RT+bloom, GPU-driven, node editor, city), 0 diagnostics. Exposure is
+      `WARPLOOM_EXPOSURE`.
+- [ ] **B3b frame capture through the compose chain** — the capture path
+      re-records the scene into its own 8-bit target and cannot sample a float
+      intermediate, so it refuses with a clear message while compose is on. It
+      needs a format-aware readback plus a compose-into-caller-target entry
+      point.
 - [ ] **B5 H-Z occlusion on** — `enable_hiz` is currently only ever set in
       tests.
 - [x] **B6 no duplicated Vulkan in the app** — raw `vkCmd*` calls in the

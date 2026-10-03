@@ -4,6 +4,7 @@
  */
 
 #include "warploom/render/vulkan_pipeline.hpp"
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <utility>
@@ -14,10 +15,20 @@
 
 namespace warploom::render {
 
-VulkanPipeline::~VulkanPipeline() { cleanup(nullptr); }
+// Deliberately empty.
+//
+// cleanup(nullptr) is NOT equivalent: it falls back to the recorded device,
+// which is how a pipeline that outlives its VulkanContext ends up calling
+// vkDestroyShaderModule on a dead device -- reported by the loader as
+// VUID-vkDestroyShaderModule-device-parameter, followed by a crash in
+// teardown. A destructor cannot know whether the device is still alive, so it
+// must not free anything. Callers release pipelines explicitly, with a real
+// device, and cleanup() is the documented way to do it.
+VulkanPipeline::~VulkanPipeline() = default;
 
 ::warploom::core::Result<void> VulkanPipeline::load_shader_file(
     VkDevice device, const std::string& path) {
+  device_ = device;
 #ifdef OMNICPP_HAS_VULKAN
   std::ifstream file(path, std::ios::ate | std::ios::binary);
   if (!file.is_open()) {
@@ -45,6 +56,7 @@ VulkanPipeline::~VulkanPipeline() { cleanup(nullptr); }
 
 ::warploom::core::Result<void> VulkanPipeline::load_shader(
     VkDevice device, const std::uint32_t* code, std::size_t code_size_bytes) {
+  device_ = device;
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !code || code_size_bytes < 4 || code_size_bytes % 4 != 0) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
@@ -95,6 +107,7 @@ VulkanPipeline::~VulkanPipeline() { cleanup(nullptr); }
 
 ::warploom::core::Result<void> VulkanPipeline::load_shader_stage_file(
     VkDevice device, const std::string& path, const std::string& stage) {
+  device_ = device;
 #ifdef OMNICPP_HAS_VULKAN
   if (!device) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
@@ -171,6 +184,7 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
 
 ::warploom::core::Result<void> VulkanPipeline::create_compute_pipeline(
     VkDevice device, VkPipelineLayout pipeline_layout) {
+  device_ = device;
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !compute_shader_) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
@@ -218,6 +232,7 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
     float depth_bias_slope,
     bool dynamic_depth_bias) {
 #ifdef OMNICPP_HAS_VULKAN
+  device_ = device;
   if (!device || !render_pass || !vertex_shader_ || !fragment_shader_) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
@@ -359,6 +374,14 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
   VkResult result = vkCreateGraphicsPipelines(
       device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline_);
   if (result != VK_SUCCESS) {
+    // Report the code. vkCreateGraphicsPipelines can fail without any
+    // validation message (a zeroed state struct, a mismatched layout), and a
+    // bare "not available" left this undiagnosable for hours.
+    std::fprintf(stderr,
+                 "VulkanPipeline: vkCreateGraphicsPipelines failed (VkResult %d) "
+                 "for render pass %p format %d\n",
+                 static_cast<int>(result), static_cast<const void*>(render_pass),
+                 static_cast<int>(vertex_format));
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
@@ -379,6 +402,7 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
     VkDevice device, const VkDescriptorSetLayout* set_layouts,
     std::uint32_t set_layout_count, const void* push_constant_range) {
 #ifdef OMNICPP_HAS_VULKAN
+  device_ = device;
   if (!device) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
@@ -410,6 +434,7 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
 
 void VulkanPipeline::cleanup(VkDevice device) noexcept {
 #ifdef OMNICPP_HAS_VULKAN
+  if (device == VK_NULL_HANDLE) device = device_;
   if (device) {
     if (pipeline_) vkDestroyPipeline(device, pipeline_, nullptr);
     if (owns_layout_ && layout_) vkDestroyPipelineLayout(device, layout_, nullptr);

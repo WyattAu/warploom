@@ -36,8 +36,8 @@ absent.
 | `record_pbr_frame` (the module's own PBR frame) | yes | no — the app records its lit pass via `record_pbr_scene` inside the renderer's own render pass | `test_shadow_mapping`, `test_rt_shadows`, `test_rt_reflections` |
 | `record_pbr_frame_gpu_driven` (one-submission GPU-driven frame) | yes | partial — the app drives the two halves separately (`record_gpu_driven_cull`, `record_gpu_driven_draw`) because it renders a shadow pass between them | `test_gpu_driven_frame`, `test_gpu_driven_occlusion_frame`; app A/B is 100% byte-identical |
 | `VulkanOffscreenTarget` | yes | **test-only** | 28 test files |
-| Post: fullscreen pass, ACES tonemap, FXAA | yes | **test-only** | `test_postprocessing` |
-| Bloom (Karis downsample + tent upsample) | yes | **test-only** | 2 test files; no engine caller, no app caller |
+| Post: fullscreen pass, ACES tonemap, FXAA | yes | yes — `RendererConfig::enable_hdr_compose`; the app renders into a float intermediate and tonemaps into the swapchain | `test_postprocessing`; app verified under validation in 8 configurations |
+| Bloom (Karis downsample + tent upsample) | yes | yes — opt-in via `RendererConfig::enable_bloom` (`WARPLOOM_BLOOM=1`) | `test_postprocessing` |
 | PBR (Cook-Torrance, metallic-roughness, bindless, tangent-space normals, emissive) | yes | yes | `test_pbr_scene`; the app's own fragment path |
 | IBL: prefiltered env + irradiance + BRDF LUT bake | yes | yes | `test_pbr_ibl`; `VulkanIblBaker` is called by the app |
 | Analytic sky (Rayleigh + Mie, sun disc) | yes | partial | `test_sky_integration`; the app only uses it *baked into* IBL |
@@ -51,7 +51,7 @@ absent.
 | GPU timestamps / frame latency percentiles | yes | yes | `GpuTiming`; telemetry `gpu_ns` |
 | Parallel secondary command-buffer recording | yes | **test-only** | `test_parallel_recorder` |
 | Async-compute queue submission | no | no | queue family discovered, never used for submission |
-| HDR pipeline + exposure control | no | no | the app renders straight to the swapchain; highlights clip |
+| HDR intermediate + exposure | yes | yes | `WARPLOOM_EXPOSURE=<float>`; exposure is read at start-up, making it a protocol command is roadmap item E1 |
 | Deferred / G-buffer, MSAA | no | no | every image is `VK_SAMPLE_COUNT_1_BIT` |
 | CSM / cascaded shadow maps | no | no | single 2048² map |
 | SSAO, SSR, TAA, denoiser, volumetrics | no | no | — |

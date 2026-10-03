@@ -132,6 +132,9 @@ struct PostProcessHarness {
   VkDescriptorSet tex_set{};
   VkDescriptorSet mat_set{};
   SolidTexture white;
+  //! Stands in for an absent bloom buffer: tonemap_fxaa.frag always samples
+  //! binding 1, and a black 1x1 makes the additive term exactly zero.
+  SolidTexture black;
   omnicpp::render::Allocation cube_va{}, cube_ia{};
   SceneMesh cube_mesh{};
   VkDescriptorSet cube_ds{};
@@ -167,6 +170,10 @@ struct PostProcessHarness {
   VkDescriptorSetLayout bloom_layout{};
   VkDescriptorSet bloom_a_ds{};
   VkDescriptorSet bloom_b_ds{};
+  //! Downsample input: the HDR scene, in the bloom pipeline's own layout.
+  //! (The tonemap's hdr_ds comes from post_layout, which declares two
+  //! bindings and would be layout-incompatible with the bloom pipelines.)
+  VkDescriptorSet bloom_src_ds{};
 
   bool create_bloom_targets(VkDevice dev) {
     VkImageCreateInfo ii{};
@@ -209,7 +216,9 @@ struct PostProcessHarness {
     si.magFilter = si.minFilter = VK_FILTER_LINEAR;
     si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     if (vkCreateSampler(dev, &si, nullptr, &bloom_sampler) != VK_SUCCESS) { std::fprintf(stderr, "bloom: sampler failed\n"); return false; }
-    auto bl = desc.create_layout({{0,0,1,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT}}, 2);
+    // Pool capacity = sets_to_reserve, and three sets come from this layout:
+    // the downsample's source, its output, and the upsample's output.
+    auto bl = desc.create_layout({{0,0,1,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT}}, 3);
     if (!bl.is_ok()) { std::fprintf(stderr, "bloom: create_layout failed\n"); return false; }
     bloom_layout = bl.value();
     auto da = desc.allocate_set(bloom_layout);
@@ -217,6 +226,18 @@ struct PostProcessHarness {
     bloom_a_ds = da.value();
     desc.write_image(bloom_a_ds, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                      bloom_sampler, bloom_a_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0);
+    // The downsample reads the HDR scene; it is written after hdr_view exists.
+    auto src = desc.allocate_set(bloom_layout);
+    if (!src.is_ok()) { std::fprintf(stderr, "bloom: allocate src failed\n"); return false; }
+    bloom_src_ds = src.value();
+    // The downsample samples the HDR scene. Written here rather than in
+    // init(): this function runs later, so hdr_view/hdr_sampler exist, and
+    // bloom_src_ds certainly does.
+    if (!desc.write_image(bloom_src_ds, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                          hdr_sampler, hdr_view,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0).is_ok()) {
+      std::fprintf(stderr, "bloom: write src failed\n"); return false;
+    }
     auto db = desc.allocate_set(bloom_layout);
     if (!db.is_ok()) { std::fprintf(stderr, "bloom: allocate b failed\n"); return false; }
     bloom_b_ds = db.value();
@@ -298,6 +319,8 @@ struct PostProcessHarness {
     desc.write_buffer(mat_set, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, mat_buf.buffer, 0, VK_WHOLE_SIZE);
 
     if (!make_white(dev, ctx.physical_device(), ctx.graphics_queue(), qf, alloc, white)) return false;
+    // Same helper, then overwritten to black on the GPU below.
+    if (!make_white(dev, ctx.physical_device(), ctx.graphics_queue(), qf, alloc, black)) return false;
     desc.write_image(tex_set, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         white.sampler, white.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0);
 
@@ -368,8 +391,13 @@ struct PostProcessHarness {
     hfbi.width = 256; hfbi.height = 256; hfbi.layers = 1;
     if (vkCreateFramebuffer(dev, &hfbi, nullptr, &hdr_fb) != VK_SUCCESS) return false;
 
-    // Post-process set layout (set 0: input image).
-    auto r_post = desc.create_layout({{0,0,1,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT}}, 1);
+    // Post-process set layout. tonemap_fxaa.frag declares TWO samplers at
+    // set 0 -- binding 0 is the HDR scene, binding 1 the additive bloom input --
+    // so the layout must declare both, and the pool is sized from
+    // sets_to_reserve (2 here) to cover the sets allocated from it.
+    auto r_post = desc.create_layout({
+        {0,0,1,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT},
+        {0,1,1,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT}}, 2);
     if (!r_post.is_ok()) return false;
     post_layout = r_post.value();
     auto pds = desc.allocate_set(post_layout);
@@ -377,6 +405,56 @@ struct PostProcessHarness {
     hdr_ds = pds.value();
     desc.write_image(hdr_ds, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         hdr_sampler, hdr_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0);
+    // Binding 1: the bloom slot. Bound to the black texture so the tonemap's
+    // additive term is zero and the existing assertions stay meaningful.
+    {
+      auto pool = omnicpp::render::VulkanRenderer::create_command_pool(dev, qf);
+      if (pool.is_ok()) {
+        auto cb = omnicpp::render::VulkanRenderer::allocate_command_buffer(dev, pool.value());
+        if (cb.is_ok()) {
+          VkCommandBuffer cmd = cb.value();
+          VkCommandBufferBeginInfo bi{};
+          bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+          bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+          if (vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS) {
+            VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            VkImageMemoryBarrier b{};
+            b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            b.image = black.img;
+            b.subresourceRange = range;
+            b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr,
+                                 0, nullptr, 1, &b);
+            VkClearColorValue cc{{0.0f, 0.0f, 0.0f, 1.0f}};
+            vkCmdClearColorImage(cmd, black.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                 &cc, 1, &range);
+            b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
+                                 nullptr, 0, nullptr, 1, &b);
+            if (vkEndCommandBuffer(cmd) == VK_SUCCESS) {
+              VkSubmitInfo si{};
+              si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+              si.commandBufferCount = 1;
+              si.pCommandBuffers = &cmd;
+              vkQueueSubmit(ctx.graphics_queue(), 1, &si, VK_NULL_HANDLE);
+              vkQueueWaitIdle(ctx.graphics_queue());
+            }
+          }
+        }
+        vkDestroyCommandPool(dev, pool.value(), nullptr);
+      }
+    }
+    desc.write_image(hdr_ds, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        black.sampler, black.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0);
 
     return true;
   }
@@ -388,7 +466,8 @@ struct PostProcessHarness {
     if (!tonemap_pipe.load_shader_stage_file(dev, sd+"/fullscreen.vert.spv","vertex").is_ok()||
         !tonemap_pipe.load_shader_stage_file(dev, sd+"/tonemap_fxaa.frag.spv","fragment").is_ok()) return false;
     VkDescriptorSetLayout tl[1] = {post_layout};
-    if (!tonemap_pipe.create_pipeline_layout(dev, tl, 1, nullptr).is_ok()) return false;
+    VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16};
+    if (!tonemap_pipe.create_pipeline_layout(dev, tl, 1, &push).is_ok()) return false;
     if (!tonemap_pipe.create_graphics_pipeline(dev, rp, format,
         tonemap_pipe.pipeline_layout(), false, false, false).is_ok()) return false;
     return true;
@@ -456,6 +535,11 @@ struct PostProcessHarness {
     tm.samples[0] = {hdr_image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                      VK_IMAGE_ASPECT_COLOR_BIT};
     tm.sample_count = 1;
+    // Exposure push constant (shader reads pc.exposure).
+    const float exposure = 1.0f;
+    tm.push_data = &exposure;
+    tm.push_size = sizeof(float);
+    tm.push_stage_flags = VK_SHADER_STAGE_FRAGMENT_BIT;
     tm_ctx.pass = &tm;
 
     omnicpp::render::GraphPass tm_pass =
@@ -517,6 +601,7 @@ struct PostProcessHarness {
     if (bloom_b_image) vkDestroyImage(dev, bloom_b_image, nullptr);
     if (bloom_sampler) vkDestroySampler(dev, bloom_sampler, nullptr);
     destroy_solid(dev, alloc, white);
+    destroy_solid(dev, alloc, black);
     if (cube_va.is_valid()) alloc.destroy_allocation(cube_va);
     if (cube_ia.is_valid()) alloc.destroy_allocation(cube_ia);
     if (mat_buf.is_valid()) alloc.destroy_allocation(mat_buf);
@@ -669,7 +754,7 @@ omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
 
   struct Ctx { omnicpp::render::VulkanRenderer* self;
                omnicpp::render::VulkanRenderer::FullscreenPass* pass;
-               VkDescriptorSet set; } dctx{&frame_renderer, &down, h.hdr_ds};
+               VkDescriptorSet set; } dctx{&frame_renderer, &down, h.bloom_src_ds};
   struct Uctx { omnicpp::render::VulkanRenderer* self;
                 omnicpp::render::VulkanRenderer::FullscreenPass* pass;
                 VkDescriptorSet set; } uctx{&frame_renderer, &up, h.bloom_a_ds};

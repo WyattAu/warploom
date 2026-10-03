@@ -156,9 +156,13 @@ constexpr VkBufferUsageFlags VK_BUFFER_USAGE_TRANSFER_DST_BIT = 0x00000002;
 constexpr VkMemoryPropertyFlags VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT = 0x00000001;
 constexpr VkMemoryPropertyFlags VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT = 0x00000002;
 constexpr VkMemoryPropertyFlags VK_MEMORY_PROPERTY_HOST_COHERENT_BIT = 0x00000040;
+constexpr VkImageUsageFlags VK_IMAGE_USAGE_SAMPLED_BIT = 0x00000010;
 constexpr VkFormat VK_FORMAT_B8G8R8A8_UNORM = 44;
 constexpr VkFormat VK_FORMAT_B8G8R8A8_SRGB = 50;
 constexpr VkFormat VK_FORMAT_D32_SFLOAT = 126;
+//! HDR compose's preferred intermediate. Headless stand-ins exist so a
+//! VkFormat default argument in a public header compiles without Vulkan.
+constexpr VkFormat VK_FORMAT_R16G16B16A16_SFLOAT = 97;
 constexpr VkPresentModeKHR VK_PRESENT_MODE_FIFO_KHR = 2;
 #ifndef VK_NULL_HANDLE
 #define VK_NULL_HANDLE nullptr

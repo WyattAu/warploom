@@ -22,10 +22,17 @@ public:
   VulkanOffscreenTarget(VulkanOffscreenTarget&&) = delete;
   VulkanOffscreenTarget& operator=(VulkanOffscreenTarget&&) = delete;
 
+  //! \param extra_image_usage OR-ed into the color image's usage flags. The
+  //! default set is COLOR_ATTACHMENT | TRANSFER_SRC. Pass
+  //! VK_IMAGE_USAGE_SAMPLED_BIT for a target that is read back by a later
+  //! pass -- without it, sampling the view is
+  //! VUID-VkWriteDescriptorSet-descriptorType-00337, and the bindless
+  //! descriptor path can fail silently instead.
   [[nodiscard]] ::warploom::core::Result<void> create(
       VkDevice device, VkPhysicalDevice physical_device,
       VkFormat format, std::uint32_t width, std::uint32_t height,
-      VulkanMemoryAllocator* allocator = nullptr);
+      VulkanMemoryAllocator* allocator = nullptr,
+      VkImageUsageFlags extra_image_usage = 0U);
 
   //! Optional depth-stencil attachment. Call BEFORE create_render_pass();
   //! when present, the render pass gains a depth attachment (cleared to
@@ -34,7 +41,15 @@ public:
   [[nodiscard]] ::warploom::core::Result<void> create_depth(
       VkDevice device, VkPhysicalDevice physical_device, VkFormat depth_format);
 
-  [[nodiscard]] ::warploom::core::Result<void> create_render_pass(VkDevice device);
+  //! \param color_final_layout overrides the color attachment's finalLayout.
+  //! The default (TRANSFER_SRC_OPTIMAL) suits a readback target. A target that
+  //! is immediately sampled wants COLOR_ATTACHMENT_OPTIMAL instead, so the
+  //! pass performs no implicit transition and the caller owns the single
+  //! explicit barrier to SHADER_READ_ONLY -- deterministic, and it keeps the
+  //! validation layer's layout tracking in step with the descriptor.
+  [[nodiscard]] ::warploom::core::Result<void> create_render_pass(
+      VkDevice device,
+      VkImageLayout color_final_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
   [[nodiscard]] ::warploom::core::Result<void> create_framebuffer(VkDevice device);
   //! Release every handle. Pass a real VkDevice (or omit it and use the
   //! recorded one) -- a null device is a no-op that leaks.
@@ -53,6 +68,19 @@ public:
   [[nodiscard]] VkFormat format() const noexcept { return format_; }
   [[nodiscard]] std::uint32_t width() const noexcept { return width_; }
   [[nodiscard]] std::uint32_t height() const noexcept { return height_; }
+  //! Layouts the color/depth attachments are left in when this target's
+  //! render pass ends. Callers that sample the result must barrier FROM
+  //! these, not from an assumed value: assuming TRANSFER_SRC_OPTIMAL where
+  //! the pass actually ends in COLOR_ATTACHMENT_OPTIMAL turns the barrier
+  //! into a silent no-op and the sample reads the wrong layout
+  //! (VUID-vkCmdDraw-imageLayout-00344).
+  [[nodiscard]] VkImageLayout color_final_layout() const noexcept {
+    return color_final_layout_;
+  }
+  [[nodiscard]] VkImageLayout depth_final_layout() const noexcept {
+    return depth_final_layout_;
+  }
+
   [[nodiscard]] bool is_valid() const noexcept {
     return image_ != VK_NULL_HANDLE && image_view_ != VK_NULL_HANDLE &&
            render_pass_ != VK_NULL_HANDLE && framebuffer_ != VK_NULL_HANDLE;
@@ -84,6 +112,8 @@ private:
   VkFormat format_{VK_FORMAT_UNDEFINED};
   std::uint32_t width_{0};
   std::uint32_t height_{0};
+  VkImageLayout color_final_layout_{VK_IMAGE_LAYOUT_UNDEFINED};
+  VkImageLayout depth_final_layout_{VK_IMAGE_LAYOUT_UNDEFINED};
 };
 
 } // namespace warploom::render

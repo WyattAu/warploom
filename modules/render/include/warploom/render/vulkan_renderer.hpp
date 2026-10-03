@@ -12,6 +12,8 @@
 #include "warploom/render/vulkan_render_pass.hpp"
 #include "warploom/render/vulkan_pipeline.hpp"
 #include "warploom/render/vulkan_descriptors.hpp"
+#include "warploom/render/vulkan_memory_allocator.hpp"
+#include "warploom/render/vulkan_offscreen.hpp"
 #include "warploom/render/vulkan_hiz_frame_state.hpp"
 #include "warploom/render/vulkan_hiz_pyramid.hpp"
 #include "warploom/render/vulkan_render_graph.hpp"
@@ -104,6 +106,35 @@ struct RendererConfig {
   //! disabled; `gpu_timing().available` reports whether the device supports
   //! graphics-stage timestamps.
   bool enable_gpu_timing{false};
+
+  // --- HDR compose -------------------------------------------------------
+  //! Render the scene into an HDR intermediate, then tonemap + FXAA it into
+  //! the swapchain image. Without this the scene is written straight to an
+  //! 8-bit target: values above 1.0 clip hard, so the only response to a
+  //! bright key is to dim the whole frame.
+  //!
+  //! When enabled, `scene_record_callback` runs inside a render pass on the
+  //! HDR target rather than the swapchain, and the compose chain runs
+  //! afterwards. The application's callback therefore stops owning the
+  //! final presentation, which is the point: the engine decides the pass
+  //! sequence and can own the render graph.
+  //!
+  //! Requires `compose_shader_dir` to hold tonemap_fxaa.frag (and, when
+  //! `enable_bloom` is set, bloom_downsample.frag and bloom_upsample.frag).
+  bool enable_hdr_compose{false};
+  //! Directory holding the compiled compose shaders. Empty disables compose
+  //! even when enable_hdr_compose is true, and is reported at configure time.
+  std::string compose_shader_dir{};
+  //! HDR intermediate format. R16G16B16A16_SFLOAT when the device supports
+  //! it, else B8G8R8A8_UNORM, else compose is refused with an error.
+  VkFormat hdr_format{VK_FORMAT_R16G16B16A16_SFLOAT};
+  //! Multiplies scene radiance before the tonemap curve.
+  float exposure{1.0f};
+  //! Two-stage bloom: one half-resolution downsample, then one tent upsample
+  //! added back by the tonemap shader. Ignored when enable_hdr_compose is off.
+  bool enable_bloom{false};
+  //! Half-resolution bloom buffer edge, in pixels.
+  std::uint32_t bloom_downscale{2};
 };
 
 class VulkanRenderer final {
@@ -121,6 +152,23 @@ public:
       const VulkanSwapchain& swapchain,
       const VulkanRenderPass& render_pass,
       const RendererConfig& config = {});
+
+  // --- HDR compose introspection ---------------------------------------
+  // An application whose pipelines are built against a render pass must
+  // build them against the HDR intermediate when compose is on. These
+  // accessors expose it, and `compose_generation()` bumps whenever the
+  // intermediate is (re)created, so the application knows to rebuild.
+  // Before the first frame both are null/undefined and generation is 0.
+  [[nodiscard]] bool hdr_compose_active() const noexcept {
+    return config_.enable_hdr_compose && compose_ready_;
+  }
+  [[nodiscard]] VkRenderPass hdr_render_pass() const noexcept {
+    return compose_ready_ ? hdr_target_.render_pass() : VK_NULL_HANDLE;
+  }
+  [[nodiscard]] VkFormat hdr_format() const noexcept { return compose_hdr_format_; }
+  [[nodiscard]] std::uint32_t compose_generation() const noexcept {
+    return compose_generation_;
+  }
 
   [[nodiscard]] ::warploom::core::Result<std::uint32_t> begin_frame();
   [[nodiscard]] ::warploom::core::Result<void> record_commands(
@@ -302,6 +350,17 @@ public:
     //! Optional draw parameters (default: 3-vertex triangle, 1 instance).
     std::uint32_t vertex_count{3};
     std::uint32_t instance_count{1};
+    //! Optional push constants. The pass's pipeline layout must declare a
+    //! range covering [0, push_size) for the stages the shader reads. Used by
+    //! the compose chain to carry exposure.
+    const void* push_data{nullptr};
+    std::uint32_t push_size{0};
+    //! Stages to bind the push constants for. MUST be covered by the
+    //! pass's pipeline layout: recording a stage the layout does not cover is
+    //! VUID-vkCmdPushConstants-offset-01795, and a vertex stage that declares
+    //! no push block still has to be excluded explicitly.
+    VkShaderStageFlags push_stage_flags{
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT};
   };
 
   //! Record one FullscreenPass inside an ACTIVE render pass (no begin/end,
@@ -474,6 +533,66 @@ private:
   const VulkanSwapchain* swapchain_{nullptr};
   const VulkanRenderPass* render_pass_resource_{nullptr};
   std::vector<FrameResources> frames_;
+
+  // --- HDR compose (RendererConfig::enable_hdr_compose) -----------------
+  // Declaration order is load-bearing: the pipelines and targets hold
+  // buffers allocated from compose_allocator_, so they must be destroyed
+  // before it. VulkanOffscreenTarget's destructor releases its own device
+  // handles, so the targets come first.
+  std::unique_ptr<VulkanMemoryAllocator> compose_allocator_;
+  std::unique_ptr<VulkanDescriptorManager> compose_descriptor_manager_;
+  //! Tonemap pipeline for the PRESENTATION target. Distinct from the bloom
+  //! upsample pipeline: a VkPipeline bakes in its render pass and attachment
+  //! formats, so the pass that writes the HDR intermediate and the pass that
+  //! writes the swapchain image cannot share one.
+  std::unique_ptr<VulkanPipeline> compose_pipeline_;
+  //! Render pass and format of the presentation target (the swapchain's),
+  //! captured at initialize() so the tonemap pipeline can be built for it.
+  VkRenderPass present_pass_{VK_NULL_HANDLE};
+  VkFormat present_format_{VK_FORMAT_UNDEFINED};
+  std::unique_ptr<VulkanPipeline> bloom_down_pipeline_;
+  std::unique_ptr<VulkanPipeline> bloom_up_pipeline_;
+  VulkanOffscreenTarget hdr_target_;
+  VulkanOffscreenTarget bloom_target_;
+  VkDescriptorSetLayout compose_layout_{VK_NULL_HANDLE};
+  VkSampler hdr_sampler_{VK_NULL_HANDLE};
+  VkSampler linear_sampler_{VK_NULL_HANDLE};
+  //! 1x1 black texture bound to the bloom slot when bloom is disabled, so
+  //! tonemap_fxaa.frag keeps a single shader for both configurations.
+  struct BlackTexture {
+    VkImage image{VK_NULL_HANDLE};
+    VkImageView view{VK_NULL_HANDLE};
+    VkDeviceMemory memory{VK_NULL_HANDLE};
+  } black_texture_{};
+  VkDescriptorSet compose_set_{VK_NULL_HANDLE};
+  //! Single-sampler layouts/sets for the two bloom stages. Both bloom shaders
+  //! declare their input at set 0 binding 0, which in the two-binding compose
+  //! layout is the HDR scene -- so the upsample would sample the very image it
+  //! is writing. Each bloom stage therefore gets its own one-binding set
+  //! pointed at its actual input.
+  VkDescriptorSetLayout bloom_stage_layout_{VK_NULL_HANDLE};
+  VkDescriptorSet bloom_down_set_{VK_NULL_HANDLE};
+  VkDescriptorSet bloom_up_set_{VK_NULL_HANDLE};
+  VkFormat compose_hdr_format_{VK_FORMAT_UNDEFINED};
+  //! Current tracked layout of the compose chain's two intermediate images,
+  //! so each stage can barrier from the truth rather than an assumption.
+  VkImageLayout hdr_layout_{VK_IMAGE_LAYOUT_UNDEFINED};
+  VkImageLayout bloom_layout_{VK_IMAGE_LAYOUT_UNDEFINED};
+  std::uint32_t compose_width_{0};
+  std::uint32_t compose_height_{0};
+  //! Bumped on every (re)creation of the HDR intermediate.
+  std::uint32_t compose_generation_{0};
+  bool compose_ready_{false};
+  bool compose_failed_{false};
+  [[nodiscard]] ::warploom::core::Result<void> ensure_compose_resources(
+      std::uint32_t width, std::uint32_t height);
+  //! Record bloom down -> up (when enabled) then tonemap+FXAA into
+  //! `target_pass`/`target_framebuffer`. Requires ensure_compose_resources().
+  void record_compose_chain(VkCommandBuffer command_buffer,
+                            VkRenderPass target_pass,
+                            VkFramebuffer target_framebuffer,
+                            std::uint32_t width, std::uint32_t height);
+  void destroy_compose_resources() noexcept;
   // Persistent renderer-owned H-Z pair. Declaration order is intentional:
   // pyramids are destroyed before the allocator on teardown.
   VulkanHiZFrameState hiz_state_{};

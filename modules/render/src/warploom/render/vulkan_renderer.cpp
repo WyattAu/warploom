@@ -51,6 +51,11 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
   render_pass_resource_ = &render_pass;
   swapchain_ = &swapchain;
   config_ = config;
+  // Captured for the HDR compose chain: its tonemap pipeline must be built
+  // for the swapchain's render pass and format, which is a different
+  // attachment format from the HDR intermediate.
+  present_pass_ = render_pass.render_pass();
+  present_format_ = swapchain.image_format();
 
   auto pool_result = create_command_pool(
       device_, static_cast<std::uint32_t>(context.queue_families().graphics_family));
@@ -174,6 +179,14 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
       cleanup(device_);
       return hiz_result;
     }
+  }
+  // Compose eagerly, at the swapchain extent, rather than on the first
+  // record_commands(): an application builds its scene pipelines against the
+  // HDR intermediate (see hdr_render_pass()), so the target has to exist
+  // before the caller gets control back from initialize().
+  if (config_.enable_hdr_compose) {
+    (void)ensure_compose_resources(swapchain.extent_width(),
+                                   swapchain.extent_height());
   }
   return ::warploom::core::Result<void>::ok();
 #else
@@ -606,6 +619,616 @@ void pbr_frame_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 #endif
 }
 
+// --- HDR compose chain -------------------------------------------------
+//
+// Owned by the renderer so an application opts in with two config fields
+// instead of hand-rolling an intermediate target, a sampler, a descriptor
+// set and a fullscreen pass. The pass sequence becomes:
+//
+//   [optional] shadow pre-pass      (application hook)
+//   [optional] GPU-driven cull      (application hook)
+//   HDR pass                       -> hdr_target_   (application callback)
+//   [optional] bloom down           -> bloom_target_
+//   [optional] bloom up             -> hdr_target_
+//   tonemap + FXAA + bloom          -> swapchain image
+//
+// The last three are the engine's, which is what stops the application from
+// owning presentation.
+
+::warploom::core::Result<void> VulkanRenderer::ensure_compose_resources(
+    std::uint32_t width, std::uint32_t height) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!config_.enable_hdr_compose) {
+    return ::warploom::core::Result<void>::ok();
+  }
+  if (compose_failed_) {
+    // Already refused once; do not retry every frame.
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
+  }
+  if (width == 0U || height == 0U) {
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
+  }
+
+  const auto refuse = [this](const char* why) -> ::warploom::core::Result<void> {
+    compose_failed_ = true;
+    std::fprintf(stderr,
+                 "Warploom: HDR compose disabled (%s). The scene will render "
+                 "straight to the swapchain with clipped highlights.\n", why);
+    return ::warploom::core::Result<void>::ok();
+  };
+
+  // Pick the best supported HDR format.
+  VkFormat hdr_format = config_.hdr_format != VK_FORMAT_UNDEFINED
+                            ? config_.hdr_format
+                            : VK_FORMAT_R16G16B16A16_SFLOAT;
+  {
+    VkFormatProperties props{};
+    vkGetPhysicalDeviceFormatProperties(physical_device_, hdr_format, &props);
+    const bool sampled = (props.optimalTilingFeatures &
+                          VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0U &&
+                         (props.optimalTilingFeatures &
+                          VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0U;
+    if (!sampled) {
+      hdr_format = VK_FORMAT_B8G8R8A8_UNORM;
+      vkGetPhysicalDeviceFormatProperties(physical_device_, hdr_format, &props);
+      if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) == 0U ||
+          (props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0U) {
+        return refuse("no colour-renderable + sampleable HDR format");
+      }
+    }
+  }
+  compose_hdr_format_ = hdr_format;
+
+  // One-time setup: allocator, descriptors, samplers, pipelines, black
+  // texture. Size-dependent resources are (re)created below.
+  if (!compose_allocator_) {
+    compose_allocator_ = std::make_unique<VulkanMemoryAllocator>();
+    if (!compose_allocator_->initialize(device_, physical_device_).is_ok()) {
+      return refuse("allocator init failed");
+    }
+  }
+  if (!compose_descriptor_manager_) {
+    compose_descriptor_manager_ = std::make_unique<VulkanDescriptorManager>();
+    if (!compose_descriptor_manager_->initialize(device_).is_ok()) {
+      return refuse("descriptor manager init failed");
+    }
+    // ReflectedBinding is {set, binding, count, type, stage}: both samplers
+    // live at set 0, bindings 0 (HDR input) and 1 (additive bloom input).
+    auto layout = compose_descriptor_manager_->create_layout({
+        {0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+         VK_SHADER_STAGE_FRAGMENT_BIT},
+        {0, 1, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+         VK_SHADER_STAGE_FRAGMENT_BIT}}, 1U);
+    if (!layout.is_ok()) return refuse("compose descriptor layout failed");
+    compose_layout_ = layout.value();
+    auto set = compose_descriptor_manager_->allocate_set(compose_layout_);
+    if (!set.is_ok()) return refuse("compose descriptor set failed");
+    compose_set_ = set.value();
+
+    // Only when bloom is on: these sets are otherwise dead weight, and
+    // allocating them unconditionally exhausted the pool and silently
+    // disabled compose altogether.
+    if (config_.enable_bloom) {
+      // Capacity 2: one set per bloom stage, sharing this single-binding
+      // layout. create_layout sizes the pool from sets_to_reserve, so
+      // allocating two sets from a layout reserved for one fails.
+      auto stage_layout = compose_descriptor_manager_->create_layout({
+          {0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+           VK_SHADER_STAGE_FRAGMENT_BIT}}, 2U);
+      if (!stage_layout.is_ok()) return refuse("bloom stage layout failed");
+      bloom_stage_layout_ = stage_layout.value();
+      auto down_set =
+          compose_descriptor_manager_->allocate_set(bloom_stage_layout_);
+      if (!down_set.is_ok()) return refuse("bloom downsample set failed");
+      bloom_down_set_ = down_set.value();
+      auto up_set =
+          compose_descriptor_manager_->allocate_set(bloom_stage_layout_);
+      if (!up_set.is_ok()) return refuse("bloom upsample set failed");
+      bloom_up_set_ = up_set.value();
+    }
+  }
+
+  if (hdr_sampler_ == VK_NULL_HANDLE) {
+    VkSamplerCreateInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    si.magFilter = si.minFilter = VK_FILTER_LINEAR;
+    si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    si.addressModeU = si.addressModeV = si.addressModeW =
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    si.maxLod = 1.0f;
+    if (vkCreateSampler(device_, &si, nullptr, &hdr_sampler_) != VK_SUCCESS) {
+      return refuse("sampler creation failed");
+    }
+    linear_sampler_ = hdr_sampler_;
+  }
+
+  if (black_texture_.image == VK_NULL_HANDLE) {
+    // 1x1 opaque black, sampled by the bloom slot when bloom is off.
+    VkImageCreateInfo ii{};
+    ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = VK_FORMAT_B8G8R8A8_UNORM;
+    ii.extent = {1, 1, 1};
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+    // initialLayout must be UNDEFINED or PREINITIALIZED
+    // (VUID-VkImageCreateInfo-initialLayout-00993), so the move to
+    // SHADER_READ_ONLY_OPTIMAL is a one-time barrier below rather than an
+    // initial layout.
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (vkCreateImage(device_, &ii, nullptr, &black_texture_.image) != VK_SUCCESS) {
+      return refuse("black texture creation failed");
+    }
+    VkMemoryRequirements req{};
+    vkGetImageMemoryRequirements(device_, black_texture_.image, &req);
+    VkPhysicalDeviceMemoryProperties mem_props{};
+    vkGetPhysicalDeviceMemoryProperties(physical_device_, &mem_props);
+    const std::uint32_t bits = req.memoryTypeBits;
+    std::uint32_t type = 0U;
+    bool found = false;
+    for (std::uint32_t i = 0; i < mem_props.memoryTypeCount; ++i) {
+      if ((bits & (1U << i)) == 0U) continue;
+      const VkMemoryPropertyFlags flags = mem_props.memoryTypes[i].propertyFlags;
+      if ((flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0U) {
+        type = i; found = true; break;
+      }
+    }
+    if (!found) return refuse("no device-local memory for the black texture");
+    VkMemoryAllocateInfo ai{};
+    ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    ai.allocationSize = req.size;
+    ai.memoryTypeIndex = type;
+    if (vkAllocateMemory(device_, &ai, nullptr, &black_texture_.memory) != VK_SUCCESS ||
+        vkBindImageMemory(device_, black_texture_.image,
+                          black_texture_.memory, 0U) != VK_SUCCESS) {
+      return refuse("black texture allocation failed");
+    }
+    VkImageViewCreateInfo vi{};
+    vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vi.image = black_texture_.image;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = VK_FORMAT_B8G8R8A8_UNORM;
+    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    if (vkCreateImageView(device_, &vi, nullptr, &black_texture_.view) != VK_SUCCESS) {
+      return refuse("black texture view failed");
+    }
+    // One-time transition into the layout it is always sampled in. Without
+    // it the submit sees the image still UNDEFINED.
+    if (auto pool = VulkanRenderer::create_command_pool(
+            device_, static_cast<std::uint32_t>(
+                         [&] {
+                           std::uint32_t n = 0U;
+                           vkGetPhysicalDeviceQueueFamilyProperties(
+                               physical_device_, &n, nullptr);
+                           return n;
+                         }() > 0U
+                         ? 0U
+                         : 0U));
+        pool.is_ok()) {
+      if (auto cb = VulkanRenderer::allocate_command_buffer(device_, pool.value());
+          cb.is_ok()) {
+        VkCommandBuffer cmd = cb.value();
+        VkCommandBufferBeginInfo bi{};
+        bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        if (vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS) {
+          VkImageMemoryBarrier b{};
+          b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+          b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+          b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+          b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+          b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+          b.image = black_texture_.image;
+          b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+          b.srcAccessMask = 0;
+          b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+          vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                               VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0U,
+                               0U, nullptr, 0U, nullptr, 1U, &b);
+          if (vkEndCommandBuffer(cmd) == VK_SUCCESS) {
+            VkSubmitInfo si{};
+            si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            si.commandBufferCount = 1U;
+            si.pCommandBuffers = &cmd;
+            vkQueueSubmit(graphics_queue_, 1U, &si, VK_NULL_HANDLE);
+            vkQueueWaitIdle(graphics_queue_);
+          }
+        }
+      }
+      vkDestroyCommandPool(device_, pool.value(), nullptr);
+    }
+  }
+
+  const std::string dir = config_.compose_shader_dir;
+  if (dir.empty()) return refuse("compose_shader_dir is empty");
+
+  // Load the compose shaders and build their layouts. Idempotent: a resize
+  // must redo this, because VulkanPipeline::cleanup() destroys the shader
+  // modules AND the (owned) layout, not just the VkPipeline. Skipping this on
+  // a rebuild leaves create_graphics_pipeline with no vertex or fragment
+  // module, which fails its argument check with no diagnostic.
+  const auto build_pipelines = [&]() -> bool {
+    VkDescriptorSetLayout layouts[1] = {compose_layout_};
+    VkDescriptorSetLayout stage_layouts[1] = {bloom_stage_layout_};
+    VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT, 0U, 16U};
+    if (compose_pipeline_ == nullptr) compose_pipeline_ = std::make_unique<VulkanPipeline>();
+    compose_pipeline_->cleanup();
+    if (!compose_pipeline_
+             ->load_shader_stage_file(device_, dir + "/fullscreen.vert.spv", "vertex").is_ok() ||
+        !compose_pipeline_
+             ->load_shader_stage_file(device_, dir + "/tonemap_fxaa.frag.spv", "fragment").is_ok()) {
+      return false;
+    }
+    if (!compose_pipeline_->create_pipeline_layout(device_, layouts, 1U, &push).is_ok()) {
+      return false;
+    }
+    if (!config_.enable_bloom) return true;
+
+    if (bloom_down_pipeline_ == nullptr) {
+      bloom_down_pipeline_ = std::make_unique<VulkanPipeline>();
+    }
+    bloom_down_pipeline_->cleanup();
+    if (!bloom_down_pipeline_
+             ->load_shader_stage_file(device_, dir + "/fullscreen.vert.spv", "vertex").is_ok() ||
+        !bloom_down_pipeline_
+             ->load_shader_stage_file(device_, dir + "/bloom_downsample.frag.spv", "fragment").is_ok()) {
+      return false;
+    }
+    if (!bloom_down_pipeline_->create_pipeline_layout(device_, stage_layouts, 1U, nullptr).is_ok()) {
+      return false;
+    }
+    if (bloom_up_pipeline_ == nullptr) bloom_up_pipeline_ = std::make_unique<VulkanPipeline>();
+    bloom_up_pipeline_->cleanup();
+    if (!bloom_up_pipeline_
+             ->load_shader_stage_file(device_, dir + "/fullscreen.vert.spv", "vertex").is_ok() ||
+        !bloom_up_pipeline_
+             ->load_shader_stage_file(device_, dir + "/bloom_upsample.frag.spv", "fragment").is_ok()) {
+      return false;
+    }
+    return bloom_up_pipeline_->create_pipeline_layout(device_, stage_layouts, 1U, nullptr).is_ok();
+  };
+
+  // ---- size-dependent resources ---------------------------------------
+  if (compose_ready_ && compose_width_ == width && compose_height_ == height) {
+    return ::warploom::core::Result<void>::ok();
+  }
+
+  // Pipelines bake in the render pass and format, so they are rebuilt with
+  // the targets rather than reused across a resize.
+  const std::uint32_t bw = std::max(1U, width / std::max(1U, config_.bloom_downscale));
+  const std::uint32_t bh = std::max(1U, height / std::max(1U, config_.bloom_downscale));
+
+  hdr_target_.cleanup();
+  bloom_target_.cleanup();
+  // The pipelines below bake in a render pass and attachment formats, so they
+  // are rebuilt here. The old ones must be released first: recreating over a
+  // live VkPipeline leaks it and then destroys it twice, which the driver
+  // reports as vkDestroyShaderModule: Invalid device at teardown.
+  //
+  // cleanup() forgets the caller's layout handle (it does not own it, so it
+  // does not destroy it), so the layouts are captured first and handed back
+  // explicitly -- otherwise the rebuild asks for a null layout, the engine
+  // synthesises an empty one, and vkCreateGraphicsPipelines fails because the
+  // shader uses set 0.
+  if (!build_pipelines()) {
+    return refuse("compose shader/pipeline setup failed");
+  }
+  const VkPipelineLayout compose_layout = compose_pipeline_->pipeline_layout();
+  const VkPipelineLayout bloom_down_layout =
+      bloom_down_pipeline_ != nullptr ? bloom_down_pipeline_->pipeline_layout()
+                                      : VK_NULL_HANDLE;
+  const VkPipelineLayout bloom_up_layout =
+      bloom_up_pipeline_ != nullptr ? bloom_up_pipeline_->pipeline_layout()
+                                    : VK_NULL_HANDLE;
+  compose_ready_ = false;
+  compose_width_ = width;
+  compose_height_ = height;
+  hdr_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+  bloom_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+
+  // SAMPLED: the compose chain samples this image, and so does anything the
+  // application reads back through the capture path.
+  if (!hdr_target_.create(device_, physical_device_, compose_hdr_format_, width,
+                          height, compose_allocator_.get(),
+                          VK_IMAGE_USAGE_SAMPLED_BIT)
+           .is_ok() ||
+      !hdr_target_.create_depth(device_, physical_device_, VK_FORMAT_D32_SFLOAT)
+           .is_ok() ||
+      // COLOR_ATTACHMENT_OPTIMAL: this target is sampled immediately, and
+      // letting the compose chain own the transition to SHADER_READ_ONLY keeps
+      // one explicit barrier per image.
+      !hdr_target_
+           .create_render_pass(device_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+           .is_ok() ||
+      !hdr_target_.create_framebuffer(device_).is_ok()) {
+    return refuse("HDR target creation failed");
+  }
+
+  // Tonemap targets the swapchain image: built for the presentation render
+  // pass and format, NOT the HDR intermediate's.
+  if (present_pass_ == VK_NULL_HANDLE ||
+      present_format_ == VK_FORMAT_UNDEFINED) {
+    return refuse("presentation target unknown");
+  }
+  if (!compose_pipeline_
+           ->create_graphics_pipeline(device_, present_pass_, present_format_,
+                                     compose_layout, false, false, false)
+           .is_ok()) {
+    return refuse("compose pipeline creation failed");
+  }
+
+  if (config_.enable_bloom) {
+    if (!bloom_target_
+             .create(device_, physical_device_, compose_hdr_format_, bw, bh,
+                     compose_allocator_.get(), VK_IMAGE_USAGE_SAMPLED_BIT)
+             .is_ok() ||
+        !bloom_target_
+             .create_render_pass(device_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+             .is_ok() ||
+        !bloom_target_.create_framebuffer(device_).is_ok()) {
+      return refuse("bloom target creation failed");
+    }
+    if (!bloom_down_pipeline_
+             ->create_graphics_pipeline(device_, bloom_target_.render_pass(),
+                                       compose_hdr_format_,
+                                       bloom_down_layout, false, false, false)
+             .is_ok() ||
+        !bloom_up_pipeline_
+             ->create_graphics_pipeline(device_, hdr_target_.render_pass(),
+                                       compose_hdr_format_,
+                                       bloom_up_layout, false, false, false)
+             .is_ok()) {
+      return refuse("bloom pipeline creation failed");
+    }
+  }
+
+  // Bind the two sampler slots: HDR input and the bloom input (the black
+  // texture when bloom is off).
+  if (!compose_descriptor_manager_
+           ->write_image(compose_set_, 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                         hdr_sampler_, hdr_target_.image_view(),
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
+           .is_ok()) {
+    return refuse("HDR descriptor write failed");
+  }
+  const VkImageView bloom_view =
+      config_.enable_bloom ? bloom_target_.image_view() : black_texture_.view;
+  if (!compose_descriptor_manager_
+           ->write_image(compose_set_, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                         linear_sampler_, bloom_view,
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
+           .is_ok()) {
+    return refuse("bloom descriptor write failed");
+  }
+  // Each bloom stage reads its own input at binding 0. Only when bloom is on:
+  // the sets do not exist otherwise, and writing to a null set fails.
+  if (config_.enable_bloom &&
+      (!compose_descriptor_manager_
+           ->write_image(bloom_down_set_, 0U,
+                         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, hdr_sampler_,
+                         hdr_target_.image_view(),
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
+           .is_ok() ||
+       !compose_descriptor_manager_
+           ->write_image(bloom_up_set_, 0U,
+                         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                         linear_sampler_, bloom_view,
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
+           .is_ok())) {
+    return refuse("bloom stage descriptor write failed");
+  }
+
+  compose_ready_ = true;
+  ++compose_generation_;
+  return ::warploom::core::Result<void>::ok();
+#else
+  (void)width; (void)height;
+  return ::warploom::core::Result<void>::ok();
+#endif
+}
+
+
+void VulkanRenderer::record_compose_chain(VkCommandBuffer command_buffer,
+                                          VkRenderPass target_pass,
+                                          VkFramebuffer target_framebuffer,
+                                          std::uint32_t width,
+                                          std::uint32_t height) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!compose_ready_ || hdr_sampler_ == VK_NULL_HANDLE) return;
+
+  // Layouts are tracked per target through the chain rather than assumed.
+  // Each stage transitions its target into COLOR_ATTACHMENT_OPTIMAL, lets the
+  // render pass do its work, and transitions it back out to
+  // SHADER_READ_OPTIMAL. Anything less leaves the validation layer's idea of
+  // the layout disagreeing with the shader's descriptor, which is
+  // VUID-vkCmdDraw-imageLayout-00344.
+  auto current_layout = [&](VkImage image) -> VkImageLayout& {
+    return image == bloom_target_.image() ? bloom_layout_
+                                          : hdr_layout_;
+  };
+  (void)current_layout;
+
+  const auto transition = [&](VkImage image, VkImageLayout from,
+                              VkImageLayout to, VkAccessFlags dst_access) {
+    if (from == to) return;
+    VkImageMemoryBarrier b{};
+    b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    b.oldLayout = from;
+    b.newLayout = to;
+    b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.image = image;
+    b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    b.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                      VK_ACCESS_SHADER_READ_BIT;
+    b.dstAccessMask = dst_access;
+    vkCmdPipelineBarrier(command_buffer,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0U, 0U, nullptr, 0U, nullptr, 1U, &b);
+  };
+
+  // One helper per stage: it owns both transitions and the pass, so no stage
+  // can forget one. (B2 folds this into execute_graph.)
+  const auto run = [&](VulkanPipeline& pipe, VulkanOffscreenTarget* target,
+                       VkRenderPass rp, std::uint32_t w, std::uint32_t h,
+                       const void* push, std::uint32_t push_size,
+                       VkDescriptorSet set) {
+    VkImage write_image = VK_NULL_HANDLE;
+    VkImageLayout* write_layout = nullptr;
+    if (target != nullptr) {
+      write_image = target->image();
+      write_layout = (target == &bloom_target_) ? &bloom_layout_
+                                                : &hdr_layout_;
+      // Coming from the previous stage's SHADER_READ_ONLY (or UNDEFINED on the
+      // first frame) into the color attachment this pass renders to.
+      if (*write_layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+        transition(write_image, *write_layout,
+                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+        *write_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      }
+    }
+    VkClearValue clear[2]{};
+    clear[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+    clear[1].depthStencil = {1.0f, 0U};
+    VkRenderPassBeginInfo rp_info{};
+    rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp_info.renderPass = rp;
+    rp_info.framebuffer = target != nullptr ? target->framebuffer()
+                                            : target_framebuffer;
+    rp_info.renderArea.offset = {0, 0};
+    rp_info.renderArea.extent = {w, h};
+    // Always two entries: pClearValues is indexed by attachment number and
+    // surplus entries are ignored, whereas too few is
+    // VUID-VkRenderPassBeginInfo-clearValueCount-00902.
+    rp_info.clearValueCount = 2U;
+    rp_info.pClearValues = clear;
+    vkCmdBeginRenderPass(command_buffer, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
+    FullscreenPass pass{};
+    pass.pipeline = pipe.pipeline();
+    pass.pipeline_layout = pipe.pipeline_layout();
+    pass.render_pass = rp;
+    pass.framebuffer = rp_info.framebuffer;
+    pass.width = w;
+    pass.height = h;
+    pass.clear_values = clear;
+    pass.clear_value_count = 2U;
+    pass.sample_count = 1U;  // HDR input; slot 1 keeps the bloom binding
+    pass.push_data = push;
+    pass.push_size = push_size;
+    pass.push_stage_flags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    (void)record_fullscreen_draw(command_buffer, pass, set);
+    vkCmdEndRenderPass(command_buffer);
+
+    if (target != nullptr) {
+      transition(write_image, target->color_final_layout(),
+                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                 VK_ACCESS_SHADER_READ_BIT);
+      *write_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+  };
+
+  // A pass that only SAMPLES an intermediate still has to put it in
+  // SHADER_READ_ONLY first; run() only handles the image it writes.
+  const auto ensure_sampled = [&](VkImage image, VkImageLayout& layout) {
+    // The bloom buffer only exists when bloom is enabled; barriering a null
+    // image is a crash.
+    if (image == VK_NULL_HANDLE) return;
+    if (layout == VK_IMAGE_LAYOUT_UNDEFINED) {
+      layout = hdr_target_.color_final_layout();
+    }
+    if (layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+      transition(image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                 VK_ACCESS_SHADER_READ_BIT);
+      layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+  };
+
+  struct ComposePush {
+    float exposure;
+    float pad[3];
+  } push{};
+  push.exposure = config_.exposure;
+
+  if (config_.enable_bloom && bloom_down_pipeline_ && bloom_up_pipeline_) {
+    // The downsample reads the HDR scene.
+    ensure_sampled(hdr_target_.image(), hdr_layout_);
+    run(*bloom_down_pipeline_, &bloom_target_, bloom_target_.render_pass(),
+        bloom_target_.width(), bloom_target_.height(), nullptr, 0U,
+        bloom_down_set_);
+    // The upsample reads the bloom buffer and rewrites the HDR target.
+    ensure_sampled(bloom_target_.image(), bloom_layout_);
+    run(*bloom_up_pipeline_, &hdr_target_, hdr_target_.render_pass(), width,
+        height, nullptr, 0U, bloom_up_set_);
+  }
+  // The tonemap reads the HDR scene and the bloom buffer.
+  ensure_sampled(hdr_target_.image(), hdr_layout_);
+  ensure_sampled(bloom_target_.image(), bloom_layout_);
+  run(*compose_pipeline_, nullptr, target_pass, width, height, &push,
+      sizeof(push), compose_set_);
+#else
+  (void)command_buffer; (void)target_pass; (void)target_framebuffer;
+  (void)width; (void)height;
+#endif
+}
+
+void VulkanRenderer::destroy_compose_resources() noexcept {
+#ifdef OMNICPP_HAS_VULKAN
+  compose_ready_ = false;
+  compose_width_ = 0U;
+  compose_height_ = 0U;
+  compose_set_ = VK_NULL_HANDLE;
+  compose_layout_ = VK_NULL_HANDLE;
+  // Explicit, with the recorded device. VulkanPipeline's destructor is a
+  // deliberate no-op (cleanup(nullptr) ignored by cleanup()), because a
+  // pipeline that outlives its VulkanContext would otherwise call
+  // vkDestroy* on a dead device. Anything holding one must therefore release
+  // it explicitly, which is what this is for.
+  if (compose_pipeline_ != nullptr) {
+    compose_pipeline_->cleanup();
+    compose_pipeline_.reset();
+  }
+  if (bloom_down_pipeline_ != nullptr) {
+    bloom_down_pipeline_->cleanup();
+    bloom_down_pipeline_.reset();
+  }
+  if (bloom_up_pipeline_ != nullptr) {
+    bloom_up_pipeline_->cleanup();
+    bloom_up_pipeline_.reset();
+  }
+  // Targets before the allocator that owns their memory.
+  bloom_target_.cleanup();
+  hdr_target_.cleanup();
+  if (black_texture_.view != VK_NULL_HANDLE) {
+    vkDestroyImageView(device_, black_texture_.view, nullptr);
+    black_texture_.view = VK_NULL_HANDLE;
+  }
+  if (black_texture_.image != VK_NULL_HANDLE) {
+    vkDestroyImage(device_, black_texture_.image, nullptr);
+    black_texture_.image = VK_NULL_HANDLE;
+  }
+  if (black_texture_.memory != VK_NULL_HANDLE) {
+    vkFreeMemory(device_, black_texture_.memory, nullptr);
+    black_texture_.memory = VK_NULL_HANDLE;
+  }
+  if (hdr_sampler_ != VK_NULL_HANDLE) {
+    vkDestroySampler(device_, hdr_sampler_, nullptr);
+    hdr_sampler_ = VK_NULL_HANDLE;
+    linear_sampler_ = VK_NULL_HANDLE;
+  }
+  compose_descriptor_manager_.reset();
+  compose_allocator_.reset();
+#endif
+}
+
 ::warploom::core::Result<void> VulkanRenderer::record_pbr_frame(
     VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
     const PbrFrameTargets& targets) const {
@@ -947,6 +1570,11 @@ void fullscreen_render_cb(VkCommandBuffer cb, const GraphPass& pass,
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pass.pipeline_layout, 0, 1, &set0, 0, nullptr);
   }
+  if (pass.push_data != nullptr && pass.push_size > 0U) {
+    vkCmdPushConstants(command_buffer, pass.pipeline_layout,
+                       pass.push_stage_flags, 0U, pass.push_size,
+                       pass.push_data);
+  }
   vkCmdDraw(command_buffer, pass.vertex_count, pass.instance_count, 0, 0);
   return ::warploom::core::Result<void>::ok();
 #else
@@ -1151,10 +1779,40 @@ void fullscreen_render_cb(VkCommandBuffer cb, const GraphPass& pass,
         ::warploom::core::RuntimeError::invalid_config);
   }
 
+  // HDR compose: the scene renders into an HDR intermediate owned by the
+  // renderer, and the compose chain writes the swapchain image afterwards.
+  // The application's scene callback therefore stops owning presentation.
+  const bool compose = config_.enable_hdr_compose &&
+                       ensure_compose_resources(width, height).is_ok() &&
+                       compose_ready_;
+
+  // HDR intermediate pass target when composing, else the swapchain.
+  VkRenderPass scene_pass = render_pass_;
+  VkFramebuffer scene_framebuffer = framebuffer;
+  if (compose) {
+    scene_pass = hdr_target_.render_pass();
+    scene_framebuffer = hdr_target_.framebuffer();
+    VkImageMemoryBarrier to_color{};
+    to_color.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    // The HDR target's color attachment declares initialLayout UNDEFINED,
+    // which is also its layout before the first frame of each resize.
+    to_color.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    to_color.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    to_color.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_color.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_color.image = hdr_target_.image();
+    to_color.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    to_color.srcAccessMask = 0;
+    to_color.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0U,
+                         0U, nullptr, 0U, nullptr, 1U, &to_color);
+  }
+
   VkRenderPassBeginInfo rp_info{};
   rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-  rp_info.renderPass = render_pass_;
-  rp_info.framebuffer = framebuffer;
+  rp_info.renderPass = scene_pass;
+  rp_info.framebuffer = scene_framebuffer;
   rp_info.renderArea.offset = {0, 0};
   rp_info.renderArea.extent = {width, height};
 
@@ -1198,6 +1856,23 @@ void fullscreen_render_cb(VkCommandBuffer cb, const GraphPass& pass,
   }
 
   vkCmdEndRenderPass(cb);
+
+  // HDR compose: bloom (optional) then tonemap+FXAA into the swapchain
+  // image. Runs after the scene pass and before the end stamp, so the
+  // timestamp still covers the whole frame.
+  if (compose) {
+    // The scene pass just rendered into the HDR target, so it left that image
+    // in the render pass's declared final layout. Re-seed the tracker here or
+    // it stays at whatever the previous frame's compose chain ended on, and
+    // the next frame's sample reads the wrong layout
+    // (VUID-vkCmdDraw-imageLayout-00344).
+    hdr_layout_ = hdr_target_.color_final_layout();
+    // bloom_layout_ is deliberately NOT reset: the scene pass never touches
+    // the bloom buffer, so it carries SHADER_READ_ONLY over from the previous
+    // frame's chain. Resetting it to UNDEFINED makes the next barrier declare
+    // the wrong oldLayout, which turns it into a no-op.
+    record_compose_chain(cb, render_pass_, framebuffer, width, height);
+  }
 
   // End stamp: after the main render pass, before presentation commands.
   if (gpu_timing_enabled_ && timestamp_pool_ != VK_NULL_HANDLE) {
@@ -1829,6 +2504,7 @@ void VulkanRenderer::cleanup(VkDevice device) noexcept {
   if (dev) {
     vkDeviceWaitIdle(dev);
     cleanup_hiz_pipeline_resources();
+    destroy_compose_resources();
     for (auto& frame : frames_) frame.cleanup(dev);
     for (auto semaphore : render_finished_semaphores_) {
       if (semaphore) vkDestroySemaphore(dev, semaphore, nullptr);
