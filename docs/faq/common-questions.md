@@ -1,5 +1,12 @@
 # Common Questions
 
+> **Note**
+> Parts of this page describe the pre-0.1 Conan and direnv setup, which has
+> been retired. The engine's only third-party dependency is GoogleTest,
+> fetched by CPM; `conan/` no longer exists. See the README for the current
+> build path.
+
+
 General questions about the OmniCPP-template project.
 
 ## Table of Contents
@@ -123,11 +130,11 @@ public:
 
 ### Can I use an older C++ standard?
 
-**TL;DR:** Yes, modify [`CMakeLists.txt`](../CMakeLists.txt:471) to set `CMAKE_CXX_STANDARD` to 17 or 20.
+**TL;DR:** Yes, modify [`CMakeLists.txt`](../../CMakeLists.txt:471) to set `CMAKE_CXX_STANDARD` to 17 or 20.
 
 **The Deep Dive:**
 
-In [`CMakeLists.txt`](../CMakeLists.txt:471), change:
+In [`CMakeLists.txt`](../../CMakeLists.txt:471), change:
 ```cmake
 set(CMAKE_CXX_STANDARD 23)
 ```
@@ -300,7 +307,7 @@ build/emscripten/release/bin/
 | **Conan** | ✅ Supported | Binary packages, cross-platform |
 | **vcpkg** | ✅ Supported | Microsoft ecosystem, Windows-focused |
 
-**Configuration in [`CMakeLists.txt`](../CMakeLists.txt:56-58):**
+**Configuration in [`CMakeLists.txt`](../../CMakeLists.txt:56-58):**
 ```cmake
 option(OMNICPP_USE_CONAN "Use Conan package manager" OFF)
 option(OMNICPP_USE_VCPKG "Use vcpkg package manager" OFF)
@@ -309,7 +316,7 @@ option(OMNICPP_USE_CPM "Use CPM.cmake package manager" ON)
 
 ### How do I add a dependency via CPM?
 
-**TL;DR:** Add to [`dependencies.cmake`](../dependencies.cmake:1) using `CPMAddPackage`.
+**TL;DR:** Add to [`dependencies.cmake`](../../dependencies.cmake:1) using `CPMAddPackage`.
 
 **The Deep Dive:**
 
@@ -345,8 +352,8 @@ The controller uses:
 - **black** for Python files (`.py`)
 
 **Configuration Files:**
-- [`.clang-format`](../.clang-format:1) - C++ formatting rules
-- [`.pre-commit-config.yaml`](../.pre-commit-config.yaml:1) - Pre-commit hooks
+- [`.clang-format`](../../.clang-format:1) - C++ formatting rules
+- [`.pre-commit-config.yaml`](../../.pre-commit-config.yaml:1) - Pre-commit hooks
 
 **Usage:**
 ```bash
@@ -363,7 +370,7 @@ python OmniCppController.py format --check
 python OmniCppController.py format --cpp-only
 ```
 
-**Reference:** [`OmniCppController.py:556-624`](../OmniCppController.py:556-624)
+**Reference:** [`OmniCppController.py:556-624`](../../OmniCppController.py:556-624)
 
 ### How do I run static analysis?
 
@@ -393,7 +400,7 @@ python OmniCppController.py lint --cpp-only
 ```
 
 **Configuration Files:**
-- [`.clang-tidy`](../.clang-tidy:1) - clang-tidy checks
-- [`.pylintrc`](../.pylintrc:1) - pylint configuration
+- [`.clang-tidy`](../../.clang-tidy:1) - clang-tidy checks
+- pylint/mypy targets were removed along with the Python build controller
 
-**Reference:** [`OmniCppController.py:626-701`](../OmniCppController.py:626-701)
+**Reference:** [`OmniCppController.py:626-701`](../../OmniCppController.py:626-701)

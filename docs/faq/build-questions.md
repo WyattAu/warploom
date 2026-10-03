@@ -1,5 +1,12 @@
 # Build Questions
 
+> **Note**
+> Parts of this page describe the pre-0.1 Conan and direnv setup, which has
+> been retired. The engine's only third-party dependency is GoogleTest,
+> fetched by CPM; `conan/` no longer exists. See the README for the current
+> build path.
+
+
 Questions and solutions related to the build system, compilation, and dependencies.
 
 ## Table of Contents
@@ -15,7 +22,7 @@ Questions and solutions related to the build system, compilation, and dependenci
 
 ### How does the build system work?
 
-**TL;DR:** The build system uses [`OmniCppController.py`](../OmniCppController.py:1) to orchestrate CMake, Conan, and build operations.
+**TL;DR:** The build system uses [`OmniCppController.py`](../../OmniCppController.py:1) to orchestrate CMake, Conan, and build operations.
 
 **The Deep Dive:**
 
@@ -52,7 +59,7 @@ Think of the build system like a construction project manager:
 - **ConanManager** = Materials supplier (delivers dependencies)
 
 **Key Classes:**
-- [`OmniCppController`](../OmniCppController.py:131) - Main entry point
+- [`OmniCppController`](../../OmniCppController.py:131) - Main entry point
 - [`BuildManager`](../omni_scripts/build.py:179) - Build orchestration
 - [`CMakeManager`](../omni_scripts/cmake.py:109) - CMake operations
 - [`ConanManager`](../omni_scripts/conan.py:101) - Dependency management
@@ -164,7 +171,7 @@ python OmniCppController.py build standalone "Build Project" default release --c
 
 **Note:** The build system automatically detects the best available compiler if `--compiler` is not specified.
 
-**Reference:** [`OmniCppController.py:247-258`](../OmniCppController.py:247-258)
+**Reference:** [`OmniCppController.py:247-258`](../../OmniCppController.py:247-258)
 
 ## CMake Configuration
 
@@ -215,7 +222,7 @@ cat build/debug/CMakeCache.txt | grep -i error
 
 ### How do I change the CMake generator?
 
-**TL;DR:** The generator is automatically selected based on the compiler, but can be overridden in [`CMakePresets.json`](../CMakePresets.json:1).
+**TL;DR:** The generator is automatically selected based on the compiler, but can be overridden in [`CMakePresets.json`](../../CMakePresets.json:1).
 
 **The Deep Dive:**
 
@@ -228,7 +235,7 @@ cat build/debug/CMakeCache.txt | grep -i error
 | GCC/Clang (Linux) | Unix Makefiles |
 
 **Custom Generator:**
-Edit [`CMakePresets.json`](../CMakePresets.json:1):
+Edit [`CMakePresets.json`](../../CMakePresets.json:1):
 ```json
 {
   "version": 3,
@@ -298,7 +305,9 @@ cat ~/.conan/logs/conan.log
 
 ### How do I add a new Conan dependency?
 
-**TL;DR:** Add to [`conan/conanfile.py`](../conan/conanfile.py:1) or [`conan/conanfile.txt`](../conan/conanfile.txt:1).
+**TL;DR:** Not applicable any more. Conan was retired; the only third-party
+dependency is GoogleTest, declared in `cmake/FindDependencies.cmake`. The text
+below is kept as a record of the previous packaging story.
 
 **The Deep Dive:**
 

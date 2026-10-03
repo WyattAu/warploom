@@ -1,5 +1,12 @@
 # Nix Development Environment
 
+> **Note**
+> Parts of this page describe the pre-0.1 Conan and direnv setup, which has
+> been retired. The engine's only third-party dependency is GoogleTest,
+> fetched by CPM; `conan/` no longer exists. See the README for the current
+> build path.
+
+
 **Version:** 1.0.0
 **Last Updated:** 2026-01-28
 **Related ADRs:** [ADR-027: Nix Package Manager Integration](../.specs/02_adrs/ADR-027-nix-package-manager-integration.md)
@@ -312,7 +319,7 @@ export CCACHE_DIR=$PWD/.ccache
 
 ### Direnv Integration
 
-The project includes [`.envrc`](../.envrc:1) for automatic environment loading with direnv:
+You can add an `.envrc` for automatic environment loading with direnv:
 
 ```bash
 # .envrc content
@@ -647,7 +654,7 @@ find_package(spdlog REQUIRED)
 
 ### Conan Profile for Nix
 
-The setup script creates a Conan profile at [`conan/profiles/nix`](../conan/profiles/nix:1):
+The retired setup script used to create a Conan profile at `conan/profiles/nix`:
 
 ```ini
 # Conan profile for Nix on Linux

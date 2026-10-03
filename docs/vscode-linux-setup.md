@@ -1,5 +1,12 @@
 # VSCode Linux Setup Guide
 
+> **Note**
+> Parts of this page describe the pre-0.1 Conan and direnv setup, which has
+> been retired. The engine's only third-party dependency is GoogleTest,
+> fetched by CPM; `conan/` no longer exists. See the README for the current
+> build path.
+
+
 **Version:** 1.0.0
 **Last Updated:** 2026-01-28
 **Related ADRs:** [ADR-026: VSCode tasks and launch configuration](../.specs/02_adrs/ADR-026-vscode-tasks-launch-configuration.md), [ADR-032: VSCode Platform-Specific Tasks](../.specs/02_adrs/ADR-032-vscode-platform-specific-tasks.md)
@@ -723,7 +730,7 @@ The project includes a "Load Nix Shell" task in [`.vscode/tasks.json`](../.vscod
 
 #### Method 2: Direnv Integration
 
-The project includes [`.envrc`](../.envrc:1) for automatic environment loading with direnv:
+You can add an `.envrc` for automatic environment loading with direnv:
 
 ```bash
 # .envrc content

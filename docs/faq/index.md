@@ -30,7 +30,7 @@ Think of OmniCPP-template as a "starter kit" for C++ game development—like a p
 **TL;DR:** Run `python OmniCppController.py build standalone "Clean Build Pipeline" default release` to build the project.
 
 **The Deep Dive:**
-The project uses [`OmniCppController.py`](../OmniCppController.py:1) as the main entry point for all build operations. The controller manages:
+The project uses [`OmniCppController.py`](../../OmniCppController.py:1) as the main entry point for all build operations. The controller manages:
 - Compiler detection and validation
 - Dependency installation via Conan/vcpkg
 - CMake configuration and building

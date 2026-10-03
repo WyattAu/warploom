@@ -71,4 +71,4 @@ This project includes third-party components with their own licenses:
 - **PackageProject.cmake & CPMLicenses.cmake**: MIT License
 - **Ccache.cmake**: GPL 3.0
 
-See the full [LICENSE](../LICENSE) file for complete license information.
+See the full [LICENSE](../../LICENSE) file for complete license information.

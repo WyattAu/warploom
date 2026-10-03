@@ -1,150 +1,132 @@
 # Warploom
 
-*(formerly OmniCPP)*
+A data-oriented C++ engine with deterministic simulation, Vulkan rendering,
+an ECS foundation, and a time-warp editor — shipped as five installable
+CMake packages.
 
-A data-oriented C++ engine with deterministic simulation, lock-free concurrency, Vulkan rendering, and an ECS foundation.
-
-## Architecture
-
-```
-include/engine/core/
-├── deterministic_runtime.hpp  — Fixed-step scheduler, SPSC/MPSC, replay, state hash
-├── ecs.hpp                    — Archetype ECS, queries, change tracking, entity recycling,
-│                                component pools, parallel system execution, bump allocator
-├── clock.hpp                  — SteadyClock, ManualTimer, ScopedTimer
-├── thread_pool.hpp            — Fixed-size pool with CPU affinity
-├── replay.hpp                 — Versioned portable binary replay
-└── engine.hpp                 — Engine facade (Result<T> error model)
-
-include/engine/render/
-├── vulkan_context.hpp         — Vulkan instance/device abstraction (Qt-free)
-├── vulkan_surface.hpp         — Platform surface creation (X11/Wayland/Win32)
-├── vulkan_swapchain.hpp       — Swapchain management (format/present mode selection)
-├── vulkan_render_pass.hpp     — Render pass + framebuffers + depth resources
-├── vulkan_pipeline.hpp        — Graphics pipeline + SPIR-V shader loading
-├── vulkan_renderer.hpp        — Command buffers, frame sync, draw loop
-└── software_rasterizer.hpp    — Deterministic CPU rasterizer for testing
-
-Concurrency Primitives
-├── BoundedQueue<T,N>          — Single-thread ring buffer
-├── SpscChannel<T,N>           — Lock-free SPSC (1P/1C)
-└── MpscChannel<T,N>           — Lock-free MPSC (Vyukov, NP/1C)
-```
+The differentiator is **determinism as product**: a session can be recorded,
+replayed, and scrubbed to any frame, and the state comes back exactly. 64
+assertions of that run over a real socket in CI (`tools/live_proof.py`).
 
 ## Build
 
 ```bash
-cmake --preset headless-debug
-cmake --build build/headless-debug -j$(nproc)
-ctest --test-dir build/headless-debug
+cmake --preset default
+cmake --build build/default -j$(nproc)
+ctest --test-dir build/default --output-on-failure
+./build/default/bin/warploom_viewport
 ```
+
+That is the whole path. Shaders are compiled by the build; the viewport
+finds them without any environment variable.
+
+**Requirements** (Linux): CMake ≥ 3.28, Ninja, a C++26 compiler, Vulkan
+headers, `libxcb`, and `glslc` or `glslangValidator` for the shaders.
+`apt install cmake ninja-build g++ libvulkan-dev libxcb1-dev pkg-config
+glslang-tools`.
 
 ### Presets
 
-| Preset | Flags | Purpose |
-|--------|-------|---------|
-| `headless-debug` | `-O0 -g` | Development + all tests |
-| `headless-release` | `-O3` | Optimized build |
-| `tsan` | `-fsanitize=thread` | ThreadSanitizer |
-| `asan-ubsan` | `-fsanitize=address,undefined` | Memory/UB checks |
+| Preset | Purpose |
+|---|---|
+| `default` | modules + tests + viewport, with whatever toolchain CMake finds |
+| `headless-debug` / `headless-release` | no Vulkan, no window — the fast inner loop |
+| `headless-debug-clang` | the same under Clang |
+| `asan-ubsan` / `tsan` | sanitizer legs |
+| `vulkan-validation` | Khronos validation layer on Mesa lavapipe |
+| `release` | optimised build |
 
-## Rendering Pipeline
+Each has a matching `--build` and `ctest --preset` entry. About 60 more
+(compiler, cross and Nix combinations) are `hidden` — reachable with
+`--preset=<name>`, absent from `--list-presets`.
 
-### Vulkan Context (`vulkan_context.hpp`)
-- Instance creation with validation layers
-- Physical device selection and scoring (prefers discrete GPU)
-- Logical device creation with graphics + present queue families
-- Graceful degradation when Vulkan is unavailable
+## Architecture
 
-### Vulkan Surface (`vulkan_surface.hpp`)
-- X11/XCB surface creation
-- Win32 surface creation
-- Headless fallback for CI
+Five installable libraries and one headerless aggregate:
 
-### Vulkan Swapchain (`vulkan_swapchain.hpp`)
-- Surface capability querying (min/max images, extent, transforms)
-- Format selection (prefers SRGB B8G8R8A8 for correct gamma)
-- Present mode selection (FIFO for vsync, MAILBOX for low latency)
-- Image view creation for all swapchain images
-- Swapchain recreation on window resize
+| Package | Target | Contents |
+|---|---|---|
+| `WarploomCore` | `Warploom::core` | deterministic runtime, document/JSON, ECS, node graph, replay/scrubber/recorder, protocol + session, input, physics |
+| `WarploomUI` | `Warploom::ui` | widget primitives, glyph atlas |
+| `WarploomEditor` | `Warploom::editor` | node editor, inspector, graph→animation bridge, clip timeline view |
+| `WarploomRender` | `Warploom::render` | Vulkan context/swapchain/pipelines, render graph, RT, IBL, GPU-driven draw, H-Z occlusion, software rasterizer |
+| `WarploomAsset` | `Warploom::asset` | glTF/GLB + skeletal animation import, PNG/JPEG/KTX2 decoding |
+| `WarploomEngine` | `Warploom::engine` | INTERFACE aggregate over all five |
 
-### Vulkan Render Pass (`vulkan_render_pass.hpp`)
-- Color + depth render pass with subpass dependencies
-- Per-swapchain-image framebuffers
-- Depth image/view creation with memory allocation
-- Depth format selection from physical device capabilities
+Each installs its own `Warploom<Name>Config.cmake` and version file, so a
+consumer needs only `find_package(WarploomRender)` and a link line. There
+is no monolithic engine target.
 
-### Vulkan Pipeline (`vulkan_pipeline.hpp`)
-- SPIR-V shader loading from file and memory
-- Graphics pipeline with configurable state:
-  - Dynamic viewport and scissor
-  - Configurable depth test/write
-  - Configurable face culling
-  - Blend state
-- Pipeline layout creation (ready for uniform buffers / push constants)
-
-### Vulkan Renderer (`vulkan_renderer.hpp`)
-- Per-frame command buffer pool (configurable frame count)
-- Frame synchronization: fences + semaphores (double/triple buffering)
-- Acquire → Record → Submit → Present cycle
-- Static utilities: command pool creation, command buffer allocation
-
-### Software Rasterizer (`software_rasterizer.hpp`)
-- Triangle rasterization with barycentric coordinates
-- Depth buffer with z-interpolation
-- Color interpolation across vertices
-- Both winding orders supported
-- Deterministic frame hashing for regression testing
-
-## ECS
-
-Archetype-based SoA layout:
-
-- **Entity**: 8 bytes with recycling and generation counter
-- **Query API**: `query<T1,T2>(f)`, `query_if<T>(pred, action)`, `count_if<T>(pred)`
-- **Change tracking**: `mark_dirty<T>()`, `set_component<T>()`, `is_dirty<T>()`, `clear_dirties()`
-- **Parallel execution**: `run_parallel()` — independent systems run concurrently via ThreadPool
-- **Component pools**: `ComponentPool<T>` — pre-allocated slots, zero steady-state allocation
-- **Bump allocator**: Zero-allocation simulation phase
-- **System scheduler**: Topological ordering with wave-based parallel partitioning
-
-## Concurrency
-
-All lock-free, header-only, TSan-validated with `halt_on_error=1`:
-
-| Primitive | Thread Model | Use Case |
-|-----------|-------------|----------|
-| `BoundedQueue<T,N>` | Single thread | Internal bookkeeping |
-| `SpscChannel<T,N>` | 1P / 1C | Runtime event queue |
-| `MpscChannel<T,N>` | NP / 1C | Worker thread events |
-
-## Benchmark
-
-```bash
-build/headless-debug/bin/warploom_deterministic_runtime_benchmark
-build/headless-debug/bin/warploom_deterministic_runtime_benchmark --output results.json
 ```
+modules/core     11,470 lines   22 headers, 11 TUs
+modules/render   13,333 lines   27 headers, 22 TUs
+modules/asset     6,410 lines    6 headers,  6 TUs
+modules/editor    3,278 lines    4 headers,  3 TUs
+modules/ui        1,329 lines    2 headers,  2 TUs
+examples/viewport  5,553 lines   the application
+tests/           37,246 lines   624 tests across 5 suites
+```
+
+Public headers are spelled `warploom/<module>/<header>.hpp` and reached
+through each module's own interface include directory. There is no
+superproject-wide include path.
+
+## What actually works, and what does not
+
+Read [`docs/rendering-status.md`](docs/rendering-status.md) before trusting
+any capability list, including this one. It separates three questions that
+are easy to conflate — is it in the engine, can the app reach it, and what
+proves it.
+
+The short version:
+
+**Strong.** Ray tracing is real: acceleration structures, an RT pipeline with
+a shader-binding table, `vkCmdTraceRaysKHR`, and a loop path tracer checked
+against an independent fp64 Monte-Carlo integrator. The render graph, IBL,
+PBR, GPU-driven cull→indirect, glTF and skeletal import, and the
+determinism/replay/scrub/timeline stack are all implemented and tested.
+
+**Not yet true.** Three things the project is sometimes described as having,
+that it does not:
+
+- **Physics is 204 lines.** Semi-implicit Euler, spheres only, an O(n²)
+  broadphase, no shapes, no joints, and it is stepped outside the
+  deterministic tick — so replay cannot reproduce it.
+- **The app does not use the renderer module.** The viewport hand-rolls its
+  own Vulkan. `record_pbr_frame`, the render graph, H-Z occlusion, offscreen
+  targets and the whole bloom/tonemap chain are real and tested but have no
+  production caller. The application is a weaker renderer than its test suite
+  proves.
+- **The timeline steps rather than interpolates.** Clips, recording,
+  playback and undo all work; playback picks the last key at or before the
+  frame, so there are no curves, one armed track at a time, and the clip
+  strip widget is not wired into the app.
 
 ## Validation
 
 | Check | Status |
-|-------|--------|
-| Headless CTest (**134 unit tests**) | ✅ |
-| TSan (`halt_on_error=1`) | ✅ Zero data races |
-| ASan/UBSan | ✅ No memory/UB errors |
-| Documentation links | ✅ 29 files |
-| Benchmark JSON output | ✅ p50=56ns, p99=71ns |
+|---|---|
+| `ctest` — 5 suites | 624 tests |
+| Full suite on hardware (RTX 2060) under `VK_LAYER_KHRONOS_validation` | 0 diagnostics, 0 leaks |
+| `headless-debug`, `headless-debug-clang`, `asan-ubsan`, `tsan` | green |
+| `live_proof.py all` over real sockets | 64/64 |
+| `cpack` | 353-file package: modules, headers, package configs, shaders, viewport |
 
-## Project Structure
+The Vulkan CI leg is Mesa lavapipe, which has no ray-tracing extensions, so
+every RT test skips there. Hardware RT is verified locally, not in CI.
+
+## Layout
 
 ```
-include/engine/core/          — 6 verified core headers
-include/engine/render/        — 7 rendering headers (complete pipeline)
-src/engine/core/              — 1 engine implementation
-src/engine/render/            — 6 Vulkan implementations
-tests/unit/                   — Unit tests (Google Test)
-tests/performance/            — Benchmark (JSON output)
-tests/archive/                — Archived legacy subsystem tests
-legacy/archive/               — Archived legacy code (138 files)
-.github/workflows/            — CI matrix (debug, release, TSan, ASan, docs)
+modules/            the five libraries + the aggregate, each a CMake package
+examples/viewport/  the windowed application (XCB + Vulkan)
+tools/              headless control host used by the live-proof harness
+assets/shaders/     73 GLSL sources, compiled by cmake/Shaders.cmake
+tests/              suites, module fixtures, the live-proof harness
+cmake/              build system: presets live in CMakePresets.json
+docs/               architecture, roadmap, capability status
 ```
+
+## Licence
+
+MIT — see [`LICENSE`](LICENSE).

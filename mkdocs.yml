@@ -1,12 +1,11 @@
-site_name: OmniCppLib Documentation
-site_description: Documentation for OmniCppLib, a C++ template project
-site_author: Your Organization
-site_url: https://your-org.github.io/your-repo
+site_name: Warploom
+site_description: >-
+  Warploom: a data-oriented C++ engine with deterministic simulation,
+  Vulkan rendering, and a time-warp editor.
+site_author: Warploom contributors
 
-repo_url: https://github.com/your-org/your-repo
-repo_name: your-org/your-repo
-
-copyright: Copyright &copy; 2024 Your Organization
+repo_url: https://github.com/WyattAu/OmniCPP-template
+repo_name: OmniCPP-template
 
 theme:
   name: material
@@ -47,7 +46,7 @@ plugins:
       enable_creation_date: true
       type: timeago
   - git-committers:
-      repository: your-org/your-repo
+      repository: WyattAu/OmniCPP-template
       branch: main
 
 markdown_extensions:
@@ -102,17 +101,51 @@ nav:
   - Home: index.md
   - Getting Started:
       - Installation: getting-started/installation.md
-      - Quick Start: getting-started/quick-start.md
-  - API Documentation:
+      - Quick Start: guides/quick_start.md
+  - Capability and Status:
+      - Rendering status (engine vs app vs proof): rendering-status.md
+      - Roadmap: roadmap.md
+      - Replay format: replay-format.md
+      - GPU-driven rendering: gpu-driven-rendering.md
+      - Scale benchmark: scale-benchmark.md
+  - Architecture:
+      - Developer guide: developer-guide.md
+      - API documentation: api-documentation.md
+      - Modules and rename: rename-and-modules.md
+      - Module extraction plans:
+          - warploom-core-plan.md
+          - warploom-render-plan.md
+          - warploom-asset-plan.md
+          - warploom-editor-plan.md
+          - warploom-engine-plan.md
+          - warploom-identity-plan.md
+          - warploom-timeline-plan.md
+          - warploom-clip-timeline-view-plan.md
+  - Guides:
+      - Game engine: user-guide-game-engine.md
+      - Build system: user-guide-build-system.md
+      - Vulkan rendering: vulkan-rendering.md
+      - Nix development: nix-development.md
+      - WASM builds: wasm-builds.md
+      - Migration guide: migration-guide.md
+  - Platform Builds:
+      - Linux: linux-builds.md
+      - MSVC: msvc-builds.md
+      - MinGW: mingw-builds.md
+      - CachyOS: cachyos-builds.md
+      - VS Code on Linux: vscode-linux-setup.md
+  - Troubleshooting:
+      - Overview: troubleshooting.md
+      - Guide: troubleshooting-guide.md
+      - Linux: linux-troubleshooting.md
+      - llvmpipe viewport JIT issue: llvmpipe-viewport-jit-issue.md
+      - Compiler detection: compiler-detection.md
+  - FAQ:
+      - index.md
+      - Build questions: faq/build-questions.md
+      - Common questions: faq/common-questions.md
+      - Performance: faq/performance-questions.md
+  - API:
       - Overview: api/overview.md
-      - Modules:
-          - Math Module: api/modules/math.md
-          - String Utils Module: api/modules/string-utils.md
-  - Development:
-      - Building: development/building.md
-      - Testing: development/testing.md
-      - C++23 Modules Guide: development/cpp23-modules.md
-      - Contributing: development/contributing.md
   - About:
       - License: about/license.md
-      - Changelog: about/changelog.md

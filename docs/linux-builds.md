@@ -1,5 +1,12 @@
 # Linux Builds
 
+> **Note**
+> Parts of this page describe the pre-0.1 Conan and direnv setup, which has
+> been retired. The engine's only third-party dependency is GoogleTest,
+> fetched by CPM; `conan/` no longer exists. See the README for the current
+> build path.
+
+
 This document outlines requirements and expected behavior for Linux builds in OmniCpp project.
 
 ## Overview
@@ -8,7 +15,7 @@ Linux builds have been significantly enhanced with the following new features:
 
 - **Nix Package Manager Integration** - Reproducible development environments with [`flake.nix`](../flake.nix:1) and [`flake.lock`](../flake.lock:1)
 - **CachyOS Primary Target** - Performance-optimized builds for CachyOS with custom compiler flags
-- **Direnv Integration** - Automatic environment loading with [`.envrc`](../.envrc:1)
+- **Direnv Integration** - Automatic environment loading with an `.envrc` you create yourself
 - **Enhanced Conan Profiles** - Linux-specific profiles for GCC 13 and Clang 19
 - **CMake Presets** - Linux-specific CMake presets for GCC and Clang
 - **VSCode Linux Configuration** - Platform-specific tasks and debug configurations
