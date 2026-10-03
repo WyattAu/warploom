@@ -18,7 +18,7 @@ cmake_minimum_required(VERSION 3.28...4.0)
 # warploom/asset/*.hpp; the compat forwarders are gone.
 # ============================================================================
 
-project(WarploomAsset VERSION 0.1.0 LANGUAGES CXX)
+project(WarploomAsset VERSION ${WARPLOOM_VERSION} LANGUAGES CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)

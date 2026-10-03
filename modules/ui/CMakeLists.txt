@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 3.28...4.0)
 # Standalone: find_package(WarploomUI CONFIG REQUIRED) after installation.
 # ============================================================================
 
-project(WarploomUI VERSION 0.1.0 LANGUAGES CXX)
+project(WarploomUI VERSION ${WARPLOOM_VERSION} LANGUAGES CXX)
 
 option(WARPLOOM_UI_BUILD_TESTS "Build warploom-ui module tests" ON)
 

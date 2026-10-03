@@ -7,8 +7,13 @@
 # ============================================================================
 
 cmake_minimum_required(VERSION 3.28...4.0)
+
+# The one place the version is written down. Every module and the CPack
+# package read it. Override with -DWARPLOOM_VERSION=x.y.z (release.yml does).
+set(WARPLOOM_VERSION "0.1.0" CACHE STRING "Warploom version")
+
 project(Warploom
-    VERSION 1.0.0
+    VERSION ${WARPLOOM_VERSION}
     DESCRIPTION "Warploom - deterministic simulation + node-based editor engine"
     LANGUAGES CXX
 )

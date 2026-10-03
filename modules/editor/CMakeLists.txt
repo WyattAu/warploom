@@ -18,7 +18,7 @@ cmake_minimum_required(VERSION 3.28...4.0)
 # warploom/editor/*.hpp; the compat forwarders are gone.
 # ============================================================================
 
-project(WarploomEditor VERSION 0.1.0 LANGUAGES CXX)
+project(WarploomEditor VERSION ${WARPLOOM_VERSION} LANGUAGES CXX)
 
 option(WARPLOOM_EDITOR_BUILD_TESTS "Build warploom-editor module tests" ON)
 

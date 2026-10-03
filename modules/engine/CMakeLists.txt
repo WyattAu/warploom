@@ -19,7 +19,7 @@ cmake_minimum_required(VERSION 3.28...4.0)
 # is S5-B (docs/warploom-engine-plan.md §6).
 # ============================================================================
 
-project(WarploomEngine VERSION 0.1.0 LANGUAGES CXX)
+project(WarploomEngine VERSION ${WARPLOOM_VERSION} LANGUAGES CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)

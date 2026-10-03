@@ -14,7 +14,7 @@ set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_DESCRIPTION ${PROJECT_DESCRIPTION})
 set(CPACK_PACKAGE_VENDOR "OmniCpp")
-set(CPACK_PACKAGE_CONTACT "support@omnicpp.com")
+set(CPACK_PACKAGE_CONTACT "maintainers@github.com")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/omnicpp/omnicpp-template")
 set(CPACK_PACKAGE_LICENSE_FILE "${CMAKE_SOURCE_DIR}/LICENSE")
 
@@ -85,10 +85,13 @@ if(WARPLOOM_PLATFORM_WINDOWS)
     set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 
     # WIX configuration
-    set(CPACK_WIX_UPGRADE_GUID "YOUR-GUID-HERE")
-    set(CPACK_WIX_LICENSE_RTF "${CMAKE_SOURCE_DIR}/LICENSE.rtf")
-    set(CPACK_WIX_UI_BANNER "${CMAKE_SOURCE_DIR}/assets/banner.bmp")
-    set(CPACK_WIX_UI_DIALOG "${CMAKE_SOURCE_DIR}/assets/dialog.bmp")
+    # A real upgrade GUID is required; the template placeholder
+    # "YOUR-GUID-HERE" is not a GUID and WiX refused to generate.
+    set(CPACK_WIX_UPGRADE_GUID "6f2b8c14-9a3d-4f27-9b6e-1c0a5d3e7f48")
+    # The banner/dialog/license artwork this block referenced
+    # (assets/banner.bmp, assets/dialog.bmp, LICENSE.rtf) does not exist in
+    # the tree, and CPack treats a missing file as a hard error. Add the
+    # assets and these lines back if branded installers are ever wanted.
 
 elseif(WARPLOOM_PLATFORM_LINUX)
     # Linux-specific configuration
@@ -106,7 +109,8 @@ elseif(WARPLOOM_PLATFORM_MACOS)
     # macOS-specific configuration
     set(CPACK_DRAGNDROP_COMPONENTS "Runtime")
     set(CPACK_MACOSX_BUNDLE_NAME "${PROJECT_NAME}.app")
-    set(CPACK_MACOSX_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/assets/icon.icns")
+    # No icon: assets/icon.icns is not in the tree.
+    # set(CPACK_MACOSX_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/assets/icon.icns")
 
 elseif(WARPLOOM_PLATFORM_WASM)
     # WASM-specific configuration

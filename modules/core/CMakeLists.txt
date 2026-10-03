@@ -15,7 +15,7 @@ cmake_minimum_required(VERSION 3.28...4.0)
 # names the real path, so the superproject has no include shim at all.
 # ============================================================================
 
-project(WarploomCore VERSION 0.1.0 LANGUAGES CXX)
+project(WarploomCore VERSION ${WARPLOOM_VERSION} LANGUAGES CXX)
 
 option(WARPLOOM_CORE_BUILD_TESTS "Build warploom-core module tests" ON)
 

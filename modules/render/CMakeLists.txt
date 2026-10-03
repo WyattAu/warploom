@@ -19,7 +19,7 @@ cmake_minimum_required(VERSION 3.28...4.0)
 # warploom/render/*.hpp; the compat forwarders are gone.
 # ============================================================================
 
-project(WarploomRender VERSION 0.1.0 LANGUAGES CXX)
+project(WarploomRender VERSION ${WARPLOOM_VERSION} LANGUAGES CXX)
 
 # S3: honor the superproject's Vulkan switch (headless legs build with
 # WARPLOOM_USE_VULKAN=OFF and must stay GPU-free); standalone default ON.

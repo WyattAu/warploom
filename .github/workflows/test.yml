@@ -20,6 +20,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
       - name: Install toolchain
         run: |
           sudo apt-get update
@@ -49,6 +59,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
       - name: Install toolchain
         run: |
           sudo apt-get update
@@ -72,6 +92,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
       - name: Install toolchain
         run: |
           sudo apt-get update
@@ -94,6 +124,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
 
       - name: Install toolchain
         run: |
@@ -120,6 +160,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
       - name: Install toolchain
         run: |
           sudo apt-get update
@@ -142,6 +192,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
 
       - name: Install toolchain + Vulkan stack
         run: |
@@ -174,6 +234,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
 
       - name: Install toolchain
         run: |
@@ -209,5 +279,97 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
       - name: Check docs links
         run: python3 scripts/check_docs_links.py
+
+  # ============================================================================
+  # Examples — builds the viewport, the one user-facing artifact.
+  #
+  # Every other job sets WARPLOOM_BUILD_EXAMPLES=OFF, so a 5,500-line
+  # translation unit that is the engine's only real application had never been
+  # compiled by CI. It also proves the shader pipeline (cmake/Shaders.cmake)
+  # runs from a clean checkout: the .spv output directory is the build root,
+  # not somewhere under tests/.
+  #
+  # It builds here; it cannot present, because lavapipe has no window. The
+  # viewport binary is uploaded so the build is verifiable by artifact.
+  # ============================================================================
+  examples:
+    name: "Viewport builds"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: Install toolchain + Vulkan stack + shader compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang python3 \
+            libvulkan-dev glslang-tools mesa-vulkan-drivers \
+            libx11-dev libxcb1-dev pkg-config
+
+      - name: Configure
+        run: cmake --preset default
+
+      - name: Build (compiles all 73 shaders into the build root)
+        run: cmake --build build/default -j$(nproc)
+
+      - name: Assert the viewport and its shaders exist
+        run: |
+          test -x build/default/bin/warploom_viewport
+          n=$(ls build/default/shaders/*.spv | wc -l)
+          echo "compiled shaders: $n"
+          test "$n" -ge 70
+
+      - name: Upload the viewport binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: warploom-viewport
+          path: build/default/bin/warploom_viewport
+          retention-days: 7
+
+  # ============================================================================
+  # Presets — the documented entry points must actually configure.
+  #
+  # cmake --preset default used to abort on a hardcoded /nix/store Qt6_DIR,
+  # which is the command a new contributor runs first. Cheap to check, so it
+  # is checked on every push.
+  # ============================================================================
+  presets:
+    name: "Presets are usable"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang python3
+
+      - name: Every visible preset lists
+        run: |
+          cmake --list-presets
+          cmake --build --list-presets
+          ctest --list-presets
+
+      - name: default configures and builds
+        run: |
+          cmake --preset default
+          cmake --build build/default -j$(nproc)
+          ctest --test-dir build/default --output-on-failure --timeout 300
