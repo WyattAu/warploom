@@ -36,7 +36,9 @@ public:
 
   [[nodiscard]] ::warploom::core::Result<void> create_render_pass(VkDevice device);
   [[nodiscard]] ::warploom::core::Result<void> create_framebuffer(VkDevice device);
-  void cleanup(VkDevice device) noexcept;
+  //! Release every handle. Pass a real VkDevice (or omit it and use the
+  //! recorded one) -- a null device is a no-op that leaks.
+  void cleanup(VkDevice device = VK_NULL_HANDLE) noexcept;
 
   [[nodiscard]] VkImage image() const noexcept { return image_; }
   [[nodiscard]] VkImageView image_view() const noexcept { return image_view_; }
@@ -57,6 +59,12 @@ public:
   }
 
 private:
+  //! Device that owns every handle below. Recorded on first use so the
+  //! destructor can actually release them -- VulkanOffscreenTarget used to
+  //! call cleanup(VK_NULL_HANDLE), and cleanup() ignores a null device, so
+  //! every offscreen target leaked its image, views, render pass and
+  //! framebuffer until the device was destroyed.
+  VkDevice device_{VK_NULL_HANDLE};
   VkImage image_{VK_NULL_HANDLE};
   VkDeviceMemory memory_{VK_NULL_HANDLE};
   // Owns the image binding when created through a VulkanMemoryAllocator.

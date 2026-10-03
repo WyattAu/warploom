@@ -513,7 +513,7 @@ struct RtShadowHarness {
              .is_ok() ||
         !shadow_pipe.create_graphics_pipeline(ctx.device(), shadow_rp,
             VK_FORMAT_D32_SFLOAT, shadow_pipe.pipeline_layout(), true, true,
-            true, /*depth_bias_slope=*/8.0f).is_ok()) {
+            true, /*depth_bias_slope=*/8.0f, /*dynamic_depth_bias=*/true).is_ok()) {
       return false;
     }
     return true;

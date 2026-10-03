@@ -3180,7 +3180,9 @@ bool setup_lighting(ViewportApp& app) {
                                      VK_FORMAT_D32_SFLOAT,
                                      app.shadow_pipeline_static.pipeline_layout(),
                                      /*depth_test=*/true,
-                                     /*depth_write=*/true, /*cull=*/false)
+                                     /*depth_write=*/true, /*cull=*/false,
+                                     /*depth_bias_slope=*/0.0f,
+                                     /*dynamic_depth_bias=*/true)
            .is_ok()) {
     std::fprintf(stderr, "viewport: static shadow pipeline failed\n");
     std::fprintf(stderr, "viewport: setup_lighting failed at line 1265\n"); return false;
@@ -3268,7 +3270,9 @@ bool setup_lighting(ViewportApp& app) {
                                        VK_FORMAT_D32_SFLOAT,
                                        app.shadow_pipeline_skinned.pipeline_layout(),
                                        /*depth_test=*/true,
-                                       /*depth_write=*/true, /*cull=*/false)
+                                       /*depth_write=*/true, /*cull=*/false,
+                                       /*depth_bias_slope=*/0.0f,
+                                       /*dynamic_depth_bias=*/true)
              .is_ok()) {
       std::fprintf(stderr, "viewport: skinned shadow pipeline failed\n");
       std::fprintf(stderr, "viewport: setup_lighting failed at line 1293\n"); return false;
@@ -4010,6 +4014,11 @@ bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
     push.joint_base = object.joint_base;
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       pipe.pipeline());
+    // Slope-scaled depth bias, recorded once per draw after the bind. The
+    // shadow pipelines declare VK_DYNAMIC_STATE_DEPTH_BIAS, and the shader's
+    // own fixed PCF bias alone was not enough to keep large, near-grazing
+    // ground surfaces free of acne.
+    vkCmdSetDepthBias(command_buffer, 2.0f, 0.0f, 4.0f);
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipe.pipeline_layout(), 0, 1,
                             &object.mesh->descriptor_set, 0, nullptr);

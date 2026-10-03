@@ -106,11 +106,15 @@ void build_bar(float height, std::vector<float>& vertices,
 }
 
 //! 1x1 opaque-white R8G8B8A8 texture (bindless element 0 fallback).
+//! \param out_image receives the VkImage handle. The caller MUST destroy it:
+//! the allocation only owns the backing memory, so a caller that keeps the
+//! view/sampler/alloc triple alone leaks the image until vkDestroyDevice.
 bool make_white_texture(VkDevice device, VkPhysicalDevice physical_device,
                         VkQueue queue, std::uint32_t queue_family,
                         omnicpp::render::VulkanMemoryAllocator& allocator,
                         VkImageView& out_view, VkSampler& out_sampler,
-                        omnicpp::render::Allocation& out_alloc) {
+                        omnicpp::render::Allocation& out_alloc,
+                        VkImage& out_image) {
   VkImage image = VK_NULL_HANDLE;
   VkImageCreateInfo ii{};
   ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -155,6 +159,7 @@ bool make_white_texture(VkDevice device, VkPhysicalDevice physical_device,
     return false;
   }
   out_alloc = image_mem;
+  out_image = image;
 
   auto pool = omnicpp::render::VulkanRenderer::create_command_pool(device,
                                                                    queue_family);
@@ -393,10 +398,12 @@ TEST(VulkanHardware, GpuDrivenCullWritesIndirectCommands) {
   ASSERT_TRUE(tex_set.is_ok());
   VkImageView white_view = VK_NULL_HANDLE;
   VkSampler white_sampler = VK_NULL_HANDLE;
+  VkImage white_image = VK_NULL_HANDLE;
   omnicpp::render::Allocation white_alloc{};
   ASSERT_TRUE(make_white_texture(context.device(), context.physical_device(),
                                  context.graphics_queue(), qf, allocator,
-                                 white_view, white_sampler, white_alloc));
+                                 white_view, white_sampler, white_alloc,
+                                 white_image));
   ASSERT_TRUE(descriptors
                   .write_image(tex_set.value(), 0U,
                                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -672,6 +679,11 @@ TEST(VulkanHardware, GpuDrivenCullWritesIndirectCommands) {
   if (white_alloc.is_valid()) {
     allocator.destroy_allocation(white_alloc);
   }
+  if (white_image != VK_NULL_HANDLE) {
+    vkDestroyImage(context.device(), white_image, nullptr);
+  }
+  // Before the allocator and the device: see test_gpu_driven_ab.cpp.
+  target.cleanup();
   gfx_pipe.cleanup(context.device());
   cull_pipe.cleanup(context.device());
   descriptors.cleanup();

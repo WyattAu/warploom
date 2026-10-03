@@ -130,6 +130,7 @@ omnicpp::render::SceneMatrix mat_mul(const SceneMatrix& a, const SceneMatrix& b)
 }
 
 struct SolidTexture {
+  VkImage image{VK_NULL_HANDLE};
   VkImageView view{VK_NULL_HANDLE};
   VkSampler sampler{VK_NULL_HANDLE};
   omnicpp::render::Allocation allocation{};
@@ -186,6 +187,7 @@ bool make_solid_texture(VkDevice device, VkPhysicalDevice physical_device,
     return false;
   }
   out.allocation = image_mem;
+  out.image = image;
 
   auto pool = omnicpp::render::VulkanRenderer::create_command_pool(device,
                                                                    queue_family);
@@ -262,6 +264,11 @@ void destroy_solid_texture(VkDevice device,
   if (t.allocation.is_valid()) {
     allocator.destroy_allocation(t.allocation);
     t.allocation = {};
+  }
+  // The allocation owns the backing memory, not the image object itself.
+  if (t.image != VK_NULL_HANDLE) {
+    vkDestroyImage(device, t.image, nullptr);
+    t.image = VK_NULL_HANDLE;
   }
 }
 
@@ -674,6 +681,12 @@ TEST(VulkanHardware, GpuDrivenVertexPullMatchesPerDrawPixels) {
       << "vertex-pull driven path must be pixel-identical to per-draw path";
 
   destroy_solid_texture(context.device(), allocator, white);
+  // Offscreen targets first: they return their allocations to the allocator's
+  // free list, and they must be destroyed while the VkDevice is still alive.
+  // Tearing the device down first (as this used to) leaked their images,
+  // views, render pass and framebuffer.
+  target_a.cleanup();
+  target_b.cleanup();
   pipe_b.cleanup(context.device());
   pipe_a.cleanup(context.device());
   descriptors.cleanup();

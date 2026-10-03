@@ -352,7 +352,8 @@ struct ShadowHarness {
     VkPushConstantRange spush{VK_SHADER_STAGE_VERTEX_BIT, 0, 128};
     if (!shadow_pipe.create_pipeline_layout(ctx.device(), solo, 1, &spush).is_ok()||
         !shadow_pipe.create_graphics_pipeline(ctx.device(), shadow_rp,
-            VK_FORMAT_D32_SFLOAT, shadow_pipe.pipeline_layout(), true, false, false).is_ok()) return false;
+            VK_FORMAT_D32_SFLOAT, shadow_pipe.pipeline_layout(), true, false, false,
+            /*depth_bias_slope=*/0.0f, /*dynamic_depth_bias=*/true).is_ok()) return false;
 
     // main pipeline (pbr_shadow.frag, 4 sets, 160-byte push)
     if (!main_pipe.load_shader_stage_file(ctx.device(), sd_path+"/pbr_scene.vert.spv","vertex").is_ok()||

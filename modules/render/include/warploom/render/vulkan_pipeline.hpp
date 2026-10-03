@@ -57,11 +57,17 @@ public:
       bool enable_depth_test = true,
       bool enable_depth_write = true,
       bool enable_backface_cull = true,
-      //! Depth-bias slope factor (shadow-map acne relief). When nonzero the
-      //! pipeline enables depth bias and exposes it as a DYNAMIC state so the
-      //! recorder sets per-draw values with vkCmdSetDepthBias; a zero factor
-      //! leaves the pipeline bias-free and the dynamic state unregistered.
-      float depth_bias_slope = 0.0f);
+      //! Static rasterizer depth-bias slope factor (shadow-map acne relief),
+      //! baked into VkPipelineRasterizationStateCreateInfo::depthBiasSlopeFactor.
+      float depth_bias_slope = 0.0f,
+      //! Declare VK_DYNAMIC_STATE_DEPTH_BIAS on this pipeline. Set this
+      //! whenever the recorder will call vkCmdSetDepthBias: without the
+      //! dynamic state registered, that call is both a validation error
+      //! (VUID-vkCmdDrawIndexed-None-08608) and a silent no-op, so the bias
+      //! it sets never reaches the rasterizer. It is deliberately separate
+      //! from depth_bias_slope above -- a pipeline can carry a static bias,
+      //! a dynamic bias, or both.
+      bool dynamic_depth_bias = false);
 
   //! Create a compute pipeline from the "compute" stage module (load with
   //! load_shader_stage_file(device, path, "compute") first). Requires a

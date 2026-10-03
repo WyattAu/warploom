@@ -7,7 +7,7 @@
 
 namespace warploom::render {
 
-VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(VK_NULL_HANDLE); }
+VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(); }
 
 ::warploom::core::Result<void> VulkanOffscreenTarget::create(
     VkDevice device, VkPhysicalDevice physical_device,
@@ -17,6 +17,7 @@ VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(VK_NULL_HANDLE); }
   if (!device || !physical_device || format == VK_FORMAT_UNDEFINED || width == 0 || height == 0) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
+  device_ = device;
 
   VkImageCreateInfo image_info{};
   image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -110,6 +111,7 @@ VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(VK_NULL_HANDLE); }
 ::warploom::core::Result<void> VulkanOffscreenTarget::create_depth(
     VkDevice device, VkPhysicalDevice physical_device, VkFormat depth_format) {
 #ifdef OMNICPP_HAS_VULKAN
+  device_ = device;
   if (!device || !physical_device || depth_format == VK_FORMAT_UNDEFINED) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -215,6 +217,7 @@ VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(VK_NULL_HANDLE); }
   if (!device || !image_ || render_pass_) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
+  device_ = device;
 
   VkAttachmentDescription color_attachment{};
   color_attachment.format = format_;
@@ -302,6 +305,7 @@ VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(VK_NULL_HANDLE); }
   if (!device || !image_view_ || !render_pass_ || framebuffer_) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
+  device_ = device;
   VkImageView attachment_views[2] = {image_view_, depth_view_};
   VkFramebufferCreateInfo framebuffer_info{};
   framebuffer_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -329,6 +333,9 @@ VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(VK_NULL_HANDLE); }
 
 void VulkanOffscreenTarget::cleanup(VkDevice device) noexcept {
 #ifdef OMNICPP_HAS_VULKAN
+  // Fall back to the device recorded at create() time: the destructor has no
+  // argument to pass.
+  if (device == VK_NULL_HANDLE) device = device_;
   if (device) {
     if (framebuffer_) vkDestroyFramebuffer(device, framebuffer_, nullptr);
     if (render_pass_) vkDestroyRenderPass(device, render_pass_, nullptr);
@@ -370,6 +377,7 @@ void VulkanOffscreenTarget::cleanup(VkDevice device) noexcept {
   format_ = VK_FORMAT_UNDEFINED;
   width_ = 0;
   height_ = 0;
+  device_ = VK_NULL_HANDLE;
 }
 
 } // namespace warploom::render
