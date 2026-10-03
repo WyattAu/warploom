@@ -17,7 +17,6 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "OFF",
-        "WARPLOOM_LEGACY_ENGINE": "OFF",
         "WARPLOOM_BUILD_TESTS": "ON",
         "WARPLOOM_BUILD_EXAMPLES": "OFF",
         "WARPLOOM_USE_VULKAN": "OFF",
@@ -93,29 +92,27 @@
     {
       "name": "default",
       "displayName": "Default Config",
-      "description": "Default build configuration (single build directory)",
-      "binaryDir": "${sourceDir}/build",
+      "description": "Ships the modules, the viewport and the tests with the toolchain CMake finds. Start here if you are not picking a leg. (own build directory)",
+      "binaryDir": "${sourceDir}/build/default",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_CXX_STANDARD": "26",
-        "CMAKE_CXX_FLAGS": "-march=native -g -Wall -Wextra -Wpedantic -U_FORTIFY_SOURCE",
-        "CMAKE_C_FLAGS": "-march=native -g -Wall -Wextra -Wpedantic -U_FORTIFY_SOURCE",
+        "CMAKE_CXX_FLAGS": "-g -Wall -Wextra -Wpedantic -U_FORTIFY_SOURCE",
+        "CMAKE_C_FLAGS": "-g -Wall -Wextra -Wpedantic -U_FORTIFY_SOURCE",
         "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined",
         "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined",
-        "CMAKE_PREFIX_PATH": "/nix/var/nix/profiles/default",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_BUILD_PARALLEL_LEVEL": "$(nproc)",
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "OFF",
+        "WARPLOOM_BUILD_TESTS": "ON",
         "WARPLOOM_BUILD_EXAMPLES": "ON",
         "WARPLOOM_USE_VULKAN": "ON",
-        "WARPLOOM_USE_QT6": "ON",
+        "WARPLOOM_USE_QT6": "OFF",
         "WARPLOOM_USE_OPENGL": "OFF",
         "WARPLOOM_USE_GLFW": "OFF",
-        "WARPLOOM_USE_SPDLOG": "ON",
         "WARPLOOM_USE_GLM": "ON",
         "WARPLOOM_USE_STB": "ON",
         "WARPLOOM_ENABLE_COVERAGE": "OFF",
@@ -123,15 +120,14 @@
         "WARPLOOM_ENABLE_LINTING": "ON",
         "WARPLOOM_USE_CONAN": "OFF",
         "WARPLOOM_USE_VCPKG": "OFF",
-        "WARPLOOM_USE_CPM": "ON",
-        "Qt6_DIR": "/nix/store/kavwy4v9p1jhf952dzipkjj5l1hjx110-qtbase-6.10.1/lib/cmake/Qt6"
+        "WARPLOOM_USE_CPM": "ON"
       }
     },
     {
       "name": "debug",
       "displayName": "Debug",
-      "description": "Debug build (single build directory)",
-      "binaryDir": "${sourceDir}/build",
+      "description": "Debug build (single build directory) (own build directory)",
+      "binaryDir": "${sourceDir}/build/debug",
       "generator": "Ninja",
       "cacheVariables": {
         "WARPLOOM_BUILD_ENGINE": "ON",
@@ -142,7 +138,6 @@
         "WARPLOOM_USE_QT6": "ON",
         "WARPLOOM_USE_OPENGL": "OFF",
         "WARPLOOM_USE_GLFW": "OFF",
-        "WARPLOOM_USE_SPDLOG": "ON",
         "WARPLOOM_USE_GLM": "ON",
         "WARPLOOM_USE_STB": "ON",
         "WARPLOOM_ENABLE_COVERAGE": "OFF",
@@ -151,13 +146,14 @@
         "WARPLOOM_USE_CONAN": "OFF",
         "WARPLOOM_USE_VCPKG": "OFF",
         "WARPLOOM_USE_CPM": "ON"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "release",
       "displayName": "Release",
-      "description": "Release build (single build directory)",
-      "binaryDir": "${sourceDir}/build",
+      "description": "Release build (single build directory) (own build directory)",
+      "binaryDir": "${sourceDir}/build/release",
       "generator": "Ninja",
       "cacheVariables": {
         "WARPLOOM_BUILD_ENGINE": "ON",
@@ -168,7 +164,6 @@
         "WARPLOOM_USE_QT6": "ON",
         "WARPLOOM_USE_OPENGL": "OFF",
         "WARPLOOM_USE_GLFW": "OFF",
-        "WARPLOOM_USE_SPDLOG": "ON",
         "WARPLOOM_USE_GLM": "ON",
         "WARPLOOM_USE_STB": "ON",
         "WARPLOOM_ENABLE_COVERAGE": "OFF",
@@ -176,15 +171,14 @@
         "WARPLOOM_ENABLE_LINTING": "ON",
         "WARPLOOM_USE_CONAN": "OFF",
         "WARPLOOM_USE_VCPKG": "OFF",
-        "WARPLOOM_USE_CPM": "ON",
-        "Qt6_DIR": "/nix/store/kavwy4v9p1jhf952dzipkjj5l1hjx110-qtbase-6.10.1/lib/cmake/Qt6"
+        "WARPLOOM_USE_CPM": "ON"
       }
     },
     {
       "name": "relwithdebinfo",
       "displayName": "RelWithDebInfo",
-      "description": "Release with debug info (single build directory)",
-      "binaryDir": "${sourceDir}/build",
+      "description": "Release with debug info (single build directory) (own build directory)",
+      "binaryDir": "${sourceDir}/build/relwithdebinfo",
       "generator": "Ninja",
       "cacheVariables": {
         "WARPLOOM_BUILD_ENGINE": "ON",
@@ -195,7 +189,6 @@
         "WARPLOOM_USE_QT6": "ON",
         "WARPLOOM_USE_OPENGL": "OFF",
         "WARPLOOM_USE_GLFW": "OFF",
-        "WARPLOOM_USE_SPDLOG": "ON",
         "WARPLOOM_USE_GLM": "ON",
         "WARPLOOM_USE_STB": "ON",
         "WARPLOOM_ENABLE_COVERAGE": "OFF",
@@ -204,13 +197,14 @@
         "WARPLOOM_USE_CONAN": "OFF",
         "WARPLOOM_USE_VCPKG": "OFF",
         "WARPLOOM_USE_CPM": "ON"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "minsizerel",
       "displayName": "MinSizeRel",
-      "description": "Minimum size release (single build directory)",
-      "binaryDir": "${sourceDir}/build",
+      "description": "Minimum size release (single build directory) (own build directory)",
+      "binaryDir": "${sourceDir}/build/minsizerel",
       "generator": "Ninja",
       "cacheVariables": {
         "WARPLOOM_BUILD_ENGINE": "ON",
@@ -221,7 +215,6 @@
         "WARPLOOM_USE_QT6": "ON",
         "WARPLOOM_USE_OPENGL": "OFF",
         "WARPLOOM_USE_GLFW": "OFF",
-        "WARPLOOM_USE_SPDLOG": "ON",
         "WARPLOOM_USE_GLM": "ON",
         "WARPLOOM_USE_STB": "ON",
         "WARPLOOM_ENABLE_COVERAGE": "OFF",
@@ -230,7 +223,8 @@
         "WARPLOOM_USE_CONAN": "OFF",
         "WARPLOOM_USE_VCPKG": "OFF",
         "WARPLOOM_USE_CPM": "ON"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "engine-debug",
@@ -243,7 +237,8 @@
         "WARPLOOM_BUILD_GAME": "OFF",
         "WARPLOOM_BUILD_TESTS": "ON",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "engine-release",
@@ -256,7 +251,8 @@
         "WARPLOOM_BUILD_GAME": "OFF",
         "WARPLOOM_BUILD_TESTS": "OFF",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "game-debug",
@@ -269,7 +265,8 @@
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "game-release",
@@ -282,7 +279,8 @@
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "msvc-debug",
@@ -296,8 +294,11 @@
         "CMAKE_CXX_COMPILER": "cl",
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "ON"
-      }
+        "WARPLOOM_BUILD_TESTS": "ON",
+        "CMAKE_C_COMPILER_LAUNCHER": "cmd /c",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "cmd /c"
+      },
+      "hidden": true
     },
     {
       "name": "msvc-release",
@@ -311,8 +312,11 @@
         "CMAKE_CXX_COMPILER": "cl",
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "CMAKE_C_COMPILER_LAUNCHER": "cmd /c",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "cmd /c"
+      },
+      "hidden": true
     },
     {
       "name": "msvc-relwithdebinfo",
@@ -326,8 +330,11 @@
         "CMAKE_CXX_COMPILER": "cl",
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "CMAKE_C_COMPILER_LAUNCHER": "cmd /c",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "cmd /c"
+      },
+      "hidden": true
     },
     {
       "name": "msvc-minsizerel",
@@ -341,8 +348,11 @@
         "CMAKE_CXX_COMPILER": "cl",
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+        "WARPLOOM_BUILD_TESTS": "OFF",
+        "CMAKE_C_COMPILER_LAUNCHER": "cmd /c",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "cmd /c"
+      },
+      "hidden": true
     },
     {
       "name": "msvc-clang-debug",
@@ -357,7 +367,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "ON"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "msvc-clang-release",
@@ -372,7 +383,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "msvc-clang-relwithdebinfo",
@@ -387,7 +399,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "msvc-clang-minsizerel",
@@ -402,7 +415,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "mingw-gcc-debug",
@@ -417,7 +431,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "ON"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "mingw-gcc-release",
@@ -432,7 +447,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "mingw-gcc-relwithdebinfo",
@@ -447,7 +463,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "mingw-gcc-minsizerel",
@@ -462,7 +479,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "mingw-clang-debug",
@@ -477,7 +495,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "ON"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "mingw-clang-release",
@@ -492,7 +511,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "mingw-clang-relwithdebinfo",
@@ -507,7 +527,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "mingw-clang-minsizerel",
@@ -522,13 +543,14 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "gcc-debug",
       "displayName": "GCC Debug",
-      "description": "Debug build with GCC compiler (single build directory)",
-      "binaryDir": "${sourceDir}/build",
+      "description": "Debug build with GCC compiler (single build directory) (own build directory)",
+      "binaryDir": "${sourceDir}/build/gcc-debug",
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -537,13 +559,14 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "ON"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "gcc-release",
       "displayName": "GCC Release",
-      "description": "Release build with GCC compiler (single build directory)",
-      "binaryDir": "${sourceDir}/build",
+      "description": "Release build with GCC compiler (single build directory) (own build directory)",
+      "binaryDir": "${sourceDir}/build/gcc-release",
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
@@ -552,7 +575,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "gcc-relwithdebinfo",
@@ -567,7 +591,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "gcc-minsizerel",
@@ -582,13 +607,14 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "clang-debug",
       "displayName": "Clang Debug",
-      "description": "Debug build with Clang compiler (single build directory)",
-      "binaryDir": "${sourceDir}/build",
+      "description": "Debug build with Clang compiler (single build directory) (own build directory)",
+      "binaryDir": "${sourceDir}/build/clang-debug",
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -597,13 +623,14 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "ON"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "clang-release",
       "displayName": "Clang Release",
-      "description": "Release build with Clang compiler (single build directory)",
-      "binaryDir": "${sourceDir}/build",
+      "description": "Release build with Clang compiler (single build directory) (own build directory)",
+      "binaryDir": "${sourceDir}/build/clang-release",
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
@@ -612,7 +639,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "clang-relwithdebinfo",
@@ -627,7 +655,8 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "clang-minsizerel",
@@ -642,13 +671,14 @@
         "WARPLOOM_BUILD_ENGINE": "ON",
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-debug",
       "displayName": "Nix Debug",
-      "description": "Debug build with Nix environment (GCC 13 or Clang 19)",
-      "binaryDir": "${sourceDir}/build",
+      "description": "Debug build with Nix environment (GCC 13 or Clang 19) (own build directory)",
+      "binaryDir": "${sourceDir}/build/nix-debug",
       "generator": "Ninja",
       "cacheVariables": {
         "WARPLOOM_BUILD_ENGINE": "ON",
@@ -659,7 +689,6 @@
         "WARPLOOM_USE_QT6": "ON",
         "WARPLOOM_USE_OPENGL": "OFF",
         "WARPLOOM_USE_GLFW": "OFF",
-        "WARPLOOM_USE_SPDLOG": "ON",
         "WARPLOOM_USE_GLM": "ON",
         "WARPLOOM_USE_STB": "ON",
         "WARPLOOM_USE_NLOHMANN_JSON": "ON",
@@ -669,13 +698,14 @@
         "WARPLOOM_USE_CONAN": "OFF",
         "WARPLOOM_USE_VCPKG": "OFF",
         "WARPLOOM_USE_CPM": "ON"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-release",
       "displayName": "Nix Release",
-      "description": "Release build with Nix environment (GCC 13 or Clang 19)",
-      "binaryDir": "${sourceDir}/build",
+      "description": "Release build with Nix environment (GCC 13 or Clang 19) (own build directory)",
+      "binaryDir": "${sourceDir}/build/nix-release",
       "generator": "Ninja",
       "cacheVariables": {
         "WARPLOOM_BUILD_ENGINE": "ON",
@@ -686,7 +716,6 @@
         "WARPLOOM_USE_QT6": "ON",
         "WARPLOOM_USE_OPENGL": "OFF",
         "WARPLOOM_USE_GLFW": "OFF",
-        "WARPLOOM_USE_SPDLOG": "ON",
         "WARPLOOM_USE_GLM": "ON",
         "WARPLOOM_USE_STB": "ON",
         "WARPLOOM_USE_NLOHMANN_JSON": "ON",
@@ -696,175 +725,8 @@
         "WARPLOOM_USE_CONAN": "OFF",
         "WARPLOOM_USE_VCPKG": "OFF",
         "WARPLOOM_USE_CPM": "ON"
-      }
-    },
-    {
-      "name": "cachyos-gcc-debug",
-      "displayName": "CachyOS-GCC Debug",
-      "description": "Debug build with CachyOS GCC 13 compiler",
-      "binaryDir": "${sourceDir}/build",
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_C_COMPILER": "gcc",
-        "CMAKE_CXX_COMPILER": "g++",
-        "CMAKE_CXX_STANDARD": "26",
-        "CMAKE_CXX_FLAGS": "-march=native -g -Wall -Wextra -Wpedantic",
-        "CMAKE_C_FLAGS": "-march=native -g -Wall -Wextra -Wpedantic",
-        "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined",
-        "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined",
-        "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "ON",
-        "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
-    },
-    {
-      "name": "cachyos-gcc-release",
-      "displayName": "CachyOS-GCC Release",
-      "description": "Release build with CachyOS GCC 13 compiler with performance optimizations",
-      "binaryDir": "${sourceDir}/build/cachyos-gcc/release",
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_C_COMPILER": "gcc",
-        "CMAKE_CXX_COMPILER": "g++",
-        "CMAKE_CXX_STANDARD": "26",
-        "CMAKE_CXX_FLAGS": "-march=native -O3 -flto -DNDEBUG -Wall -Wextra -Wpedantic",
-        "CMAKE_C_FLAGS": "-march=native -O3 -flto -DNDEBUG -Wall -Wextra -Wpedantic",
-        "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-        "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-        "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "OFF",
-        "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
-    },
-    {
-      "name": "cachyos-gcc-relwithdebinfo",
-      "displayName": "CachyOS-GCC RelWithDebInfo",
-      "description": "Release with debug info build with CachyOS GCC 13 compiler",
-      "binaryDir": "${sourceDir}/build/cachyos-gcc/relwithdebinfo",
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_C_COMPILER": "gcc",
-        "CMAKE_CXX_COMPILER": "g++",
-        "CMAKE_CXX_STANDARD": "26",
-        "CMAKE_CXX_FLAGS": "-march=native -O2 -g -flto -Wall -Wextra -Wpedantic",
-        "CMAKE_C_FLAGS": "-march=native -O2 -g -flto -Wall -Wextra -Wpedantic",
-        "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-        "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-        "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "OFF",
-        "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
-    },
-    {
-      "name": "cachyos-gcc-minsizerel",
-      "displayName": "CachyOS-GCC MinSizeRel",
-      "description": "Minimum size release build with CachyOS GCC 13 compiler",
-      "binaryDir": "${sourceDir}/build/cachyos-gcc/minsizerel",
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "MinSizeRel",
-        "CMAKE_C_COMPILER": "gcc",
-        "CMAKE_CXX_COMPILER": "g++",
-        "CMAKE_CXX_STANDARD": "26",
-        "CMAKE_CXX_FLAGS": "-march=native -Os -flto -DNDEBUG -Wall -Wextra -Wpedantic",
-        "CMAKE_C_FLAGS": "-march=native -Os -flto -DNDEBUG -Wall -Wextra -Wpedantic",
-        "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto -Wl,-s",
-        "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto -Wl,-s",
-        "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "OFF",
-        "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
-    },
-    {
-      "name": "cachyos-clang-debug",
-      "displayName": "CachyOS-Clang Debug",
-      "description": "Debug build with CachyOS Clang 19 compiler (single build directory)",
-      "binaryDir": "${sourceDir}/build",
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
-        "CMAKE_CXX_STANDARD": "26",
-        "CMAKE_CXX_FLAGS": "-march=native -g -Wall -Wextra -Wpedantic",
-        "CMAKE_C_FLAGS": "-march=native -g -Wall -Wextra -Wpedantic",
-        "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined",
-        "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined",
-        "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "ON",
-        "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
-    },
-    {
-      "name": "cachyos-clang-release",
-      "displayName": "CachyOS-Clang Release",
-      "description": "Release build with CachyOS Clang 19 compiler with performance optimizations",
-      "binaryDir": "${sourceDir}/build/cachyos-clang/release",
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
-        "CMAKE_CXX_STANDARD": "26",
-        "CMAKE_CXX_FLAGS": "-march=native -O3 -flto -DNDEBUG -Wall -Wextra -Wpedantic",
-        "CMAKE_C_FLAGS": "-march=native -O3 -flto -DNDEBUG -Wall -Wextra -Wpedantic",
-        "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-        "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-        "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "OFF",
-        "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
-    },
-    {
-      "name": "cachyos-clang-relwithdebinfo",
-      "displayName": "CachyOS-Clang RelWithDebInfo",
-      "description": "Release with debug info build with CachyOS Clang 19 compiler",
-      "binaryDir": "${sourceDir}/build/cachyos-clang/relwithdebinfo",
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
-        "CMAKE_CXX_STANDARD": "26",
-        "CMAKE_CXX_FLAGS": "-march=native -O2 -g -flto -Wall -Wextra -Wpedantic",
-        "CMAKE_C_FLAGS": "-march=native -O2 -g -flto -Wall -Wextra -Wpedantic",
-        "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-        "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-        "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "OFF",
-        "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
-    },
-    {
-      "name": "cachyos-clang-minsizerel",
-      "displayName": "CachyOS-Clang MinSizeRel",
-      "description": "Minimum size release build with CachyOS Clang 19 compiler",
-      "binaryDir": "${sourceDir}/build/cachyos-clang/minsizerel",
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "MinSizeRel",
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
-        "CMAKE_CXX_STANDARD": "26",
-        "CMAKE_CXX_FLAGS": "-march=native -Os -flto -DNDEBUG -Wall -Wextra -Wpedantic",
-        "CMAKE_C_FLAGS": "-march=native -Os -flto -DNDEBUG -Wall -Wextra -Wpedantic",
-        "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto -Wl,-s",
-        "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto -Wl,-s",
-        "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "OFF",
-        "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "wasm-debug",
@@ -878,7 +740,8 @@
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "wasm-release",
@@ -892,7 +755,8 @@
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "wasm-relwithdebinfo",
@@ -906,7 +770,8 @@
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "wasm-minsizerel",
@@ -920,7 +785,8 @@
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "linux-x86_64-debug",
@@ -934,7 +800,8 @@
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "ON",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "linux-x86_64-release",
@@ -948,7 +815,8 @@
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "linux-arm64-debug",
@@ -962,7 +830,8 @@
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "ON",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "linux-arm64-release",
@@ -976,35 +845,8 @@
         "WARPLOOM_BUILD_GAME": "ON",
         "WARPLOOM_BUILD_TESTS": "OFF",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
-    },
-    {
-      "name": "windows-arm64-debug",
-      "displayName": "Windows ARM64 Debug",
-      "description": "Debug build for Windows ARM64",
-      "binaryDir": "${sourceDir}/build/windows/arm64/debug",
-      "toolchainFile": "${sourceDir}/cmake/toolchains/arm64-windows-msvc.cmake",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "ON",
-        "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
-    },
-    {
-      "name": "windows-arm64-release",
-      "displayName": "Windows ARM64 Release",
-      "description": "Release build for Windows ARM64",
-      "binaryDir": "${sourceDir}/build/windows/arm64/release",
-      "toolchainFile": "${sourceDir}/cmake/toolchains/arm64-windows-msvc.cmake",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
-        "WARPLOOM_BUILD_TESTS": "OFF",
-        "WARPLOOM_BUILD_EXAMPLES": "OFF"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-gcc-debug",
@@ -1033,7 +875,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-gcc-release",
@@ -1062,7 +905,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-gcc-relwithdebinfo",
@@ -1091,7 +935,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-gcc-minsizerel",
@@ -1120,7 +965,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-clang-debug",
@@ -1149,7 +995,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-clang-release",
@@ -1178,7 +1025,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-clang-relwithdebinfo",
@@ -1207,7 +1055,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-clang-minsizerel",
@@ -1236,7 +1085,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-cachyos-gcc-debug",
@@ -1269,7 +1119,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-cachyos-gcc-release",
@@ -1302,7 +1153,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-cachyos-gcc-relwithdebinfo",
@@ -1335,7 +1187,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-cachyos-gcc-minsizerel",
@@ -1368,7 +1221,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-cachyos-clang-debug",
@@ -1401,7 +1255,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-cachyos-clang-release",
@@ -1434,7 +1289,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-cachyos-clang-relwithdebinfo",
@@ -1467,7 +1323,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-cachyos-clang-minsizerel",
@@ -1500,7 +1357,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-qt6-vulkan-debug",
@@ -1535,7 +1393,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     },
     {
       "name": "nix-qt6-vulkan-release",
@@ -1573,7 +1432,8 @@
         "type": "equals",
         "lhs": "$penv{IN_NIX_SHELL}",
         "rhs": "1"
-      }
+      },
+      "hidden": true
     }
   ],
   "buildPresets": [
@@ -1778,16 +1638,6 @@
       "displayName": "Linux ARM64 Release Build"
     },
     {
-      "name": "windows-arm64-debug",
-      "configurePreset": "windows-arm64-debug",
-      "displayName": "Windows ARM64 Debug Build"
-    },
-    {
-      "name": "windows-arm64-release",
-      "configurePreset": "windows-arm64-release",
-      "displayName": "Windows ARM64 Release Build"
-    },
-    {
       "name": "nix-gcc-debug",
       "configurePreset": "nix-gcc-debug",
       "displayName": "Nix GCC Debug Build"
@@ -1881,6 +1731,40 @@
       "name": "vulkan-validation",
       "configurePreset": "vulkan-validation",
       "displayName": "Vulkan Validation Build"
+    },
+    {
+      "name": "headless-debug",
+      "configurePreset": "headless-debug"
+    },
+    {
+      "name": "headless-debug-clang",
+      "configurePreset": "headless-debug-clang"
+    },
+    {
+      "name": "asan-ubsan",
+      "configurePreset": "asan-ubsan"
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan"
+    },
+    {
+      "name": "headless-release",
+      "configurePreset": "headless-release"
+    },
+    {
+      "name": "default",
+      "configurePreset": "default"
+    },
+    {
+      "name": "nix-debug",
+      "configurePreset": "nix-debug",
+      "hidden": true
+    },
+    {
+      "name": "nix-release",
+      "configurePreset": "nix-release",
+      "hidden": true
     }
   ],
   "testPresets": [
@@ -1894,6 +1778,176 @@
       "output": {
         "outputOnFailure": true
       }
+    },
+    {
+      "name": "headless-debug",
+      "configurePreset": "headless-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "headless-debug-clang",
+      "configurePreset": "headless-debug-clang",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "asan-ubsan",
+      "configurePreset": "asan-ubsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "headless-release",
+      "configurePreset": "headless-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "default",
+      "configurePreset": "default",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "engine-debug",
+      "configurePreset": "engine-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "msvc-debug",
+      "configurePreset": "msvc-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "msvc-clang-debug",
+      "configurePreset": "msvc-clang-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "mingw-gcc-debug",
+      "configurePreset": "mingw-gcc-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "mingw-clang-debug",
+      "configurePreset": "mingw-clang-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "gcc-debug",
+      "configurePreset": "gcc-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "clang-debug",
+      "configurePreset": "clang-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "nix-debug",
+      "configurePreset": "nix-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "linux-x86_64-debug",
+      "configurePreset": "linux-x86_64-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "linux-arm64-debug",
+      "configurePreset": "linux-arm64-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "nix-gcc-debug",
+      "configurePreset": "nix-gcc-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "nix-clang-debug",
+      "configurePreset": "nix-clang-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "nix-cachyos-gcc-debug",
+      "configurePreset": "nix-cachyos-gcc-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "nix-cachyos-clang-debug",
+      "configurePreset": "nix-cachyos-clang-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
+    },
+    {
+      "name": "nix-qt6-vulkan-debug",
+      "configurePreset": "nix-qt6-vulkan-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "hidden": true
     }
   ]
 }
