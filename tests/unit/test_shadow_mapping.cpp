@@ -349,7 +349,11 @@ struct ShadowHarness {
     if (!shadow_pipe.load_shader_stage_file(ctx.device(), sd_path+"/shadow.vert.spv","vertex").is_ok()||
         !shadow_pipe.load_shader_stage_file(ctx.device(), sd_path+"/shadow.frag.spv","fragment").is_ok()) return false;
     VkDescriptorSetLayout solo[1] = {mesh_layout};
-    VkPushConstantRange spush{VK_SHADER_STAGE_VERTEX_BIT, 0, 128};
+// 144 bytes: shadow.vert's push block gained a trailing uvec4 so it stays
+    // layout-compatible with shadow_skinned.vert and one pipeline layout can serve
+    // both vertex stages. A 128-byte range leaves the shader's block outside the
+    // layout (VUID-VkGraphicsPipelineCreateInfo-layout-10069).
+        VkPushConstantRange spush{VK_SHADER_STAGE_VERTEX_BIT, 0, 144};
     if (!shadow_pipe.create_pipeline_layout(ctx.device(), solo, 1, &spush).is_ok()||
         !shadow_pipe.create_graphics_pipeline(ctx.device(), shadow_rp,
             VK_FORMAT_D32_SFLOAT, shadow_pipe.pipeline_layout(), true, false, false,
