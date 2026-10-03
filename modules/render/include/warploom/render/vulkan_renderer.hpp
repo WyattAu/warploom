@@ -223,9 +223,18 @@ public:
     //! Main lit pass drawing ONE vkCmdDrawIndexedIndirect over the commands.
     VkPipeline draw_pipeline{VK_NULL_HANDLE};
     VkPipelineLayout draw_pipeline_layout{VK_NULL_HANDLE};
-    VkDescriptorSet draw_sets[4]{VK_NULL_HANDLE, VK_NULL_HANDLE,
-                                 VK_NULL_HANDLE, VK_NULL_HANDLE};
+    //! Six entries: slots 0..5 cover per-object sets, bindless samplers,
+    //! the material SSBO, the bone SSBO (unused by the driven path), the
+    //! shadow map and the IBL resources.
+    VkDescriptorSet draw_sets[6]{};
     std::uint32_t draw_set_count{0};
+    //! Descriptor-set slot each entry of draw_sets binds to. The pipeline
+    //! layouts in this engine reserve slot 3 for the bone SSBO, which the
+    //! driven path never uses (it draws static geometry only), so the
+    //! binding is not contiguous: a driven frame typically binds 0,1,2 then
+    //! 4,5. vkCmdBindDescriptorSets requires consecutive firstSet/count, so
+    //! the recorder groups consecutive runs rather than assuming one range.
+    std::uint32_t draw_set_slots[6]{0U, 1U, 2U, 3U, 4U, 5U};
     GpuDrivenPush draw_push{};
     VkBuffer index_buffer{VK_NULL_HANDLE};
     //! Target.
@@ -242,6 +251,28 @@ public:
   //! dispatch is ceil(object_count / 64) groups (matches the shared shader).
   [[nodiscard]] ::warploom::core::Result<void> record_pbr_frame_gpu_driven(
       VkCommandBuffer command_buffer, const GpuDrivenFrame& frame) const;
+
+  //! Record ONLY the compute cull/LOD pass: bind the cull pipeline and
+  //! descriptor set, push the cull constants, dispatch ceil(object_count/64)
+  //! groups, and emit the COMPUTE(WRITE) -> DRAW_INDIRECT(READ) buffer
+  //! barrier the indirect draw needs.
+  //!
+  //! record_pbr_frame_gpu_driven runs the cull and the draw inside a render
+  //! graph, which is the right shape when the caller wants the whole frame.
+  //! An application that renders a shadow pass between the two -- so the
+  //! shadow map is filled before anything is lit -- needs the halves
+  //! separately, and previously had to hand-roll both.
+  [[nodiscard]] ::warploom::core::Result<void> record_gpu_driven_cull(
+      VkCommandBuffer command_buffer, const GpuDrivenFrame& frame) const;
+
+  //! Record ONLY the main lit pass of the GPU-driven path, inside an
+  //! ALREADY-BEGUN render pass: sets viewport/scissor, binds the draw
+  //! pipeline, its descriptor sets and push constants, binds the shared
+  //! index buffer, and issues ONE vkCmdDrawIndexedIndirect over the GPU-written
+  //! commands. The counterpart of record_pbr_scene for a driven draw list.
+  [[nodiscard]] ::warploom::core::Result<void> record_gpu_driven_draw(
+      VkCommandBuffer command_buffer, std::uint32_t width,
+      std::uint32_t height, const GpuDrivenFrame& frame) const;
 
   //! One full-screen triangle sampling up to 4 source images (post-process:
   //! tonemap/FXAA/bloom combine, sky resolve, SSAO blur...). The graph node

@@ -3933,31 +3933,23 @@ bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
   if (app.gpu_driven) {
     const std::uint32_t gd_slot = app.renderer.current_frame();
     write_gpu_driven_payload(app, gd_slot, app.time, height);
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                      app.gd_cull_pipeline.pipeline());
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            app.gd_cull_pipeline.pipeline_layout(), 0U, 1U,
-                            &app.gd_cull_sets[gd_slot], 0U, nullptr);
-    vkCmdPushConstants(command_buffer, app.gd_cull_pipeline.pipeline_layout(),
-                       VK_SHADER_STAGE_COMPUTE_BIT, 0U,
-                       app.gd_cull_push_staging.size(),
-                       app.gd_cull_push_staging.data());
-    vkCmdDispatch(command_buffer, (app.gd_instance_count + 63U) / 64U, 1U, 1U);
-    VkBufferMemoryBarrier bb{};
-    bb.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    bb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    bb.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
-                       VK_ACCESS_SHADER_READ_BIT;
-    bb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    bb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    bb.buffer = app.gd_indirect_buffer;
-    bb.offset = 0U;
-    bb.size = VK_WHOLE_SIZE;
-    vkCmdPipelineBarrier(command_buffer,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
-                             VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-                         0U, 0U, nullptr, 1U, &bb, 0U, nullptr);
+    // Cull, LOD and command generation are the engine's. The payload is
+    // still written here because it is per-frame application state, and the
+    // buffer barrier to the indirect draw comes with the call.
+    omnicpp::render::VulkanRenderer::GpuDrivenFrame frame{};
+    frame.cull_pipeline = app.gd_cull_pipeline.pipeline();
+    frame.cull_pipeline_layout = app.gd_cull_pipeline.pipeline_layout();
+    frame.cull_set = app.gd_cull_sets[gd_slot];
+    frame.object_count = app.gd_instance_count;
+    frame.cull_push.data = app.gd_cull_push_staging.data();
+    frame.cull_push.size = app.gd_cull_push_staging.size();
+    frame.indirect_buffer = app.gd_indirect_buffer;
+    if (!omnicpp::render::VulkanRenderer{}
+             .record_gpu_driven_cull(command_buffer, frame)
+             .is_ok()) {
+      std::fprintf(stderr, "viewport: record_gpu_driven_cull failed\n");
+      return false;
+    }
   }
 
   if (!app.lighting_ready) return true;  // nothing to pre-render
@@ -4326,39 +4318,46 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
   // hook) already wrote every draw command and the visibility counter, so
   // the CPU never computes visibility, LOD, or per-draw submission.
   if (app.gpu_driven) {
-    // The shadow pre-pass hook leaves its 2048^2 dynamic viewport/scissor
-    // behind; the driven pipeline uses dynamic viewport state, so re-set the
-    // window's before drawing.
-    VkViewport vp{0.0f, 0.0f, static_cast<float>(width),
-                  static_cast<float>(height), 0.0f, 1.0f};
-    vkCmdSetViewport(command_buffer, 0U, 1U, &vp);
-    VkRect2D sc{{0, 0}, {width, height}};
-    vkCmdSetScissor(command_buffer, 0U, 1U, &sc);
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      app.gd_draw_pipeline.pipeline());
-    // Two binds: sets must bind to consecutive slots, and the bone slot (3)
-    // is unused by the driven path (cubes scene, no skinning).
-    const VkDescriptorSet draw_sets[3] = {
-        app.gd_draw_sets[app.renderer.current_frame()], app.scene.texture_set,
-        app.scene.material_set};
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            app.gd_draw_pipeline_layout, 0U, 3U, draw_sets,
-                            0U, nullptr);
-    const VkDescriptorSet light_sets[2] = {app.scene.shadow_set,
-                                           app.scene.ibl_set};
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            app.gd_draw_pipeline_layout, 4U, 2U, light_sets,
-                            0U, nullptr);
-    const GdPush push{app.scene.camera.view_projection,
-                      {}, app.scene.camera_position, {}};
-    vkCmdPushConstants(command_buffer, app.gd_draw_pipeline_layout,
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0U, sizeof(push), &push);
-    vkCmdBindIndexBuffer(command_buffer, app.gd_shared_index_buffer, 0U,
-                         VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexedIndirect(command_buffer, app.gd_indirect_buffer, 0U,
-                             app.gd_instance_count,
-                             sizeof(VkDrawIndexedIndirectCommand));
+    // ONE vkCmdDrawIndexedIndirect over the GPU-written commands, recorded
+    // by the engine inside this already-begun render pass. The shadow
+    // pre-pass left a 2048^2 viewport/scissor bound; the engine re-sets
+    // dynamic state from the width and height passed here.
+    omnicpp::render::VulkanRenderer::GpuDrivenFrame frame{};
+    frame.draw_pipeline = app.gd_draw_pipeline.pipeline();
+    frame.draw_pipeline_layout = app.gd_draw_pipeline_layout;
+    // Five sets at slots 0,1,2,4,5 -- slot 3 is the bone SSBO, unused by the
+    // driven path (cubes scene, no skinning). The engine recorder groups
+    // these into the two vkCmdBindDescriptorSets ranges this needs.
+    frame.draw_set_count = 5U;
+    frame.draw_sets[0] = app.gd_draw_sets[app.renderer.current_frame()];
+    frame.draw_set_slots[0] = 0U;  // per-object sets
+    frame.draw_sets[1] = app.scene.texture_set;
+    frame.draw_set_slots[1] = 1U;  // bindless samplers
+    frame.draw_sets[2] = app.scene.material_set;
+    frame.draw_set_slots[2] = 2U;  // material SSBO
+    frame.draw_sets[3] = app.scene.shadow_set;
+    frame.draw_set_slots[3] = 4U;  // shadow map
+    frame.draw_sets[4] = app.scene.ibl_set;
+    frame.draw_set_slots[4] = 5U;  // IBL
+    {
+      GdPush push{app.scene.camera.view_projection,
+                  {}, app.scene.camera_position, {}};
+      frame.draw_push.data = &push;
+      frame.draw_push.size = sizeof(push);
+    }
+    frame.index_buffer = app.gd_shared_index_buffer;
+    // The buffer the compute pass wrote the commands into: the recorder
+    // reads it from the frame description, so it must be named on both
+    // halves, not just the cull side.
+    frame.indirect_buffer = app.gd_indirect_buffer;
+    frame.object_count = app.gd_instance_count;
+    const auto gd = omnicpp::render::VulkanRenderer{}.record_gpu_driven_draw(
+        command_buffer, width, height, frame);
+    if (!gd.is_ok()) {
+      std::fprintf(stderr, "viewport: record_gpu_driven_draw failed (%d)\n",
+                   static_cast<int>(gd.error()));
+      return false;
+    }
     return true;
   }
 

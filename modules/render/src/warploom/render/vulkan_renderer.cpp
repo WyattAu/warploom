@@ -729,10 +729,19 @@ void gpu_driven_render_cb(VkCommandBuffer cb, const GraphPass& pass,
   vkCmdSetScissor(cb, 0, 1, &scissor);
 
   vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, f.draw_pipeline);
-  if (f.draw_set_count > 0U) {
+  // Bind in maximal consecutive runs: vkCmdBindDescriptorSets takes a single
+  // (firstSet, count) pair, and the slot map may legitimately skip one.
+  for (std::uint32_t i = 0; i < f.draw_set_count;) {
+    std::uint32_t j = i;
+    while (j + 1U < f.draw_set_count &&
+           f.draw_set_slots[j + 1U] == f.draw_set_slots[j] + 1U) {
+      ++j;
+    }
+    const std::uint32_t count = j - i + 1U;
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            f.draw_pipeline_layout, 0, f.draw_set_count,
-                            f.draw_sets, 0, nullptr);
+                            f.draw_pipeline_layout, f.draw_set_slots[i], count,
+                            &f.draw_sets[i], 0, nullptr);
+    i = j + 1U;
   }
   if (f.draw_push.data != nullptr && f.draw_push.size > 0U) {
     vkCmdPushConstants(cb, f.draw_pipeline_layout,
@@ -749,6 +758,85 @@ void gpu_driven_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 }  // namespace
 #endif  // OMNICPP_HAS_VULKAN
 
+::warploom::core::Result<void> VulkanRenderer::record_gpu_driven_cull(
+    VkCommandBuffer command_buffer, const GpuDrivenFrame& frame) const {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!command_buffer || frame.cull_pipeline == VK_NULL_HANDLE ||
+      frame.cull_pipeline_layout == VK_NULL_HANDLE ||
+      frame.cull_set == VK_NULL_HANDLE || frame.object_count == 0U ||
+      frame.indirect_buffer == VK_NULL_HANDLE) {
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
+  }
+  GpuDrivenCtx ctx{&frame};
+  GraphComputePass cull{};
+  cull.name = "gpu_driven_cull";
+  cull.group_count_x = (frame.object_count + 63U) / 64U;
+  cull.user_data = &ctx;
+
+  const std::vector<GraphNode> nodes{GraphNode::from_compute(cull)};
+  const CompiledGraph compiled = compile_graph(nodes);
+  execute_graph(command_buffer, nodes, compiled, nullptr, &gpu_driven_compute_cb);
+
+  // Hand the indirect commands to the eventual draw. execute_graph has no
+  // consumer to infer that edge from here, so the barrier is explicit.
+  VkBufferMemoryBarrier barrier{};
+  barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+  barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  barrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
+                          VK_ACCESS_SHADER_READ_BIT;
+  barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.buffer = frame.indirect_buffer;
+  barrier.offset = 0U;
+  barrier.size = VK_WHOLE_SIZE;
+  vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
+                           VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                       0U, 0U, nullptr, 1U, &barrier, 0U, nullptr);
+  return ::warploom::core::Result<void>::ok();
+#else
+  (void)command_buffer;
+  (void)frame;
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
+::warploom::core::Result<void> VulkanRenderer::record_gpu_driven_draw(
+    VkCommandBuffer command_buffer, std::uint32_t width, std::uint32_t height,
+    const GpuDrivenFrame& frame) const {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!command_buffer || frame.draw_pipeline == VK_NULL_HANDLE ||
+      frame.draw_pipeline_layout == VK_NULL_HANDLE ||
+      frame.draw_set_count == 0U ||
+      frame.draw_set_count > std::size(frame.draw_sets) ||
+      frame.index_buffer == VK_NULL_HANDLE || width == 0U || height == 0U) {
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
+  }
+  // Called inside the caller's already-begun render pass, so there is no
+  // render_pass/framebuffer to validate here; GpuDrivenFrame still carries
+  // them for record_pbr_frame_gpu_driven's use.
+  GpuDrivenCtx ctx{&frame};
+  GraphPass pass{};
+  pass.name = "gpu_driven_main";
+  pass.width = width;
+  pass.height = height;
+  pass.user_data = &ctx;
+  gpu_driven_render_cb(command_buffer, pass, &ctx);
+  return ::warploom::core::Result<void>::ok();
+#else
+  (void)command_buffer;
+  (void)width;
+  (void)height;
+  (void)frame;
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
+
 ::warploom::core::Result<void> VulkanRenderer::record_pbr_frame_gpu_driven(
     VkCommandBuffer command_buffer, const GpuDrivenFrame& frame) const {
 #ifdef OMNICPP_HAS_VULKAN
@@ -758,7 +846,8 @@ void gpu_driven_render_cb(VkCommandBuffer cb, const GraphPass& pass,
       frame.indirect_buffer == VK_NULL_HANDLE ||
       frame.draw_pipeline == VK_NULL_HANDLE ||
       frame.draw_pipeline_layout == VK_NULL_HANDLE ||
-      frame.draw_set_count == 0U || frame.draw_set_count > 4U ||
+      frame.draw_set_count == 0U ||
+      frame.draw_set_count > std::size(frame.draw_sets) ||
       frame.index_buffer == VK_NULL_HANDLE ||
       frame.render_pass == VK_NULL_HANDLE ||
       frame.framebuffer == VK_NULL_HANDLE || frame.width == 0U ||
