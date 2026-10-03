@@ -79,6 +79,7 @@ add_executable(warploom_unit_tests
     unit/test_lod_integration.cpp
     unit/test_postprocessing.cpp
     unit/test_gpu_skinning.cpp
+    unit/test_pbr_frame_variants.cpp
     unit/test_gpu_mannequin.cpp
     unit/test_mesh_lod.cpp
     unit/test_png_decoder.cpp

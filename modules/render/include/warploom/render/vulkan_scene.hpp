@@ -286,6 +286,17 @@ struct ScenePbrObject {
   //! actors share one bone buffer / bone set: actor a's joints live at
   //! [a * joints_per_actor, ...). 0 for static objects.
   std::uint32_t joint_base{0U};
+  //! Draw this object through the scene's *skinned* pipeline variant rather
+  //! than the default one.
+  //!
+  //! joint_base alone cannot express this: it is an offset into the shared
+  //! bone buffer and is legitimately 0 for the first (and often only) actor.
+  //! What distinguishes a skinned draw is which pipeline its vertex stage
+  //! needs, so that is what this flag says. When true, record_pbr_scene and
+  //! record_shadow_pre_pass bind VulkanPbrScene::skinned_pipeline (or
+  //! shadow_skinned_pipeline) instead of the default; if the scene has no
+  //! skinned variant the default is used and the draw is static.
+  bool skinned{false};
 
   [[nodiscard]] const SceneMesh* effective_mesh() const noexcept {
     return mesh != nullptr ? mesh : &mesh_value;
@@ -322,6 +333,14 @@ struct VulkanScene {
 struct VulkanPbrScene {
   VkPipeline pipeline{VK_NULL_HANDLE};
   VkPipelineLayout pipeline_layout{VK_NULL_HANDLE};
+  //! Optional skinned counterpart of pipeline (skinned_scene.vert): objects
+  //! with ScenePbrObject::skinned are drawn through it, everything else
+  //! through `pipeline`. This is what lets one scene mix a rigged actor with
+  //! static geometry in a single pass, which is what the viewport does. Both
+  //! layouts must agree on the descriptor slots the caller binds, since the
+  //! per-pass set bindings are issued once, not per pipeline.
+  VkPipeline skinned_pipeline{VK_NULL_HANDLE};
+  VkPipelineLayout skinned_pipeline_layout{VK_NULL_HANDLE};
   SceneCamera camera{};
   //! World-space eye position for the view vector (specular).
   std::array<float, 4> camera_position{0.0f, 0.0f, 0.0f, 1.0f};
@@ -336,6 +355,11 @@ struct VulkanPbrScene {
   //! Shadow depth pipeline and layout (depth-only, light VP + model push).
   VkPipeline shadow_pipeline{VK_NULL_HANDLE};
   VkPipelineLayout shadow_pipeline_layout{VK_NULL_HANDLE};
+  //! Optional skinned counterpart of shadow_pipeline (shadow_skinned.vert).
+  //! Objects with ScenePbrObject::skinned draw through this instead. Leaving
+  //! it null keeps every shadow draw on the default pipeline.
+  VkPipeline shadow_skinned_pipeline{VK_NULL_HANDLE};
+  VkPipelineLayout shadow_skinned_pipeline_layout{VK_NULL_HANDLE};
   //! Combined shadow depth texture (sampled in the fragment stage). Bound at
   //! shadow_set_slot (4 for the IBL+shadow variant pbr_ibl_shadow.frag, 3 for
   //! the shadow-only variant pbr_shadow.frag).

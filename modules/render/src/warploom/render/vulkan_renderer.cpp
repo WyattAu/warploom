@@ -318,66 +318,74 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
 
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     scene.pipeline);
+  // Per-pass pipeline state for the lit pass. The draw loop below may swap to
+  // the scene's skinned variant for rigged objects.
+  //
+  // Vulkan invalidates descriptor bindings whenever the bound pipeline layout
+  // changes, so the two are tracked together: a layout change forces every
+  // descriptor set to be re-issued. When the caller gives the skinned variant
+  // the same layout as the default (the recommended shape), the layout never
+  // changes mid-loop and no set is re-bound.
+  VkPipeline bound_pipeline = scene.pipeline;
+  VkPipelineLayout bound_layout = scene.pipeline_layout;
   constexpr std::uint32_t kInvalidMaterial = 0xffffffffU;
-  if (scene.texture_set != VK_NULL_HANDLE) {
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            scene.pipeline_layout, 1, 1, &scene.texture_set, 0,
-                            nullptr);
-  }
-  if (scene.material_set != VK_NULL_HANDLE) {
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            scene.pipeline_layout, 2, 1, &scene.material_set, 0,
-                            nullptr);
-  }
-  if (scene.ibl_set != VK_NULL_HANDLE) {
-    // IBL variant (pbr_ibl.frag): prefiltered env cube, irradiance cube and
-    // split-sum BRDF LUT live at set 3 by default; scene.ibl_set_slot
-    // relocates them (5 for the composed pbr_full variant whose set 3 is
-    // the skinning bones). Non-IBL pipelines leave it null.
-    const std::uint32_t ibl_slot =
-        scene.ibl_set_slot != 0U ? scene.ibl_set_slot : 3U;
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            scene.pipeline_layout, ibl_slot, 1, &scene.ibl_set,
-                            0, nullptr);
-  }
-  if (scene.shadow_set != VK_NULL_HANDLE) {
-    // Shadow map sampled in the fragment stage for PCF. Slot matches the
-    // pipeline variant: 4 for IBL+shadow (pbr_ibl_shadow.frag), 3 for
-    // shadow-only (pbr_shadow.frag); scene.shadow_set_slot == 0 keeps the
-    // historical default of 4.
-    const std::uint32_t shadow_slot =
-        scene.shadow_set_slot != 0U ? scene.shadow_set_slot : 4U;
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            scene.pipeline_layout, shadow_slot, 1,
-                            &scene.shadow_set, 0, nullptr);
-  }
-  if (scene.rt_set != VK_NULL_HANDLE) {
-    // Ray-query shadow variant (pbr_rt_full.frag): set 4 is the scene TLAS
-    // the fragment stage traces occlusion rays against. Slot matches the
-    // pipeline variant; scene.rt_set_slot == 0 keeps the default (4).
-    const std::uint32_t rt_slot =
-        scene.rt_set_slot != 0U ? scene.rt_set_slot : 4U;
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            scene.pipeline_layout, rt_slot, 1, &scene.rt_set,
-                            0, nullptr);
-  }
-  if (scene.bone_set != VK_NULL_HANDLE) {
-    // Skinned variant (skinned_scene.vert): one 64-byte joint matrix per
-    // joint at set 3. Requires the skinned 4-set pipeline layout; leaving
-    // bone_set null keeps the 3-set static-pipeline path unchanged.
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            scene.pipeline_layout, 3, 1, &scene.bone_set, 0,
-                            nullptr);
-  }
-  if (scene.lights_set != VK_NULL_HANDLE) {
-    // Many-light variant (pbr_full_ml / pbr_rt_full_ml): dynamic point
-    // lights SSBO at set 6 by default (scene.lights_set_slot relocates).
-    const std::uint32_t lights_slot =
-        scene.lights_set_slot != 0U ? scene.lights_set_slot : 6U;
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            scene.pipeline_layout, lights_slot, 1,
-                            &scene.lights_set, 0, nullptr);
-  }
+
+  const auto bind_scene_descriptors = [&](VkPipelineLayout layout) {
+    if (scene.texture_set != VK_NULL_HANDLE) {
+      vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              layout, 1, 1, &scene.texture_set, 0, nullptr);
+    }
+    if (scene.material_set != VK_NULL_HANDLE) {
+      vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              layout, 2, 1, &scene.material_set, 0, nullptr);
+    }
+    if (scene.ibl_set != VK_NULL_HANDLE) {
+      // IBL variant (pbr_ibl.frag): prefiltered env cube, irradiance cube and
+      // split-sum BRDF LUT live at set 3 by default; scene.ibl_set_slot
+      // relocates them (5 for the composed pbr_full variant whose set 3 is
+      // the skinning bones). Non-IBL pipelines leave it null.
+      const std::uint32_t ibl_slot =
+          scene.ibl_set_slot != 0U ? scene.ibl_set_slot : 3U;
+      vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              layout, ibl_slot, 1, &scene.ibl_set, 0, nullptr);
+    }
+    if (scene.shadow_set != VK_NULL_HANDLE) {
+      // Shadow map sampled in the fragment stage for PCF. Slot matches the
+      // pipeline variant: 4 for IBL+shadow (pbr_ibl_shadow.frag), 3 for
+      // shadow-only (pbr_shadow.frag); scene.shadow_set_slot == 0 keeps the
+      // historical default of 4.
+      const std::uint32_t shadow_slot =
+          scene.shadow_set_slot != 0U ? scene.shadow_set_slot : 4U;
+      vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              layout, shadow_slot, 1, &scene.shadow_set, 0,
+                              nullptr);
+    }
+    if (scene.rt_set != VK_NULL_HANDLE) {
+      // Ray-query shadow variant (pbr_rt_full.frag): set 4 is the scene TLAS
+      // the fragment stage traces occlusion rays against.
+      const std::uint32_t rt_slot =
+          scene.rt_set_slot != 0U ? scene.rt_set_slot : 4U;
+      vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              layout, rt_slot, 1, &scene.rt_set, 0, nullptr);
+    }
+    if (scene.bone_set != VK_NULL_HANDLE) {
+      // Skinned variant (skinned_scene.vert): one 64-byte joint matrix per
+      // joint at set 3.
+      vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              layout, 3, 1, &scene.bone_set, 0, nullptr);
+    }
+    if (scene.lights_set != VK_NULL_HANDLE) {
+      // Many-light variant (pbr_full_ml / pbr_rt_full_ml): dynamic point
+      // lights SSBO at set 6 by default (scene.lights_set_slot relocates).
+      const std::uint32_t lights_slot =
+          scene.lights_set_slot != 0U ? scene.lights_set_slot : 6U;
+      vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              layout, lights_slot, 1, &scene.lights_set, 0,
+                              nullptr);
+    }
+  };
+
+  bind_scene_descriptors(bound_layout);
 
   constexpr VkShaderStageFlags kPushStages =
       static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_VERTEX_BIT |
@@ -414,10 +422,32 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
     push.model = object.model;
     push.material_index = object.material_index;
     push.joint_base = object.joint_base;
+    // Skinned objects need a vertex stage that samples the bone SSBO, so
+    // they bind the scene's skinned variant. Track the current binding and
+    // only re-bind on a change: the pipeline state is expensive and the draw
+    // list usually alternates in runs, not per object.
+    const bool want_skinned = object.skinned &&
+                              scene.skinned_pipeline != VK_NULL_HANDLE;
+    const VkPipeline want_pipeline =
+        want_skinned ? scene.skinned_pipeline : scene.pipeline;
+    if (bound_pipeline != want_pipeline) {
+      vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        want_pipeline);
+      bound_pipeline = want_pipeline;
+    }
+    const VkPipelineLayout want_layout =
+        want_skinned && scene.skinned_pipeline_layout != VK_NULL_HANDLE
+            ? scene.skinned_pipeline_layout
+            : scene.pipeline_layout;
+    if (bound_layout != want_layout) {
+      // A different layout drops every previously bound set.
+      bind_scene_descriptors(want_layout);
+      bound_layout = want_layout;
+    }
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            scene.pipeline_layout, 0, 1,
-                            &mesh.descriptor_set, 0, nullptr);
-    vkCmdPushConstants(command_buffer, scene.pipeline_layout, kPushStages, 0,
+                            want_layout, 0, 1, &mesh.descriptor_set, 0,
+                            nullptr);
+    vkCmdPushConstants(command_buffer, want_layout, kPushStages, 0,
                        sizeof(push), &push);
     vkCmdBindIndexBuffer(command_buffer, mesh.index_buffer,
                          mesh.index_offset, VK_INDEX_TYPE_UINT32);
@@ -487,6 +517,7 @@ void pbr_frame_render_cb(VkCommandBuffer cb, const GraphPass& pass,
   // matrices at set 3; static pipelines leave it null and nothing is bound.
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     scene.shadow_pipeline);
+  VkPipeline bound_shadow_pipeline = scene.shadow_pipeline;
   // Depth bias relieves shadow-map acne: with a diagonal light the stored
   // depth varies across a face, so unbiased fragments fail LESS_OR_EQUAL
   // against neighboring texels and everything reads shadowed. NOTE: the
@@ -494,11 +525,17 @@ void pbr_frame_render_cb(VkCommandBuffer cb, const GraphPass& pass,
   // for D32), so it is nearly inert at small values; the slope factor does
   // the real work (slope 128 covers ~45-degree faces in light UV space).
   vkCmdSetDepthBias(command_buffer, 8.0f, 0.0f, 128.0f);
-  if (scene.bone_set != VK_NULL_HANDLE) {
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            scene.shadow_pipeline_layout, 3, 1, &scene.bone_set,
-                            0, nullptr);
-  }
+  // Set 3 carries the joint matrices for the skinned vertex stage. Tracked
+  // per-layout: swapping to a layout that differs drops all bound sets.
+  VkPipelineLayout bound_shadow_layout = scene.shadow_pipeline_layout;
+  const auto bind_shadow_descriptors = [&](VkPipelineLayout layout) {
+    if (scene.bone_set != VK_NULL_HANDLE) {
+      vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              layout, 3, 1, &scene.bone_set, 0, nullptr);
+    }
+  };
+  bind_shadow_descriptors(bound_shadow_layout);
+
   struct ShadowPush {
     SceneMatrix light_view_projection;
     SceneMatrix model;
@@ -512,10 +549,32 @@ void pbr_frame_render_cb(VkCommandBuffer cb, const GraphPass& pass,
     }
     const SceneMesh& mesh = *mesh_ptr;
     push.model = object.model;
+    // A rigged actor's shadow needs the skinned vertex stage, exactly as the
+    // lit pass does. See ScenePbrObject::skinned.
+    const bool want_skinned =
+        object.skinned && scene.shadow_skinned_pipeline != VK_NULL_HANDLE;
+    if (bound_shadow_pipeline !=
+        (want_skinned ? scene.shadow_skinned_pipeline
+                      : scene.shadow_pipeline)) {
+      vkCmdBindPipeline(
+          command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+          want_skinned ? scene.shadow_skinned_pipeline
+                       : scene.shadow_pipeline);
+      bound_shadow_pipeline =
+          want_skinned ? scene.shadow_skinned_pipeline : scene.shadow_pipeline;
+    }
+    const VkPipelineLayout want_layout =
+        want_skinned && scene.shadow_skinned_pipeline_layout != VK_NULL_HANDLE
+            ? scene.shadow_skinned_pipeline_layout
+            : scene.shadow_pipeline_layout;
+    if (bound_shadow_layout != want_layout) {
+      bind_shadow_descriptors(want_layout);
+      bound_shadow_layout = want_layout;
+    }
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            scene.shadow_pipeline_layout, 0, 1,
-                            &mesh.descriptor_set, 0, nullptr);
-    vkCmdPushConstants(command_buffer, scene.shadow_pipeline_layout,
+                            want_layout, 0, 1, &mesh.descriptor_set, 0,
+                            nullptr);
+    vkCmdPushConstants(command_buffer, want_layout,
                        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
     vkCmdBindIndexBuffer(command_buffer, mesh.index_buffer,
                          mesh.index_offset, VK_INDEX_TYPE_UINT32);
