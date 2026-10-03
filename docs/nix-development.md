@@ -1178,7 +1178,6 @@ jobs:
 
 - [CachyOS Builds](cachyos-builds.md)
 - [Linux Builds](linux-builds.md)
-- [Conan Linux Profiles](conan-linux-profiles.md)
 - [VSCode Linux Setup](vscode-linux-setup.md)
 
 ### External Resources

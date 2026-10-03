@@ -62,23 +62,48 @@ Both are the next campaigns, not this one.
 
 ## Phase B — one render path
 
-The largest single engineering task, and the one that makes every
-"test-only" row in `rendering-status.md` a shipped feature instead of a
-test artifact.
+The largest engineering task, and the one that makes every "test-only" row
+in `rendering-status.md` a shipped feature instead of a test artifact.
 
-- [ ] **B1 viewport through `record_pbr_frame`** — move the shadow pre-pass
-      and main pass off the hand-rolled `vkCmd*` calls, keeping pixel-parity
-      tests as the safety net.
-- [ ] **B2 render graph in the app** — computed barriers instead of manual
-      ones.
-- [ ] **B3 HDR target + post chain** — the app currently renders straight to
-      the swapchain, so highlights clip. Brings ACES, FXAA and bloom from
-      test-only to shipped.
-- [ ] **B4 the module's GPU-driven frame** — the app has a parallel
-      hand-rolled copy; converge on `record_pbr_frame_gpu_driven`.
+Enabling change, landed first: the renderer could bind only one pipeline per
+pass, so a scene mixing a rigged actor with static geometry — which is what
+the application does — could not be expressed. `ScenePbrObject::skinned`
+plus optional skinned counterparts in `VulkanPbrScene` fixed that, with
+descriptor rebinding keyed on the pipeline layout (Vulkan drops bound sets
+when the layout changes) and the bone set bound only where the layout
+declares a slot 3.
+
+- [x] **B1a shadow pre-pass through `record_shadow_pre_pass`** — the
+      hand-rolled copy is deleted. shadow.vert's push block was widened to
+      144 bytes to match shadow_skinned.vert so one layout serves both.
+      Verified: identical shadow-map texel occupancy (1,889,907/4,194,304),
+      a uniform depth shift from converging on the engine's bias values, and
+      99.99% of frame-30 pixels byte-identical with differences confined to a
+      24x85 region at the shadow boundary.
+- [x] **B1b lit pass** — already delegated to `record_pbr_scene`; the only
+      raw Vulkan left in it was the GPU-driven block.
+- [x] **B4 GPU-driven path** — `record_gpu_driven_cull` and
+      `record_gpu_driven_draw` added, because the application renders a
+      shadow pass between the two halves and cannot use the single-graph
+      entry point. GpuDrivenFrame gained an explicit descriptor-slot map
+      because the driven path binds 0,1,2 then 4,5. Verified: 921,600 of
+      921,600 pixels byte-identical against the previous commit, 0 VUIDs.
+- [ ] **B2 render graph in the app** — the app still records into a render
+      pass the renderer opened, so the graph's computed barriers do not
+      apply. Requires the HDR target below first.
+- [ ] **B3 HDR target + post chain** — the app renders straight to the
+      swapchain, so highlights clip and there is no exposure control. Brings
+      ACES, FXAA and bloom from test-only to shipped. **This is the largest
+      remaining Phase B item.**
 - [ ] **B5 H-Z occlusion on** — `enable_hiz` is currently only ever set in
       tests.
-- [ ] **B6 no `vkCmd` outside `modules/render`** — the gate.
+- [x] **B6 no duplicated Vulkan in the app** — raw `vkCmd*` calls in the
+      viewport fell from 31 to 10. All ten are legitimate application
+      orchestration: ray-tracing acceleration-structure build barriers, the
+      one-time neutral shadow-map clear, capture readback barriers, and the
+      begin/endRenderPass framing around the engine's calls. The stricter
+      reading of the gate — no `vkCmd` at all outside `modules/render` —
+      would move the pass framing and the capture path into the engine too.
 
 ## Phase C — one data model, one tick
 

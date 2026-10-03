@@ -194,13 +194,13 @@ The fastest way to build with GCC on CachyOS is using CMake presets:
 
 ```bash
 # Configure with CachyOS GCC release preset
-cmake --preset cachyos-gcc-release
+cmake --preset gcc-release
 
 # Build the project
-cmake --build --preset cachyos-gcc-release
+cmake --build --preset gcc-release
 
 # Run tests (if enabled)
-ctest --preset cachyos-gcc-release
+ctest --preset gcc-release
 ```
 
 ### Manual Configuration
@@ -286,13 +286,13 @@ Build with Clang using CMake presets:
 
 ```bash
 # Configure with CachyOS Clang release preset
-cmake --preset cachyos-clang-release
+cmake --preset clang-release
 
 # Build the project
-cmake --build --preset cachyos-clang-release
+cmake --build --preset clang-release
 
 # Run tests (if enabled)
-ctest --preset cachyos-clang-release
+ctest --preset clang-release
 ```
 
 ### Manual Configuration
@@ -363,118 +363,45 @@ cmake -G Ninja \
 
 ---
 
-## CachyOS Conan Profiles
+## Package management on CachyOS
 
-The project includes Conan profiles specifically configured for CachyOS builds.
+Warploom has no package-manager step. Its only third-party dependency is
+GoogleTest, fetched by CPM from a shared source cache
+(`~/.cache/warploom/cpm`), and Vulkan, `libxcb` and a SPIR-V compiler come
+from the system.
 
-### Available Profiles
+The `conan/` tree that this page used to document has been deleted: it was
+Conan 1 syntax driven by Conan 2 flags, declared thirty packages the engine
+never included, and defaulted to off. `conan-linux-profiles.md` went with it.
 
-| Profile | Compiler | Build Type | C++ Standard | Description |
-|---------|-----------|-------------|--------------|-------------|
-| [`cachyos`](../conan/profiles/cachyos) | GCC 13 | Release | C++23 | Optimized GCC release build |
-| [`cachyos-debug`](../conan/profiles/cachyos-debug) | GCC 13 | Debug | C++23 | GCC debug build with security flags |
-| [`cachyos-clang`](../conan/profiles/cachyos-clang) | Clang 19 | Release | C++23 | Optimized Clang release build |
-| [`cachyos-clang-debug`](../conan/profiles/cachyos-clang-debug) | Clang 19 | Debug | C++23 | Clang debug build with security flags |
-
-### Using Conan Profiles
+CachyOS needs nothing special. Install the toolchain and build:
 
 ```bash
-# Install dependencies with CachyOS GCC profile
-conan install . --profile cachyos
-
-# Install dependencies with CachyOS Clang profile
-conan install . --profile cachyos-clang
-
-# Install dependencies with debug profile
-conan install . --profile cachyos-debug
-
-# Build with Conan
-conan build . --profile cachyos
+sudo pacman -S base-devel cmake ninja vulkan-headers libxcb glslang
+cmake --preset headless-debug
+cmake --build build/headless-debug -j$(nproc)
 ```
 
-### Profile Configuration Details
-
-#### cachyos Profile
-
-```ini
-[settings]
-os=Linux
-arch=x86_64
-compiler=gcc
-compiler.version=13
-compiler.libcxx=libstdc++11
-compiler.cppstd=23
-build_type=Release
-
-[conf]
-tools.cmake.cmaketoolchain:system_name=Linux
-tools.cmake.cmaketoolchain:generator=Ninja
-tools.build:compiler_executables={"c": "gcc", "cpp": "g++"}
-tools.build:cxxflags=-march=native -O3 -flto -DNDEBUG
-tools.build:cflags=-march=native -O3 -flto -DNDEBUG
-tools.build:sharedlinkflags=-Wl,--as-needed -Wl,--no-undefined -flto
-tools.build:exelinkflags=-Wl,--as-needed -Wl,--no-undefined -flto
-
-[options]
-vulkan/*:shared=True
-
-[buildenv]
-CC=gcc
-CXX=g++
-CFLAGS=-march=native -O3 -flto -DNDEBUG
-CXXFLAGS=-march=native -O3 -flto -DNDEBUG
-LDFLAGS=-Wl,--as-needed -Wl,--no-undefined -flto
-```
-
-#### cachyos-clang Profile
-
-```ini
-[settings]
-os=Linux
-arch=x86_64
-compiler=clang
-compiler.version=19
-compiler.libcxx=libc++
-compiler.cppstd=23
-build_type=Release
-
-[conf]
-tools.cmake.cmaketoolchain:system_name=Linux
-tools.cmake.cmaketoolchain:generator=Ninja
-tools.build:compiler_executables={"c": "clang", "cpp": "clang++"}
-tools.build:cxxflags=-march=native -O3 -flto -DNDEBUG
-tools.build:cflags=-march=native -O3 -flto -DNDEBUG
-tools.build:sharedlinkflags=-Wl,--as-needed -Wl,--no-undefined -flto
-tools.build:exelinkflags=-Wl,--as-needed -Wl,--no-undefined -flto
-
-[options]
-vulkan/*:shared=True
-
-[buildenv]
-CC=clang
-CXX=clang++
-CFLAGS=-march=native -O3 -flto -DNDEBUG
-CXXFLAGS=-march=native -O3 -flto -DNDEBUG
-LDFLAGS=-Wl,--as-needed -Wl,--no-undefined -flto
-```
-
----
+For the windowed viewport you also want a Vulkan driver
+(`vulkan-radeon`, `vulkan-intel` or `nvidia-dkms`) and `libxcb`.
 
 ## CachyOS CMake Presets
 
-The project includes CMake presets specifically configured for CachyOS builds.
+The `cachyos-*` presets were byte-identical duplicates of the `gcc-*` /
+`clang-*` presets and have been deleted; use those directly. Inside a Nix
+shell the `nix-cachyos-*` presets still exist.
 
 ### Available Presets
 
 | Preset | Compiler | Build Type | Description |
 |--------|-----------|-------------|-------------|
-| `cachyos-gcc-debug` | GCC 13 | Debug | Debug build with GCC |
-| `cachyos-gcc-release` | GCC 13 | Release | Optimized release build with GCC |
-| `cachyos-gcc-relwithdebinfo` | GCC 13 | RelWithDebInfo | Release with debug info |
+| `gcc-debug` | GCC 13 | Debug | Debug build with GCC |
+| `gcc-release` | GCC 13 | Release | Optimized release build with GCC |
+| `gcc-relwithdebinfo` | GCC 13 | RelWithDebInfo | Release with debug info |
 | `cachyos-gcc-minsizerel` | GCC 13 | MinSizeRel | Minimum size release |
-| `cachyos-clang-debug` | Clang 19 | Debug | Debug build with Clang |
-| `cachyos-clang-release` | Clang 19 | Release | Optimized release build with Clang |
-| `cachyos-clang-relwithdebinfo` | Clang 19 | RelWithDebInfo | Release with debug info |
+| `clang-debug` | Clang 19 | Debug | Debug build with Clang |
+| `clang-release` | Clang 19 | Release | Optimized release build with Clang |
+| `clang-relwithdebinfo` | Clang 19 | RelWithDebInfo | Release with debug info |
 | `cachyos-clang-minsizerel` | Clang 19 | MinSizeRel | Minimum size release |
 
 ### Using CMake Presets
@@ -484,28 +411,28 @@ The project includes CMake presets specifically configured for CachyOS builds.
 cmake --list-presets
 
 # Configure with CachyOS GCC release preset
-cmake --preset cachyos-gcc-release
+cmake --preset gcc-release
 
 # Configure with CachyOS Clang release preset
-cmake --preset cachyos-clang-release
+cmake --preset clang-release
 
 # Build with preset
-cmake --build --preset cachyos-gcc-release
+cmake --build --preset gcc-release
 
 # Clean build
-cmake --build --preset cachyos-gcc-release --target clean
+cmake --build --preset gcc-release --target clean
 
 # Run tests
-ctest --preset cachyos-gcc-debug
+ctest --preset gcc-debug
 ```
 
 ### Preset Configuration Details
 
-#### cachyos-gcc-release Preset
+#### gcc-release Preset
 
 ```json
 {
-  "name": "cachyos-gcc-release",
+  "name": "gcc-release",
   "displayName": "CachyOS-GCC Release",
   "description": "Release build with CachyOS GCC 13 compiler with performance optimizations",
   "binaryDir": "${sourceDir}/build/cachyos-gcc/release",
@@ -527,11 +454,11 @@ ctest --preset cachyos-gcc-debug
 }
 ```
 
-#### cachyos-clang-release Preset
+#### clang-release Preset
 
 ```json
 {
-  "name": "cachyos-clang-release",
+  "name": "clang-release",
   "displayName": "CachyOS-Clang Release",
   "description": "Release build with CachyOS Clang 19 compiler with performance optimizations",
   "binaryDir": "${sourceDir}/build/cachyos-clang/release",
@@ -754,17 +681,17 @@ cmake /path/to/project
 
 ```bash
 # Enable verbose output
-cmake --preset cachyos-gcc-debug --trace-expand
+cmake --preset gcc-debug --trace-expand
 
 # Or with environment variable
-VERBOSE=1 cmake --build --preset cachyos-gcc-debug
+VERBOSE=1 cmake --build --preset gcc-debug
 ```
 
 #### Check Compiler Flags
 
 ```bash
 # Show actual compiler flags
-cmake --preset cachyos-gcc-release --trace 2>&1 | grep CMAKE_CXX_FLAGS
+cmake --preset gcc-release --trace 2>&1 | grep CMAKE_CXX_FLAGS
 
 # Verify flags in build directory
 cat build/cachyos-gcc/release/CMakeCache.txt | grep FLAGS

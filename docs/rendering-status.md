@@ -33,19 +33,20 @@ absent.
 |---|---|---|---|
 | Vulkan 1.2/1.3 context, sync2, timeline semaphores, descriptor indexing, bufferDeviceAddress | yes | yes | `VulkanContext` feature negotiation; headless degrade path |
 | Render graph: computed barriers, layout transitions, queue-family release/acquire | yes | **test-only** | `test_render_graph*`, `test_shadow_mapping`, `test_postprocessing` |
-| `record_pbr_frame` (the module's own PBR frame) | yes | **test-only** | `test_shadow_mapping`, `test_rt_shadows`, `test_rt_reflections` |
-| `record_pbr_frame_gpu_driven` (one-submission GPU-driven frame) | yes | **test-only** | `test_gpu_driven_frame`, `test_gpu_driven_occlusion_frame` |
+| `record_pbr_frame` (the module's own PBR frame) | yes | no — the app records its lit pass via `record_pbr_scene` inside the renderer's own render pass | `test_shadow_mapping`, `test_rt_shadows`, `test_rt_reflections` |
+| `record_pbr_frame_gpu_driven` (one-submission GPU-driven frame) | yes | partial — the app drives the two halves separately (`record_gpu_driven_cull`, `record_gpu_driven_draw`) because it renders a shadow pass between them | `test_gpu_driven_frame`, `test_gpu_driven_occlusion_frame`; app A/B is 100% byte-identical |
 | `VulkanOffscreenTarget` | yes | **test-only** | 28 test files |
 | Post: fullscreen pass, ACES tonemap, FXAA | yes | **test-only** | `test_postprocessing` |
 | Bloom (Karis downsample + tent upsample) | yes | **test-only** | 2 test files; no engine caller, no app caller |
 | PBR (Cook-Torrance, metallic-roughness, bindless, tangent-space normals, emissive) | yes | yes | `test_pbr_scene`; the app's own fragment path |
 | IBL: prefiltered env + irradiance + BRDF LUT bake | yes | yes | `test_pbr_ibl`; `VulkanIblBaker` is called by the app |
 | Analytic sky (Rayleigh + Mie, sun disc) | yes | partial | `test_sky_integration`; the app only uses it *baked into* IBL |
-| Shadow map: depth pre-pass, PCF, bias | yes | yes | `test_shadow_mapping`, `test_rt_shadows` |
+| Shadow map: depth pre-pass, PCF, bias | yes | yes — via `record_shadow_pre_pass`, the hand-rolled copy deleted | `test_shadow_mapping`, `test_rt_shadows`; app A/B: identical texel occupancy, uniform bias shift |
 | Mesh LOD selection (GPU projected-size) | yes | yes | `test_lod_integration`, `test_gpu_driven_cull` |
+| Per-object static/rigged pipeline switch in one pass | yes | yes | `test_pbr_frame_variants` |
 | Mesh simplification (decimation / LOD mesh generation) | no | no | selection exists; nothing generates lower-LOD meshes |
 | H-Z depth pyramid + occlusion culling | yes | **test-only** | `test_gpu_lod_occlusion`, `test_depth_pyramid_mips`; `enable_hiz` is only ever set in tests |
-| GPU-driven draw: mesh table, vertex pull, compute cull → indirect | yes | partial | the app has its own hand-rolled equivalent rather than calling the module's |
+| GPU-driven draw: mesh table, vertex pull, compute cull → indirect | yes | yes | `test_lod_integration`, `test_gpu_driven_cull`; app A/B 921,600/921,600 pixels byte-identical |
 | GPU skinning (bone SSBO) | yes | yes | `test_gpu_skinning`, `test_gpu_mannequin` |
 | GPU timestamps / frame latency percentiles | yes | yes | `GpuTiming`; telemetry `gpu_ns` |
 | Parallel secondary command-buffer recording | yes | **test-only** | `test_parallel_recorder` |
