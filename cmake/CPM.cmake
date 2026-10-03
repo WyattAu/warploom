@@ -1,80 +1,94 @@
 # ============================================================================
-# OmniCpp Template - CPM.cmake Integration
+# Warploom - CPM.cmake Integration
 # ============================================================================
-# CPM.cmake is a CMake script that adds dependency management
+# CPM.cmake adds the single third-party dependency the engine has.
 # https://github.com/cpm-cmake/CPM.cmake
 # ============================================================================
 
-# CPM version
 set(CPM_VERSION "0.40.2")
-set(CPM_DOWNLOAD_LOCATION "${CMAKE_BINARY_DIR}/cmake/CPM_${CPM_VERSION}.cmake")
 
-# Download CPM.cmake if not present
+# The bootstrap script is vendored in-tree (cmake/CPM_0.40.2.cmake) and used
+# from the source tree. It used to be downloaded into ${CMAKE_BINARY_DIR} on
+# every fresh binary dir, which meant even a warm-cache configure needed the
+# network -- and the vendored copy was never referenced by anything.
+set(CPM_DOWNLOAD_LOCATION "${CMAKE_CURRENT_LIST_DIR}/CPM_${CPM_VERSION}.cmake")
+
 if(NOT EXISTS "${CPM_DOWNLOAD_LOCATION}")
-    message(STATUS "Downloading CPM.cmake v${CPM_VERSION}...")
-    file(DOWNLOAD
-        https://github.com/cpm-cmake/CPM.cmake/releases/download/v${CPM_VERSION}/CPM.cmake
-        "${CPM_DOWNLOAD_LOCATION}"
-        EXPECTED_HASH SHA256=c8cdc32c03816538ce22781ed72964dc864b2a34a310d3b7104812a5ca2d835d
-        SHOW_PROGRESS
-    )
-
-    if(NOT EXISTS "${CPM_DOWNLOAD_LOCATION}")
-        message(FATAL_ERROR "Failed to download CPM.cmake")
-    endif()
-
-    message(STATUS "CPM.cmake downloaded successfully")
+    message(FATAL_ERROR
+        "Warploom: vendored CPM.cmake is missing from ${CMAKE_CURRENT_LIST_DIR}. "
+        "Restore cmake/CPM_${CPM_VERSION}.cmake, or point CPM_DOWNLOAD_LOCATION at "
+        "a local copy.")
 endif()
 
-# Include CPM.cmake
+# ============================================================================
+# Source cache
+# ============================================================================
+# Shared across binary directories, so switching preset does not re-download
+# googletest. This is also the path CI should cache.
+#
+# This MUST be decided before CPM is included: CPM reads
+# CPM_SOURCE_CACHE / ENV{CPM_SOURCE_CACHE} at include() time and creates the
+# cache entry itself (defaulting to OFF). Setting it afterwards silently
+# loses to the entry CPM just wrote, which is how this ended up as OFF.
+if(NOT DEFINED CPM_SOURCE_CACHE)
+    if(DEFINED ENV{CPM_SOURCE_CACHE})
+        set(CPM_SOURCE_CACHE "$ENV{CPM_SOURCE_CACHE}")
+    elseif(DEFINED ENV{HOME})
+        set(CPM_SOURCE_CACHE "$ENV{HOME}/.cache/warploom/cpm")
+    else()
+        set(CPM_SOURCE_CACHE "${CMAKE_BINARY_DIR}/cpm_cache")
+    endif()
+    set(CPM_SOURCE_CACHE "${CPM_SOURCE_CACHE}" CACHE PATH "CPM source cache")
+endif()
+
 include("${CPM_DOWNLOAD_LOCATION}")
 
 # ============================================================================
 # CPM.cmake Configuration
 # ============================================================================
-set(CPM_USE_LOCAL_PACKAGES ON CACHE BOOL "Use local packages if available")
-set(CPM_LOCAL_PACKAGES_ONLY OFF CACHE BOOL "Only use local packages")
-set(CPM_DOWNLOAD_ALL ON CACHE BOOL "Download all dependencies")
-set(CPM_DONT_UPDATE_PACKAGE_CACHE OFF CACHE BOOL "Don't update package cache")
-set(CPM_SOURCE_CACHE "${CMAKE_BINARY_DIR}/CPM_cache" CACHE PATH "CPM source cache")
+file(MAKE_DIRECTORY "${CPM_SOURCE_CACHE}")
 
-# Create CPM cache directory
-if(NOT EXISTS "${CPM_SOURCE_CACHE}")
-    file(MAKE_DIRECTORY "${CPM_SOURCE_CACHE}")
-endif()
+set(CPM_USE_LOCAL_PACKAGES ON CACHE BOOL "Prefer a find_package() hit over a download")
+set(CPM_LOCAL_PACKAGES_ONLY OFF CACHE BOOL "Never download; fail if a package is missing")
 
 # ============================================================================
-# CPM.cmake Helper Functions
+# Helper
 # ============================================================================
-function(omnicpp_add_cpm_package PACKAGE_NAME)
+function(warploom_add_cpm_package PACKAGE_NAME)
     cmake_parse_arguments(ARGS
-        "REQUIRED;OPTIONAL"
+        "OPTIONAL"
         "VERSION;GIT_TAG;GIT_REPOSITORY;GITHUB_REPOSITORY;URL"
-        ""
+        "OPTIONS"
         ${ARGN}
     )
 
-    if(WARPLOOM_USE_CPM)
-        if(ARGS_REQUIRED)
-            CPMAddPackage(
-                NAME ${PACKAGE_NAME}
-                VERSION ${ARGS_VERSION}
-                GIT_TAG ${ARGS_GIT_TAG}
-                GIT_REPOSITORY ${ARGS_GIT_REPOSITORY}
-                GITHUB_REPOSITORY ${ARGS_GITHUB_REPOSITORY}
-                URL ${ARGS_URL}
-            )
-        elseif(ARGS_OPTIONAL)
-            CPMTryAddPackage(
-                NAME ${PACKAGE_NAME}
-                VERSION ${ARGS_VERSION}
-                GIT_TAG ${ARGS_GIT_TAG}
-                GIT_REPOSITORY ${ARGS_GIT_REPOSITORY}
-                GITHUB_REPOSITORY ${ARGS_GITHUB_REPOSITORY}
-                URL ${ARGS_URL}
-            )
-        endif()
+    if(NOT WARPLOOM_USE_CPM)
+        return()
+    endif()
+
+    # A package is REQUIRED unless it is explicitly marked OPTIONAL: a caller
+    # that forgets the keyword should get the package, not silence.
+    if(NOT ARGS_OPTIONAL)
+        CPMAddPackage(
+            NAME ${PACKAGE_NAME}
+            VERSION ${ARGS_VERSION}
+            GIT_TAG ${ARGS_GIT_TAG}
+            GIT_REPOSITORY ${ARGS_GIT_REPOSITORY}
+            GITHUB_REPOSITORY ${ARGS_GITHUB_REPOSITORY}
+            URL ${ARGS_URL}
+            OPTIONS ${ARGS_OPTIONS}
+        )
+    else()
+        CPMTryAddPackage(
+            NAME ${PACKAGE_NAME}
+            VERSION ${ARGS_VERSION}
+            GIT_TAG ${ARGS_GIT_TAG}
+            GIT_REPOSITORY ${ARGS_GIT_REPOSITORY}
+            GITHUB_REPOSITORY ${ARGS_GITHUB_REPOSITORY}
+            URL ${ARGS_URL}
+            OPTIONS ${ARGS_OPTIONS}
+        )
     endif()
 endfunction()
 
-message(STATUS "CPM.cmake integration loaded (v${CPM_VERSION})")
+message(STATUS "CPM.cmake v${CPM_VERSION} (source cache: ${CPM_SOURCE_CACHE})")

@@ -2,232 +2,61 @@
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "warploom",
   "version": "0.0.5",
-  "description": "Warploom - deterministic simulation + node-based editor engine with C++23 support",
-  "license": "MIT",
+  "description": "Warploom: data-oriented C++ engine with deterministic simulation, a Vulkan renderer and a time-warp editor.",
+  "homepage": "https://github.com/WyattAu/OmniCPP-template",
+  "builtin-baseline": "2024-06-17",
   "dependencies": [
- {
-    "name": "quill",
-      "version>=": "7.5.0"
-    },
-    {
-      "name": "nlohmann-json",
-      "version>=": "3.11.3"
-    },
-    {
-      "name": "zlib",
-      "version>=": "1.3.1"
-    },
-    {
-      "name": "spdlog",
-      "version>=": "1.14.1"
-    },
-    {
-      "name": "gtest",
-      "version>=": "1.15.0"
-    },
-    {
-      "name": "catch2",
-      "version>=": "3.7.1"
-    },
-    {
-      "name": "glm",
-      "version>=": "1.0.1"
-    },
-    {
-      "name": "stb",
-      "version>=": "2023-12-27"
-    },
-    {
-      "name": "cpptrace",
-      "version>=": "0.6.3"
-    },
-    {
-      "name": "openssl",
-      "version>=": "3.3.1"
-    },
     {
       "name": "vulkan-headers",
-      "version>=": "1.3.296"
+      "comment": "Vulkan headers for warploom-render and the viewport."
     },
     {
       "name": "vulkan-loader",
-      "version>=": "1.3.296"
-    },
-    {
-      "name": "shaderc",
-      "version>=": "2024-01-22"
-    },
-    {
-      "name": "spirv-tools",
-      "version>=": "2024-01-22"
-    },
-    {
-      "name": "glslang",
-      "version>=": "14.0.0"
-    },
-    {
-      "name": "spirv-cross",
-      "version>=": "2024-01-22"
-    },
-    {
-      "name": "asio",
-      "version>=": "1.30.2"
-    },
-    {
-      "name": "simdjson",
-      "version>=": "3.6.0"
-    },
-    {
-      "name": "flatbuffers",
-      "version>=": "23.5.26"
-    },
-    {
-      "name": "libsodium",
-      "version>=": "1.0.19"
-    },
-    {
-      "name": "grpc",
-      "version>=": "1.60.0"
-    },
-    {
-      "name": "protobuf",
-      "version>=": "4.25.1"
-    }
-  ],
-  "builtin-baseline": "2024-06-17",
-  "overrides": [
-    {
-      "name": "fmt",
-      "version": "10.2.1"
-    },
-    {
-      "name": "nlohmann-json",
-      "version": "3.11.3"
-    },
-    {
-      "name": "spdlog",
-      "version": "1.14.1"
+      "comment": "Vulkan loader at runtime."
     },
     {
       "name": "gtest",
-      "version": "1.15.0"
+      "comment": "The engine's only third-party dependency (test suites)."
     },
     {
-      "name": "glm",
-      "version": "1.0.1"
+      "name": "shaderc",
+      "comment": "glslc, used by cmake/Shaders.cmake to compile the SPIR-V."
+    },
+    {
+      "name": "glslang",
+      "comment": "glslangValidator fallback when glslc is unavailable."
     }
   ],
   "features": {
+    "tests": {
+      "description": "Build the test suites.",
+      "dependencies": [
+        {
+          "name": "gtest"
+        }
+      ]
+    },
     "vulkan": {
-      "description": "Enable Vulkan graphics API support",
+      "description": "Build warploom-render and the viewport.",
       "dependencies": [
-        "vulkan-headers",
-        "vulkan-loader",
-        "shaderc",
-        "spirv-tools",
-        "glslang",
-        "spirv-cross"
+        {
+          "name": "vulkan-headers"
+        },
+        {
+          "name": "vulkan-loader"
+        }
       ]
     },
-    "opengl": {
-      "description": "Enable OpenGL graphics API support",
+    "shaders": {
+      "description": "Compile the engine's shaders at build time.",
       "dependencies": [
-        "opengl",
-        "glad"
-      ]
-    },
-    "qt6": {
-      "description": "Enable Qt6 framework support",
-      "dependencies": [
-        "qt6"
-      ]
-    },
-    "testing": {
-      "description": "Enable testing frameworks",
-      "dependencies": [
-        "gtest",
-        "catch2"
-      ]
-    },
-    "logging": {
-      "description": "Enable logging support",
-      "dependencies": [
-        "spdlog"
-      ]
-    },
-    "math": {
-      "description": "Enable math library support",
-      "dependencies": [
-        "glm"
-      ]
-    },
-    "image": {
-      "description": "Enable image loading support",
-      "dependencies": [
-        "stb"
-      ]
-    },
-    "networking": {
-      "description": "Enable networking support",
-      "dependencies": [
-        "openssl"
-      ]
-    },
-    "debugging": {
-      "description": "Enable debugging support",
-      "dependencies": [
-        "cpptrace"
-      ]
-    },
-    "performance": {
-      "description": "Enable high-performance containers (SwissTables, mimalloc)",
-      "dependencies": [
-        "abseil",
-        "mimalloc"
-      ]
-    },
-    "concurrency": {
-      "description": "Enable structured concurrency with asio",
-      "dependencies": [
-        "asio"
-      ]
-    },
-    "serialization": {
-      "description": "Enable zero-copy serialization (simdjson, flatbuffers)",
-      "dependencies": [
-        "simdjson",
-        "flatbuffers"
-      ]
-    },
-    "rpc": {
-      "description": "Enable RPC contracts with gRPC/Protobuf",
-      "dependencies": [
-        "grpc",
-        "protobuf"
-      ]
-    },
-    "security": {
-      "description": "Enable cryptographic security (libsodium)",
-      "dependencies": [
-        "libsodium"
-      ]
-    },
-    "embedded": {
-      "description": "Enable embedded-friendly containers (ETL)",
-      "dependencies": [
-        "etl"
+        {
+          "name": "shaderc"
+        },
+        {
+          "name": "glslang"
+        }
       ]
     }
-  },
-  "default-features": [
-    "vulkan",
-    "testing",
-    "logging",
-    "math",
-    "image",
-    "debugging",
-    "performance",
-    "concurrency",
-    "serialization"
-  ]
+  }
 }
