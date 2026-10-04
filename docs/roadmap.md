@@ -235,8 +235,9 @@ declares a slot 3.
       asserting they shared a contract. `TimelineIsDrivenByTheTickNotByTheHost`
       reproduces the old behaviour when the timeline stage is removed.
 
-      The physics stage is deliberately a *counted no-op* today (C3), so the
-      ordering is already fixed and tested before a solver lands in it. It sits
+      The physics stage was deliberately a *counted no-op* when this landed, so
+      the ordering would already be fixed and tested before a solver moved into
+      it. C3 has since put the solver there. It sits
       after `sync_graph` and is gated on pause, which is why a paused tick still
       applies graph edits and refreshes the projection. Projection runs last so
       the projected store reflects a clip's write rather than the pre-playback
@@ -245,8 +246,38 @@ declares a slot 3.
       Verified: 100.0000% of pixels identical to pre-C1 (mean 78.472, max 110),
       6 tick tests, 562 total, 0 diagnostics, 0 leaks, 6/6 ctest, 64/64 live
       proofs, four viewport configurations clean.
-- [ ] **C3 physics in the tick, and in the protocol** — so replay captures
-      it.
+- [x] **C3 physics in the tick and in the protocol** — the session owns a
+      `PhysicsWorld` and `tick()` steps it, so both hosts simulate the same
+      world by construction rather than by convention. Bodies substep at
+      `kMaxPhysicsSubstep` (1/240 s), count derived from `fixed_dt` alone and
+      capped at 8: a large frame dt cannot tunnel bodies through each other,
+      and a pathological one cannot make a tick arbitrarily expensive.
+
+      Determinism shaped it. The substep count is a pure function of `fixed_dt`,
+      never wall-clock, so a replay re-ticking the same frames reproduces the
+      integration — asserted by stepping two sessions 20 frames and requiring
+      bit-identical positions plus identical snapshot bytes.
+
+      State travels in `snapshot_json()` (gravity plus per-body pose, velocity,
+      radius, inverse mass, restitution), in object-id order so the bytes are
+      reproducible. Floats use `to_chars`' shortest round-trip form, NOT
+      `std::to_string`: six decimals is lossy, so a resumed replay would return
+      a body very slightly moved and diverge from the original on the next tick.
+      The test parses the JSON back and demands exact equality.
+
+      Poses are written into the projected transform *after* `project()`, which
+      refreshes from the document and would otherwise snap every simulated
+      object back to its authored position each frame.
+
+      Honest limit: `snapshot_json()` is the live protocol query, so physics is
+      *reported*. Scrub checkpoints still capture the document only, so a
+      time-warp scrub does not yet restore physics. That is the rest of the
+      replay coverage.
+
+      Verified: 100.0000% of pixels identical to pre-C1, 14 tick tests (8 new),
+      570 total, 0 diagnostics, 0 leaks, 6/6 ctest, 64/64 live proofs. Removing
+      the step, the pose write-back, or the substep derivation each fails
+      tests.
 - [ ] **C4 delete the test-local ECS bridge** — `test_physics_ecs_bridge`
       currently proves a helper that exists only in that file.
 
