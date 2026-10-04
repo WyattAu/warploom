@@ -1,7 +1,7 @@
 # OmniCpp Build System - Python Dependencies
 
 # Core Dependencies
-pyyaml>=6.0
+pyyaml>=6.0.3
 tomli>=2.0.1
 
 # Development Dependencies
