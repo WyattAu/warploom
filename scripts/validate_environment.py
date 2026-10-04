@@ -7,6 +7,7 @@ checking for required tools, compilers, and dependencies.
 """
 
 import os
+import shutil
 import sys
 import subprocess
 import platform
@@ -253,11 +254,20 @@ class EnvironmentValidator:
             self.check_command(cmd, desc)  # type: ignore[arg-type]
 
     def validate_package_managers(self) -> None:
-        """Validate package managers."""
-        print("📦 Checking Package Managers...")
+        """Validate package managers.
 
-        # Conan
-        self.check_version("conan", "Conan package manager", "2.0")
+        Warploom has one dependency story: CPM fetches from the network at
+        configure time, so there is no package manager binary to require and
+        nothing to install. Conan was removed along with conan/ (commit
+        a1a3214); it used to be checked here, which recorded a hard failure on
+        any machine without it installed -- a requirement for a tool the build
+        no longer uses. vcpkg stays as optional toolchain support, since
+        cmake/VcpkgIntegration.cmake still honours a vcpkg toolchain.
+        """
+        print("📦 Checking Package Managers...")
+        self.results["passed"].append(
+            "✅ CPM: fetched at configure time, no system package manager required"
+        )
 
         # vcpkg (check if directory exists)
         vcpkg_paths = [
@@ -267,36 +277,50 @@ class EnvironmentValidator:
             "C:\\Program Files\\vcpkg"
         ]
 
-        vcpkg_found = False
-        for path in vcpkg_paths:
-            expanded_path = os.path.expanduser(path)
-            if self.check_directory(expanded_path, "vcpkg installation"):
-                vcpkg_found = True
-                break
-
-        if not vcpkg_found:
-            self.results["warnings"].append("⚠️  vcpkg not found in common locations")  # type: ignore[arg-type]
+        # vcpkg is OPTIONAL: cmake/VcpkgIntegration.cmake only honours a vcpkg
+        # toolchain if one is present. Probing with check_directory recorded a
+        # hard FAILURE for every location tried, so a normal CPM-only machine
+        # reported four failures for a toolchain it never intended to use.
+        # Probe quietly and report at most one informational line.
+        vcpkg_found = any(
+            os.path.isdir(os.path.expanduser(path)) for path in vcpkg_paths
+        )
+        if vcpkg_found:
+            self.results["passed"].append(
+                "✅ vcpkg: present, toolchain integration available"
+            )
+        else:
+            self.results["warnings"].append(
+                "⚠️  vcpkg not found in common locations (optional: CPM is the "
+                "dependency mechanism)"
+            )
 
     def validate_qt_vulkan(self) -> None:
         """Validate Qt and Vulkan development setup."""
         print("🎨 Checking Qt/Vulkan Development...")
 
-        # Vulkan SDK
-        vulkan_paths = [
-            "C:\\VulkanSDK",
-            "/usr/local/VulkanSDK",
-            "~/VulkanSDK"
-        ]
+        # Vulkan: probe the TOOLS, not an SDK install directory. The old check
+        # looked for C:\VulkanSDK / /usr/local/VulkanSDK and recorded a hard
+        # failure for each miss, so a machine with a perfectly working Vulkan
+        # installed from distro packages (vulkaninfo, glslc and glslangValidator
+        # all on PATH) was told its Vulkan was broken. What the build actually
+        # needs is the shader compilers and a loader, and those are what is
+        # checked now.
+        vulkan_tools = ["vulkaninfo", "glslc", "glslangValidator"]
+        missing_vulkan = [t for t in vulkan_tools if shutil.which(t) is None]
 
-        vulkan_found = False
-        for path in vulkan_paths:
-            expanded_path = os.path.expanduser(path)
-            if self.check_directory(expanded_path, "Vulkan SDK"):
-                vulkan_found = True
-                break
-
-        if not vulkan_found:
-            self.results["warnings"].append("⚠️  Vulkan SDK not found - required for Qt/Vulkan builds")  # type: ignore[arg-type]
+        if not missing_vulkan:
+            self.results["passed"].append(
+                "✅ Vulkan toolchain: " + ", ".join(vulkan_tools)
+            )
+        elif len(missing_vulkan) == len(vulkan_tools):
+            self.results["failed"].append(
+                "❌ Vulkan toolchain: none of " + ", ".join(vulkan_tools) + " found"
+            )
+        else:
+            self.results["warnings"].append(
+                "⚠️  Vulkan toolchain missing: " + ", ".join(missing_vulkan)
+            )
 
     def validate_cross_compilation(self) -> None:
         """Validate cross-compilation toolchains."""

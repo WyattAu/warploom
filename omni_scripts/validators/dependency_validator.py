@@ -278,12 +278,25 @@ class DependencyValidator:
         errors: List[str] = []
         warnings: List[str] = []
 
-        # Check for missing dependencies
+        # Check for missing dependencies. System deps are recorded under a
+        # DISPLAY name ('Python 3', 'CMake') while this list names the COMMAND
+        # ('python3', 'cmake'), so the two were compared directly and never
+        # matched -- reporting 'Required system dependency not found: python3'
+        # on machines where python3 was demonstrably running the check.
+        # Normalising both sides (case, spaces, underscores) makes the
+        # comparison mean what it says.
+        def _normalize(name: str) -> str:
+            return ''.join(ch for ch in name.lower() if ch.isalnum())
+
         required_deps = ['cmake', 'ninja', 'python3']
-        found_system_deps = {dep.name.lower() for dep in all_dependencies if dep.source == 'system'}
+        found_system_deps = {
+            _normalize(dep.name)
+            for dep in all_dependencies
+            if dep.source == 'system'
+        }
 
         for req_dep in required_deps:
-            if req_dep not in found_system_deps:
+            if _normalize(req_dep) not in found_system_deps:
                 errors.append(f"Required system dependency not found: {req_dep}")
 
         # Check dependency integrity in _deps directory
