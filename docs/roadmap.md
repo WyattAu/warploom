@@ -103,10 +103,22 @@ declares a slot 3.
       in five configurations (hdr, bloom, rt, rt+bloom, no-hdr), 546 tests, 0
       leaks, 64 live proofs.
 
-      Still open, and now the only part of B2: the *application* scene pass is
-      still recorded into a render pass the renderer opened. `record_pbr_frame`
-      exists and is graph-driven, but the viewport does not call it, because it
-      renders a shadow pass between the graph's two halves.
+      Not a defect, to be clear about the division of labour: the renderer
+      opening the scene pass and the application supplying only scene data is
+      the *goal* of engine/app separation, not work left over. `record_pbr_frame`
+      is the single-entry-point variant for callers that want to own pass
+      framing themselves; the viewport deliberately does not use it, because it
+      needs a shadow pass between the graph's halves and per-scene work
+      (node-editor paint, city actors, document cubes) inside the main pass.
+
+      The one genuine leftover is that the scene pass still hand-writes its own
+      UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL barrier for the HDR target, so the
+      frame is two graphs with a manual seam between them rather than one.
+      Closing it means making the scene pass a node in the same sequence as the
+      compose stages, which also retires the `initial_layout` seeding -- once
+      the producer is in-graph the compiler tracks the image itself. Left for a
+      separate change: it touches the frame loop's pass framing, and it deserves
+      its own verification run rather than riding along on B2.
 - [x] **B3 HDR target + post chain** — the renderer now owns an HDR
       intermediate plus a bloom and tonemap/FXAA chain
       (`RendererConfig::enable_hdr_compose`), and the application's scene
