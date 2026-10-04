@@ -1583,6 +1583,20 @@ void fullscreen_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 
 }  // namespace
 
+VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
+    bool compose, HiZDepthSource hdr_depth, HiZDepthSource swapchain_depth) {
+  const auto usable = [](const HiZDepthSource& d) {
+    return d.available() && d.sampleable;
+  };
+  if (compose) {
+    // Sampleability decides whether the reduction may read it at all. When the
+    // HDR depth is unusable we report unavailable rather than falling back to
+    // the swapchain's, which the scene did not write this frame.
+    return usable(hdr_depth) ? hdr_depth : HiZDepthSource{};
+  }
+  return usable(swapchain_depth) ? swapchain_depth : HiZDepthSource{};
+}
+
 ::warploom::core::Result<void> VulkanRenderer::record_fullscreen_draw(
     VkCommandBuffer command_buffer, const FullscreenPass& pass,
     VkDescriptorSet set0) {
@@ -1914,16 +1928,26 @@ void fullscreen_render_cb(VkCommandBuffer cb, const GraphPass& pass,
                         timestamp_pool_, current_frame_ * 2U + 1U);
   }
 
+  const HiZDepthSource hiz_depth = select_hiz_depth_source(
+      compose,
+      {hdr_target_.depth_image(), hdr_target_.depth_view(),
+       hdr_target_.depth_is_sampleable()},
+      {render_pass_resource_ != nullptr ? render_pass_resource_->depth_image()
+                                        : VK_NULL_HANDLE,
+       render_pass_resource_ != nullptr ? render_pass_resource_->depth_view()
+                                        : VK_NULL_HANDLE,
+       render_pass_resource_ != nullptr &&
+           render_pass_resource_->depth_is_sampleable()});
   if (hiz_enabled_ && (hiz_direct_enabled_ || hiz_record_callback_) &&
-      render_pass_resource_ && render_pass_resource_->depth_is_sampleable()) {
+      hiz_depth.available()) {
     pending_hiz_token_ = hiz_state_.begin_frame();
     const std::uint32_t destination_index = pending_hiz_token_.write_index;
     const std::uint32_t previous_index = pending_hiz_token_.previous_index;
     HiZFrameRecord record{};
     record.token = pending_hiz_token_;
-    record.depth_image = render_pass_resource_->depth_image();
-    record.depth_view = render_pass_resource_->depth_view();
-    record.depth_is_sampleable = render_pass_resource_->depth_is_sampleable();
+    record.depth_image = hiz_depth.image;
+    record.depth_view = hiz_depth.view;
+    record.depth_is_sampleable = hiz_depth.sampleable;
     record.destination_initialized = hiz_pyramid_initialized_[destination_index];
     record.previous_pyramid = pending_hiz_token_.has_previous ? hiz_pyramids_[previous_index].get() : nullptr;
     record.destination_pyramid = hiz_pyramids_[destination_index].get();

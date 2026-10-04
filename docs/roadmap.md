@@ -156,8 +156,33 @@ declares a slot 3.
       Note for whoever does it: the project defines `OMNICPP_HAS_VULKAN` with
       no value, so `#if OMNICPP_HAS_VULKAN` silently evaluates false. Use
       `#ifdef`.
-- [ ] **B5 H-Z occlusion on** — `enable_hiz` is currently only ever set in
-      tests.
+- [x] **B5 H-Z depth source** — the reduction read
+      `render_pass_resource_->depth_image()` unconditionally. Under compose
+      that is the swapchain's depth, which the scene never wrote: the scene
+      renders into the HDR intermediate's own depth. So H-Z under compose
+      would have reduced a stale attachment and published a pyramid that does
+      not describe the frame. `select_hiz_depth_source` now picks the depth the
+      scene actually wrote, and reports unavailable rather than falling back to
+      the stale one. Covered by `SelectsTheDepthTheSceneWrote`, which fails if
+      the fallback comes back.
+
+- [ ] **B5b an occlusion consumer** — the pyramid is still built and thrown
+      away. There is no occlusion shader that matches the viewport's *split*
+      cull ABI: `cull_and_draw_lod.comp` (what the app uses, via
+      `record_gpu_driven_cull`) has no pyramid binding, and the two shaders
+      that do read occlusion do not fit —
+      `cull_and_draw_lod_occlude.comp` is fused cull+draw with the pyramid in a
+      buffer at set 0 binding 4, and `cull_hiz_sampled.comp` is a standalone
+      test ABI (binding 0 instance spheres, 1 pyramid sampler, 2 draws) used
+      only by `test_hiz_sampled_pingpong.cpp`.
+
+      So turning occlusion on in the app means adding a pyramid binding to the
+      cull descriptor set and a split-path cull variant that tests it, not
+      flipping `enable_hiz`. Verification is also not a byte-exact A/B: correct
+      occlusion legitimately removes hidden geometry, so the evidence has to be
+      the existing `test_gpu_driven_occlusion_frame.cpp` approach (occluder
+      present -> occludee culled; occluder removed -> occludee drawn) rather
+      than pixel equality against the non-occluded frame.
 - [x] **B6 no duplicated Vulkan in the app** — raw `vkCmd*` calls in the
       viewport fell from 31 to 10. All ten are legitimate application
       orchestration: ray-tracing acceleration-structure build barriers, the

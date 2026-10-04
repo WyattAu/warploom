@@ -487,6 +487,19 @@ public:
   [[nodiscard]] bool hiz_enabled() const noexcept { return hiz_enabled_; }
   //! True when the renderer also owns the reduction compute pipeline.
   [[nodiscard]] bool hiz_direct_enabled() const noexcept { return hiz_direct_enabled_; }
+
+  //! Which depth buffer an H-Z reduction must read this frame. Under HDR
+  //! compose the scene renders into the HDR intermediate's own depth, so the
+  //! swapchain's depth is a stale attachment describing an earlier frame.
+  //! Reducing it would publish a pyramid that does not match what was drawn.
+  struct HiZDepthSource {
+    VkImage image{VK_NULL_HANDLE};
+    VkImageView view{VK_NULL_HANDLE};
+    bool sampleable{false};
+    [[nodiscard]] bool available() const noexcept { return image != VK_NULL_HANDLE; }
+  };
+  [[nodiscard]] static HiZDepthSource select_hiz_depth_source(
+      bool compose, HiZDepthSource hdr_depth, HiZDepthSource swapchain_depth);
   //! State contract for current/previous H-Z selection and invalidation.
   [[nodiscard]] const VulkanHiZFrameState& hiz_frame_state() const noexcept {
     return hiz_state_;
