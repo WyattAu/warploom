@@ -25,12 +25,18 @@ void on_signal(int) { g_stop = 1; }
 
 //! Forwards every command to the embedded session; nothing is host-owned
 //! here (headless = no camera, no sun, no capture scheduling) except the
-//! SIM CLOCK: `step` advances the frame counter and runs ONE full session
-//! tick (sync_graph + tick_timeline) per tick — the same contract the
-//! viewport's frame loop follows (G3 timeline sampling is host-ticked).
+//! SIM CLOCK. `step` advances the frame counter and runs ONE
+//! `EditorSession::tick` per tick -- the same call, with the same argument
+//! shape, that the viewport's frame loop makes. Neither host sequences the
+//! stages itself any more, so the two cannot drift.
 //! The logical frame model matches the W2 recorder exactly.
 class HeadlessHost final : public omnicpp::core::ControlHost {
  public:
+  //! Fixed timestep handed to every tick. Physics is not in the tick yet
+  //! (roadmap C3), so today this only decides whether the physics stage is
+  //! skipped; declared here so C3 does not have to touch the host.
+  static constexpr double kFixedDt = 1.0 / 60.0;
+
   [[nodiscard]] omnicpp::core::ControlReply on_control(
       const omnicpp::core::ControlCommand& command) override {
     if (command.kind ==
@@ -40,9 +46,7 @@ class HeadlessHost final : public omnicpp::core::ControlHost {
               ? static_cast<std::uint64_t>(command.numbers[0])
               : 1U;
       for (std::uint64_t t = 0; t < ticks; ++t) {
-        std::string error;
-        (void)editor_.sync_graph(error);
-        editor_.tick_timeline(frame_);
+        (void)editor_.tick({frame_, kFixedDt, false});
         frame_ += 1;
       }
     }

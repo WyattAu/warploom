@@ -223,9 +223,28 @@ declares a slot 3.
       leaks, 6/6 ctest, 64/64 live proofs, five viewport configurations clean.
       Removing the identity store, the orphan sweep, or the transform refresh
       each fail tests; so does restoring the stale-depth fallback from B5.
-- [ ] **C2 a single `tick(FrameInput)`** — `sync_graph → physics.step →
-      timeline.tick → record`, called identically by the app and by the
-      headless host.
+- [x] **C2 one `tick(FrameInput)`** — `EditorSession::tick` runs
+      `sync_graph → physics.step → timeline.tick → project`, and the viewport
+      and the control host both call exactly that. Neither sequences the stages
+      itself any more, so the two cannot drift.
+
+      This fixed a live divergence, not just an organizational one: the control
+      host ticked the timeline and the viewport called `sync_graph` only, so a
+      clip played in the viewport did nothing while the same document played
+      correctly under the host — with a comment in `headless_host.cpp`
+      asserting they shared a contract. `TimelineIsDrivenByTheTickNotByTheHost`
+      reproduces the old behaviour when the timeline stage is removed.
+
+      The physics stage is deliberately a *counted no-op* today (C3), so the
+      ordering is already fixed and tested before a solver lands in it. It sits
+      after `sync_graph` and is gated on pause, which is why a paused tick still
+      applies graph edits and refreshes the projection. Projection runs last so
+      the projected store reflects a clip's write rather than the pre-playback
+      value.
+
+      Verified: 100.0000% of pixels identical to pre-C1 (mean 78.472, max 110),
+      6 tick tests, 562 total, 0 diagnostics, 0 leaks, 6/6 ctest, 64/64 live
+      proofs, four viewport configurations clean.
 - [ ] **C3 physics in the tick, and in the protocol** — so replay captures
       it.
 - [ ] **C4 delete the test-local ECS bridge** — `test_physics_ecs_bridge`

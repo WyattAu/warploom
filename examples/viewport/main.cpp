@@ -4655,8 +4655,13 @@ void tick_node_editor(ViewportApp& app) {
   // M10: graph->scene bridge — bindings write their pin values into object
   // properties every tick (insertion order, deterministic; skipped bindings
   // are non-fatal).
-  std::string sync_error;
-  (void)app.editor.sync_graph(sync_error);
+  // C2: one tick, same call the headless host makes. This used to call
+  // sync_graph only, so the viewport never ticked its timeline -- a clip
+  // played in the viewport did nothing while the same document played
+  // correctly under the control host.
+  static constexpr double kTickFixedDt = 1.0 / 60.0;
+  (void)app.editor.tick({app.frame_index, kTickFixedDt,
+                         app.control_paused()});
   app.node_view->sync_widgets();
   warploom::ui::compute_layout(app.ui_tree, static_cast<float>(kWidth),
                               static_cast<float>(kHeight));

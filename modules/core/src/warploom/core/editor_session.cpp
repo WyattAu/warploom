@@ -135,6 +135,37 @@ void split_axis_property(const std::string& property, std::string& base,
   axis = -1;
 }
 
+EditorSession::TickReport EditorSession::tick(const FrameInput& input) {
+  TickReport report{};
+
+  // 1. Bindings write their pin values into object properties.
+  std::string error;
+  const std::size_t applied = sync_graph(error);
+  report.bindings_applied = static_cast<std::uint32_t>(applied);
+  // A graph evaluation failure is NOT a tick failure: bindings that resolve
+  // still apply, and the session has always treated a bad binding as
+  // non-fatal. Reporting it lets a host surface it without a host-specific
+  // second error path.
+  report.synced = error.empty();
+
+  // 2. Physics. Not wired yet (roadmap C3): deliberately a counted no-op so
+  // the ordering is already fixed and tested before a solver lands in it.
+  // Skipped while paused -- a paused host must not advance the simulation, but
+  // must still see graph edits apply, which is why this sits after sync_graph.
+  if (!input.paused && input.fixed_dt > 0.0) {
+    report.physics_substeps = 1U;
+  }
+
+  // 3. The clip wins the frame against a binding on the same property.
+  tick_timeline(input.frame);
+
+  // 4. Carry the document into the ECS. After the timeline so a clip's write
+  // is what gets projected, not the pre-playback value.
+  (void)projection_.project(doc_);
+
+  return report;
+}
+
 void EditorSession::tick_timeline(std::uint64_t frame) {
   // 1. Playback first: apply the armed clip's step-hold values (direct
   //    application, bindings model). Auto-stops at clip end.

@@ -22,6 +22,7 @@
 #include "warploom/core/command_recorder.hpp"
 #include "warploom/core/control_server.hpp"
 #include "warploom/core/document.hpp"
+#include "warploom/core/document_projection.hpp"
 #include "warploom/core/property_registry.hpp"
 #include "warploom/core/replay_scrubber.hpp"
 
@@ -102,6 +103,51 @@ class EditorSession final : public ::warploom::core::ControlHost {
   }
 
   // -- Timeline clips (G3, protocol v1.8) ----------------------------------
+  //! One simulation tick's worth of input. Carrying this explicitly is what
+  //! lets every host drive the same tick() and therefore the same simulation:
+  //! a host that forgets to pass a frame, or advances its own counter
+  //! differently, no longer silently diverges.
+  struct FrameInput final {
+    //! Logical sim frame this tick advances to. The host owns the counter but
+    //! the session stamps everything from it, so there is exactly one source.
+    std::uint64_t frame{0};
+    //! Fixed timestep in seconds. Only meaningful once physics is in the tick
+    //! (C3); carried now so the signature does not change when it lands.
+    double fixed_dt{0.0};
+    //! True when the host wants the simulation paused. A paused tick still
+    //! runs sync_graph, so UI edits keep applying while time is stopped.
+    bool paused{false};
+  };
+
+  //! The projected runtime view of the document. Refreshed by tick().
+  [[nodiscard]] const DocumentProjection& projection() const noexcept {
+    return projection_;
+  }
+
+  //! The one tick. Every host — the viewport and the headless control host —
+  //! calls exactly this, in this order, once per logical frame:
+  //!
+  //!   1. sync_graph    bindings write their pin values into properties
+  //!   2. physics.step  the simulation, in fixed-dt substeps (C3 wires the
+  //!                   solver here; until then it is a counted no-op, so the
+  //!                   ordering is already fixed before it is load-bearing)
+  //!   3. tick_timeline the clip wins the frame when it and a binding both
+  //!                   drive the same property
+  //!   4. projection    carry the document into the ECS so systems downstream
+  //!                   read one store
+  //!
+  //! Order is load-bearing and documented per step. This existed because the
+  //! two hosts had drifted: the headless host ticked the timeline and the
+  //! viewport did not, so the same document played differently depending on
+  //! who was driving it, while a comment claimed they shared a contract.
+  struct TickReport final {
+    std::uint32_t bindings_applied{0};
+    std::uint32_t physics_substeps{0};
+    bool synced{false};
+    [[nodiscard]] bool ok() const noexcept { return synced; }
+  };
+  [[nodiscard]] TickReport tick(const FrameInput& input);
+
   //! ONE session tick of the timeline: record-into-armed-clip, then
   //! play-from-armed-clip. Direct application (NOT commands — driven values
   //! are the bindings model; W1 scrubbing is the recovery path). Call once
@@ -166,6 +212,9 @@ class EditorSession final : public ::warploom::core::ControlHost {
       ::warploom::core::ControlReply& reply);
 
   SceneDocument doc_{};
+  //! C1/C2: the document's runtime projection, refreshed once per tick so
+  //! every system downstream reads one store rather than the document.
+  DocumentProjection projection_{};
   CommandStack stack_{doc_};
   std::uint64_t selected_id_{0};
   CommandRecorder recorder_{};  //!< W2 capture (frame-thread-only)
