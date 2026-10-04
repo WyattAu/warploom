@@ -301,6 +301,31 @@ declares a slot 3.
 - [ ] **D1 real physics** — extract `warploom-physics`; broadphase, shapes,
       joints, XPBD substepping, speculative contacts; deterministic by
       construction. Today: 204 lines, spheres, O(n²).
+
+      **Measured blocker for the broadphase.** A conservative uniform grid was
+      written, verified result-preserving at N=1000 (fingerprint identical,
+      1.05x), and then found *not* result-preserving at N=4000 and N=8000 —
+      which is why it is not committed. Asymptotics were fine (1.05x → 1.67x →
+      3.65x as N grew), so the design was sound; the semantics were not.
+
+      The cause is the solver, not the grid. Step 3 resolves contacts in a
+      single pass that **mutates positions as it goes**: for each pair it
+      applies a positional correction before moving to the next pair. A
+      candidate list built from positions at pass start therefore omits pairs
+      that only come into overlap *because* an earlier pair pushed a body into
+      them — and the all-pairs loop would have caught those, since it re-reads
+      every position at the moment it visits the pair. At N=1000 the density is
+      low enough that this never triggered, which is exactly why a single-scale
+      check would have shipped it.
+
+      So no static broadphase can be made bit-identical to this solver; the
+      candidate set would have to be "every pair that overlaps at any point
+      during the sequential pass", which depends on the resolution order that
+      produced it. The fix is to make step 3 order-independent — compute all
+      contacts from one position snapshot, then apply corrections — which is
+      also what a real solver does. That changes results (a better solver, not
+      the same one, cheaper), so it needs its own tests and its own review
+      rather than arriving inside a performance commit.
 - [ ] **D2 real timeline** — interpolation and easing, concurrent record and
       play, camera/light/render tracks, and `ClipTimelineView` actually in
       the app. Today playback steps between keys and the widget has no
