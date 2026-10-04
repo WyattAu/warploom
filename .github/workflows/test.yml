@@ -24,7 +24,7 @@ jobs:
       # makes switching preset free locally. Keyed on the manifests that can
       # change what gets fetched.
       - name: Cache third-party sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/warploom/cpm
           key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
@@ -63,7 +63,7 @@ jobs:
       # makes switching preset free locally. Keyed on the manifests that can
       # change what gets fetched.
       - name: Cache third-party sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/warploom/cpm
           key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
@@ -96,7 +96,7 @@ jobs:
       # makes switching preset free locally. Keyed on the manifests that can
       # change what gets fetched.
       - name: Cache third-party sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/warploom/cpm
           key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
@@ -129,7 +129,7 @@ jobs:
       # makes switching preset free locally. Keyed on the manifests that can
       # change what gets fetched.
       - name: Cache third-party sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/warploom/cpm
           key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
@@ -164,7 +164,7 @@ jobs:
       # makes switching preset free locally. Keyed on the manifests that can
       # change what gets fetched.
       - name: Cache third-party sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/warploom/cpm
           key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
@@ -197,7 +197,7 @@ jobs:
       # makes switching preset free locally. Keyed on the manifests that can
       # change what gets fetched.
       - name: Cache third-party sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/warploom/cpm
           key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
@@ -239,7 +239,7 @@ jobs:
       # makes switching preset free locally. Keyed on the manifests that can
       # change what gets fetched.
       - name: Cache third-party sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/warploom/cpm
           key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
@@ -283,7 +283,7 @@ jobs:
       # makes switching preset free locally. Keyed on the manifests that can
       # change what gets fetched.
       - name: Cache third-party sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/warploom/cpm
           key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
@@ -311,7 +311,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Cache third-party sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/warploom/cpm
           key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
