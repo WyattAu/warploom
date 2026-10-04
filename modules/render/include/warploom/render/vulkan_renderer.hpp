@@ -365,10 +365,12 @@ public:
 
   //! Record one FullscreenPass inside an ACTIVE render pass (no begin/end,
   //! viewport/scissor to width x height, bind pipeline + set 0 = the caller's
-  //! single set, draw). Callback-compatible with graph record hooks.
-  [[nodiscard]] ::warploom::core::Result<void> record_fullscreen_draw(
+  //! single set, draw). Callback-compatible with graph record hooks, so it is
+  //! static: the compose chain records it from a capture-free lambda, which a
+  //! const member call could not do without capturing `this`.
+  [[nodiscard]] static ::warploom::core::Result<void> record_fullscreen_draw(
       VkCommandBuffer command_buffer, const FullscreenPass& pass,
-      VkDescriptorSet set0) const;
+      VkDescriptorSet set0);
 
   //! Graph node wrapper: records render-pass begin + record_fullscreen_draw
   //! + end. Compatible with execute_graph's record_render hook via the
@@ -574,10 +576,6 @@ private:
   VkDescriptorSet bloom_down_set_{VK_NULL_HANDLE};
   VkDescriptorSet bloom_up_set_{VK_NULL_HANDLE};
   VkFormat compose_hdr_format_{VK_FORMAT_UNDEFINED};
-  //! Current tracked layout of the compose chain's two intermediate images,
-  //! so each stage can barrier from the truth rather than an assumption.
-  VkImageLayout hdr_layout_{VK_IMAGE_LAYOUT_UNDEFINED};
-  VkImageLayout bloom_layout_{VK_IMAGE_LAYOUT_UNDEFINED};
   std::uint32_t compose_width_{0};
   std::uint32_t compose_height_{0};
   //! Bumped on every (re)creation of the HDR intermediate.

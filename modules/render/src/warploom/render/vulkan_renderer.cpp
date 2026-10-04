@@ -928,8 +928,6 @@ void pbr_frame_render_cb(VkCommandBuffer cb, const GraphPass& pass,
   compose_ready_ = false;
   compose_width_ = width;
   compose_height_ = height;
-  hdr_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
-  bloom_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
 
   // SAMPLED: the compose chain samples this image, and so does anything the
   // application reads back through the capture path.
@@ -1033,6 +1031,33 @@ void pbr_frame_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 }
 
 
+namespace {
+
+//! One compose stage: the pipeline, the target it renders into, and what it
+//! samples. `target == nullptr` means the stage writes the presentation target
+//! (the swapchain), whose layout the render pass owns.
+struct ComposeStage {
+  const VulkanPipeline* pipeline{nullptr};
+  VulkanOffscreenTarget* target{nullptr};
+  VkRenderPass pass{VK_NULL_HANDLE};
+  VkFramebuffer framebuffer{VK_NULL_HANDLE};
+  std::uint32_t width{0};
+  std::uint32_t height{0};
+  const void* push{nullptr};
+  std::uint32_t push_size{0};
+  VkDescriptorSet set{VK_NULL_HANDLE};
+  //! Images this stage samples, in descriptor-slot order.
+  std::array<GraphSampledImage, 2> samples{};
+  std::uint32_t sample_count{0};
+};
+
+}  // namespace
+
+//! Records the chain as render-graph nodes and lets compile_graph compute the
+//! barriers, rather than hand-writing a layout transition per stage. Every
+//! stage declares what it reads and what it writes; the compiler tracks each
+//! image's layout and access across the sequence and emits exactly the
+//! transitions required.
 void VulkanRenderer::record_compose_chain(VkCommandBuffer command_buffer,
                                           VkRenderPass target_pass,
                                           VkFramebuffer target_framebuffer,
@@ -1041,116 +1066,13 @@ void VulkanRenderer::record_compose_chain(VkCommandBuffer command_buffer,
 #ifdef OMNICPP_HAS_VULKAN
   if (!compose_ready_ || hdr_sampler_ == VK_NULL_HANDLE) return;
 
-  // Layouts are tracked per target through the chain rather than assumed.
-  // Each stage transitions its target into COLOR_ATTACHMENT_OPTIMAL, lets the
-  // render pass do its work, and transitions it back out to
-  // SHADER_READ_OPTIMAL. Anything less leaves the validation layer's idea of
-  // the layout disagreeing with the shader's descriptor, which is
-  // VUID-vkCmdDraw-imageLayout-00344.
-  auto current_layout = [&](VkImage image) -> VkImageLayout& {
-    return image == bloom_target_.image() ? bloom_layout_
-                                          : hdr_layout_;
-  };
-  (void)current_layout;
+  // Where the scene pass left the HDR image. It is recorded outside this graph,
+  // so each stage's first sample of it declares this as the producer state.
+  const VkImageLayout hdr_from_scene = hdr_target_.color_final_layout();
 
-  const auto transition = [&](VkImage image, VkImageLayout from,
-                              VkImageLayout to, VkAccessFlags dst_access) {
-    if (from == to) return;
-    VkImageMemoryBarrier b{};
-    b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    b.oldLayout = from;
-    b.newLayout = to;
-    b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    b.image = image;
-    b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    b.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-                      VK_ACCESS_SHADER_READ_BIT;
-    b.dstAccessMask = dst_access;
-    vkCmdPipelineBarrier(command_buffer,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0U, 0U, nullptr, 0U, nullptr, 1U, &b);
-  };
-
-  // One helper per stage: it owns both transitions and the pass, so no stage
-  // can forget one. (B2 folds this into execute_graph.)
-  const auto run = [&](VulkanPipeline& pipe, VulkanOffscreenTarget* target,
-                       VkRenderPass rp, std::uint32_t w, std::uint32_t h,
-                       const void* push, std::uint32_t push_size,
-                       VkDescriptorSet set) {
-    VkImage write_image = VK_NULL_HANDLE;
-    VkImageLayout* write_layout = nullptr;
-    if (target != nullptr) {
-      write_image = target->image();
-      write_layout = (target == &bloom_target_) ? &bloom_layout_
-                                                : &hdr_layout_;
-      // Coming from the previous stage's SHADER_READ_ONLY (or UNDEFINED on the
-      // first frame) into the color attachment this pass renders to.
-      if (*write_layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-        transition(write_image, *write_layout,
-                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-        *write_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-      }
-    }
-    VkClearValue clear[2]{};
-    clear[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-    clear[1].depthStencil = {1.0f, 0U};
-    VkRenderPassBeginInfo rp_info{};
-    rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rp_info.renderPass = rp;
-    rp_info.framebuffer = target != nullptr ? target->framebuffer()
-                                            : target_framebuffer;
-    rp_info.renderArea.offset = {0, 0};
-    rp_info.renderArea.extent = {w, h};
-    // Always two entries: pClearValues is indexed by attachment number and
-    // surplus entries are ignored, whereas too few is
-    // VUID-VkRenderPassBeginInfo-clearValueCount-00902.
-    rp_info.clearValueCount = 2U;
-    rp_info.pClearValues = clear;
-    vkCmdBeginRenderPass(command_buffer, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
-    FullscreenPass pass{};
-    pass.pipeline = pipe.pipeline();
-    pass.pipeline_layout = pipe.pipeline_layout();
-    pass.render_pass = rp;
-    pass.framebuffer = rp_info.framebuffer;
-    pass.width = w;
-    pass.height = h;
-    pass.clear_values = clear;
-    pass.clear_value_count = 2U;
-    pass.sample_count = 1U;  // HDR input; slot 1 keeps the bloom binding
-    pass.push_data = push;
-    pass.push_size = push_size;
-    pass.push_stage_flags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    (void)record_fullscreen_draw(command_buffer, pass, set);
-    vkCmdEndRenderPass(command_buffer);
-
-    if (target != nullptr) {
-      transition(write_image, target->color_final_layout(),
-                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                 VK_ACCESS_SHADER_READ_BIT);
-      *write_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    }
-  };
-
-  // A pass that only SAMPLES an intermediate still has to put it in
-  // SHADER_READ_ONLY first; run() only handles the image it writes.
-  const auto ensure_sampled = [&](VkImage image, VkImageLayout& layout) {
-    // The bloom buffer only exists when bloom is enabled; barriering a null
-    // image is a crash.
-    if (image == VK_NULL_HANDLE) return;
-    if (layout == VK_IMAGE_LAYOUT_UNDEFINED) {
-      layout = hdr_target_.color_final_layout();
-    }
-    if (layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-      transition(image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                 VK_ACCESS_SHADER_READ_BIT);
-      layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    }
-  };
+  VkClearValue clear[2]{};
+  clear[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+  clear[1].depthStencil = {1.0f, 0U};
 
   struct ComposePush {
     float exposure;
@@ -1158,22 +1080,140 @@ void VulkanRenderer::record_compose_chain(VkCommandBuffer command_buffer,
   } push{};
   push.exposure = config_.exposure;
 
+  // --- Declare the stages. ---
+  std::vector<ComposeStage> stages;
   if (config_.enable_bloom && bloom_down_pipeline_ && bloom_up_pipeline_) {
-    // The downsample reads the HDR scene.
-    ensure_sampled(hdr_target_.image(), hdr_layout_);
-    run(*bloom_down_pipeline_, &bloom_target_, bloom_target_.render_pass(),
-        bloom_target_.width(), bloom_target_.height(), nullptr, 0U,
-        bloom_down_set_);
-    // The upsample reads the bloom buffer and rewrites the HDR target.
-    ensure_sampled(bloom_target_.image(), bloom_layout_);
-    run(*bloom_up_pipeline_, &hdr_target_, hdr_target_.render_pass(), width,
-        height, nullptr, 0U, bloom_up_set_);
+    ComposeStage down{};
+    down.pipeline = bloom_down_pipeline_.get();
+    down.target = &bloom_target_;
+    down.pass = bloom_target_.render_pass();
+    down.framebuffer = bloom_target_.framebuffer();
+    down.width = bloom_target_.width();
+    down.height = bloom_target_.height();
+    down.set = bloom_down_set_;
+    down.samples[0].image = hdr_target_.image();
+    down.samples[0].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    down.samples[0].initial_layout = hdr_from_scene;
+    down.samples[0].initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    down.samples[0].initial_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    down.sample_count = 1;
+    stages.push_back(down);
+
+    ComposeStage up{};
+    up.pipeline = bloom_up_pipeline_.get();
+    up.target = &hdr_target_;
+    up.pass = hdr_target_.render_pass();
+    up.framebuffer = hdr_target_.framebuffer();
+    up.width = width;
+    up.height = height;
+    up.set = bloom_up_set_;
+    up.samples[0].image = bloom_target_.image();
+    up.samples[0].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    up.samples[0].initial_layout = bloom_target_.color_final_layout();
+    up.samples[0].initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    up.samples[0].initial_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    up.sample_count = 1;
+    stages.push_back(up);
   }
-  // The tonemap reads the HDR scene and the bloom buffer.
-  ensure_sampled(hdr_target_.image(), hdr_layout_);
-  ensure_sampled(bloom_target_.image(), bloom_layout_);
-  run(*compose_pipeline_, nullptr, target_pass, width, height, &push,
-      sizeof(push), compose_set_);
+
+  // The tonemap always runs: it samples the HDR scene and the bloom buffer
+  // (slot 1 is the 1x1 black texture when bloom is off) and writes the
+  // presentation target.
+  ComposeStage tonemap{};
+  tonemap.pipeline = compose_pipeline_.get();
+  tonemap.target = nullptr;
+  tonemap.pass = target_pass;
+  tonemap.framebuffer = target_framebuffer;
+  tonemap.width = width;
+  tonemap.height = height;
+  tonemap.push = &push;
+  tonemap.push_size = sizeof(push);
+  tonemap.set = compose_set_;
+  tonemap.samples[0].image = hdr_target_.image();
+  tonemap.samples[0].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  // With no bloom stage, the scene pass is this stage's only producer. With
+  // bloom, the upsample rewrote hdr and the compiler already tracked it.
+  tonemap.samples[0].initial_layout = hdr_from_scene;
+  tonemap.samples[0].initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  tonemap.samples[0].initial_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  tonemap.samples[1].image = bloom_target_.image();
+  tonemap.samples[1].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  if (bloom_target_.image() != VK_NULL_HANDLE) {
+    tonemap.samples[1].initial_layout = bloom_target_.color_final_layout();
+    tonemap.samples[1].initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    tonemap.samples[1].initial_stage =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  }
+  tonemap.sample_count = config_.enable_bloom ? 2U : 1U;
+  stages.push_back(tonemap);
+
+  // --- Build graph nodes. Each stage writes its target as a real attachment,
+  // so the compiler tracks write-after-write and write-after-read edges too.
+  std::vector<GraphPass> passes;
+  std::vector<ComposeStage> stage_copy;
+  passes.reserve(stages.size());
+  for (const ComposeStage& stage : stages) {
+    GraphPass pass{};
+    pass.name = "compose";
+    pass.render_pass = stage.pass;
+    pass.framebuffer = stage.framebuffer;
+    pass.width = stage.width;
+    pass.height = stage.height;
+    pass.clear_values = clear;
+    // Two entries always: pClearValues is indexed by attachment number, and
+    // too few is VUID-VkRenderPassBeginInfo-clearValueCount-00902.
+    pass.clear_value_count = 2U;
+    pass.sampled_images.assign(stage.samples.begin(),
+                               stage.samples.begin() + stage.sample_count);
+    if (stage.target != nullptr) {
+      RenderPassAttachment attachment{};
+      attachment.image = stage.target->image();
+      attachment.view = stage.target->image_view();
+      attachment.format = stage.target->format();
+      attachment.used_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      attachment.final_layout = stage.target->color_final_layout();
+      attachment.access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+      attachment.stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+      pass.attachments.push_back(attachment);
+    }
+    pass.user_data = nullptr;
+    passes.push_back(pass);
+    stage_copy.push_back(stage);
+  }
+  // The recorder needs the stage, and the pass carries an opaque handle.
+  for (std::size_t i = 0; i < passes.size(); ++i) {
+    passes[i].user_data = &stage_copy[i];
+  }
+
+  std::vector<GraphNode> nodes;
+  nodes.reserve(passes.size());
+  for (const GraphPass& pass : passes) {
+    nodes.push_back(GraphNode::from_render(pass));
+  }
+
+  const CompiledGraph compiled = compile_graph(nodes);
+
+  execute_graph(command_buffer, nodes, compiled,
+                +[](VkCommandBuffer cb, const GraphPass& pass, void* user) {
+                  const auto* stage =
+                      static_cast<const ComposeStage*>(user);
+                  if (stage == nullptr || stage->pipeline == nullptr) return;
+                  FullscreenPass draw{};
+                  draw.pipeline = stage->pipeline->pipeline();
+                  draw.pipeline_layout = stage->pipeline->pipeline_layout();
+                  draw.render_pass = pass.render_pass;
+                  draw.framebuffer = pass.framebuffer;
+                  draw.width = pass.width;
+                  draw.height = pass.height;
+                  draw.clear_values = pass.clear_values;
+                  draw.clear_value_count = pass.clear_value_count;
+                  draw.push_data = stage->push;
+                  draw.push_size = stage->push_size;
+                  draw.push_stage_flags = VK_SHADER_STAGE_FRAGMENT_BIT;
+                  (void)VulkanRenderer::record_fullscreen_draw(cb, draw,
+                                                        stage->set);
+                },
+                nullptr);
 #else
   (void)command_buffer; (void)target_pass; (void)target_framebuffer;
   (void)width; (void)height;
@@ -1545,7 +1585,7 @@ void fullscreen_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 
 ::warploom::core::Result<void> VulkanRenderer::record_fullscreen_draw(
     VkCommandBuffer command_buffer, const FullscreenPass& pass,
-    VkDescriptorSet set0) const {
+    VkDescriptorSet set0) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!command_buffer || pass.pipeline == VK_NULL_HANDLE ||
       pass.pipeline_layout == VK_NULL_HANDLE) {
@@ -1861,16 +1901,10 @@ void fullscreen_render_cb(VkCommandBuffer cb, const GraphPass& pass,
   // image. Runs after the scene pass and before the end stamp, so the
   // timestamp still covers the whole frame.
   if (compose) {
-    // The scene pass just rendered into the HDR target, so it left that image
-    // in the render pass's declared final layout. Re-seed the tracker here or
-    // it stays at whatever the previous frame's compose chain ended on, and
-    // the next frame's sample reads the wrong layout
-    // (VUID-vkCmdDraw-imageLayout-00344).
-    hdr_layout_ = hdr_target_.color_final_layout();
-    // bloom_layout_ is deliberately NOT reset: the scene pass never touches
-    // the bloom buffer, so it carries SHADER_READ_ONLY over from the previous
-    // frame's chain. Resetting it to UNDEFINED makes the next barrier declare
-    // the wrong oldLayout, which turns it into a no-op.
+    // Layout tracking is compile_graph's job: each stage declares what it
+    // reads and writes, and the compiler emits the transitions. The scene
+    // pass is outside the graph, so record_compose_chain seeds the first
+    // sample of each image from that pass's declared final layout.
     record_compose_chain(cb, render_pass_, framebuffer, width, height);
   }
 

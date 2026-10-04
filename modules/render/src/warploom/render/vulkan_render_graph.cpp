@@ -296,8 +296,29 @@ CompiledGraph compile_graph(const std::vector<GraphNode>& nodes) {
         if (!sampled.image) continue;
         ImageState& state = states[{sampled.image, 0U}];
         if (!state.valid) {
-          // No in-graph producer: the app owns the image's external state
-          // and guarantees the declared layout; record it without a barrier.
+          if (sampled.initial_layout == VK_IMAGE_LAYOUT_UNDEFINED) {
+            // No in-graph producer and the caller asserts the image is
+            // already in used_layout with no outstanding writes. Record the
+            // state and emit nothing.
+            state.layout = sampled.used_layout;
+            state.access = kShaderRead;
+            state.stage = kFragStage;
+            state.valid = true;
+            continue;
+          }
+          // An external producer left the image somewhere else. Emit the
+          // transition from where it really is, the way the compute path
+          // already does with GraphImageUse::initial_layout.
+          GraphBarrier barrier;
+          barrier.image = sampled.image;
+          barrier.old_layout = sampled.initial_layout;
+          barrier.new_layout = sampled.used_layout;
+          barrier.src_access = sampled.initial_access;
+          barrier.dst_access = kShaderRead;
+          barrier.src_stage = sampled.initial_stage;
+          barrier.dst_stage = kFragStage;
+          barrier.aspect = sampled.aspect;
+          barriers.push_back(barrier);
           state.layout = sampled.used_layout;
           state.access = kShaderRead;
           state.stage = kFragStage;

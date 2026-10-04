@@ -284,3 +284,55 @@ TEST(VulkanHardware, RenderGraphComputeThenDraw) {
   GTEST_SKIP() << "Vulkan support or test shaders were not enabled";
 #endif
 }
+
+// The compose chain's HDR scene is produced by the scene render pass, which is
+// recorded OUTSIDE any graph. So the first graph use of that image must
+// transition from the scene pass's declared final layout into
+// SHADER_READ_ONLY. Before initial_layout existed on GraphSampledImage, the
+// compiler treated any first use as "caller already arranged it" and emitted
+// no barrier, which is exactly the transition the chain needs.
+//
+// No device required: compile_graph only does map lookups on VkImage keys.
+#ifdef WARPLOOM_HAS_VULKAN
+TEST(RenderGraph, SampledFirstUseHonoursExternalProducerLayout) {
+  auto image = reinterpret_cast<VkImage>(static_cast<std::uintptr_t>(0x1000));
+  const VkImageLayout kSceneFinal = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+  // --- Baseline: no initial_layout means the caller guarantees readiness. ---
+  omnicpp::render::GraphPass ready{};
+  ready.name = "tonemap";
+  omnicpp::render::GraphSampledImage prearranged{};
+  prearranged.image = image;
+  prearranged.used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  ready.sampled_images = {prearranged};
+
+  const auto ready_compiled = omnicpp::render::compile_graph(
+      {omnicpp::render::GraphNode::from_render(ready)});
+  ASSERT_EQ(ready_compiled.barriers_per_node.at(0).size(), 0U)
+      << "a prearranged first use must not emit a barrier";
+
+  // --- With initial_layout the transition is emitted from the real state. ---
+  omnicpp::render::GraphPass external{};
+  external.name = "tonemap";
+  omnicpp::render::GraphSampledImage from_scene{};
+  from_scene.image = image;
+  from_scene.used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  from_scene.initial_layout = kSceneFinal;
+  from_scene.initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  from_scene.initial_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  external.sampled_images = {from_scene};
+
+  const auto external_compiled = omnicpp::render::compile_graph(
+      {omnicpp::render::GraphNode::from_render(external)});
+  ASSERT_EQ(external_compiled.barriers_per_node.at(0).size(), 1U)
+      << "an externally produced image must transition into its sampled layout";
+  const auto& barrier = external_compiled.barriers_per_node.at(0).front();
+  EXPECT_EQ(barrier.image, image);
+  EXPECT_EQ(barrier.old_layout, kSceneFinal);
+  EXPECT_EQ(barrier.new_layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  EXPECT_EQ(barrier.src_access, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+  EXPECT_EQ(barrier.dst_access, VK_ACCESS_SHADER_READ_BIT);
+  EXPECT_EQ(barrier.src_stage, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+  EXPECT_EQ(barrier.dst_stage, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+}
+#endif

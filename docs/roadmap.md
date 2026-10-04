@@ -88,10 +88,25 @@ declares a slot 3.
       entry point. GpuDrivenFrame gained an explicit descriptor-slot map
       because the driven path binds 0,1,2 then 4,5. Verified: 921,600 of
       921,600 pixels byte-identical against the previous commit, 0 VUIDs.
-- [ ] **B2 render graph in the app** — the app still records into a render
-      pass the renderer opened, so the graph's computed barriers do not apply.
-      The compose chain now hand-writes its own layout barriers (tracked per
-      target); folding those into `execute_graph` is what this item means.
+- [x] **B2 compose chain runs on the render graph** — `record_compose_chain`
+      declared each stage as a `GraphPass` and let `compile_graph` compute the
+      barriers, replacing ~90 lines of hand-written layout tracking. That
+      tracking needed a member (`hdr_layout_`) re-seeded in `record_commands`
+      after every scene pass, because the compiler had no way to know an image
+      was produced outside the graph. Fixed properly: `GraphSampledImage` now
+      carries `initial_layout`/`initial_access`/`initial_stage`, mirroring
+      `GraphImageUse`, so an external producer is a declared fact rather than a
+      hand-maintained guess. `record_fullscreen_draw` became `static` so the
+      chain can record from a capture-free lambda.
+
+      Verified: identical no-HDR capture (mean 78.601, max 110), 0 diagnostics
+      in five configurations (hdr, bloom, rt, rt+bloom, no-hdr), 546 tests, 0
+      leaks, 64 live proofs.
+
+      Still open, and now the only part of B2: the *application* scene pass is
+      still recorded into a render pass the renderer opened. `record_pbr_frame`
+      exists and is graph-driven, but the viewport does not call it, because it
+      renders a shadow pass between the graph's two halves.
 - [x] **B3 HDR target + post chain** — the renderer now owns an HDR
       intermediate plus a bloom and tonemap/FXAA chain
       (`RendererConfig::enable_hdr_compose`), and the application's scene

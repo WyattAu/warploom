@@ -55,6 +55,16 @@ struct GraphSampledImage {
   VkImage image{VK_NULL_HANDLE};
   VkImageLayout used_layout{VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
   std::uint32_t aspect{0};  //!< VkImageAspectFlags; 0 means infer from layout.
+  //! Where the image actually is when this is its FIRST use in the graph, and
+  //! who last touched it. Needed when an external pass produced the image: the
+  //! HDR scene is finished by the scene render pass, which is recorded outside
+  //! the graph, and leaves it in the scene pass's declared final layout rather
+  //! than SHADER_READ_ONLY. Leaving these UNDEFINED/0 asserts "the caller
+  //! already put it in used_layout and no barrier is required", which is true
+  //! for the shadow map's producer only because that pass is in-graph.
+  VkImageLayout initial_layout{VK_IMAGE_LAYOUT_UNDEFINED};
+  std::uint32_t initial_access{0};
+  std::uint32_t initial_stage{0};
 };
 
 //! One render pass: a name, its attachments, and a record callback handle.
