@@ -176,11 +176,22 @@ declares a slot 3.
       test ABI (binding 0 instance spheres, 1 pyramid sampler, 2 draws) used
       only by `test_hiz_sampled_pingpong.cpp`.
 
-      So turning occlusion on in the app means adding a pyramid binding to the
-      cull descriptor set and a split-path cull variant that tests it, not
-      flipping `enable_hiz`. Verification is also not a byte-exact A/B: correct
-      occlusion legitimately removes hidden geometry, so the evidence has to be
-      the existing `test_gpu_driven_occlusion_frame.cpp` approach (occluder
+      Closer than it looks, though. `cull_and_draw_lod_occlude.comp` is
+      compute-only (no drawIndirect), so it is already a cull shader, and its
+      payload ABI matches the app's: both read object 0's sphere at word 18 with
+      24 words per object, and the app's `cull_and_draw_lod.comp` selects LOD
+      from that same sphere. The one real mismatch is binding 0: the occlude
+      shader declares it as a `Header` of counters (`[0] draw_word,
+      [1] visible_word`), while the viewport shares ONE set layout between cull
+      and draw, in which binding 0 is the shared vertex-pull buffer. The app
+      would need a separate cull-only layout -- binding 0 counters, binding 4
+      pyramid -- rather than sharing.
+
+      So B5b is roughly: a second cull descriptor layout, binding the previous
+      frame's pyramid at binding 4, `enable_hiz` on, and the pyramid build
+      wired into the frame. Verification is also not a byte-exact A/B: correct
+      occlusion legitimately removes hidden geometry, so the evidence has to
+      be the existing `test_gpu_driven_occlusion_frame.cpp` approach (occluder
       present -> occludee culled; occluder removed -> occludee drawn) rather
       than pixel equality against the non-occluded frame.
 - [x] **B6 no duplicated Vulkan in the app** — raw `vkCmd*` calls in the
