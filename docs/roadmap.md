@@ -204,9 +204,25 @@ declares a slot 3.
 
 ## Phase C — one data model, one tick
 
-- [ ] **C1 document → ECS projection** — the document stays the authored
-      truth; the ECS becomes its runtime projection, so renderer and physics
-      read the same store.
+- [x] **C1 document → ECS projection** — `DocumentProjection`
+      (`modules/core/include/warploom/core/document_projection.hpp`) projects a
+      `SceneDocument` into a `World`: one entity per transformable object,
+      carrying `DocumentTransform`, a `DocumentRef` back to the authored
+      object, and `TimelineDriven` when a clip writes one of its transform
+      channels. The document stays authoritative — undo/redo/save all still go
+      through it — and `project()` is what carries edits into the runtime store.
+      It is idempotent, preserves entity identity across edits, destroys
+      exactly the entities whose objects left, and reports unprojectable
+      objects rather than dropping them silently.
+
+      The viewport now builds its scene list from the ECS instead of
+      re-deriving a matrix per object per frame, so the ECS has its first
+      production consumer and the document has exactly one path to the screen.
+      Verified: 100.0000% of pixels byte-identical against the pre-C1 renderer
+      (mean 78.472, max 110), 9 projection tests, 556 total, 0 diagnostics, 0
+      leaks, 6/6 ctest, 64/64 live proofs, five viewport configurations clean.
+      Removing the identity store, the orphan sweep, or the transform refresh
+      each fail tests; so does restoring the stale-depth fallback from B5.
 - [ ] **C2 a single `tick(FrameInput)`** — `sync_graph → physics.step →
       timeline.tick → record`, called identically by the app and by the
       headless host.

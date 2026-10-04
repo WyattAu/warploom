@@ -27,6 +27,7 @@
 #include "warploom/editor/graph_anim_bridge.hpp"
 #include "warploom/editor/inspector.hpp"
 #include "warploom/core/document.hpp"
+#include "warploom/core/document_projection.hpp"
 #include <memory>
 #include <random>
 #include <string>
@@ -60,8 +61,11 @@
 #include "warploom/render/vulkan_ui_renderer.hpp"
 #include "telemetry.hpp"
 
-
 using SceneMatrix = omnicpp::render::SceneMatrix;
+// C1: projection types, so the scene list is built from the ECS.
+using omnicpp::editor::DocumentProjection;
+using omnicpp::editor::DocumentRef;
+using omnicpp::editor::DocumentTransform;
 
 namespace {
 
@@ -407,6 +411,10 @@ struct ViewportApp {
   VkDescriptorSetLayout gd_set0_layout{VK_NULL_HANDLE};
   std::vector<VkDescriptorSet> gd_cull_sets;
   std::vector<VkDescriptorSet> gd_draw_sets;
+  //! C1: the document stays authoritative; this is its runtime projection.
+  //! The scene list is built from the ECS, not re-derived from document
+  //! properties, so renderer and physics read the same store.
+  omnicpp::editor::DocumentProjection projection;
   omnicpp::render::VulkanPipeline gd_cull_pipeline;
   omnicpp::render::VulkanPipeline gd_draw_pipeline;
   // --- Node editor overlay (OMNICPP_NODE_EDITOR=1) --------------------------
@@ -4387,38 +4395,59 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
 //! exactly what renders. Rotation uses the document's Euler XYZ degrees
 //! (yaw about Y first, matching the city's actor convention).
 void mirror_document_objects(ViewportApp& app) {
-  const auto& doc_objects = app.editor.document().objects;
-  for (const auto& obj : doc_objects) {
-    if (obj.type_id != kDocumentCubeTypeId) continue;
-    const auto pos_it = obj.properties.find("position");
-    const auto rot_it = obj.properties.find("rotation");
-    const auto scale_it = obj.properties.find("scale");
-    const auto color_it = obj.properties.find("color");
-    if (pos_it == obj.properties.end() || rot_it == obj.properties.end() ||
-        scale_it == obj.properties.end()) {
-      continue;
-    }
-    const auto& p = pos_it->second.vec;
-    const auto& r = rot_it->second.vec;
-    const auto& s = scale_it->second.vec;
-    const float kDegToRad = 3.14159265358979f / 180.0f;
-    SceneMatrix model =
-        multiply(translation_matrix(static_cast<float>(p[0]),
-                                    static_cast<float>(p[1]),
-                                    static_cast<float>(p[2])),
-                 multiply(rotation_y_matrix(static_cast<float>(r[1]) *
-                                            kDegToRad),
-                          scale_matrix(static_cast<float>(s[0]),
-                                       static_cast<float>(s[1]),
-                                       static_cast<float>(s[2]))));
-    omnicpp::render::ScenePbrObject render_obj;
-    render_obj.mesh = &app.cube.mesh;
-    render_obj.model = model;
-    render_obj.material_index = 2U;
-    render_obj.joint_base = 0U;
-    (void)color_it;  // material table is fixed for now (M12: per-object)
-    app.scene.objects.push_back(render_obj);
+  // Project the document into the ECS, then build the render objects from the
+  // projected components. The document is still the authored truth -- undo,
+  // redo and save all go through it, and project() is what carries those edits
+  // into the runtime store. What this removes is the per-frame re-derivation of
+  // a matrix straight from a property bag, which was a second, parallel path to
+  // the same answer with no identity to hold on to.
+  const auto report = app.projection.project(app.editor.document());
+
+  // Both diagnostics fire once. A document legitimately holds objects that are
+  // not cubes and have no transform, so "nothing projected" is only suspicious
+  // when something *could* have been projected -- and re-printing per frame
+  // would bury the one line that matters in thousands of repeats.
+  static bool warned_skipped = false;
+  static bool warned_empty = false;
+  if (report.skipped != 0U && !warned_skipped) {
+    std::fprintf(stderr,
+                 "viewport: %u document object(s) have no position/rotation/"
+                 "scale and are not rendered\n",
+                 report.skipped);
+    warned_skipped = true;
   }
+  const bool projectable = !report.created && report.skipped != 0U &&
+                           app.projection.entity_count() == 0U;
+  if (projectable && !warned_empty) {
+    std::fprintf(stderr,
+                 "viewport: no document object projected to an entity\n");
+    warned_empty = true;
+  }
+
+  constexpr float kDegToRad = 3.14159265358979f / 180.0f;
+  app.projection.world().query_if<DocumentTransform, DocumentRef>(
+      [](const omnicpp::core::Entity&, const DocumentTransform&,
+         const DocumentRef& ref) { return ref.type_id == kDocumentCubeTypeId; },
+      [&](const omnicpp::core::Entity&, const DocumentTransform& t,
+          const DocumentRef&) {
+        // Same composition the previous code used: translate * yaw * scale.
+        // Kept bit-for-bit so a saved scene still looks identical.
+        SceneMatrix model = multiply(
+            translation_matrix(static_cast<float>(t.position[0]),
+                               static_cast<float>(t.position[1]),
+                               static_cast<float>(t.position[2])),
+            multiply(rotation_y_matrix(
+                         static_cast<float>(t.rotation_deg[1]) * kDegToRad),
+                     scale_matrix(static_cast<float>(t.scale[0]),
+                                  static_cast<float>(t.scale[1]),
+                                  static_cast<float>(t.scale[2]))));
+        omnicpp::render::ScenePbrObject render_obj;
+        render_obj.mesh = &app.cube.mesh;
+        render_obj.model = model;
+        render_obj.material_index = 2U;
+        render_obj.joint_base = 0U;
+        app.scene.objects.push_back(render_obj);
+      });
 }
 
 //! Renderer hook: advance the clock (the one sanctioned mutation) and record
