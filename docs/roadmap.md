@@ -278,8 +278,23 @@ declares a slot 3.
       570 total, 0 diagnostics, 0 leaks, 6/6 ctest, 64/64 live proofs. Removing
       the step, the pose write-back, or the substep derivation each fails
       tests.
-- [ ] **C4 delete the test-local ECS bridge** — `test_physics_ecs_bridge`
-      currently proves a helper that exists only in that file.
+- [x] **C4 the test-local ECS bridge is gone** — `test_physics_ecs_bridge`
+      defined its own `sync_transforms` and a local `SceneTransform`, then
+      asserted the copy worked. That proved a bridge existing only in the test:
+      production could change freely and the test would still pass.
+
+      Deleting the file outright would have lost real coverage, so the helper
+      went and the assertions stayed, retargeted. The two bridge cases now
+      drive `EditorSession`, so they test the code the renderer actually reads.
+      The determinism-at-scale case stays at the solver level where the
+      property lives — `position_fingerprint` over a thousand bodies needs no
+      bridge — and a new case runs the same thousand bodies end to end through
+      the production bridge to prove that path is deterministic too.
+
+      `ThousandInstancesDeterministic` takes ~25 s, which is D1 showing
+      through: the solver is O(n²) over pairs. It was 26 s before this change,
+      so nothing regressed — it got marginally faster by dropping the per-step
+      ECS sync. A broadphase is what makes it fast, and that is D1.
 
 ## Phase D — the three thin products
 

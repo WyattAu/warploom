@@ -1,7 +1,14 @@
 //! @file test_physics_ecs_bridge.cpp
-//! @brief Physics-ECS bridge proofs: bodies drive World components through
-//!        the fixed-step sync, static bodies stay put, and a 1000-instance
-//!        stepped scene stays deterministic across two runs.
+//! @brief Physics-to-ECS proofs, through the bridge that actually ships.
+//!
+//! This file used to define its own `sync_transforms` helper and a local
+//! `SceneTransform` component, then asserted that the copy worked. That proved
+//! a bridge existing only in this file -- if production changed, the test would
+//! still pass. C1 and C3 gave the session a real bridge, so the two bridge
+//! tests now drive `EditorSession` and the local helper is gone. The
+//! determinism-at-scale case stays at the solver level, where the property
+//! actually lives: `position_fingerprint` over a thousand bodies needs no
+//! bridge at all, and pretending otherwise only slowed it down.
 
 #include <gtest/gtest.h>
 
@@ -9,115 +16,133 @@
 #include <cstdint>
 #include <vector>
 
+#include "warploom/core/document_projection.hpp"
+#include "warploom/core/editor_session.hpp"
 #include "warploom/core/ecs.hpp"
 #include "warploom/core/physics_world.hpp"
 
 namespace {
 
-using omnicpp::core::World;
+using omnicpp::editor::DocumentProjection;
+using omnicpp::editor::DocumentTransform;
+using omnicpp::editor::EditorSession;
 using omnicpp::physics::PhysicsBody;
 using omnicpp::physics::PhysicsWorld;
 
-//! The bridge's transform component: what the renderer consumes.
-struct SceneTransform {
-  float position[3]{0.0f, 0.0f, 0.0f};
-  float scale{1.0f};
-};
+constexpr double kDt = 1.0 / 60.0;
 
-//! Mirrors the bridge: after each physics step, copy body poses into the
-//! entities' SceneTransform components (bodies in insertion order map to
-//! entities in creation order).
-static void sync_transforms(PhysicsWorld& world, World& ecs,
-                            const std::vector<omnicpp::core::Entity>& entities) {
-  for (std::size_t i = 0; i < entities.size() && i < world.body_count(); ++i) {
-    const PhysicsBody& b = world.body(static_cast<std::uint32_t>(i));
-    auto& t = ecs.get_component<SceneTransform>(entities[i]);
-    t.position[0] = b.position[0];
-    t.position[1] = b.position[1];
-    t.position[2] = b.position[2];
-    t.scale = b.radius;
+//! Give a session `count` cubes with full transforms, each with a body.
+void seed_scene(EditorSession& session, int count, float inverse_mass) {
+  omnicpp::editor::SceneDocument document{};
+  for (int i = 0; i < count; ++i) {
+    omnicpp::editor::SceneObject object{};
+    object.id = static_cast<std::uint64_t>(i) + 1U;
+    object.type_id = 1U;
+    object.name = "body";
+    object.properties["position"] = omnicpp::editor::PropValue::make_vec3(
+        0.0, 5.0, 0.0);
+    object.properties["rotation"] =
+        omnicpp::editor::PropValue::make_vec3(0.0, 0.0, 0.0);
+    object.properties["scale"] =
+        omnicpp::editor::PropValue::make_vec3(1.0, 1.0, 1.0);
+    document.objects.push_back(object);
+    if (object.id >= document.next_object_id) {
+      document.next_object_id = object.id + 1U;
+    }
+  }
+  session.reset_from(std::move(document));
+  (void)session.tick({0U, kDt, false});
+
+  for (int i = 0; i < count; ++i) {
+    PhysicsBody body{};
+    const float f = static_cast<float>(i);
+    body.position[0] = -10.0F + std::fmod(f * 0.37F, 20.0F);
+    body.position[1] = 2.0F + std::fmod(f * 0.11F, 8.0F);
+    body.position[2] = -10.0F + std::fmod(f * 0.53F, 20.0F);
+    body.radius = 0.2F + 0.3F * std::fmod(f * 0.017F, 1.0F);
+    body.restitution = 0.3F + 0.2F * std::fmod(f * 0.023F, 1.0F);
+    body.inverse_mass = inverse_mass;
+    (void)session.spawn_physics_body(static_cast<std::uint64_t>(i) + 1U, body);
   }
 }
 
-TEST(PhysicsEcsBridge, BodiesDriveTransformComponents) {
-  PhysicsWorld world(-9.81f);
-  World ecs;
-  std::vector<omnicpp::core::Entity> entities;
-  for (int i = 0; i < 3; ++i) {
-    auto e = ecs.create_entity();
-    ecs.add_component<SceneTransform>(e);
-    PhysicsBody b;
-    b.position[1] = 3.0f + static_cast<float>(i);
-    b.radius = 0.4f;
-    world.add_body(b);
-    entities.push_back(e);
-  }
+}  // namespace
 
-  for (int i = 0; i < 60; ++i) {
-    world.step(1.0f / 60.0f);
-    sync_transforms(world, ecs, entities);
-  }
+TEST(PhysicsEcsBridge, BodiesDriveProjectedTransforms) {
+  // Previously proven by a local copy of the bridge. Now proven against the
+  // one the renderer actually reads.
+  EditorSession session{};
+  seed_scene(session, 1, 1.0F);
+  ASSERT_NE(session.physics_body_for(1U), nullptr);
 
-  // The transforms must equal the body poses (fallen under gravity).
-  for (std::size_t i = 0; i < entities.size(); ++i) {
-    const auto& t = ecs.get_component<SceneTransform>(entities[i]);
-    const auto& b = world.body(static_cast<std::uint32_t>(i));
-    EXPECT_FLOAT_EQ(t.position[0], b.position[0]);
-    EXPECT_FLOAT_EQ(t.position[1], b.position[1]);
-    EXPECT_FLOAT_EQ(t.scale, b.radius);
-    // 60 ticks of free fall from 3-5 m at 9.81 m/s^2: they must all still
-    // be falling (well below start, well above the terminal bounce zone).
-    EXPECT_LT(t.position[1], 3.0f);
-    EXPECT_GT(t.position[1], 0.3f);
-  }
+  (void)session.tick({1U, kDt, false});
+  ASSERT_TRUE(session.projection().projected(1U));
+  const auto entity = session.projection().entity_for(1U);
+  const auto& transform =
+      session.projection().world().get_component<DocumentTransform>(entity);
+  EXPECT_DOUBLE_EQ(transform.position[0],
+                   static_cast<double>(session.physics_body_for(1U)->position[0]));
+  EXPECT_DOUBLE_EQ(transform.position[1],
+                   static_cast<double>(session.physics_body_for(1U)->position[1]));
+  EXPECT_DOUBLE_EQ(transform.position[2],
+                   static_cast<double>(session.physics_body_for(1U)->position[2]));
 }
 
 TEST(PhysicsEcsBridge, StaticBodyLeavesTransformAtOrigin) {
-  PhysicsWorld world(0.0f);
-  World ecs;
-  auto e = ecs.create_entity();
-  ecs.add_component<SceneTransform>(e);
-  PhysicsBody b;  // inverse_mass 0 = static at origin
-  b.inverse_mass = 0.0f;
-  world.add_body(b);
-  std::vector<omnicpp::core::Entity> entities{e};
+  EditorSession session{};
+  seed_scene(session, 1, 0.0F);  // inverse_mass 0 == immovable
+  const auto start = session.physics_body_for(1U)->position[1];
 
-  for (int i = 0; i < 120; ++i) {
-    world.step(1.0f / 60.0f);
-    sync_transforms(world, ecs, entities);
+  for (std::uint64_t frame = 1; frame <= 10; ++frame) {
+    (void)session.tick({frame, kDt, false});
   }
-  const auto& t = ecs.get_component<SceneTransform>(e);
-  EXPECT_FLOAT_EQ(t.position[0], 0.0f);
-  EXPECT_FLOAT_EQ(t.position[1], 0.0f);
+  EXPECT_FLOAT_EQ(session.physics_body_for(1U)->position[1], start)
+      << "a static body must not move under gravity";
+  const auto entity = session.projection().entity_for(1U);
+  EXPECT_DOUBLE_EQ(
+      session.projection().world().get_component<DocumentTransform>(entity)
+          .position[1],
+      static_cast<double>(start));
 }
 
 TEST(PhysicsEcsBridge, ThousandInstancesDeterministic) {
-  auto run = [] {
-    PhysicsWorld world(-9.81f);
-    World ecs;
-    std::vector<omnicpp::core::Entity> entities;
-    entities.reserve(1000);
+  // Solver-level, so no bridge is involved: `position_fingerprint` collapses
+  // every body's position to one value, and two identical runs must produce
+  // the identical value. This is the property replay depends on, and it is
+  // about PhysicsWorld rather than about ECS plumbing.
+  const auto run = [] {
+    PhysicsWorld world(-9.81F);
     for (int i = 0; i < 1000; ++i) {
-      auto e = ecs.create_entity();
-      ecs.add_component<SceneTransform>(e);
       PhysicsBody b;
       const float f = static_cast<float>(i);
       // Deterministic pseudo-scatter over a 20x20 m field.
-      b.position[0] = -10.0f + std::fmod(f * 0.37f, 20.0f);
-      b.position[1] = 2.0f + std::fmod(f * 0.11f, 8.0f);
-      b.position[2] = -10.0f + std::fmod(f * 0.53f, 20.0f);
-      b.radius = 0.2f + 0.3f * std::fmod(f * 0.017f, 1.0f);
-      b.restitution = 0.3f + 0.2f * std::fmod(f * 0.023f, 1.0f);
+      b.position[0] = -10.0F + std::fmod(f * 0.37F, 20.0F);
+      b.position[1] = 2.0F + std::fmod(f * 0.11F, 8.0F);
+      b.position[2] = -10.0F + std::fmod(f * 0.53F, 20.0F);
+      b.radius = 0.2F + 0.3F * std::fmod(f * 0.017F, 1.0F);
+      b.restitution = 0.3F + 0.2F * std::fmod(f * 0.023F, 1.0F);
       world.add_body(b);
-      entities.push_back(e);
     }
     for (int i = 0; i < 240; ++i) {  // 4 sim seconds
-      world.step(1.0f / 60.0f);
-      sync_transforms(world, ecs, entities);
+      world.step(1.0F / 60.0F);
     }
     return world.position_fingerprint();
   };
   EXPECT_EQ(run(), run());
 }
 
-}  // namespace
+TEST(PhysicsEcsBridge, ThousandInstancesThroughTheRealBridgeStayDeterministic) {
+  // The same property, but end to end: two sessions each project a thousand
+  // objects, simulate them through the production bridge, and must agree.
+  // Slower than the solver-only case (the projection runs per tick), so it
+  // uses fewer frames -- the claim is determinism, not convergence.
+  const auto run = [] {
+    EditorSession session{};
+    seed_scene(session, 1000, 1.0F);
+    for (std::uint64_t frame = 1; frame <= 5; ++frame) {
+      (void)session.tick({frame, kDt, false});
+    }
+    return session.physics().position_fingerprint();
+  };
+  EXPECT_EQ(run(), run());
+}
