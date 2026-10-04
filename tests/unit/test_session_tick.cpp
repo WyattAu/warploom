@@ -8,7 +8,9 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 
 #include "warploom/core/document_projection.hpp"
@@ -77,7 +79,7 @@ TEST(SessionTick, PausedTicksDoNotAdvanceTheSimulationStage) {
   EditorSession session{};
   seed_cube(session);
   const auto running = session.tick({0U, kDt, false});
-  EXPECT_EQ(running.physics_substeps, 1U);
+  EXPECT_GT(running.physics_substeps, 0U) << "an unpaused tick must step physics";
 
   // A paused host must still see graph edits apply, which is why sync_graph
   // runs before the pause gate -- so a paused tick is not a no-op tick.
@@ -169,4 +171,199 @@ TEST(SessionTick, FrameComesFromTheInputNotAnInternalCounter) {
   EXPECT_EQ(ea.generation, eb.generation);
   EXPECT_EQ(a.snapshot_json(), b.snapshot_json())
       << "identical ticks must produce identical state";
+}
+// ----------------------------------------------------------------------------
+// C3: physics in the tick, and in the protocol
+// ----------------------------------------------------------------------------
+
+namespace {
+
+//! A body resting above the ground, so a tick actually moves it.
+::omnicpp::physics::PhysicsBody falling_body() {
+  ::omnicpp::physics::PhysicsBody body{};
+  body.position[0] = 0.0F;
+  body.position[1] = 10.0F;
+  body.position[2] = 0.0F;
+  body.velocity[0] = 0.0F;
+  body.velocity[1] = 0.0F;
+  body.velocity[2] = 0.0F;
+  body.radius = 0.5F;
+  body.inverse_mass = 1.0F;
+  body.restitution = 0.4F;
+  return body;
+}
+
+}  // namespace
+
+TEST(SessionTick, TickAdvancesPhysicsByTheFrameTimestep) {
+  EditorSession session{};
+  seed_cube(session);
+  (void)session.tick({0U, kDt, false});
+  ASSERT_TRUE(session.spawn_physics_body(1U, falling_body()));
+
+  const auto before = session.physics_body_for(1U);
+  ASSERT_NE(before, nullptr);
+  const float start_y = before->position[1];
+  ASSERT_GT(start_y, 0.0F);
+
+  (void)session.tick({1U, kDt, false});
+  const auto after = session.physics_body_for(1U);
+  ASSERT_NE(after, nullptr);
+  // Gravity is negative on Y, so a free body must fall.
+  EXPECT_LT(after->position[1], start_y);
+}
+
+TEST(SessionTick, SubstepCountIsAFunctionOfTimestepNotWallClock) {
+  // Two sessions, same ticks, must integrate identically -- byte for byte.
+  // This is the property replay depends on.
+  EditorSession a{};
+  EditorSession b{};
+  seed_cube(a);
+  seed_cube(b);
+  (void)a.tick({0U, kDt, false});
+  (void)b.tick({0U, kDt, false});
+  ASSERT_TRUE(a.spawn_physics_body(1U, falling_body()));
+  ASSERT_TRUE(b.spawn_physics_body(1U, falling_body()));
+
+  for (std::uint64_t frame = 1; frame <= 20; ++frame) {
+    const auto ra = a.tick({frame, kDt, false});
+    const auto rb = b.tick({frame, kDt, false});
+    ASSERT_EQ(ra.physics_substeps, rb.physics_substeps);
+  }
+  EXPECT_EQ(a.physics_body_for(1U)->position[1],
+            b.physics_body_for(1U)->position[1])
+      << "identical ticks must integrate bit-identically";
+  EXPECT_EQ(a.snapshot_json(), b.snapshot_json());
+}
+
+TEST(SessionTick, SubstepCountGrowsWithTimestepAndIsCapped) {
+  EditorSession session{};
+  seed_cube(session);
+  (void)session.tick({0U, kDt, false});
+  (void)session.spawn_physics_body(1U, falling_body());
+
+  // 1/60 s needs four 1/240 substeps; a tiny dt needs exactly one.
+  const auto at_60hz = session.tick({1U, 1.0 / 60.0, false});
+  EXPECT_GT(at_60hz.physics_substeps, 1U);
+  const auto at_1hz = session.tick({2U, 0.001, false});
+  EXPECT_EQ(at_1hz.physics_substeps, 1U);
+  // And a pathological dt is capped rather than trusted.
+  const auto absurd = session.tick({3U, 1000.0, false});
+  EXPECT_LE(absurd.physics_substeps, 8U);
+}
+
+TEST(SessionTick, PausedTicksDoNotAdvancePhysics) {
+  EditorSession session{};
+  seed_cube(session);
+  (void)session.tick({0U, kDt, false});
+  (void)session.spawn_physics_body(1U, falling_body());
+  (void)session.tick({1U, kDt, false});
+  const float settled = session.physics_body_for(1U)->position[1];
+
+  const auto paused = session.tick({2U, kDt, true});
+  EXPECT_EQ(paused.physics_substeps, 0U);
+  EXPECT_FLOAT_EQ(session.physics_body_for(1U)->position[1], settled)
+      << "a paused tick must not move a body";
+}
+
+TEST(SessionTick, SimulatedPoseReachesTheProjectedStore) {
+  // The point of the whole exercise: the renderer reads the projection, so a
+  // simulated body must be visible there and not snap back to the authored
+  // position on the next tick.
+  EditorSession session{};
+  seed_cube(session);
+  (void)session.tick({0U, kDt, false});
+  ASSERT_TRUE(session.spawn_physics_body(1U, falling_body()));
+
+  (void)session.tick({1U, kDt, false});
+  ASSERT_TRUE(session.projection().projected(1U));
+  const auto entity = session.projection().entity_for(1U);
+  // Copy, not a reference: the projection rewrites this component every tick,
+  // so holding a reference across tick 2 would compare the new value to itself.
+  const double after_first =
+      session.projection().world().get_component<DocumentTransform>(entity)
+          .position[1];
+  EXPECT_DOUBLE_EQ(after_first,
+                   static_cast<double>(session.physics_body_for(1U)->position[1]))
+      << "the projected transform must track the simulated pose";
+
+  // And it must survive the next project() rather than reverting to 2.0.
+  (void)session.tick({2U, kDt, false});
+  const double after_second =
+      session.projection().world().get_component<DocumentTransform>(entity)
+          .position[1];
+  EXPECT_LT(after_second, after_first)
+      << "a simulated object must not snap back to its authored position";
+}
+
+TEST(SessionTick, SpawningForAnUnprojectedObjectFails) {
+  EditorSession session{};
+  seed_cube(session);
+  // No tick yet, so nothing is projected.
+  EXPECT_FALSE(session.spawn_physics_body(1U, falling_body()))
+      << "simulating something invisible would look like physics did nothing";
+}
+
+TEST(SessionTick, PhysicsStateTravelsInTheSnapshot) {
+  EditorSession session{};
+  seed_cube(session);
+  (void)session.tick({0U, kDt, false});
+  ASSERT_TRUE(session.spawn_physics_body(1U, falling_body()));
+  (void)session.tick({1U, kDt, false});
+
+  const std::string json = session.snapshot_json();
+  EXPECT_NE(json.find("\"physics\""), std::string::npos);
+  EXPECT_NE(json.find("\"bodies\""), std::string::npos);
+  EXPECT_NE(json.find("\"gravity\""), std::string::npos);
+  // The body actually present, with its current position.
+  EXPECT_NE(json.find("\"oid\":1"), std::string::npos);
+}
+
+TEST(SessionTick, SnapshotFloatsRoundTripExactly) {
+  // A body at a position std::to_string could not express: six decimals is
+  // lossy, and a resumed replay would then diverge on the next tick.
+  EditorSession session{};
+  seed_cube(session);
+  (void)session.tick({0U, kDt, false});
+  ::omnicpp::physics::PhysicsBody awkward = falling_body();
+  awkward.position[1] = 0.123456789012345F;
+  awkward.velocity[1] = -3.0517578125e-05F;
+  ASSERT_TRUE(session.spawn_physics_body(1U, awkward));
+
+  // The snapshot carries the body's position AFTER a tick, so the value under
+  // test is the live one, not the authored seed. Round-trip means: what parses
+  // back out of the JSON is exactly the float in the world.
+  const std::string json = session.snapshot_json();
+  const auto parse_array3 = [&json](const char* key) {
+    const std::size_t at = json.find(key);
+    EXPECT_NE(at, std::string::npos) << key << " missing from snapshot";
+    if (at == std::string::npos) return std::array<double, 3>{};
+    const std::size_t open = json.find('[', at);
+    const std::size_t close = json.find(']', open);
+    EXPECT_NE(close, std::string::npos);
+    std::array<double, 3> out{};
+    std::size_t cursor = open + 1;
+    for (std::size_t i = 0; i < 3; ++i) {
+      out[i] = std::strtod(json.c_str() + cursor, nullptr);
+      while (cursor < json.size() && json[cursor] != ',' && json[cursor] != ']') {
+        ++cursor;
+      }
+      ++cursor;
+    }
+    return out;
+  };
+  const auto position = parse_array3("\"pos\"");
+  EXPECT_FLOAT_EQ(static_cast<float>(position[1]),
+                  session.physics_body_for(1U)->position[1])
+      << "the snapshot must round-trip a float std::to_string would truncate";
+  EXPECT_FLOAT_EQ(static_cast<float>(parse_array3("\"vel\"")[1]),
+                  session.physics_body_for(1U)->velocity[1]);
+
+  // And re-emitting the same state twice gives identical bytes.
+  EditorSession other{};
+  seed_cube(other);
+  (void)other.tick({0U, kDt, false});
+  ASSERT_TRUE(other.spawn_physics_body(1U, awkward));
+  EXPECT_EQ(session.snapshot_json(), other.snapshot_json())
+      << "identical physics state must serialise to identical bytes";
 }

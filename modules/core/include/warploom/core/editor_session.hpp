@@ -16,6 +16,7 @@
 //! render structures; tests use it headless. The session never touches
 //! GPU/renderer state — that keeps the protocol fully headless-testable.
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,7 @@
 #include "warploom/core/control_server.hpp"
 #include "warploom/core/document.hpp"
 #include "warploom/core/document_projection.hpp"
+#include "warploom/core/physics_world.hpp"
 #include "warploom/core/property_registry.hpp"
 #include "warploom/core/replay_scrubber.hpp"
 
@@ -119,10 +121,38 @@ class EditorSession final : public ::warploom::core::ControlHost {
     bool paused{false};
   };
 
+  // -- Physics (C3) ---------------------------------------------------------
+  //! The deterministic world, stepped by tick() and reported over the
+  //! protocol. Held by the session rather than by a host so that the physics
+  //! state is part of what a replay has to reproduce.
+  [[nodiscard]] ::warploom::physics::PhysicsWorld& physics() noexcept {
+    return physics_;
+  }
+  [[nodiscard]] const ::warploom::physics::PhysicsWorld& physics() const noexcept {
+    return physics_;
+  }
+  //! Give a document object a simulated body. The body's pose is written back
+  //! into that object's projected transform every tick, so the renderer shows
+  //! the simulation rather than the authored value. Returns false when the
+  //! object is not projected -- simulating something invisible would look
+  //! like the physics silently did nothing.
+  [[nodiscard]] bool spawn_physics_body(
+      std::uint64_t object_id, const ::warploom::physics::PhysicsBody& body);
+  [[nodiscard]] const ::warploom::physics::PhysicsBody* physics_body_for(
+      std::uint64_t object_id) const;
+
   //! The projected runtime view of the document. Refreshed by tick().
   [[nodiscard]] const DocumentProjection& projection() const noexcept {
     return projection_;
   }
+
+  //! Largest timestep physics will ever take in one substep. A host that
+  //! asks for a huge dt gets several substeps rather than one tunnelling step.
+  static constexpr double kMaxPhysicsSubstep = 1.0 / 240.0;
+  //! Ceiling on substeps per tick, so a hostile or buggy dt cannot make a tick
+  //! arbitrarily expensive. Deterministic: the count is a pure function of
+  //! fixed_dt, never of wall-clock time.
+  static constexpr std::uint32_t kMaxPhysicsSubsteps = 8U;
 
   //! The one tick. Every host — the viewport and the headless control host —
   //! calls exactly this, in this order, once per logical frame:
@@ -215,6 +245,12 @@ class EditorSession final : public ::warploom::core::ControlHost {
   //! C1/C2: the document's runtime projection, refreshed once per tick so
   //! every system downstream reads one store rather than the document.
   DocumentProjection projection_{};
+  //! C3: the simulation lives in the session so replay has to reproduce it,
+  //! and so both hosts step the same world by construction.
+  ::warploom::physics::PhysicsWorld physics_{};
+  //! Document object id -> physics body id. A map because ids are sparse, and
+  //! iteration order must not depend on spawn order.
+  std::map<std::uint64_t, std::uint32_t> physics_bodies_{};
   CommandStack stack_{doc_};
   std::uint64_t selected_id_{0};
   CommandRecorder recorder_{};  //!< W2 capture (frame-thread-only)

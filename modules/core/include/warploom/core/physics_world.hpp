@@ -3,8 +3,12 @@
 /**
  * @file physics_world.hpp
  * @brief Deterministic fixed-step physics: semi-implicit Euler integration,
- *        sphere-plane and sphere-sphere contacts, and an ECS bridge that
- *        copies body poses into SceneTransform components.
+ *        sphere-plane and sphere-sphere contacts.
+ *
+ * This header is the solver only. It knows nothing about the ECS; the bridge
+ * that copies body poses into projected transforms lives on EditorSession
+ * (spawn_physics_body / tick), which owns the world. An earlier version of
+ * this comment claimed the bridge was here and it was not.
  *
  * Determinism contract: `step(dt)` is a pure function of the world state —
  * fixed iteration order (bodies in insertion order, pairs in index order),
@@ -61,6 +65,10 @@ class PhysicsWorld final {
   [[nodiscard]] const std::vector<ContactEvent>& contacts() const noexcept {
     return contacts_;
   }
+
+  //! Gravity, exposed so a snapshot can carry the world's configuration and not
+  //! just its bodies. A resumed replay with the wrong gravity diverges.
+  [[nodiscard]] float gravity() const noexcept { return gravity_; }
 
   //! One fixed step, in phase order:
   //!   1. integrate velocities (gravity) and positions (semi-implicit Euler),

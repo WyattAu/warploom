@@ -5,6 +5,7 @@
 
 #include "warploom/core/editor_session.hpp"
 
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <map>
@@ -135,6 +136,24 @@ void split_axis_property(const std::string& property, std::string& base,
   axis = -1;
 }
 
+namespace {
+//! Append a double in a form that round-trips EXACTLY. Physics state has to
+//! survive a snapshot -> resume cycle bit-for-bit: std::to_string gives six
+//! decimals, so a body would come back slightly moved and the simulation would
+//! diverge from the original on the next tick. to_chars' shortest round-trip
+//! form is both exact and deterministic for a given value.
+void append_number(std::string& out, double value) {
+  char buffer[32];
+  const auto result =
+      std::to_chars(buffer, buffer + sizeof(buffer), value);
+  if (result.ec == std::errc{}) {
+    out.append(buffer, static_cast<std::size_t>(result.ptr - buffer));
+  } else {
+    out += "0";
+  }
+}
+}  // namespace
+
 EditorSession::TickReport EditorSession::tick(const FrameInput& input) {
   TickReport report{};
 
@@ -148,12 +167,25 @@ EditorSession::TickReport EditorSession::tick(const FrameInput& input) {
   // second error path.
   report.synced = error.empty();
 
-  // 2. Physics. Not wired yet (roadmap C3): deliberately a counted no-op so
-  // the ordering is already fixed and tested before a solver lands in it.
-  // Skipped while paused -- a paused host must not advance the simulation, but
-  // must still see graph edits apply, which is why this sits after sync_graph.
+  // 2. Physics. Skipped while paused -- a paused host must not advance the
+  // simulation, but must still see graph edits apply, which is why this sits
+  // after sync_graph.
   if (!input.paused && input.fixed_dt > 0.0) {
-    report.physics_substeps = 1U;
+    // Substep count is derived from fixed_dt alone, never from wall-clock, so
+    // a replay that re-ticks the same frames reproduces the same integration.
+    // Clamped so a pathological dt cannot make one tick arbitrarily expensive.
+    auto substeps = static_cast<std::uint32_t>(
+        std::ceil(input.fixed_dt / kMaxPhysicsSubstep));
+    substeps = std::clamp<std::uint32_t>(substeps, 1U, kMaxPhysicsSubsteps);
+    const auto substep_dt =
+        static_cast<float>(input.fixed_dt / static_cast<double>(substeps));
+    for (std::uint32_t i = 0; i < substeps; ++i) physics_.step(substep_dt);
+    report.physics_substeps = substeps;
+
+    // Push the simulated poses into the projected store so the renderer shows
+    // the simulation. Done before project() below? No -- project() refreshes
+    // transforms from the document, which would overwrite them. So the pose
+    // write happens after project(), below.
   }
 
   // 3. The clip wins the frame against a binding on the same property.
@@ -163,7 +195,37 @@ EditorSession::TickReport EditorSession::tick(const FrameInput& input) {
   // is what gets projected, not the pre-playback value.
   (void)projection_.project(doc_);
 
+  // 5. Physics poses override the authored transform, but only for objects
+  // that actually have a body: project() has just written the authored value
+  // for everything, so a simulated object would otherwise snap back to its
+  // authored position on the next tick.
+  for (const auto& [object_id, body_id] : physics_bodies_) {
+    if (!projection_.projected(object_id)) continue;
+    const auto entity = projection_.entity_for(object_id);
+    if (!projection_.world().has_component<DocumentTransform>(entity)) continue;
+    const auto& body = physics_.body(body_id);
+    auto& transform =
+        projection_.world().get_component<DocumentTransform>(entity);
+    transform.position[0] = static_cast<double>(body.position[0]);
+    transform.position[1] = static_cast<double>(body.position[1]);
+    transform.position[2] = static_cast<double>(body.position[2]);
+  }
+
   return report;
+}
+
+bool EditorSession::spawn_physics_body(
+    std::uint64_t object_id, const ::warploom::physics::PhysicsBody& body) {
+  if (!projection_.projected(object_id)) return false;
+  physics_bodies_[object_id] = physics_.add_body(body);
+  return true;
+}
+
+const ::warploom::physics::PhysicsBody* EditorSession::physics_body_for(
+    std::uint64_t object_id) const {
+  const auto it = physics_bodies_.find(object_id);
+  if (it == physics_bodies_.end()) return nullptr;
+  return &physics_.body(it->second);
 }
 
 void EditorSession::tick_timeline(std::uint64_t frame) {
@@ -1553,6 +1615,43 @@ std::string EditorSession::snapshot_json() const {
   out += std::to_string(doc_.node_graph.link_count());
   out += ",\"graph_version\":";
   out += std::to_string(doc_.node_graph.version());
+  // C3: physics state travels with the snapshot, so a replay that resumes
+  // from one continues the same simulation instead of restarting it. Emitted
+  // in object-id order (the map's own order), never spawn order, so the bytes
+  // are reproducible.
+  out += ",\"physics\":{";
+  out += "\"gravity\":";
+  append_number(out, static_cast<double>(physics_.gravity()));
+  out += ",\"bodies\":[";
+  bool first_body = true;
+  for (const auto& [object_id, body_id] : physics_bodies_) {
+    if (!first_body) out += ",";
+    first_body = false;
+    const auto& body = physics_.body(body_id);
+    out += "{\"oid\":" + std::to_string(object_id);
+    out += ",\"pos\":[";
+    append_number(out, body.position[0]);
+    out += ",";
+    append_number(out, body.position[1]);
+    out += ",";
+    append_number(out, body.position[2]);
+    out += "]";
+    out += ",\"vel\":[";
+    append_number(out, body.velocity[0]);
+    out += ",";
+    append_number(out, body.velocity[1]);
+    out += ",";
+    append_number(out, body.velocity[2]);
+    out += "]";
+    out += ",\"radius\":";
+    append_number(out, body.radius);
+    out += ",\"inv_mass\":";
+    append_number(out, body.inverse_mass);
+    out += ",\"restitution\":";
+    append_number(out, body.restitution);
+    out += "}";
+  }
+  out += "]}";
   out += "}";
   return out;
 }
