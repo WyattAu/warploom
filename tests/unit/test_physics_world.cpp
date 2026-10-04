@@ -164,3 +164,49 @@ TEST(PhysicsWorld, StackedBodiesSettleWithoutExplosion) {
 }
 
 }  // namespace
+
+// The first broadphase attempt produced a bit-identical fingerprint at N=1000
+// and diverged at N=4000, because step 3 mutated positions while it walked
+// pairs, so any candidate list built before the pass could miss a pair that an
+// earlier correction had created. Detection is now frozen against a snapshot,
+// which is what makes the grid exactly conservative.
+//
+// These cases compare the two pair-enumeration strategies directly, at a scale
+// dense enough for the original bug to appear. A single-scale check would pass
+// against the broken version.
+TEST(PhysicsWorld, BroadphaseAgreesWithAllPairsAtSeveralScales) {
+  // Same scatter as the determinism test, but stepped at three densities. The
+  // old failure needed enough bodies in flight for a correction to push one
+  // body into another it had not been paired with.
+  const auto run = [](std::size_t count, bool force_all_pairs) {
+    omnicpp::physics::PhysicsWorld world(-9.81F);
+    world.set_force_all_pairs(force_all_pairs);
+    for (std::size_t i = 0; i < count; ++i) {
+      omnicpp::physics::PhysicsBody b;
+      const float f = static_cast<float>(i);
+      b.position[0] = -10.0F + std::fmod(f * 0.37F, 20.0F);
+      b.position[1] = 2.0F + std::fmod(f * 0.11F, 8.0F);
+      b.position[2] = -10.0F + std::fmod(f * 0.53F, 20.0F);
+      b.radius = 0.2F + 0.3F * std::fmod(f * 0.017F, 1.0F);
+      b.restitution = 0.3F + 0.2F * std::fmod(f * 0.023F, 1.0F);
+      (void)world.add_body(b);
+    }
+    for (int step = 0; step < 60; ++step) world.step(1.0F / 60.0F);
+    return world.position_fingerprint();
+  };
+
+  for (const std::size_t count : {std::size_t{200}, std::size_t{600},
+                                  std::size_t{1200}}) {
+    EXPECT_EQ(run(count, false), run(count, true))
+        << "broadphase diverged from all-pairs at " << count << " bodies";
+  }
+}
+
+TEST(PhysicsWorld, ForceAllPairsIsHonouredAndReversible) {
+  omnicpp::physics::PhysicsWorld world(-9.81F);
+  EXPECT_FALSE(world.force_all_pairs());
+  world.set_force_all_pairs(true);
+  EXPECT_TRUE(world.force_all_pairs());
+  world.set_force_all_pairs(false);
+  EXPECT_FALSE(world.force_all_pairs());
+}

@@ -318,14 +318,40 @@ declares a slot 3.
       low enough that this never triggered, which is exactly why a single-scale
       check would have shipped it.
 
-      So no static broadphase can be made bit-identical to this solver; the
+      So no static broadphase can be made bit-identical to *that* solver; the
       candidate set would have to be "every pair that overlaps at any point
       during the sequential pass", which depends on the resolution order that
-      produced it. The fix is to make step 3 order-independent — compute all
-      contacts from one position snapshot, then apply corrections — which is
-      also what a real solver does. That changes results (a better solver, not
-      the same one, cheaper), so it needs its own tests and its own review
-      rather than arriving inside a performance commit.
+      produced it.
+
+- [x] **D1a order-independent contact detection** — step 3 now detects against
+      one frozen snapshot of positions, velocities, radii and masses, then
+      applies corrections in pair order. Freezing *detection* is what makes the
+      pair set a pure function of the snapshot, which in turn is what makes a
+      spatial grid exactly conservative. Corrections still apply in pair order
+      (Gauss-Seidel, converges better than a simultaneous solve); what is fixed
+      is which pairs get solved, not the order their corrections land in.
+
+      The uniform grid then works, and agrees with all-pairs at every scale
+      measured — 200, 600, 1200, 1000, 4000 and 8000 bodies — where the
+      pre-snapshot version diverged at 4000 and 8000. Speedup over all-pairs
+      of the same solver: **2.10x at 1k, 2.89x at 4k, 2.92x at 8k**.
+
+      Note these are *different results* from the old solver, not the same
+      results computed faster, and that is the point: this is a better solver,
+      not a cheaper old one. Fingerprints are stable run to run, which is what
+      replay needs; they are not expected to match a pre-D1 recording.
+
+      `set_force_all_pairs` exists so the equivalence is checkable from a test
+      rather than by rebuilding with the threshold edited by hand —
+      `BroadphaseAgreesWithAllPairsAtSeveralScales` is exactly the comparison
+      whose absence let the first attempt through. Overflow past
+      `kBroadphaseMaxCandidates` falls back to the complete pair list rather
+      than dropping pairs, which was the old version's failure mode.
+
+      Remaining in D1: the solver is still spheres-only with single-iteration
+      contact resolution, there are no joints or shapes, and
+      `warploom::physics` is still header-only inside core rather than its own
+      package.
 - [ ] **D2 real timeline** — interpolation and easing, concurrent record and
       play, camera/light/render tracks, and `ClipTimelineView` actually in
       the app. Today playback steps between keys and the widget has no
