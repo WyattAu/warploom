@@ -986,6 +986,84 @@ bool TimelineClip::evaluate(std::uint64_t frame, std::uint64_t object_id,
   return true;
 }
 
+bool TimelineClip::evaluate_at(double frame_time, std::uint64_t object_id,
+                               const std::string& property, Easing easing,
+                               PropValue& out) const {
+  // Range check on the same half-open span as evaluate(), in floating point.
+  const double start = static_cast<double>(start_frame);
+  const double end = start + static_cast<double>(length_frames);
+  if (!(frame_time >= start) || !(frame_time < end)) {
+    return false;
+  }
+  const auto it = tracks.find(track_key(object_id, property));
+  if (it == tracks.end() || it->second.samples.empty()) {
+    return false;
+  }
+  const std::vector<ClipSample>& samples = it->second.samples;
+  const double offset = frame_time - start;
+
+  // Locate the bracketing pair. Samples are strictly increasing, so this is a
+  // linear scan that stops early -- same shape as evaluate(), kept linear
+  // rather than binary-searched because tracks are short and a linear scan
+  // keeps the iteration order obvious.
+  std::size_t upper = 0;
+  while (upper < samples.size() &&
+         static_cast<double>(samples[upper].frame_offset) <= offset) {
+    ++upper;
+  }
+  if (upper == 0) {
+    return false;  // nothing at or before this point
+  }
+  const std::size_t lower_index = upper - 1U;
+
+  // Past the last key there is nothing to interpolate toward, so the final
+  // value holds. This has to be decided before the Step check below: without
+  // it, a fractional query past the last key falls through and reads
+  // samples[upper] with upper == samples.size().
+  if (upper >= samples.size()) {
+    out = samples[lower_index].value;
+    return true;
+  }
+
+  // Step mode is exactly the old behaviour, which is what keeps existing
+  // replays reproducing their original run.
+  if (easing == Easing::Step) {
+    out = samples[lower_index].value;
+    return true;
+  }
+
+  const double lower_offset = static_cast<double>(samples[lower_index].frame_offset);
+  const PropValue& a = samples[lower_index].value;
+  const PropValue& b = samples[upper].value;
+  const double span = static_cast<double>(samples[upper].frame_offset) - lower_offset;
+  if (!(span > 0.0)) {
+    out = a;
+    return true;
+  }
+  const float t = apply_easing(
+      easing, static_cast<float>((offset - lower_offset) / span));
+
+  // Non-numeric channels hold the earlier sample.
+  if (a.type == PropValue::Type::Number &&
+      b.type == PropValue::Type::Number) {
+    out = PropValue::make_number(
+        static_cast<double>(a.number) +
+        (static_cast<double>(b.number) - static_cast<double>(a.number)) *
+            static_cast<double>(t));
+    return true;
+  }
+  if (a.type == PropValue::Type::Vec3 && b.type == PropValue::Type::Vec3) {
+    double v[3];
+    for (std::size_t k = 0; k < 3; ++k) {
+      v[k] = a.vec[k] + (b.vec[k] - a.vec[k]) * static_cast<double>(t);
+    }
+    out = PropValue::make_vec3(v[0], v[1], v[2]);
+    return true;
+  }
+  out = a;
+  return true;
+}
+
 std::string SceneDocument::to_json() const {
   std::string out;
   out.reserve(256U + objects.size() * 96U);

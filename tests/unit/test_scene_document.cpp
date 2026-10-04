@@ -423,3 +423,151 @@ TEST(Bridge, RejectsInvalidPayloads) {
 }
 
 }  // namespace
+
+// ----------------------------------------------------------------------------
+// D2: interpolated timeline evaluation
+// ----------------------------------------------------------------------------
+
+namespace {
+
+//! A two-key position track: sample 0 at x=0, sample 10 at x=100.
+::omnicpp::editor::TimelineClip two_key_clip(std::uint64_t object_id) {
+  ::omnicpp::editor::TimelineClip clip{};
+  clip.id = 1U;
+  clip.name = "move";
+  clip.start_frame = 20U;
+  clip.length_frames = 40U;
+  clip.tracks[omnicpp::editor::track_key(object_id, "position")] =
+      ::omnicpp::editor::ClipTrack{
+          object_id, "position",
+          {::omnicpp::editor::ClipSample{0U, PropValue::make_vec3(0, 0, 0)},
+           ::omnicpp::editor::ClipSample{10U, PropValue::make_vec3(100, 0, 0)}}};
+  return clip;
+}
+
+double sampled_x(const ::omnicpp::editor::TimelineClip& clip,
+                 std::uint64_t object_id, std::uint64_t frame) {
+  PropValue value{};
+  if (!clip.evaluate(frame, object_id, "position", value)) return -1.0;
+  return value.vec[0];
+}
+
+double interpolated_x(const ::omnicpp::editor::TimelineClip& clip,
+                      std::uint64_t object_id, double frame_time,
+                      ::omnicpp::editor::Easing easing) {
+  PropValue value{};
+  if (!clip.evaluate_at(frame_time, object_id, "position", easing, value)) {
+    return -1.0;
+  }
+  return value.vec[0];
+}
+
+}  // namespace
+
+TEST(SceneDocument, StepModeAtWholeFramesReproducesEvaluateExactly) {
+  // The property that keeps existing recordings and replays valid: a whole
+  // frame in Step mode must be indistinguishable from evaluate(). If it drifts
+  // by even a float ULP, every previously recorded replay would re-run
+  // differently from its original take.
+  const auto clip = two_key_clip(1U);
+  for (std::uint64_t frame = 18; frame <= 62; ++frame) {
+    const double stepped = interpolated_x(clip, 1U, static_cast<double>(frame),
+                                          omnicpp::editor::Easing::Step);
+    const double held = sampled_x(clip, 1U, frame);
+    ASSERT_EQ(stepped >= 0.0, held >= 0.0) << "disagreement on range at " << frame;
+    EXPECT_DOUBLE_EQ(sampled_x(clip, 1U, frame), stepped)
+        << "Step mode drifted from evaluate() at frame " << frame;
+  }
+}
+
+TEST(SceneDocument, LinearInterpolationIsMonotonicBetweenKeys) {
+  const auto clip = two_key_clip(1U);
+  // Sample 0 sits at clip offset 0, sample 10 at offset 10; x runs 0 -> 100.
+  EXPECT_NEAR(interpolated_x(clip, 1U, 20.0, omnicpp::editor::Easing::Linear),
+              0.0, 1e-4);
+  EXPECT_NEAR(interpolated_x(clip, 1U, 25.0, omnicpp::editor::Easing::Linear),
+              50.0, 1e-4);
+  EXPECT_NEAR(interpolated_x(clip, 1U, 30.0, omnicpp::editor::Easing::Linear),
+              100.0, 1e-4);
+  // Beyond the last key the final value holds rather than extrapolating.
+  EXPECT_NEAR(interpolated_x(clip, 1U, 45.0, omnicpp::editor::Easing::Linear),
+              100.0, 1e-4);
+
+  double previous = -1.0;
+  for (int i = 0; i <= 100; ++i) {
+    const double x = interpolated_x(clip, 1U,
+                                    20.0 + 10.0 * static_cast<double>(i) / 100.0,
+                                    omnicpp::editor::Easing::Linear);
+    ASSERT_GE(x, previous - 1e-6) << "linear interpolation went backwards";
+    previous = x;
+  }
+}
+
+TEST(SceneDocument, EasingEndpointsAreExactAndOrderingDiffers) {
+  const auto clip = two_key_clip(1U);
+  // Every mode must land exactly on the keys, or a clip stops short of its own
+  // final recorded value.
+  for (const auto easing : {omnicpp::editor::Easing::Linear,
+                            omnicpp::editor::Easing::SmoothStep,
+                            omnicpp::editor::Easing::EaseIn,
+                            omnicpp::editor::Easing::EaseOut}) {
+    EXPECT_NEAR(interpolated_x(clip, 1U, 20.0, easing), 0.0, 1e-6);
+    EXPECT_NEAR(interpolated_x(clip, 1U, 30.0, easing), 100.0, 1e-6);
+  }
+  // Ease-in sits below linear at the midpoint; ease-out above it. If that
+  // inverted, the names would be lying.
+  const double linear = interpolated_x(clip, 1U, 25.0, omnicpp::editor::Easing::Linear);
+  const double ease_in = interpolated_x(clip, 1U, 25.0, omnicpp::editor::Easing::EaseIn);
+  const double ease_out = interpolated_x(clip, 1U, 25.0, omnicpp::editor::Easing::EaseOut);
+  EXPECT_LT(ease_in, linear);
+  EXPECT_GT(ease_out, linear);
+}
+
+TEST(SceneDocument, InterpolationRespectsTheClipRangeAndMissingTracks) {
+  const auto clip = two_key_clip(1U);
+  // Same half-open span as evaluate(): before the start and at/after the end.
+  PropValue value{};
+  EXPECT_FALSE(clip.evaluate_at(19.5, 1U, "position",
+                                omnicpp::editor::Easing::Linear, value));
+  EXPECT_FALSE(clip.evaluate_at(60.0, 1U, "position",
+                                omnicpp::editor::Easing::Linear, value))
+      << "the clip covers [20, 60), so 60 is outside";
+  // Before the clip's first sample there is nothing to report.
+  EXPECT_FALSE(clip.evaluate_at(20.0, 99U, "position",
+                                omnicpp::editor::Easing::Linear, value));
+  EXPECT_FALSE(clip.evaluate_at(25.0, 1U, "nonexistent",
+                                omnicpp::editor::Easing::Linear, value));
+}
+
+TEST(SceneDocument, NonNumericChannelsHoldTheEarlierSample) {
+  // There is no meaningful midpoint between two strings or two booleans, so
+  // they must hold rather than blend into something that was never recorded.
+  ::omnicpp::editor::TimelineClip clip{};
+  clip.id = 2U;
+  clip.start_frame = 0U;
+  clip.length_frames = 10U;
+  clip.tracks[omnicpp::editor::track_key(1U, "name")] =
+      ::omnicpp::editor::ClipTrack{
+          1U, "name",
+          {::omnicpp::editor::ClipSample{0U, PropValue::make_string("a")},
+           ::omnicpp::editor::ClipSample{10U, PropValue::make_string("b")}}};
+  PropValue value{};
+  ASSERT_TRUE(clip.evaluate_at(5.0, 1U, "name", omnicpp::editor::Easing::Linear,
+                               value));
+  EXPECT_EQ(value.type, PropValue::Type::String);
+  EXPECT_EQ(value.text, "a");
+
+  ::omnicpp::editor::TimelineClip flags{};
+  flags.id = 3U;
+  flags.start_frame = 0U;
+  flags.length_frames = 10U;
+  flags.tracks[omnicpp::editor::track_key(1U, "visible")] =
+      ::omnicpp::editor::ClipTrack{
+          1U, "visible",
+          {::omnicpp::editor::ClipSample{0U, PropValue::make_bool(true)},
+           ::omnicpp::editor::ClipSample{10U, PropValue::make_bool(false)}}};
+  ASSERT_TRUE(flags.evaluate_at(5.0, 1U, "visible",
+                                omnicpp::editor::Easing::Linear, value));
+  EXPECT_EQ(value.type, PropValue::Type::Bool);
+  EXPECT_TRUE(value.boolean);
+}

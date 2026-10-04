@@ -41,6 +41,24 @@ if(NOT DEFINED CPM_SOURCE_CACHE)
     set(CPM_SOURCE_CACHE "${CPM_SOURCE_CACHE}" CACHE PATH "CPM source cache")
 endif()
 
+# A binary dir configured BEFORE CPM was vendored has CPM_DIRECTORY cached
+# pointing at wherever the script used to be downloaded to (typically
+# <build>/cmake). CPM_*.cmake treats a CPM_DIRECTORY that differs from its own
+# location as "a dependency brought a newer CPM" and returns immediately --
+# without defining CPMAddPackage. Every dependency fetch then fails with
+# "Unknown CMake command CPMAddPackage", and because the entry is INTERNAL in
+# the cache it never clears itself, so the build dir stays broken forever.
+#
+# Detecting the stale pointer and unsetting it makes an old build dir heal on
+# its next configure instead of requiring a manual wipe.
+if(DEFINED CPM_DIRECTORY AND
+   NOT "${CPM_DIRECTORY}" STREQUAL "${CMAKE_CURRENT_LIST_DIR}")
+    message(STATUS
+        "Warploom: clearing stale CPM_DIRECTORY (${CPM_DIRECTORY}) -- CPM is "
+        "now vendored at ${CMAKE_CURRENT_LIST_DIR}")
+    unset(CPM_DIRECTORY CACHE)
+endif()
+
 include("${CPM_DOWNLOAD_LOCATION}")
 
 # ============================================================================

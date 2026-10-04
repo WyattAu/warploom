@@ -352,10 +352,41 @@ declares a slot 3.
       contact resolution, there are no joints or shapes, and
       `warploom::physics` is still header-only inside core rather than its own
       package.
-- [ ] **D2 real timeline** — interpolation and easing, concurrent record and
-      play, camera/light/render tracks, and `ClipTimelineView` actually in
-      the app. Today playback steps between keys and the widget has no
-      caller.
+- [x] **D2a interpolated, eased track evaluation** — `TimelineClip::evaluate_at`
+      takes a fractional frame and an `Easing`, and interpolates Number and
+      Vec3 between the bracketing samples. Bool and String hold the earlier
+      sample, because there is no meaningful midpoint between `true` and
+      `false`, or between two strings. `apply_easing` clamps so endpoints are
+      exact: a clip lands precisely on its last recorded sample rather than
+      asymptotically approaching it.
+
+      Additive, not a replacement. `evaluate()` is untouched and Step remains
+      the default, because a whole frame in Step mode must reproduce the old
+      result *exactly* — a replay of an existing recording has to re-run
+      identically to its original take, and a float-ULP drift would break
+      that. `StepModeAtWholeFramesReproducesEvaluateExactly` walks 45 frames
+      across the clip and demands `EXPECT_DOUBLE_EQ`, not a tolerance.
+
+      Found and fixed an out-of-bounds read while testing this: a fractional
+      query past a track's last key fell through to `samples[upper]` with
+      `upper == samples.size()`. It asserted in debug and would have been a
+      heap overread in release, so "past the last key holds" is now decided
+      before the interpolation branch rather than inside it.
+
+      Still open in D2: the viewport ticks whole frames, so playback remains
+      step-hold in practice until the frame clock carries sub-frame time;
+      concurrent record-and-play; camera/light/render tracks; and
+      `ClipTimelineView`, which still has no caller in the app.
+
+- [ ] **Intermittent segfault in the threaded scheduler test** — observed once
+      in roughly five full-suite runs:
+      `SystemScheduler.ParallelExecutionRunsIndependentSystemsConcurrently`,
+      which drives a 4-thread `ThreadPool` through `run_parallel`. Three
+      consecutive full runs after that were clean, and the test passes 5/5 in
+      isolation, so it is a rare race rather than a deterministic failure. It
+      predates this work (nothing in the session touches `ThreadPool`,
+      `SystemScheduler`, or that test). Not fixed: a threading race needs its
+      own investigation and a stress harness, not a drive-by patch.
 - [ ] **D3 game depth** — ECS as the app's data model, scene management,
       **G4 script node**, G2 subgraph copy/paste, G5 asset browser.
 

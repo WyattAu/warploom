@@ -57,6 +57,50 @@ struct ClipSample final {
   PropValue value{};
 };
 
+//! How a track interpolates between recorded samples.
+//!
+//! `Step` is the default and is what every recording made before
+//! interpolation existed evaluates as. It is also the only mode in which two
+//! values that differ only by when they were sampled cannot produce different
+//! results, which is why it stays the default rather than being replaced by
+//! Linear: a replay of an existing file must reproduce the original run
+//! exactly.
+enum class Easing : std::uint8_t {
+  //! Hold the last sample until the next one. The pre-interpolation behaviour.
+  Step = 0,
+  //! Straight lerp between bracketing samples.
+  Linear = 1,
+  //! Cubic ease-in-out, zero derivative at both ends.
+  SmoothStep = 2,
+  //! Cubic ease-in: slow start, fast finish.
+  EaseIn = 3,
+  //! Cubic ease-out: fast start, slow finish.
+  EaseOut = 4,
+};
+
+//! Normalised easing weight in [0, 1] for a linear-space parameter t.
+//! Endpoints are exact (0 -> 0, 1 -> 1) so a clip still lands precisely on its
+//! last recorded sample instead of asymptotically approaching it.
+[[nodiscard]] inline float apply_easing(Easing easing, float t) noexcept {
+  if (t <= 0.0F) return 0.0F;
+  if (t >= 1.0F) return 1.0F;
+  switch (easing) {
+    case Easing::Linear:
+      return t;
+    case Easing::SmoothStep:
+      return t * t * (3.0F - 2.0F * t);
+    case Easing::EaseIn:
+      return t * t * t;
+    case Easing::EaseOut: {
+      const float inv = 1.0F - t;
+      return 1.0F - inv * inv * inv;
+    }
+    case Easing::Step:
+      break;
+  }
+  return 0.0F;
+}
+
 //! G3: one recorded channel — object property values sampled over the clip's
 //! span. Step-hold evaluation: the value of the last sample at or before the
 //! query offset; nothing before the first sample.
@@ -82,6 +126,22 @@ struct TimelineClip final {
   [[nodiscard]] bool evaluate(std::uint64_t frame, std::uint64_t object_id,
                               const std::string& property,
                               PropValue& out) const;
+
+  //! Interpolated evaluation at a FRACTIONAL frame offset within the clip.
+  //!
+  //! `frame_time` is absolute, like evaluate(), but may carry a fractional
+  //! part; the fraction is what makes playback smooth rather than stepping
+  //! once per whole frame. `easing` only matters when the fractional part is
+  //! non-zero or the mode is not Step -- a whole-frame query in Step mode is
+  //! exactly evaluate(), so this is a strict superset rather than a
+  //! replacement.
+  //!
+  //! Only Number and Vec3 interpolate. Bool and String hold at the earlier
+  //! sample, because there is no meaningful value halfway between `true` and
+  //! `false`, or between two strings.
+  [[nodiscard]] bool evaluate_at(double frame_time, std::uint64_t object_id,
+                                 const std::string& property, Easing easing,
+                                 PropValue& out) const;
 };
 
 //! G3: the canonical track key for one (object, property) channel. Shared

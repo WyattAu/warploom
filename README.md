@@ -1,8 +1,9 @@
 # Warploom
 
 A data-oriented C++ engine with deterministic simulation, Vulkan rendering,
-an ECS foundation, and a time-warp editor — shipped as five installable
-CMake packages.
+an ECS foundation, and a time-warp editor — shipped as six installable
+CMake packages (`warploom_asset`, `warploom_core`, `warploom_editor`,
+`warploom_engine`, `warploom_render`, `warploom_ui`).
 
 The differentiator is **determinism as product**: a session can be recorded,
 replayed, and scrubbed to any frame, and the state comes back exactly. 64
@@ -64,7 +65,7 @@ modules/asset     6,410 lines    6 headers,  6 TUs
 modules/editor    3,278 lines    4 headers,  3 TUs
 modules/ui        1,329 lines    2 headers,  2 TUs
 examples/viewport  5,553 lines   the application
-tests/           37,246 lines   624 tests across 5 suites
+tests/           37,246 lines   580 tests across 99 suites
 ```
 
 Public headers are spelled `warploom/<module>/<header>.hpp` and reached
@@ -106,14 +107,31 @@ that it does not:
 
 | Check | Status |
 |---|---|
-| `ctest` — 5 suites | 624 tests |
+| `ctest` | 6/6 suites |
 | Full suite on hardware (RTX 2060) under `VK_LAYER_KHRONOS_validation` | 0 diagnostics, 0 leaks |
-| `headless-debug`, `headless-debug-clang`, `asan-ubsan`, `tsan` | green |
+| `default` preset, under `VK_LAYER_KHRONOS_validation` | 580 tests, 0 diagnostics, 0 leaks |
+| `headless-debug`, `asan-ubsan`, `tsan` | **do not build** — see below |
 | `live_proof.py all` over real sockets | 64/64 |
 | `cpack` | 353-file package: modules, headers, package configs, shaders, viewport |
 
 The Vulkan CI leg is Mesa lavapipe, which has no ray-tracing extensions, so
 every RT test skips there. Hardware RT is verified locally, not in CI.
+
+### Known broken: the sanitizer and headless presets
+
+`headless-debug`, `asan-ubsan` and `tsan` do not currently compile. They
+inherit `WARPLOOM_WARNINGS_AS_ERRORS=ON`, and the tree carries ~270 warnings
+(`-Wfloat-equal`, `-Wsign-conversion`, `-Wswitch-enum`, `-Wshadow`), so each
+fails with 56 `-Werror` diagnostics. `asan-ubsan` and `tsan` were worse: their
+binary dirs carried a `CPM_DIRECTORY` cache entry pointing at the location CPM
+used before it was vendored in-tree, so the vendored script treated it as a
+foreign newer version and returned without ever defining `CPMAddPackage`. That
+made configure fail outright, permanently, for anyone whose build dir predated
+vendoring. `cmake/CPM.cmake` now detects and clears the stale pointer, so old
+build dirs heal themselves.
+
+Until the warning debt is paid down, the only verified configuration is the
+`default` preset.
 
 ## Layout
 
