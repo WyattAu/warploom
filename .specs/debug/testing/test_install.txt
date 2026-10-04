@@ -1,4 +1,0 @@
-usage: OmniCppController.py install [-h]
-                                    {engine,game,standalone,all}
-                                    {debug,release}
-OmniCppController.py install: error: the following arguments are required: target, config

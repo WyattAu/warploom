@@ -1,8 +1,0 @@
-usage: OmniCppController.py clean [-h] [{engine,game,standalone,all}]
-
-positional arguments:
-  {engine,game,standalone,all}
-                        Target to clean (default: all)
-
-options:
-  -h, --help            show this help message and exit
