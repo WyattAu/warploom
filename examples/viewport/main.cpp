@@ -26,6 +26,7 @@
 #include "warploom/core/replay_scrubber.hpp"
 #include "warploom/editor/graph_anim_bridge.hpp"
 #include "warploom/editor/inspector.hpp"
+#include "warploom/core/diagnostics.hpp"
 #include "warploom/core/document.hpp"
 #include "warploom/core/document_projection.hpp"
 #include <memory>
@@ -330,6 +331,9 @@ struct TimelinePanel {
 };
 
 struct ViewportApp {
+  [[nodiscard]] std::uint64_t frames_rendered() const noexcept {
+    return frames_presented;
+  }
   // Vulkan stack.
   omnicpp::render::VulkanContext context;
   omnicpp::render::VulkanSwapchain swapchain;
@@ -680,6 +684,9 @@ struct ViewportApp {
   std::array<float, 3> camera_eye_{16.0f, 14.0f, 0.0f};
   std::array<float, 3> camera_target_{0.0f, 1.0f, 0.0f};
   std::uint32_t frame_index{0};
+  //! Frames actually presented. Reported at shutdown so a run's length is a
+  //! fact in the log rather than something to infer from a file listing.
+  std::uint64_t frames_presented{0};
   std::uint32_t captures_done{0};
   //! Scene times actually recorded by the last window frame (the capture
   //! re-records exactly these so the captured image matches what was shown).
@@ -4867,8 +4874,10 @@ bool ViewportApp::initialize() {
     return false;
   }
   if (renderer.gpu_timing().available) {
-    std::printf("viewport: gpu timing enabled (period %.1f ns/tick)\n",
-                renderer.gpu_timing().timestamp_period_ns);
+    WARPLOOM_INFO("viewport",
+                  "gpu timing available (period %.2f ns/tick, whole-frame "
+                  "only -- no per-pass breakdown yet)",
+                  static_cast<double>(renderer.gpu_timing().timestamp_period_ns));
   }
   renderer.set_synchronization2(context.has_synchronization2());
 
@@ -5365,7 +5374,14 @@ void ViewportApp::run() {
           scene.camera_position[0], scene.camera_position[1],
           scene.camera_position[2], scene.objects.size(), drawn, skinned,
           last_record_us, total_us, static_cast<float>(fps_smoothed),
-          capture_name, last_idle_weight, renderer.gpu_timing().last_total_ns);
+          capture_name, last_idle_weight,
+          // Report -1 when no timestamp has ever resolved, rather than 0.
+          // A zero here reads as "the GPU took no time", which is a claim; -1
+          // reads as "we do not know", which is the truth until the query
+          // availability bug below is fixed.
+          renderer.gpu_timing().queries_resolved > 0U
+              ? renderer.gpu_timing().last_total_ns
+              : -1.0);
 
       // Pose summary + engine memory stats (bounded size, every frame).
       if (has_mannequin) {
@@ -5386,6 +5402,7 @@ void ViewportApp::run() {
       }
       telemetry.flush();
     }
+    frames_presented += 1U;
 
     time += run_config.fixed_dt;  // deterministic animation clock
     // Shadow-map dump: copy the depth-only pre-pass output to the host so
@@ -5597,12 +5614,18 @@ void ViewportApp::shutdown() {
 int main() {
   std::signal(SIGTERM, handle_shutdown_signal);
   std::signal(SIGINT, handle_shutdown_signal);
+  // Before anything else, so a failure during initialize already has a level
+  // filter and a frame counter behind it.
+  omnicpp::core::Diagnostics::configure_from_environment();
   ViewportApp app;
   if (!app.initialize()) {
+    WARPLOOM_ERROR("viewport", "initialize failed; shutting down");
     app.shutdown();
     return 1;
   }
   app.run();
   app.shutdown();
+  WARPLOOM_INFO("viewport", "clean shutdown after %llu frame(s)",
+                static_cast<unsigned long long>(app.frames_rendered()));
   return 0;
 }

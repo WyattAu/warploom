@@ -16,6 +16,7 @@
 #include <string>
 
 #include "warploom/core/control_server.hpp"
+#include "warploom/core/diagnostics.hpp"
 #include "warploom/core/editor_session.hpp"
 
 namespace {
@@ -65,6 +66,7 @@ class HeadlessHost final : public omnicpp::core::ControlHost {
 }  // namespace
 
 int main(int argc, char** argv) {
+  omnicpp::core::Diagnostics::configure_from_environment();
   if (argc < 2) {
     std::fprintf(stderr, "usage: %s <socket-path>\n", argv[0]);
     return 2;

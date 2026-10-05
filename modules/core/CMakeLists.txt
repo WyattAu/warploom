@@ -29,6 +29,7 @@ include(CMakePackageConfigHelpers)
 add_library(warploom_core SHARED
     src/warploom/core/command_recorder.cpp
     src/warploom/core/control_server.cpp
+    src/warploom/core/diagnostics.cpp
     src/warploom/core/document.cpp
     src/warploom/core/document_projection.cpp
     src/warploom/core/editor_session.cpp

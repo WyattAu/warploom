@@ -408,6 +408,51 @@ declares a slot 3.
       camera/light/render tracks; and `ClipTimelineView`, which still has no
       caller in the app.
 
+- [x] **O1 structured diagnostics** — `warploom/core/diagnostics.hpp`. One
+      filterable channel for app, engine and viewport: severity, subsystem tag,
+      frame number, env-configured level (`WARPLOOM_LOG_LEVEL`), and a sink
+      function pointer so the viewport can tee into telemetry while tests
+      capture output.
+
+      No new dependency, deliberately: the whole point of Phase 0 was one
+      package manager and one library, and adding spdlog to get logging would
+      undo that. It is also not a logging framework -- no sinks list, no async,
+      no formatting library. One function pointer is enough.
+
+      The gap it closes was measured, not assumed: **116 ad-hoc
+      `fprintf(stderr)` calls in the viewport and exactly 1 in the entire
+      renderer**, no severity, no timestamps, nothing greppable, and 66 bare
+      `RuntimeError::` returns where a failure gave you a code and no
+      indication of which stage produced it.
+
+      Bug found while testing it: `WARPLOOM_LOG_LEVEL=off` *emitted*. `Off` is
+      the highest level and the threshold test is `<=`, so with the threshold at
+      Off every real severity passed. Both the threshold and the message level
+      must rule out Off. `OffSilencesEverything` pins it.
+
+- [ ] **GPU timing has never actually worked** — capability is detected and
+      announced ("gpu timing available"), but resolution never succeeds:
+      `vkGetQueryPoolResults` returns `VK_NOT_READY` on every attempt, so
+      `last_total_ns` has always been 0 and `queries_resolved` always 0. The
+      viewport logged that 0 into telemetry every frame, which is worse than no
+      data -- it reads as a measurement.
+
+      Ruled out by instrumenting: the fence IS reset before reuse, IS passed to
+      the submit, and IS waited on in `begin_frame` before the resolve; the pool
+      IS sized for six stamps per slot; timestamps ARE written at five
+      boundaries. Moving the resolve after the fence wait did not fix it, and
+      `VK_QUERY_RESULT_WAIT_BIT` **hung the app** -- a query whose submit never
+      happened blocks forever -- so that flag is explicitly not used.
+
+      Done in the meantime: the six-stamp per-pass breakdown is in place
+      (`GpuSegment`: pre_pass / scene / compose / hiz / present), written at
+      pass boundaries and resolved into named segments, so the mechanism is
+      ready the moment availability is understood. And telemetry now reports
+      `gpu_ns: -1` when nothing has resolved, instead of a fabricated 0.
+
+      Not root-caused. Until `queries_resolved > 0`, these numbers must not be
+      presented as measurements.
+
 - [ ] **Intermittent segfault in the threaded scheduler test** — observed once
       in roughly five full-suite runs:
       `SystemScheduler.ParallelExecutionRunsIndependentSystemsConcurrently`,

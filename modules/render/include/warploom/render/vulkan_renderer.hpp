@@ -27,6 +27,20 @@
 namespace warploom::render {
 
 //! Per-frame GPU timing telemetry in nanoseconds.
+//! Where a frame's GPU time goes. Two timestamps answer "is the frame
+//! over budget"; six answer "which pass is over budget", which is the question
+//! you actually have when a frame is slow.
+enum class GpuSegment : std::uint8_t {
+  PrePass = 0,   //!< Frame start -> after the pre-pass hooks (shadow depth).
+  Scene = 1,     //!< -> after the main scene render pass.
+  Compose = 2,   //!< -> after the HDR compose chain (bloom, tonemap, FXAA).
+  HZ = 3,        //!< -> after the H-Z reduction, when enabled.
+  Present = 4,   //!< -> after present-path bookkeeping.
+  Count = 5,
+};
+
+[[nodiscard]] const char* to_string(GpuSegment segment) noexcept;
+
 struct GpuTiming {
   //! False on devices without graphics-stage timestamps or when disabled.
   bool available{false};
@@ -34,11 +48,23 @@ struct GpuTiming {
   float timestamp_period_ns{0.0f};
   //! Last resolved frame duration for the slot being reused, in device
   //! ticks and nanoseconds: TOP_OF_PIPE at command-buffer start to
-  //! BOTTOM_OF_PIPE after the main render pass (covers pre-pass hooks).
+  //! BOTTOM_OF_PIPE at the end of the frame.
   std::uint64_t last_total_ticks{0};
   double last_total_ns{0.0};
+  //! Per-segment nanoseconds for the last resolved frame. Indexed by
+  //! GpuSegment. A segment that did not run this frame reads 0 -- which is
+  //! itself informative, since "compose took 0ms" and "compose never ran"
+  //! are different facts and only the second is a bug.
+  double segment_ns[static_cast<std::size_t>(GpuSegment::Count)]{};
+  //! Frame whose segments are in segment_ns. Lets a consumer tell a stale
+  //! reading from the current frame.
+  std::uint64_t resolved_frame{0};
   //! Number of successfully resolved frames.
   std::uint64_t queries_resolved{0};
+
+  //! One line summarising the frame, for the diagnostics channel. Kept here so
+  //! the format lives next to the numbers it describes.
+  [[nodiscard]] std::string summary() const;
 };
 
 //! Resources and immutable frame token passed to the H-Z recording callback.

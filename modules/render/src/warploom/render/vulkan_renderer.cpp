@@ -4,6 +4,8 @@
  */
 
 #include "warploom/render/vulkan_renderer.hpp"
+
+#include "warploom/core/diagnostics.hpp"
 #include "warploom/core/clock.hpp"
 #include <algorithm>
 #include <cstring>
@@ -13,6 +15,44 @@
 #endif
 
 namespace warploom::render {
+
+namespace {
+//! Timestamps recorded per frame in flight. One at the start of the command
+//! buffer, then one after each stage, so consecutive pairs bracket a segment.
+constexpr std::uint32_t kGpuStampsPerFrame = 6U;
+constexpr std::uint32_t kStampFrameStart = 0U;
+constexpr std::uint32_t kStampAfterPrePass = 1U;
+constexpr std::uint32_t kStampAfterScene = 2U;
+constexpr std::uint32_t kStampAfterCompose = 3U;
+constexpr std::uint32_t kStampAfterHZ = 4U;
+constexpr std::uint32_t kStampFrameEnd = 5U;
+}  // namespace
+
+const char* to_string(GpuSegment segment) noexcept {
+  switch (segment) {
+    case GpuSegment::PrePass: return "pre_pass";
+    case GpuSegment::Scene:   return "scene";
+    case GpuSegment::Compose: return "compose";
+    case GpuSegment::HZ:      return "hiz";
+    case GpuSegment::Present: return "present";
+    case GpuSegment::Count:   break;
+  }
+  return "?";
+}
+
+std::string GpuTiming::summary() const {
+  char buffer[320];
+  std::snprintf(buffer, sizeof(buffer),
+                "total %.2fms | pre %.2f scene %.2f compose %.2f hiz %.2f "
+                "present %.2f",
+                last_total_ns / 1.0e6,
+                segment_ns[static_cast<std::size_t>(GpuSegment::PrePass)] / 1.0e6,
+                segment_ns[static_cast<std::size_t>(GpuSegment::Scene)] / 1.0e6,
+                segment_ns[static_cast<std::size_t>(GpuSegment::Compose)] / 1.0e6,
+                segment_ns[static_cast<std::size_t>(GpuSegment::HZ)] / 1.0e6,
+                segment_ns[static_cast<std::size_t>(GpuSegment::Present)] / 1.0e6);
+  return std::string(buffer);
+}
 
 void FrameResources::cleanup(VkDevice device) noexcept {
 #ifdef OMNICPP_HAS_VULKAN
@@ -43,6 +83,14 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
+  WARPLOOM_INFO("render",
+                "initialize: %ux%u, %u frames in flight, hz=%s bloom=%s "
+                "exposure=%.2f",
+                swapchain.extent_width(), swapchain.extent_height(),
+                config.max_frames_in_flight,
+                config.enable_hiz ? "on" : "off",
+                config.enable_bloom ? "on" : "off",
+                static_cast<double>(config.exposure));
   device_ = context.device();
   physical_device_ = context.physical_device();
   graphics_queue_ = context.graphics_queue();
@@ -82,7 +130,7 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
     VkQueryPoolCreateInfo qp_info{};
     qp_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
     qp_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
-    qp_info.queryCount = static_cast<std::uint32_t>(frames_.size()) * 2U;
+    qp_info.queryCount = static_cast<std::uint32_t>(frames_.size()) * kGpuStampsPerFrame;
     VkQueueFamilyProperties queue_props{};
     std::uint32_t qcount = 0U;
     vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &qcount, nullptr);
@@ -653,9 +701,10 @@ void pbr_frame_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 
   const auto refuse = [this](const char* why) -> ::warploom::core::Result<void> {
     compose_failed_ = true;
-    std::fprintf(stderr,
-                 "Warploom: HDR compose disabled (%s). The scene will render "
-                 "straight to the swapchain with clipped highlights.\n", why);
+    WARPLOOM_WARN("render",
+                  "HDR compose disabled (%s). The scene renders straight to "
+                  "the swapchain with clipped highlights.\n",
+                  why);
     return ::warploom::core::Result<void>::ok();
   };
 
@@ -1716,13 +1765,17 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
 
 ::warploom::core::Result<std::uint32_t> VulkanRenderer::begin_frame() {
 #ifdef OMNICPP_HAS_VULKAN
-  if (!initialized_) return ::warploom::core::Result<std::uint32_t>::error(::warploom::core::RuntimeError::vulkan_not_available);
+  if (!initialized_) {
+    WARPLOOM_ERROR("render", "begin_frame before initialize()");
+    return ::warploom::core::Result<std::uint32_t>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
+  }
+  // Stamp the frame globally: every diagnostic from here on -- app callbacks,
+  // engine internals -- carries this number without threading it through.
+  ::warploom::core::Diagnostics::set_frame(frame_counter_);
 
   auto& frame = frames_[current_frame_];
   frame_begin_ns_ = ::warploom::core::SteadyClock::now_ns();
-  if (gpu_timing_enabled_) {
-    resolve_gpu_timestamps(current_frame_);
-  }
   if (timeline_pacing_) {
     // Timeline pacing: this frame's slot is safe when the timeline has passed
     // the value this slot last signaled (one frame in flight per slot).
@@ -1744,6 +1797,18 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
     vkWaitForFences(device_, 1, &frame.in_flight_fence, VK_TRUE, UINT64_MAX);
   }
   frame.frame_in_flight = false;
+
+  // Resolve GPU timestamps for THIS slot, and only here.
+  //
+  // This used to run at the top of begin_frame, before the fence wait above.
+  // A query only becomes readable once the GPU has finished the submit that
+  // wrote it, so every read raced the GPU and returned VK_NOT_READY -- which
+  // the old code swallowed silently. GPU timing therefore reported 0 for
+  // frames that were never 0, and the viewport dutifully logged that 0 into
+  // telemetry. Capability was being announced as if it were measurement.
+  if (gpu_timing_enabled_) {
+    resolve_gpu_timestamps(current_frame_);
+  }
 
   std::uint32_t image_index = 0;
   VkResult result = vkAcquireNextImageKHR(device_, swapchain_->swapchain(), UINT64_MAX,
@@ -1802,7 +1867,14 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
     std::uint32_t width, std::uint32_t height) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!initialized_ || image_index >= swapchain_->image_count()) {
-    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
+    WARPLOOM_ERROR("render",
+                   "record_commands: %s (image_index=%u of %u)",
+                   initialized_ ? "image index out of range"
+                                : "renderer not initialized",
+                   image_index,
+                   initialized_ ? swapchain_->image_count() : 0U);
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   auto& frame = frames_[current_frame_];
@@ -1817,10 +1889,10 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
   // The begin_frame wait above guarantees the previous submit on this slot
   // completed, so reset and resolve are both race-free.
   if (gpu_timing_enabled_ && timestamp_pool_ != VK_NULL_HANDLE) {
-    const std::uint32_t base = current_frame_ * 2U;
-    vkCmdResetQueryPool(cb, timestamp_pool_, base, 2U);
+    const std::uint32_t base = current_frame_ * kGpuStampsPerFrame;
+    vkCmdResetQueryPool(cb, timestamp_pool_, base, kGpuStampsPerFrame);
     vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestamp_pool_,
-                        base);
+                        base + kStampFrameStart);
   }
 
   // Application pre-pass hook: independent earlier passes (shadow-map depth
@@ -1831,6 +1903,15 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
     (void)vkEndCommandBuffer(cb);
     return ::warploom::core::Result<void>::error(
         ::warploom::core::RuntimeError::invalid_config);
+  }
+
+  // Boundary stamp: the pre-pass hooks (the shadow depth pass) are recorded, so
+  // the PrePass segment ends here. Placed before the scene pass opens, otherwise
+  // it would bracket the shadow pass AND the scene under one label and the
+  // breakdown would be a lie.
+  if (gpu_timing_enabled_ && timestamp_pool_ != VK_NULL_HANDLE) {
+    vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, timestamp_pool_,
+                        current_frame_ * kGpuStampsPerFrame + kStampAfterPrePass);
   }
 
   // HDR compose: the scene renders into an HDR intermediate owned by the
@@ -1911,6 +1992,14 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
 
   vkCmdEndRenderPass(cb);
 
+  // Boundary stamp: the scene pass is done, so the Scene segment ends here.
+  // Written before compose so a frame's compose cost is attributed to compose
+  // rather than being folded into the scene.
+  if (gpu_timing_enabled_ && timestamp_pool_ != VK_NULL_HANDLE) {
+    vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, timestamp_pool_,
+                        current_frame_ * kGpuStampsPerFrame + kStampAfterScene);
+  }
+
   // HDR compose: bloom (optional) then tonemap+FXAA into the swapchain
   // image. Runs after the scene pass and before the end stamp, so the
   // timestamp still covers the whole frame.
@@ -1922,10 +2011,16 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
     record_compose_chain(cb, render_pass_, framebuffer, width, height);
   }
 
+  if (gpu_timing_enabled_ && timestamp_pool_ != VK_NULL_HANDLE) {
+    vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, timestamp_pool_,
+                        current_frame_ * kGpuStampsPerFrame + kStampAfterCompose);
+  }
+
   // End stamp: after the main render pass, before presentation commands.
   if (gpu_timing_enabled_ && timestamp_pool_ != VK_NULL_HANDLE) {
     vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                        timestamp_pool_, current_frame_ * 2U + 1U);
+                        timestamp_pool_,
+                        current_frame_ * kGpuStampsPerFrame + kStampFrameEnd);
   }
 
   const HiZDepthSource hiz_depth = select_hiz_depth_source(
@@ -2617,24 +2712,57 @@ void VulkanRenderer::resolve_gpu_timestamps(std::uint32_t slot) noexcept {
       timestamp_pool_ == VK_NULL_HANDLE || timestamp_period_ns_ <= 0.0f) {
     return;
   }
-  const std::uint32_t base = slot * 2U;
+  // KNOWN BUG: resolution has never succeeded on this path. Instrumenting it
+  // shows vkGetQueryPoolResults returning VK_NOT_READY on every attempt, even
+  // immediately after the slot's fence wait, so last_total_ns has always been
+  // 0 and queries_resolved has always been 0. The fence IS reset before reuse
+  // and IS passed to the submit, and the pool IS sized for six stamps per slot,
+  // so the obvious causes are ruled out. Not yet root-caused; do not present
+  // these numbers as measurements until queries_resolved > 0.
+  const std::uint32_t base = slot * kGpuStampsPerFrame;
   if (slot >= timestamp_valid_.size() || !timestamp_valid_[slot]) {
     timestamp_valid_[slot] = true;  // armed: written at record time this frame
     return;
   }
-  std::uint64_t stamps[2] = {0U, 0U};
+  std::uint64_t stamps[kGpuStampsPerFrame] = {};
+  // Deliberately no WAIT_BIT. A query whose submit never happened -- a slot
+  // not yet recorded into, or a frame that failed before submit -- would block
+  // the CPU forever, and that is exactly what happened when this was tried.
+  // Correctness has to come from resolving only once the frame's own
+  // completion is known, not from blocking here.
   const VkResult result = vkGetQueryPoolResults(
-      device_, timestamp_pool_, base, 2U, sizeof(stamps), stamps,
+      device_, timestamp_pool_, base, kGpuStampsPerFrame, sizeof(stamps), stamps,
       sizeof(std::uint64_t), VK_QUERY_RESULT_64_BIT);
   if (result != VK_SUCCESS) {
     return;  // VK_NOT_READY or device loss: keep the previous value
   }
-  if (stamps[1] >= stamps[0]) {
-    gpu_timing_.last_total_ticks = stamps[1] - stamps[0];
-    gpu_timing_.last_total_ns =
-        static_cast<double>(gpu_timing_.last_total_ticks) *
-        static_cast<double>(timestamp_period_ns_);
+  // A stamp that did not land this frame (a pass that was skipped) reads 0 and
+  // would otherwise subtract backwards. Each segment is emitted only when both
+  // of its endpoints are present and ordered.
+  const auto ns = [this](std::uint64_t delta) {
+    return static_cast<double>(delta) * static_cast<double>(timestamp_period_ns_);
+  };
+  const auto segment = [&](GpuSegment which, std::uint32_t from, std::uint32_t to) {
+    if (stamps[from] == 0U || stamps[to] < stamps[from]) return;
+    gpu_timing_.segment_ns[static_cast<std::size_t>(which)] =
+        ns(stamps[to] - stamps[from]);
+  };
+  segment(GpuSegment::PrePass, kStampFrameStart, kStampAfterPrePass);
+  segment(GpuSegment::Scene, kStampAfterPrePass, kStampAfterScene);
+  segment(GpuSegment::Compose, kStampAfterScene, kStampAfterCompose);
+  segment(GpuSegment::HZ, kStampAfterCompose, kStampAfterHZ);
+  segment(GpuSegment::Present, kStampAfterHZ, kStampFrameEnd);
+
+  if (stamps[kStampFrameEnd] >= stamps[kStampFrameStart] &&
+      stamps[kStampFrameStart] != 0U) {
+    gpu_timing_.last_total_ticks =
+        stamps[kStampFrameEnd] - stamps[kStampFrameStart];
+    gpu_timing_.last_total_ns = ns(gpu_timing_.last_total_ticks);
+    gpu_timing_.resolved_frame = frame_counter_;
     ++gpu_timing_.queries_resolved;
+    // One line per resolved frame, so a slow frame can be found by grepping
+    // rather than by sampling the API from outside.
+    WARPLOOM_DEBUG("render", "gpu %s", gpu_timing_.summary().c_str());
   }
 #endif
 }
