@@ -155,7 +155,17 @@ std::vector<std::uint32_t> build_atlas(std::uint32_t color) {
     const std::uint32_t col = cell % kGlyphColumns;
     const std::uint32_t row = cell / kGlyphColumns;
     std::uint32_t pixels[kGlyphCellW * kGlyphCellH];
-    rasterize_glyph(static_cast<char>(kFirst + cell), color, pixels);
+    if (!rasterize_glyph(static_cast<char>(kFirst + cell), color, pixels)) {
+      // A character with no glyph leaves a blank cell, which reads on screen as
+      // a space. Silent, that becomes "the font is broken" with no evidence.
+      static int reported = 0;
+      if (reported < 8) {
+        ++reported;
+        std::fprintf(stderr,
+                     "Warploom: font atlas has no glyph for U+%04X\n",
+                     static_cast<unsigned>(kFirst + cell));
+      }
+    }
     for (std::uint32_t y = 0; y < kGlyphCellH; ++y) {
       const std::size_t dst =
           (static_cast<std::size_t>(row) * kGlyphCellH + y) * kAtlasW +

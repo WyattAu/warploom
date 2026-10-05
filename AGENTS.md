@@ -129,8 +129,10 @@ Nothing is claimed without these, on the `default` preset:
 Known-broken, and must not be reported as working:
 
 - `headless-debug`, `asan-ubsan` and `tsan` configure but do not **compile**:
-  56 `-Werror` diagnostics against ~270 warnings of debt. Until that debt is
-  paid, the only verified configuration is `default` — which means memory safety
-  is currently unverified by sanitizers.
+  they inherit `WARPLOOM_WARNINGS_AS_ERRORS=ON` and the tree carries warning
+  debt. `-Wunused-result` is paid (86 -> 0, and it hid a deadlock); the
+  remaining ~350 are dominated by `-Wsign-conversion` and `-Wdouble-promotion`.
+  Until that debt is paid, the only verified configuration is `default` — which
+  means memory safety is currently unverified by sanitizers.
 - A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystemsConcurrently`,
   roughly one full-suite run in five.

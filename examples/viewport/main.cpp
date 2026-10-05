@@ -1599,7 +1599,13 @@ bool setup_mannequin(ViewportApp& app) {
     to_walk.min_time_in_state = 0.25f;
     to_walk.fade_duration = 0.4f;
     app.machine->add_transition(to_walk);
-    app.machine->set_initial("walk");
+    if (!app.machine->set_initial("walk")) {
+      // Without an initial state the machine has nothing to blend from on its
+      // first transition, which looks like a broken first step rather than a
+      // missing state name.
+      WARPLOOM_WARN("viewport",
+                    "animation machine has no state named \"walk\"");
+    }
   }
   return true;
 }
@@ -4432,7 +4438,7 @@ void mirror_document_objects(ViewportApp& app) {
   }
 
   constexpr float kDegToRad = 3.14159265358979f / 180.0f;
-  app.projection.world().query_if<DocumentTransform, DocumentRef>(
+  (void)app.projection.world().query_if<DocumentTransform, DocumentRef>(
       [](const omnicpp::core::Entity&, const DocumentTransform&,
          const DocumentRef& ref) { return ref.type_id == kDocumentCubeTypeId; },
       [&](const omnicpp::core::Entity&, const DocumentTransform& t,
@@ -4935,7 +4941,7 @@ bool ViewportApp::initialize() {
           b.radius = 0.25f + 0.2f * std::fmod(f * 0.017f, 1.0f);
           b.restitution = 0.35f;
           physics_bodies.push_back(b);
-          physics_world.add_body(b);
+          (void)physics_world.add_body(b);  // body id is not needed here
         }
         gd_instance_count = body_count + 1U;
       }

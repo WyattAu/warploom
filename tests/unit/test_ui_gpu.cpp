@@ -140,7 +140,7 @@ ui::PaintList demo_paint() {
   sidebar.color = 0xFF3050C0;
   sidebar.fixed_w = 100.0F;
   sidebar.flex_grow = 1.0F;
-  tree.add(std::move(sidebar), tree.root());
+  (void)tree.add(std::move(sidebar), tree.root());
   ui::compute_layout(tree, static_cast<float>(kW), static_cast<float>(kH));
   ui::PaintList p;
   ui::paint(tree, p);

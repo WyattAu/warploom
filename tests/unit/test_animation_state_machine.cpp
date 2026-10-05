@@ -42,7 +42,7 @@ omnicpp::anim::AnimationStateMachine<FakeSnapshot> make_walk_idle() {
   to_walk.min_time_in_state = 0.25f;
   to_walk.fade_duration = 0.4f;
   m.add_transition(to_walk);
-  m.set_initial("walk");
+  (void)m.set_initial("walk");
   return m;
 }
 
@@ -104,7 +104,7 @@ TEST(AnimationStateMachine, FirstMatchWinsOnOverlappingEdges) {
   second.action = "go";
   m.add_transition(first);  // declared first: must win
   m.add_transition(second);
-  m.set_initial("a");
+  (void)m.set_initial("a");
   const FakeSnapshot pressed{"go"};
   m.tick(pressed, kDt);
   EXPECT_EQ(m.state(), "b");

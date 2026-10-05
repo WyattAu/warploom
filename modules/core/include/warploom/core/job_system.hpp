@@ -143,13 +143,29 @@ public:
   //! Allocation-free submission of a function-pointer job. The callable must
   //! not capture state except through `arg` (which must outlive the job).
   //! Preferred on the frame path: no std::function, no heap traffic.
+  //! Queue one already-formed job. Returns false when the pool refuses it.
+  //!
+  //! CONTRACT: the caller has already added a tick to `counter` for this job, so
+  //! a refusal RELEASES that tick before returning. Otherwise the caller's
+  //! counter.wait() waits forever on work that will never be queued -- a hang
+  //! rather than a slowdown, and one that happens exactly during teardown.
+  //!
+  //! A refusal is not a lost job: the caller is expected to run it inline. This
+  //! function cannot, because it is handed a bare function pointer with no
+  //! knowledge of what the work is.
   [[nodiscard]] bool submit_raw(JobPriority priority, JobCounter* counter,
                                 void (*fn)(void*), void* arg) {
-    if (!fn) return false;
+    // Release the tick on every refusal path. `decrement` is private, so this
+    // has to be done here, inside the class that owns the invariant.
+    const auto refuse = [counter]() {
+      if (counter != nullptr) decrement_counter(counter);
+      return false;
+    };
+    if (!fn) return refuse();
     bool notify = false;
     {
       std::lock_guard lock(mutex_);
-      if (!initialized_ || shutdown_requested_) return false;
+      if (!initialized_ || shutdown_requested_) return refuse();
       queues_[static_cast<std::size_t>(priority)].push_back(
           Job{{}, fn, arg, counter});
       pending_.fetch_add(1, std::memory_order_acq_rel);
@@ -157,6 +173,13 @@ public:
     }
     if (notify) cv_.notify_one();
     return true;
+  }
+
+  //! Release one tick of a caller's counter. Private because it is only
+  //! correct for the owner of the tick -- the system that either queued or
+  //! refused the job.
+  static void decrement_counter(JobCounter* counter) noexcept {
+    counter->decrement();
   }
 
   //! Block until every queued and running job has completed.

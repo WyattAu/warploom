@@ -164,7 +164,7 @@ struct DemoUi {
     open.text_color = 0xFFFFFFFF;
     open.fixed_h = 24.0F;
     open.cross_align = ui::Align::Stretch;  // full sidebar content width
-    tree.add(std::move(open), hs);
+    (void)tree.add(std::move(open), hs);
 
     ui::Widget quit;
     quit.kind = ui::WidgetKind::Button;
@@ -174,7 +174,7 @@ struct DemoUi {
     quit.text_color = 0xFFFFFFFF;
     quit.fixed_h = 24.0F;
     quit.cross_align = ui::Align::Stretch;
-    tree.add(std::move(quit), hs);
+    (void)tree.add(std::move(quit), hs);
 
     ui::Widget snap;
     snap.kind = ui::WidgetKind::Checkbox;
@@ -184,7 +184,7 @@ struct DemoUi {
     snap.text_color = 0xFF00C000;  // label drawn in the same green
     snap.checked = true;
     snap.padding = 4.0F;
-    tree.add(std::move(snap), hs);
+    (void)tree.add(std::move(snap), hs);
 
     ui::Widget hidden;
     hidden.kind = ui::WidgetKind::Panel;
@@ -193,7 +193,7 @@ struct DemoUi {
     hidden.color = 0xFFFF00FF;
     hidden.fixed_w = 40.0F;
     hidden.fixed_h = 40.0F;
-    tree.add(std::move(hidden), tree.root());
+    (void)tree.add(std::move(hidden), tree.root());
 
     ui::compute_layout(tree, 320.0F, 240.0F, kMetrics);
     ui::paint(tree, paint, kMetrics);
@@ -274,7 +274,7 @@ TEST(UiPaintGolden, GlyphOriginMatchesPaintTextPosition) {
   btn.text_color = 0xFFFFFFFF;
   btn.fixed_w = 40.0F;
   btn.fixed_h = 24.0F;
-  tree.add(std::move(btn), tree.root());
+  (void)tree.add(std::move(btn), tree.root());
   ui::compute_layout(tree, 100.0F, 100.0F, kMetrics);
   ui::PaintList p;
   ui::paint(tree, p, kMetrics);

@@ -123,8 +123,8 @@ TEST(SceneExtraction, HandleResourcesAreCopiedIntoSnapshot) {
   EXPECT_EQ(snapshot.objects[0].mesh_value.index_count, 36U);
   EXPECT_TRUE(snapshot.material_push_constants);
 
-  resources.destroy(mesh_handle, 1U);
-  resources.destroy(material_handle, 1U);
+  (void)resources.destroy(mesh_handle, 1U);
+  (void)resources.destroy(material_handle, 1U);
   EXPECT_EQ(snapshot.objects[0].mesh_value.index_count, 36U);
   EXPECT_FLOAT_EQ(snapshot.objects[0].material_value.base_color[0], 0.25f);
 }

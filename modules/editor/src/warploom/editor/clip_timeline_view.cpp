@@ -13,7 +13,9 @@ void ClipTimelineView::rebuild(ui::WidgetTree& tree,
                                std::uint32_t track_parent) {
   track_parent_ = track_parent;
   if (root_ != ui::kInvalidWidget) {
-    tree.remove(root_);  // idempotent rebuild: drop the previous skeleton
+    // Idempotent rebuild: false on the first pass just means there was no
+    // previous skeleton, which is not an error.
+    (void)tree.remove(root_);
     root_ = ui::kInvalidWidget;
     playhead_ = ui::kInvalidWidget;
     rows_.clear();
@@ -65,7 +67,7 @@ float ClipTimelineView::strip_height() const noexcept {
 void ClipTimelineView::rebuild_blocks(ui::WidgetTree& tree) {
   for (const Row& r : rows_) {
     if (r.block != ui::kInvalidWidget) {
-      tree.remove(r.block);  // unlinks block + its name-label child
+      (void)tree.remove(r.block);  // unlinks block + its name-label child
     }
   }
   rows_.clear();

@@ -21,7 +21,7 @@ TEST(WarploomCoreModule, ScrubberCaptureRestoreIsLossless) {
   ASSERT_TRUE(scrubber.capture(3, doc, error)) << error;
   const std::string bytes = doc.to_json();
 
-  doc.node_graph.add_node("const_number", {});  // mutate past the checkpoint
+  (void)doc.node_graph.add_node("const_number", {});  // mutate past the checkpoint
   omnicpp::editor::SceneDocument restored;
   ASSERT_TRUE(scrubber.restore(3, restored, error)) << error;
   EXPECT_EQ(restored.to_json(), bytes);

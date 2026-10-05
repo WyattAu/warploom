@@ -266,7 +266,7 @@ TEST(Query, SingleComponentQuery) {
   world.add_component<Health>(e3, {50});
 
   std::vector<float> xs;
-  auto count = world.query<Position>([&](omnicpp::core::Entity, Position& p) {
+  const auto count = world.query<Position>([&](omnicpp::core::Entity, Position& p) {
     xs.push_back(p.x);
   });
   EXPECT_EQ(count, 2u);
@@ -287,7 +287,7 @@ TEST(Query, TwoComponentQuery) {
   world.add_component<Health>(e3, {50});
 
   int count = 0;
-  world.query<Position, Velocity>([&](omnicpp::core::Entity, Position& p, Velocity& v) {
+  (void)world.query<Position, Velocity>([&](omnicpp::core::Entity, Position& p, Velocity& v) {
     p.x += v.dx;
     ++count;
   });

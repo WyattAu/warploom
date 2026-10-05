@@ -28,7 +28,7 @@ TEST(PhysicsWorld, ProjectileMatchesAnalyticTrajectory) {
   // Lift the body high enough that it never contacts within 30 steps.
   b.position[1] = 1000.0f;
   b.velocity[1] = 0.0f;
-  w.add_body(b);
+  (void)w.add_body(b);
 
   // Semi-implicit Euler: p_{n+1} = p_n + v_{n+1} * dt (velocity first).
   const float dt = kDt;
@@ -51,7 +51,7 @@ TEST(PhysicsWorld, BounceConservesEnergyPerRestitution) {
   b.position[1] = 1.0f;
   b.radius = 0.5f;
   b.restitution = 0.8f;
-  w.add_body(b);
+  (void)w.add_body(b);
 
   // Analytic impact speed from the 0.5 m drop: v = sqrt(2 * g * h).
   const float v_in = std::sqrt(2.0f * 9.81f * 0.5f);
@@ -80,8 +80,8 @@ TEST(PhysicsWorld, SphereSphereImpulseIsSymmetric) {
   b.position[1] = 5.0f;
   b.velocity[0] = -1.0f;
   b.restitution = 1.0f;
-  w.add_body(a);
-  w.add_body(b);
+  (void)w.add_body(a);
+  (void)w.add_body(b);
 
   w.step(kDt);
   ASSERT_FALSE(w.contacts().empty());
@@ -103,8 +103,8 @@ TEST(PhysicsWorld, StaticBodyImmovable) {
   ball.position[0] = -1.5f;  // touching (sum of radii = 1.5)
   ball.position[1] = 3.0f;
   ball.velocity[0] = 5.0f;   // moving toward the wall
-  w.add_body(wall);
-  w.add_body(ball);
+  (void)w.add_body(wall);
+  (void)w.add_body(ball);
 
   w.step(kDt);
   EXPECT_FLOAT_EQ(w.body(0).position[0], 0.0f);   // wall never moves
@@ -133,8 +133,8 @@ TEST(PhysicsWorld, RepeatedRunsAreBitIdentical) {
     b.velocity[0] = -1.0f;
     b.restitution = 0.7f;
     (void)ground.inverse_mass;
-    w.add_body(a);
-    w.add_body(b);
+    (void)w.add_body(a);
+    (void)w.add_body(b);
     for (int i = 0; i < 600; ++i) w.step(kDt);
     return w.position_fingerprint();
   };
@@ -151,8 +151,8 @@ TEST(PhysicsWorld, StackedBodiesSettleWithoutExplosion) {
   PhysicsBody upper;
   upper.position[1] = 1.5f;
   upper.restitution = 0.0f;
-  w.add_body(lower);
-  w.add_body(upper);
+  (void)w.add_body(lower);
+  (void)w.add_body(upper);
 
   for (int i = 0; i < 600; ++i) w.step(kDt);
   // Both spheres rest at ~one radius above the plane (stacking is approximate

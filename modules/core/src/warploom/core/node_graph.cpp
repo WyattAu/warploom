@@ -249,7 +249,9 @@ bool NodeGraph::add_link(std::uint64_t from_node, std::string_view from_pin,
     return false;
   }
   // Replace any existing link on the input pin.
-  remove_link(to_node, to_pin);
+  // Replacing whatever is on the input pin; false just means there was none,
+  // which is the normal first-link case.
+  (void)remove_link(to_node, to_pin);
   links_.push_back(GraphLink{from_node, std::string(from_pin), to_node,
                              std::string(to_pin)});
   ++version_;

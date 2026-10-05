@@ -224,8 +224,8 @@ struct PostProcessHarness {
     auto da = desc.allocate_set(bloom_layout);
     if (!da.is_ok()) { std::fprintf(stderr, "bloom: allocate a failed\n"); return false; }
     bloom_a_ds = da.value();
-    desc.write_image(bloom_a_ds, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                     bloom_sampler, bloom_a_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0);
+    EXPECT_TRUE(desc.write_image(bloom_a_ds, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                     bloom_sampler, bloom_a_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0).is_ok());
     // The downsample reads the HDR scene; it is written after hdr_view exists.
     auto src = desc.allocate_set(bloom_layout);
     if (!src.is_ok()) { std::fprintf(stderr, "bloom: allocate src failed\n"); return false; }
@@ -241,8 +241,8 @@ struct PostProcessHarness {
     auto db = desc.allocate_set(bloom_layout);
     if (!db.is_ok()) { std::fprintf(stderr, "bloom: allocate b failed\n"); return false; }
     bloom_b_ds = db.value();
-    desc.write_image(bloom_b_ds, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                     bloom_sampler, bloom_b_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0);
+    EXPECT_TRUE(desc.write_image(bloom_b_ds, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                     bloom_sampler, bloom_b_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0).is_ok());
     return true;
   }
 
@@ -316,13 +316,13 @@ struct PostProcessHarness {
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (!mb.is_ok()) return false;
     mat_buf = mb.value();
-    desc.write_buffer(mat_set, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, mat_buf.buffer, 0, VK_WHOLE_SIZE);
+    EXPECT_TRUE(desc.write_buffer(mat_set, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, mat_buf.buffer, 0, VK_WHOLE_SIZE).is_ok());
 
     if (!make_white(dev, ctx.physical_device(), ctx.graphics_queue(), qf, alloc, white)) return false;
     // Same helper, then overwritten to black on the GPU below.
     if (!make_white(dev, ctx.physical_device(), ctx.graphics_queue(), qf, alloc, black)) return false;
-    desc.write_image(tex_set, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        white.sampler, white.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0);
+    EXPECT_TRUE(desc.write_image(tex_set, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        white.sampler, white.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0).is_ok());
 
     // Cube mesh
     std::vector<float> v; std::vector<uint32_t> i;
@@ -337,7 +337,7 @@ struct PostProcessHarness {
     std::memcpy(cube_ia.mapped, i.data(), i.size()*sizeof(uint32_t));
     auto ds = desc.allocate_set(mesh_layout);
     if (!ds.is_ok()) return false;
-    desc.write_buffer(ds.value(), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, cube_va.buffer, 0, VK_WHOLE_SIZE);
+    EXPECT_TRUE(desc.write_buffer(ds.value(), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, cube_va.buffer, 0, VK_WHOLE_SIZE).is_ok());
     cube_mesh.vertex_buffer = cube_va.buffer;
     cube_mesh.index_buffer = cube_ia.buffer;
     cube_mesh.index_count = (uint32_t)i.size();
@@ -403,8 +403,8 @@ struct PostProcessHarness {
     auto pds = desc.allocate_set(post_layout);
     if (!pds.is_ok()) return false;
     hdr_ds = pds.value();
-    desc.write_image(hdr_ds, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        hdr_sampler, hdr_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0);
+    EXPECT_TRUE(desc.write_image(hdr_ds, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        hdr_sampler, hdr_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0).is_ok());
     // Binding 1: the bloom slot. Bound to the black texture so the tonemap's
     // additive term is zero and the existing assertions stay meaningful.
     {
@@ -453,8 +453,8 @@ struct PostProcessHarness {
         vkDestroyCommandPool(dev, pool.value(), nullptr);
       }
     }
-    desc.write_image(hdr_ds, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        black.sampler, black.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0);
+    EXPECT_TRUE(desc.write_image(hdr_ds, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        black.sampler, black.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0).is_ok());
 
     return true;
   }

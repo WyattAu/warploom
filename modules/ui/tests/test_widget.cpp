@@ -305,13 +305,13 @@ TEST(WidgetLayout, DeterministicAcrossRuns) {
     Widget lbl;
     lbl.kind = WidgetKind::Label;
     lbl.text = "determinism";
-    f.tree.add(std::move(lbl), ht);
+    (void)f.tree.add(std::move(lbl), ht);
     Widget btn;
     btn.kind = WidgetKind::Button;
     btn.text = "OK";
     btn.fixed_w = 80.0F;
     btn.cross_align = Align::End;
-    f.tree.add(std::move(btn), ht);
+    (void)f.tree.add(std::move(btn), ht);
     return f.tree;
   };
   WidgetTree t1 = build();
@@ -349,7 +349,7 @@ TEST(WidgetPaint, ParentBeforeChildAndTextAfterRects) {
   btn.text = "go";
   btn.color = 0xFF333333;
   btn.text_color = 0xFFEEEEEE;
-  f.tree.add(std::move(btn), hp);
+  (void)f.tree.add(std::move(btn), hp);
 
   ui::PaintList p;
   ui::paint(f.tree, p, kMetrics);
@@ -372,7 +372,7 @@ TEST(WidgetPaint, InvisibleSubtreeCulled) {
   Widget child;
   child.kind = WidgetKind::Label;
   child.text = "never";
-  f.tree.add(std::move(child), hh);
+  (void)f.tree.add(std::move(child), hh);
 
   ui::PaintList p;
   ui::paint(f.tree, p, kMetrics);
@@ -388,7 +388,7 @@ TEST(WidgetPaint, CheckboxEmitsToggleRect) {
   cb.checked = true;
   cb.color = 0xFF00FF00;
   cb.padding = 4.0F;
-  f.tree.add(std::move(cb), f.root);
+  (void)f.tree.add(std::move(cb), f.root);
 
   ui::PaintList p;
   ui::paint(f.tree, p, kMetrics);

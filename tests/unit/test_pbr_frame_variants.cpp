@@ -158,8 +158,8 @@ bool build_mesh(omnicpp::render::VulkanMemoryAllocator& alloc,
 
   auto ds = desc.allocate_set(mesh_layout);
   if (!ds.is_ok()) return false;
-  desc.write_buffer(ds.value(), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    out_va.buffer, 0, VK_WHOLE_SIZE);
+  EXPECT_TRUE(desc.write_buffer(ds.value(), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                    out_va.buffer, 0, VK_WHOLE_SIZE).is_ok());
 
   out_mesh.vertex_buffer = out_va.buffer;
   out_mesh.index_buffer = out_ia.buffer;
@@ -332,7 +332,7 @@ struct VariantHarness {
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (!mb.is_ok()) return false;
     mat_buf = mb.value();
-    desc.write_buffer(mat_set, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, mat_buf.buffer, 0, VK_WHOLE_SIZE);
+    EXPECT_TRUE(desc.write_buffer(mat_set, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, mat_buf.buffer, 0, VK_WHOLE_SIZE).is_ok());
 
     auto r3 = desc.create_layout({{3,0,1,VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_VERTEX_BIT}}, 8);
     if (!r3.is_ok()) return false;
@@ -344,11 +344,11 @@ struct VariantHarness {
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (!bb.is_ok()) return false;
     bone_buf = bb.value();
-    desc.write_buffer(bone_set, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, bone_buf.buffer, 0, VK_WHOLE_SIZE);
+    EXPECT_TRUE(desc.write_buffer(bone_set, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, bone_buf.buffer, 0, VK_WHOLE_SIZE).is_ok());
 
     if (!make_white(dev, ctx.physical_device(), ctx.graphics_queue(), qf, alloc, white)) return false;
-    desc.write_image(tex_set, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                     white.sampler, white.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0);
+    EXPECT_TRUE(desc.write_image(tex_set, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                     white.sampler, white.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0).is_ok());
 
     std::vector<float> v, skin; std::vector<std::uint32_t> i;
     build_bar(v, i, skin);

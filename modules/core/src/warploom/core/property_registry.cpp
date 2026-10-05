@@ -3,6 +3,8 @@
 
 #include "warploom/core/property_registry.hpp"
 
+#include <cstdio>
+
 #include <cmath>
 
 #include "warploom/core/contract.hpp"
@@ -40,25 +42,30 @@ PropertyRegistry& default_registry() {
   // flag (the registry is non-copyable, so it cannot be returned from a
   // constructing lambda).
   static PropertyRegistry registry;
-  static const bool built = [] {
-    registry.register_type(
-        std::string(kTypeCube), "Axis-aligned unit cube scaled per-axis",
+  // Every registration is checked. A type that fails to register leaves the
+  // registry silently incomplete: the object still exists in the document, but
+  // nothing can validate or edit its properties, and the symptom appears far
+  // from the cause. 0 is the failure value.
+  static const bool built = [&] {
+    bool all_ok = true;
+    all_ok = registry.register_type(
+                 std::string(kTypeCube), "Axis-aligned unit cube scaled per-axis",
         {{"position", PropValue::make_vec3(0.0, 0.0, 0.0), "World position"},
          {"rotation", PropValue::make_vec3(0.0, 0.0, 0.0), "Euler XYZ degrees"},
          {"scale", PropValue::make_vec3(1.0, 1.0, 1.0), "Per-axis scale"},
-         {"color", PropValue::make_vec3(0.8, 0.8, 0.8), "Linear albedo RGB"}});
-    registry.register_type(
-        std::string(kTypeSphere), "Unit sphere centered at the origin",
+         {"color", PropValue::make_vec3(0.8, 0.8, 0.8), "Linear albedo RGB"}}) != 0U && all_ok;
+    all_ok = registry.register_type(
+                 std::string(kTypeSphere), "Unit sphere centered at the origin",
         {{"position", PropValue::make_vec3(0.0, 0.0, 0.0), "World position"},
          {"radius", PropValue::make_number(0.5), "Radius in meters"},
          {"color", PropValue::make_vec3(0.8, 0.8, 0.8), "Linear albedo RGB"}});
-    registry.register_type(
-        std::string(kTypeLight), "Omnidirectional point light",
+    all_ok = registry.register_type(
+                 std::string(kTypeLight), "Omnidirectional point light",
         {{"position", PropValue::make_vec3(0.0, 2.0, 0.0), "World position"},
          {"color", PropValue::make_vec3(1.0, 1.0, 1.0), "Linear RGB"},
-         {"intensity", PropValue::make_number(1.0), "Candela"}});
-    registry.register_type(
-        std::string(kTypeEnvironment),
+         {"intensity", PropValue::make_number(1.0), "Candela"}}) != 0U && all_ok;
+    all_ok = registry.register_type(
+                 std::string(kTypeEnvironment),
         "Scene environment: singleton object holding camera and sun state",
         {{"camera_eye", PropValue::make_vec3(8.0, 3.0, 8.0), "Camera position"},
          {"camera_target", PropValue::make_vec3(0.0, 1.0, 0.0),

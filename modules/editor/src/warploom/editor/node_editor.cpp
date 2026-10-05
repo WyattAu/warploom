@@ -93,7 +93,7 @@ void NodeEditorView::rebuild(ui::WidgetTree& tree,
   if (card_root_ != ui::kInvalidWidget &&
       card_root_ < tree.size() &&
       tree.get(card_root_).parent == canvas_parent) {
-    tree.remove(card_root_);
+    (void)tree.remove(card_root_);  // rebuild: absent on first pass
   }
   card_root_ = ui::kInvalidWidget;
   views_.clear();

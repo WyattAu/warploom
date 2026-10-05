@@ -133,9 +133,8 @@ namespace detail {
         warploom_level_;                                                  \
     if (::warploom::core::Diagnostics::enabled(kWarploomLevel)) {        \
       char warploom_buffer_[512];                                         \
-      ::warploom::core::detail::format_into(warploom_buffer_,           \
-                                             sizeof(warploom_buffer_),    \
-                                             __VA_ARGS__);                \
+      (void)::warploom::core::detail::format_into(                        \
+          warploom_buffer_, sizeof(warploom_buffer_), __VA_ARGS__);      \
       ::warploom::core::Diagnostics::emit(kWarploomLevel, subsystem_,    \
                                           warploom_buffer_);             \
     }                                                                     \

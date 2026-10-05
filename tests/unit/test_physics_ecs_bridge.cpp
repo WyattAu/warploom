@@ -121,7 +121,7 @@ TEST(PhysicsEcsBridge, ThousandInstancesDeterministic) {
       b.position[2] = -10.0F + std::fmod(f * 0.53F, 20.0F);
       b.radius = 0.2F + 0.3F * std::fmod(f * 0.017F, 1.0F);
       b.restitution = 0.3F + 0.2F * std::fmod(f * 0.023F, 1.0F);
-      world.add_body(b);
+      (void)world.add_body(b);
     }
     for (int i = 0; i < 240; ++i) {  // 4 sim seconds
       world.step(1.0F / 60.0F);

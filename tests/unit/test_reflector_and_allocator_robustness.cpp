@@ -53,7 +53,10 @@ TEST(SpirvReflector, RejectsNullAndTrivialInputs) {
   for (std::size_t words = 0; words <= 8; ++words) {
     std::vector<std::uint32_t> truncated(tiny.begin(), tiny.begin() + std::min(words, tiny.size()));
     if (words < 1) truncated.clear();
-    EXPECT_NO_FATAL_FAILURE(omnicpp::render::reflect_spirv_resources(truncated.data(), words));
+    // These fuzz malformed SPIR-V on purpose. The claim under test is that
+    // reflection survives it -- not any particular return value -- so the
+    // reflected bindings are deliberately discarded.
+    EXPECT_NO_FATAL_FAILURE((void)(omnicpp::render::reflect_spirv_resources(truncated.data(), words)));;
   }
   EXPECT_TRUE(omnicpp::render::reflect_spirv_resources(
                   static_cast<const std::uint32_t*>(nullptr), 0).empty());
@@ -85,7 +88,10 @@ TEST(SpirvReflector, SurvivesTruncationOfRealShader) {
   // Truncate at every boundary: the parser must stop cleanly each time.
   for (std::size_t keep = 5; keep < words.size(); keep += 3) {
     std::vector<std::uint32_t> truncated(words.begin(), words.begin() + static_cast<std::ptrdiff_t>(keep));
-    EXPECT_NO_FATAL_FAILURE(omnicpp::render::reflect_spirv_resources(truncated.data(), truncated.size()));
+    // These fuzz malformed SPIR-V on purpose. The claim under test is that
+    // reflection survives it -- not any particular return value -- so the
+    // reflected bindings are deliberately discarded.
+    EXPECT_NO_FATAL_FAILURE((void)(omnicpp::render::reflect_spirv_resources(truncated.data(), truncated.size())););
   }
 }
 
@@ -97,9 +103,15 @@ TEST(SpirvReflector, SurvivesWordCountLies) {
   for (std::size_t i = 5; i < words.size(); i += 7) {
     std::vector<std::uint32_t> mutated = words;
     mutated[i] = (0xFFFFU << 16U) | (mutated[i] & 0xFFFFU);  // claim max length
-    EXPECT_NO_FATAL_FAILURE(omnicpp::render::reflect_spirv_resources(mutated.data(), mutated.size()));
+    // These fuzz malformed SPIR-V on purpose. The claim under test is that
+    // reflection survives it -- not any particular return value -- so the
+    // reflected bindings are deliberately discarded.
+    EXPECT_NO_FATAL_FAILURE((void)(omnicpp::render::reflect_spirv_resources(mutated.data(), mutated.size())););
     mutated[i] = mutated[i] & 0xFFFFU;  // claim zero length
-    EXPECT_NO_FATAL_FAILURE(omnicpp::render::reflect_spirv_resources(mutated.data(), mutated.size()));
+    // These fuzz malformed SPIR-V on purpose. The claim under test is that
+    // reflection survives it -- not any particular return value -- so the
+    // reflected bindings are deliberately discarded.
+    EXPECT_NO_FATAL_FAILURE((void)(omnicpp::render::reflect_spirv_resources(mutated.data(), mutated.size())););
   }
 }
 
@@ -117,7 +129,10 @@ TEST(SpirvReflector, SurvivesRandomByteCorruption) {
     }
     // Contract: must not crash or read out of bounds. Output validity is
     // unchecked — the input is intentionally meaningless.
-    EXPECT_NO_FATAL_FAILURE(omnicpp::render::reflect_spirv_resources(mutated.data(), mutated.size()));
+    // These fuzz malformed SPIR-V on purpose. The claim under test is that
+    // reflection survives it -- not any particular return value -- so the
+    // reflected bindings are deliberately discarded.
+    EXPECT_NO_FATAL_FAILURE((void)(omnicpp::render::reflect_spirv_resources(mutated.data(), mutated.size())););
   }
 }
 #endif  // WARPLOOM_TEST_SHADER_DIR

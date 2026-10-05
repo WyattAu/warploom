@@ -137,8 +137,17 @@ void VulkanParallelRecorder::cleanup() noexcept {
     ::warploom::core::JobCounter counter;
     counter.add(static_cast<int>(band_count - 1));
     for (std::size_t i = 1; i < band_count; ++i) {
-      job_system_->submit_raw(::warploom::core::JobPriority::render, &counter,
-                              &run_band_job, &band_jobs_[i]);
+      if (!job_system_->submit_raw(::warploom::core::JobPriority::render,
+                                   &counter, &run_band_job, &band_jobs_[i])) {
+        // The pool refused the job -- it is shutting down or was never
+        // started. submit_raw releases this band's counter tick on refusal, so
+        // counter.wait() is safe; the band itself still has to run, because a
+        // band that is not recorded is a band with no geometry in it.
+        //
+        // Running it inline costs a thread, not correctness. Ignoring the
+        // return value instead would deadlock the frame outright.
+        run_band_job(&band_jobs_[i]);
+      }
     }
     run_band_job(&band_jobs_[0]);
     counter.wait();

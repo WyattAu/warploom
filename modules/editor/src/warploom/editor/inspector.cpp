@@ -40,7 +40,7 @@ void InspectorPanel::rebuild(
   // Idempotent: drop the previous subtree.
   if (panel_ != ui::kInvalidWidget && panel_ < tree.size() &&
       tree.get(panel_).parent == parent) {
-    tree.remove(panel_);
+    (void)tree.remove(panel_);  // rebuild: absent on first pass
   }
   panel_ = ui::kInvalidWidget;
 
@@ -64,7 +64,7 @@ void InspectorPanel::rebuild(
   panel_ref.y = 40.0F;
 
   // ---------------- OUTLINER ----------------
-  tree.add(make_label("outliner_title", "OUTLINER", 0xFF9FC4E0), panel_);
+  (void)tree.add(make_label("outliner_title", "OUTLINER", 0xFF9FC4E0), panel_);
   for (const auto& obj : doc.objects) {
     const auto* type = registry.find(obj.type_id);
     const bool selected = obj.id == selected_id;
@@ -76,11 +76,11 @@ void InspectorPanel::rebuild(
     row.border_color = selected ? 0xFF66D9A0 : 0x00000000;
     row.fixed_h = 16.0F;
     row.text_color = selected ? 0xFFEFFFFFFF : 0xFFC8D2DA;
-    tree.add(row, panel_);
+    (void)tree.add(row, panel_);
   }
 
   // ---------------- PROPERTIES (selected object) ----------------
-  tree.add(make_label("props_title", "PROPERTIES", 0xFF9FC4E0), panel_);
+  (void)tree.add(make_label("props_title", "PROPERTIES", 0xFF9FC4E0), panel_);
   const SceneObject* sel = doc.find(selected_id);
   if (sel != nullptr) {
     const auto* type = registry.find(sel->type_id);
@@ -98,15 +98,15 @@ void InspectorPanel::rebuild(
         row.color = 0xFF141A20;
         row.fixed_h = 16.0F;
         row.text_color = 0xFFD8E0E8;
-        tree.add(row, panel_);
+        (void)tree.add(row, panel_);
       }
     }
   } else {
-    tree.add(make_label("props_none", "(no selection)", 0xFF66707A), panel_);
+    (void)tree.add(make_label("props_none", "(no selection)", 0xFF66707A), panel_);
   }
 
   // ---------------- BINDINGS ----------------
-  tree.add(make_label("binds_title", "BINDINGS", 0xFFE0B060), panel_);
+  (void)tree.add(make_label("binds_title", "BINDINGS", 0xFFE0B060), panel_);
   binding_count_ = bindings.size();
   for (std::size_t i = 0; i < bindings.size(); ++i) {
     const auto& b = bindings[i];
@@ -119,7 +119,7 @@ void InspectorPanel::rebuild(
     chip.border_color = 0xFFE0B060;
     chip.fixed_h = 16.0F;
     chip.text_color = 0xFFF0E0C0;
-    tree.add(chip, panel_);
+    (void)tree.add(chip, panel_);
   }
 }
 
