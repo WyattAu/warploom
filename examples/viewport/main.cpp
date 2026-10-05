@@ -4660,8 +4660,12 @@ void tick_node_editor(ViewportApp& app) {
   // played in the viewport did nothing while the same document played
   // correctly under the control host.
   static constexpr double kTickFixedDt = 1.0 / 60.0;
-  (void)app.editor.tick({app.frame_index, kTickFixedDt,
-                         app.control_paused()});
+  // sub_frame is 0, so playback stays step-hold and identical to every earlier
+  // build. Passing a wall-clock fraction here would look smoother but would
+  // make timeline playback depend on when a frame was drawn, so a replay could
+  // not reproduce the original take until the fraction is in the protocol.
+  (void)app.editor.tick(
+      {app.frame_index, kTickFixedDt, 0.0, app.control_paused()});
   app.node_view->sync_widgets();
   warploom::ui::compute_layout(app.ui_tree, static_cast<float>(kWidth),
                               static_cast<float>(kHeight));

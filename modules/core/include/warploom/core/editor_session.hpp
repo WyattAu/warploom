@@ -113,11 +113,23 @@ class EditorSession final : public ::warploom::core::ControlHost {
     //! Logical sim frame this tick advances to. The host owns the counter but
     //! the session stamps everything from it, so there is exactly one source.
     std::uint64_t frame{0};
-    //! Fixed timestep in seconds. Only meaningful once physics is in the tick
-    //! (C3); carried now so the signature does not change when it lands.
+    //! Fixed timestep in seconds.
     double fixed_dt{0.0};
-    //! True when the host wants the simulation paused. A paused tick still
-    //! runs sync_graph, so UI edits keep applying while time is stopped.
+    //! Where inside `frame` this tick lands, in [0, 1). 0 means "exactly on the
+    //! frame", which is step-hold playback. A host with a real clock can pass
+    //! the leftover fraction to get interpolated playback.
+    //!
+    //! Both shipped hosts pass 0, deliberately. Deriving this from wall-clock
+    //! time in the viewport would make timeline playback depend on when a frame
+    //! happened to be drawn, so a replay could not reproduce the original take
+    //! unless the fraction were recorded in the protocol -- which is the open
+    //! part of D2. The parameter exists so recording can happen before
+    //! smoothness is switched on, rather than the two being entangled.
+    double sub_frame{0.0};
+    //! True when the host wants the simulation paused. A paused tick still runs
+    //! sync_graph, so UI edits keep applying while time is stopped, but it
+    //! advances neither physics nor clip playback -- time being stopped means
+    //! all of it.
     bool paused{false};
   };
 
@@ -186,6 +198,18 @@ class EditorSession final : public ::warploom::core::ControlHost {
   //! The current document value is read AFTER playback applied, so a clip
   //! that plays into the same track it records from reproduces itself.
   void tick_timeline(std::uint64_t frame);
+
+  //! Shared playback body. `frame_time` may be fractional and `easing` selects
+  //! blending. Whole-frame Step playback arrives here too, which keeps
+  //! step-hold and interpolated playback on exactly one code path -- the
+  //! alternative being two implementations that drift.
+  void tick_timeline_at(double frame_time, ::warploom::editor::Easing easing);
+
+  //! Playback at a fractional frame. `alpha` in [0, 1) moves the sample point
+  //! into the frame and `easing` decides how tracks blend there. alpha 0 is
+  //! exactly tick_timeline(frame).
+  void tick_timeline_interpolated(std::uint64_t frame, double alpha,
+                                  ::warploom::editor::Easing easing);
   [[nodiscard]] const TimelineClip* recording_target() const noexcept {
     return recording_ ? doc_.find_clip(recording_clip_) : nullptr;
   }

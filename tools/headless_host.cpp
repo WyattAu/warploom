@@ -46,7 +46,10 @@ class HeadlessHost final : public omnicpp::core::ControlHost {
               ? static_cast<std::uint64_t>(command.numbers[0])
               : 1U;
       for (std::uint64_t t = 0; t < ticks; ++t) {
-        (void)editor_.tick({frame_, kFixedDt, false});
+        // sub_frame stays 0: the control host is deterministic by
+        // construction, and a fractional sample point would have to be
+        // recorded to be replayable.
+        (void)editor_.tick({frame_, kFixedDt, 0.0, false});
         frame_ += 1;
       }
     }

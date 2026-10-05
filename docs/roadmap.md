@@ -373,10 +373,40 @@ declares a slot 3.
       heap overread in release, so "past the last key holds" is now decided
       before the interpolation branch rather than inside it.
 
-      Still open in D2: the viewport ticks whole frames, so playback remains
-      step-hold in practice until the frame clock carries sub-frame time;
-      concurrent record-and-play; camera/light/render tracks; and
-      `ClipTimelineView`, which still has no caller in the app.
+- [x] **D2b sub-frame tick position reaches playback** — `FrameInput` carries a
+      `sub_frame` in [0, 1) and `tick()` routes it to interpolated playback, so
+      the D2a interpolation has a caller rather than being a capability nothing
+      reaches. Step-hold and interpolated playback now share one body
+      (`tick_timeline_at`) instead of being two implementations free to drift.
+
+      **Both shipped hosts still pass 0**, deliberately. A wall-clock-derived
+      alpha would make playback depend on when a frame happened to be drawn, so
+      a replay could not reproduce its original take unless the fraction were
+      recorded in the protocol. That recording is the open part, and having the
+      parameter exist first means the two can be done in the right order rather
+      than being entangled. Zero behaviour change today, verified 100.0000% of
+      pixels identical.
+
+      **This surfaced a real bug.** A paused tick stopped physics but kept
+      advancing clip playback — the physics stage checked `paused` and the
+      timeline stage did not. At whole frames that was easy to miss, because
+      playback mostly holds; a sub-frame tick moves the sample point and made it
+      obvious. Both stages now obey the same gate, and time being stopped means
+      all of it. Removing the gate fails 2 tests.
+
+      Also fixed while threading it through: recording sample offsets are whole
+      frames by contract, so a fractional sample point floors rather than
+      producing a fractional offset the sample ordering and on-disk format both
+      forbid. And adding a field to `FrameInput` silently reinterpreted every
+      existing three-element `tick({frame, dt, paused})` call site — `true`
+      became `sub_frame = 1.0` and `paused` defaulted to false. Six tests caught
+      it; the lesson is that adding a positional field to a widely-used aggregate
+      wants designated initialisers at the call sites.
+
+      Still open in D2: recording the sub-frame fraction in the protocol so
+      playback can be smooth *and* replayable; concurrent record-and-play;
+      camera/light/render tracks; and `ClipTimelineView`, which still has no
+      caller in the app.
 
 - [ ] **Intermittent segfault in the threaded scheduler test** — observed once
       in roughly five full-suite runs:

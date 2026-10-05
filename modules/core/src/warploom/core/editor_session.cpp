@@ -188,8 +188,23 @@ EditorSession::TickReport EditorSession::tick(const FrameInput& input) {
     // write happens after project(), below.
   }
 
-  // 3. The clip wins the frame against a binding on the same property.
-  tick_timeline(input.frame);
+  // 3. The clip wins the frame against a binding on the same property. With a
+  // sub-frame position the sample point moves inside the frame; at alpha 0 this
+  // is the old step-hold path exactly.
+  //
+  // Gated on pause, like physics above. Previously playback kept running while
+  // paused: the physics stage checked `paused` and the timeline stage did not,
+  // so a paused host stopped bodies moving but carried on driving recorded
+  // values. That only became visible once a sub-frame tick could move the
+  // sample point inside a frame -- at whole frames the pause was easy to miss
+  // because playback mostly held. Both stages now obey the same gate.
+  if (!input.paused) {
+    if (input.sub_frame > 0.0) {
+      tick_timeline_interpolated(input.frame, input.sub_frame, Easing::Linear);
+    } else {
+      tick_timeline(input.frame);
+    }
+  }
 
   // 4. Carry the document into the ECS. After the timeline so a clip's write
   // is what gets projected, not the pre-playback value.
@@ -228,19 +243,39 @@ const ::warploom::physics::PhysicsBody* EditorSession::physics_body_for(
   return &physics_.body(it->second);
 }
 
+void EditorSession::tick_timeline_interpolated(std::uint64_t frame, double alpha,
+                                              Easing easing) {
+  // Clamp rather than trust the host: an out-of-range alpha would sample
+  // outside the clip, or rewind into the previous frame.
+  if (!(alpha > 0.0)) {
+    tick_timeline(frame);
+    return;
+  }
+  if (alpha >= 1.0) {
+    alpha = 0.999999999;
+  }
+  tick_timeline_at(static_cast<double>(frame) + alpha, easing);
+}
+
 void EditorSession::tick_timeline(std::uint64_t frame) {
+  tick_timeline_at(static_cast<double>(frame), Easing::Step);
+}
+
+void EditorSession::tick_timeline_at(double frame_time, Easing easing) {
   // 1. Playback first: apply the armed clip's step-hold values (direct
   //    application, bindings model). Auto-stops at clip end.
   if (playing_) {
     const TimelineClip* clip = doc_.find_clip(playing_clip_);
     if (clip == nullptr) {
       playing_ = false;  // clip removed while armed
-    } else if (frame >= clip->start_frame + clip->length_frames) {
+    } else if (frame_time >=
+               static_cast<double>(clip->start_frame + clip->length_frames)) {
       playing_ = false;  // deterministic end: the clip's own length
-    } else if (frame >= play_started_) {
+    } else if (frame_time >= static_cast<double>(play_started_)) {
       for (const auto& [tkey, track] : clip->tracks) {
         PropValue value;
-        if (clip->evaluate(frame, track.object_id, track.property, value)) {
+        if (clip->evaluate_at(frame_time, track.object_id, track.property,
+                              easing, value)) {
           SceneObject* obj = doc_.find(track.object_id);
           if (obj == nullptr) continue;
           std::string base;
@@ -269,9 +304,10 @@ void EditorSession::tick_timeline(std::uint64_t frame) {
         recording_ ? doc_.find(recording_object_) : nullptr;
     if (clip == nullptr || obj == nullptr) {
       recording_ = false;
-    } else if (frame >= clip->start_frame + clip->length_frames) {
+    } else if (frame_time >=
+               static_cast<double>(clip->start_frame + clip->length_frames)) {
       recording_ = false;
-    } else if (frame >= clip->start_frame) {
+    } else if (frame_time >= static_cast<double>(clip->start_frame)) {
       std::string base;
       int axis = -1;
       split_axis_property(recording_property_, base, axis);
@@ -291,7 +327,11 @@ void EditorSession::tick_timeline(std::uint64_t frame) {
         }
       }
       if (have) {
-        const std::uint64_t offset = frame - clip->start_frame;
+        // Samples land on whole frame offsets by contract, so a fractional
+        // sample point floors rather than producing a fractional offset --
+        // which the sample ordering and the on-disk format both forbid.
+        const std::uint64_t offset = static_cast<std::uint64_t>(frame_time) -
+                                     clip->start_frame;
         auto& track =
             clip->tracks[track_key(recording_object_, recording_property_)];
         track.object_id = recording_object_;

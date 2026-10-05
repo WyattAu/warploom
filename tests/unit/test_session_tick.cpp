@@ -46,7 +46,7 @@ TEST(SessionTick, ProjectsTheDocumentSoSystemsReadOneStore) {
   seed_cube(session);
   EXPECT_EQ(session.projection().entity_count(), 0U);
 
-  const auto report = session.tick({0U, kDt, false});
+  const auto report = session.tick({0U, kDt, 0.0, false});
   EXPECT_TRUE(report.ok());
   // The ECS is refreshed by the tick, which is what gives it a production
   // consumer in the headless path too.
@@ -62,11 +62,11 @@ TEST(SessionTick, ProjectsTheDocumentSoSystemsReadOneStore) {
 TEST(SessionTick, ProjectionSurvivesRepeatedTicksWithIdentityStable) {
   EditorSession session{};
   seed_cube(session);
-  (void)session.tick({0U, kDt, false});
+  (void)session.tick({0U, kDt, 0.0, false});
   const auto entity = session.projection().entity_for(1U);
 
   for (std::uint64_t frame = 1; frame < 8; ++frame) {
-    (void)session.tick({frame, kDt, false});
+    (void)session.tick({frame, kDt, 0.0, false});
   }
   // Re-ticking must not churn identity: a system holding an Entity across
   // frames is the whole point of projecting at all.
@@ -78,12 +78,12 @@ TEST(SessionTick, ProjectionSurvivesRepeatedTicksWithIdentityStable) {
 TEST(SessionTick, PausedTicksDoNotAdvanceTheSimulationStage) {
   EditorSession session{};
   seed_cube(session);
-  const auto running = session.tick({0U, kDt, false});
+  const auto running = session.tick({0U, kDt, 0.0, false});
   EXPECT_GT(running.physics_substeps, 0U) << "an unpaused tick must step physics";
 
   // A paused host must still see graph edits apply, which is why sync_graph
   // runs before the pause gate -- so a paused tick is not a no-op tick.
-  const auto paused = session.tick({1U, kDt, true});
+  const auto paused = session.tick({1U, kDt, 0.0, true});
   EXPECT_TRUE(paused.ok());
   EXPECT_EQ(paused.physics_substeps, 0U) << "paused must not step physics";
   // And the document is still projected, so the UI keeps working while time
@@ -130,7 +130,7 @@ TEST(SessionTick, TimelineIsDrivenByTheTickNotByTheHost) {
   ASSERT_TRUE(armed.ok) << armed.error;
   ASSERT_NE(session.playing_clip(), nullptr);
 
-  (void)session.tick({0U, kDt, false});
+  (void)session.tick({0U, kDt, 0.0, false});
 
   const SceneObject* moved = session.document().find(1U);
   ASSERT_NE(moved, nullptr);
@@ -160,8 +160,8 @@ TEST(SessionTick, FrameComesFromTheInputNotAnInternalCounter) {
   seed_cube(a);
   seed_cube(b);
   for (std::uint64_t frame = 0; frame < 4; ++frame) {
-    (void)a.tick({frame, kDt, false});
-    (void)b.tick({frame, kDt, false});
+    (void)a.tick({frame, kDt, 0.0, false});
+    (void)b.tick({frame, kDt, 0.0, false});
   }
   ASSERT_TRUE(a.projection().projected(1U));
   ASSERT_TRUE(b.projection().projected(1U));
@@ -198,7 +198,7 @@ namespace {
 TEST(SessionTick, TickAdvancesPhysicsByTheFrameTimestep) {
   EditorSession session{};
   seed_cube(session);
-  (void)session.tick({0U, kDt, false});
+  (void)session.tick({0U, kDt, 0.0, false});
   ASSERT_TRUE(session.spawn_physics_body(1U, falling_body()));
 
   const auto before = session.physics_body_for(1U);
@@ -206,7 +206,7 @@ TEST(SessionTick, TickAdvancesPhysicsByTheFrameTimestep) {
   const float start_y = before->position[1];
   ASSERT_GT(start_y, 0.0F);
 
-  (void)session.tick({1U, kDt, false});
+  (void)session.tick({1U, kDt, 0.0, false});
   const auto after = session.physics_body_for(1U);
   ASSERT_NE(after, nullptr);
   // Gravity is negative on Y, so a free body must fall.
@@ -220,14 +220,14 @@ TEST(SessionTick, SubstepCountIsAFunctionOfTimestepNotWallClock) {
   EditorSession b{};
   seed_cube(a);
   seed_cube(b);
-  (void)a.tick({0U, kDt, false});
-  (void)b.tick({0U, kDt, false});
+  (void)a.tick({0U, kDt, 0.0, false});
+  (void)b.tick({0U, kDt, 0.0, false});
   ASSERT_TRUE(a.spawn_physics_body(1U, falling_body()));
   ASSERT_TRUE(b.spawn_physics_body(1U, falling_body()));
 
   for (std::uint64_t frame = 1; frame <= 20; ++frame) {
-    const auto ra = a.tick({frame, kDt, false});
-    const auto rb = b.tick({frame, kDt, false});
+    const auto ra = a.tick({frame, kDt, 0.0, false});
+    const auto rb = b.tick({frame, kDt, 0.0, false});
     ASSERT_EQ(ra.physics_substeps, rb.physics_substeps);
   }
   EXPECT_EQ(a.physics_body_for(1U)->position[1],
@@ -239,13 +239,13 @@ TEST(SessionTick, SubstepCountIsAFunctionOfTimestepNotWallClock) {
 TEST(SessionTick, SubstepCountGrowsWithTimestepAndIsCapped) {
   EditorSession session{};
   seed_cube(session);
-  (void)session.tick({0U, kDt, false});
+  (void)session.tick({0U, kDt, 0.0, false});
   (void)session.spawn_physics_body(1U, falling_body());
 
   // 1/60 s needs four 1/240 substeps; a tiny dt needs exactly one.
   const auto at_60hz = session.tick({1U, 1.0 / 60.0, false});
   EXPECT_GT(at_60hz.physics_substeps, 1U);
-  const auto at_1hz = session.tick({2U, 0.001, false});
+  const auto at_1hz = session.tick({2U, 0.001, 0.0, false});
   EXPECT_EQ(at_1hz.physics_substeps, 1U);
   // And a pathological dt is capped rather than trusted.
   const auto absurd = session.tick({3U, 1000.0, false});
@@ -255,12 +255,12 @@ TEST(SessionTick, SubstepCountGrowsWithTimestepAndIsCapped) {
 TEST(SessionTick, PausedTicksDoNotAdvancePhysics) {
   EditorSession session{};
   seed_cube(session);
-  (void)session.tick({0U, kDt, false});
+  (void)session.tick({0U, kDt, 0.0, false});
   (void)session.spawn_physics_body(1U, falling_body());
-  (void)session.tick({1U, kDt, false});
+  (void)session.tick({1U, kDt, 0.0, false});
   const float settled = session.physics_body_for(1U)->position[1];
 
-  const auto paused = session.tick({2U, kDt, true});
+  const auto paused = session.tick({2U, kDt, 0.0, true});
   EXPECT_EQ(paused.physics_substeps, 0U);
   EXPECT_FLOAT_EQ(session.physics_body_for(1U)->position[1], settled)
       << "a paused tick must not move a body";
@@ -272,10 +272,10 @@ TEST(SessionTick, SimulatedPoseReachesTheProjectedStore) {
   // position on the next tick.
   EditorSession session{};
   seed_cube(session);
-  (void)session.tick({0U, kDt, false});
+  (void)session.tick({0U, kDt, 0.0, false});
   ASSERT_TRUE(session.spawn_physics_body(1U, falling_body()));
 
-  (void)session.tick({1U, kDt, false});
+  (void)session.tick({1U, kDt, 0.0, false});
   ASSERT_TRUE(session.projection().projected(1U));
   const auto entity = session.projection().entity_for(1U);
   // Copy, not a reference: the projection rewrites this component every tick,
@@ -288,7 +288,7 @@ TEST(SessionTick, SimulatedPoseReachesTheProjectedStore) {
       << "the projected transform must track the simulated pose";
 
   // And it must survive the next project() rather than reverting to 2.0.
-  (void)session.tick({2U, kDt, false});
+  (void)session.tick({2U, kDt, 0.0, false});
   const double after_second =
       session.projection().world().get_component<DocumentTransform>(entity)
           .position[1];
@@ -307,9 +307,9 @@ TEST(SessionTick, SpawningForAnUnprojectedObjectFails) {
 TEST(SessionTick, PhysicsStateTravelsInTheSnapshot) {
   EditorSession session{};
   seed_cube(session);
-  (void)session.tick({0U, kDt, false});
+  (void)session.tick({0U, kDt, 0.0, false});
   ASSERT_TRUE(session.spawn_physics_body(1U, falling_body()));
-  (void)session.tick({1U, kDt, false});
+  (void)session.tick({1U, kDt, 0.0, false});
 
   const std::string json = session.snapshot_json();
   EXPECT_NE(json.find("\"physics\""), std::string::npos);
@@ -324,7 +324,7 @@ TEST(SessionTick, SnapshotFloatsRoundTripExactly) {
   // lossy, and a resumed replay would then diverge on the next tick.
   EditorSession session{};
   seed_cube(session);
-  (void)session.tick({0U, kDt, false});
+  (void)session.tick({0U, kDt, 0.0, false});
   ::omnicpp::physics::PhysicsBody awkward = falling_body();
   awkward.position[1] = 0.123456789012345F;
   awkward.velocity[1] = -3.0517578125e-05F;
@@ -362,8 +362,114 @@ TEST(SessionTick, SnapshotFloatsRoundTripExactly) {
   // And re-emitting the same state twice gives identical bytes.
   EditorSession other{};
   seed_cube(other);
-  (void)other.tick({0U, kDt, false});
+  (void)other.tick({0U, kDt, 0.0, false});
   ASSERT_TRUE(other.spawn_physics_body(1U, awkward));
   EXPECT_EQ(session.snapshot_json(), other.snapshot_json())
       << "identical physics state must serialise to identical bytes";
+}
+
+// ----------------------------------------------------------------------------
+// D2a: sub-frame tick position reaches clip playback
+// ----------------------------------------------------------------------------
+
+namespace {
+
+//! A session with one cube and a two-key clip on its position: sample 0 at
+//! x=0, sample 10 at x=100, so linear interpolation is readable by eye.
+void seed_clip(EditorSession& session) {
+  seed_cube(session);
+  TimelineClip clip{};
+  clip.id = 1U;
+  clip.name = "move";
+  clip.start_frame = 0U;
+  clip.length_frames = 20U;
+  clip.tracks[track_key(1U, "position")] = ClipTrack{
+      1U, "position",
+      {ClipSample{0U, PropValue::make_vec3(0.0, 0.0, 0.0)},
+       ClipSample{10U, PropValue::make_vec3(100.0, 0.0, 0.0)}}};
+  SceneDocument document = session.document();
+  document.clips.push_back(clip);
+  session.reset_from(std::move(document));
+
+  omnicpp::core::ControlCommand play{};
+  play.kind = omnicpp::core::ControlCommand::Kind::ClipPlay;
+  play.id = 1U;
+  play.numbers[0] = static_cast<double>(clip.id);
+  play.number_count = 1U;
+  const auto armed = session.on_control(play);
+  EXPECT_TRUE(armed.ok) << armed.error;
+}
+
+double cube_x(const EditorSession& session) {
+  const SceneObject* object = session.document().find(1U);
+  if (object == nullptr) return -1.0;
+  const auto it = object->properties.find("position");
+  if (it == object->properties.end()) return -1.0;
+  return it->second.vec[0];
+}
+
+}  // namespace
+
+TEST(SessionTick, SubFrameZeroReproducesStepHoldExactly) {
+  // The property that keeps every existing recording valid: alpha 0 through
+  // the interpolated path must be indistinguishable from step-hold.
+  EditorSession stepped{};
+  seed_clip(stepped);
+  EditorSession fractional{};
+  seed_clip(fractional);
+
+  for (std::uint64_t frame = 0; frame < 12; ++frame) {
+    (void)stepped.tick({frame, kDt, 0.0, false});
+    (void)fractional.tick({frame, kDt, 0.0, false});
+  }
+  EXPECT_DOUBLE_EQ(cube_x(stepped), cube_x(fractional));
+  // Step-hold reaches the second key at clip offset 10 and holds it there, so
+  // frame 11 is already at the final value -- not still at the first key.
+  EXPECT_NEAR(cube_x(stepped), 100.0, 1e-6);
+}
+
+TEST(SessionTick, SubFramePositionInterpolatesTheTrack) {
+  EditorSession session{};
+  seed_clip(session);
+
+  // Keys sit at clip offsets 0 and 10 running 0 -> 100. Frame 5 at alpha 0.5
+  // samples at 5.5, which is 55% of the way, so 55. Step-hold would have said
+  // 0 -- that difference is the whole point.
+  (void)session.tick({5U, kDt, 0.5, false});
+  EXPECT_NEAR(cube_x(session), 55.0, 1e-3)
+      << "a sub-frame tick must interpolate, not hold";
+  // And at alpha 0 the same frame holds the earlier key.
+  EditorSession held{};
+  seed_clip(held);
+  (void)held.tick({5U, kDt, 0.0, false});
+  EXPECT_NEAR(cube_x(held), 0.0, 1e-6);
+}
+
+TEST(SessionTick, SubFrameIsClampedRatherThanTrusted) {
+  EditorSession session{};
+  seed_clip(session);
+  // A host handing back an alpha at or past 1 must not sample into the next
+  // frame or rewind; it is pulled just inside the frame.
+  (void)session.tick({5U, kDt, 4.5, false});
+  const double x = cube_x(session);
+  EXPECT_GE(x, 0.0);
+  EXPECT_LE(x, 100.0 + 1e-3) << "clamped alpha must stay within the clip";
+
+  EditorSession negative{};
+  seed_clip(negative);
+  (void)negative.tick({5U, kDt, -3.0, false});
+  EXPECT_NEAR(cube_x(negative), 0.0, 1e-6)
+      << "a negative alpha falls back to the frame itself";
+}
+
+TEST(SessionTick, PausedTicksIgnoreTheSubFramePosition) {
+  EditorSession session{};
+  seed_clip(session);
+  (void)session.tick({0U, kDt, 0.0, false});
+  const double before = cube_x(session);
+  const auto paused = session.tick({1U, kDt, 0.75, true});
+  EXPECT_TRUE(paused.ok());
+  // Time is stopped: a paused tick must not advance playback either.
+  EXPECT_NEAR(cube_x(session), 0.0, 1e-6);
+  (void)before;
 }
