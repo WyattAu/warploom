@@ -103,7 +103,7 @@ void build_unit_cube(std::vector<float>& vertices,
   for (const Face& face : faces) {
     const std::uint32_t base =
         static_cast<std::uint32_t>(vertices.size() / 11U);
-    for (int i = 0; i < 4; ++i) {
+    for (std::size_t i = 0; i < 4U; ++i) {
       const float* p = face.corners[i];
       vertices.insert(vertices.end(), {p[0], p[1], p[2], 1.0f, 1.0f, 1.0f,
                                        face.normal[0], face.normal[1],
@@ -1824,7 +1824,7 @@ bool setup_scene(ViewportApp& app) {
       app.material_allocation.mapped);
   // 0: brushed metal cube, 1: rough dielectric cube, 2: ground, 3: skin.
   // Slots 4+ are city-scene dynamic (Sponza imports at kSponzaMaterialBase).
-  for (int i = 0; i < 256; ++i) materials[i] = {};
+  for (std::size_t i = 0; i < 256U; ++i) materials[i] = {};
   materials[0] = {};
   materials[0].base_color_factor = {0.95f, 0.35f, 0.15f, 1.0f};
   materials[0].metallic_factor = 0.9f;
@@ -2255,7 +2255,7 @@ void write_gpu_driven_payload(ViewportApp& app, std::uint32_t frame_slot,
       // far: keeps dot(fwd, p-eye) <= 150
       {{-fwd[0], -fwd[1], -fwd[2]}, f_eye + 150.0f},
   };
-  for (int p = 0; p < 6; ++p) {
+  for (std::size_t p = 0; p < 6U; ++p) {
     pushf[4 + p * 4 + 0] = planes[p].n[0];
     pushf[4 + p * 4 + 1] = planes[p].n[1];
     pushf[4 + p * 4 + 2] = planes[p].n[2];
@@ -2478,7 +2478,7 @@ bool setup_rt_shadows(ViewportApp& app) {
     std::vector<float> tris;
     tris.reserve(12U * 9U);
     for (const std::uint32_t idx : kRtCubeIndices) {
-      for (int c = 0; c < 3; ++c) {
+      for (std::size_t c = 0; c < 3U; ++c) {
         tris.push_back(kRtCubePositions[idx * 3U + c]);
       }
     }
@@ -2678,8 +2678,8 @@ bool setup_rt_shadows(ViewportApp& app) {
         multiply(translation_matrix(0.0f, -0.05f, 0.0f),
                  scale_matrix(8.0f, 0.1f, 8.0f));
     // Same column-major -> row-major conversion as build_rt_frame_tlas.
-    for (int r = 0; r < 3; ++r) {
-      for (int c = 0; c < 3; ++c) {
+    for (std::size_t r = 0; r < 3U; ++r) {
+      for (std::size_t c = 0; c < 3U; ++c) {
         seed.transform[r * 4 + c] = ground_model[c * 4 + r];
       }
       seed.transform[r * 4 + 3] = ground_model[12 + r];
@@ -2724,8 +2724,8 @@ void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
   // and drops the translation — every instance would collapse to the
   // origin, shadowing everything the ray can reach.)
   const auto model_to_rows = [](const SceneMatrix& m, float* rows) {
-    for (int r = 0; r < 3; ++r) {
-      for (int c = 0; c < 3; ++c) {
+    for (std::size_t r = 0; r < 3U; ++r) {
+      for (std::size_t c = 0; c < 3U; ++c) {
         rows[r * 4 + c] = m[c * 4 + r];
       }
       rows[r * 4 + 3] = m[12 + r];
@@ -3615,13 +3615,13 @@ bool setup_sponza(ViewportApp& app) {
     app.sponza.part_models[p] =
         [&] {
           SceneMatrix m{};
-          for (int i = 0; i < 16; ++i) m[i] = nm[i];
+          for (std::size_t i = 0; i < 16U; ++i) m[i] = nm[i];
           return m;
         }();
     const auto& prim = mesh.primitives[p];
     for (std::size_t i = prim.index_offset;
          i + 2U < prim.index_offset + prim.index_count; i += 3U) {
-      for (int k = 0; k < 3; ++k) {
+      for (std::size_t k = 0; k < 3U; ++k) {
         // Stride 19: the combined stream is [11 geometry][8 skin] per vertex
         // after the identity-payload append; positions lead each record.
         const std::size_t b =
@@ -3657,8 +3657,8 @@ bool setup_city_scene(ViewportApp& app) {
   // ------------------------------------------------------------------
   app.city_lights.clear();
   app.city_lights.reserve(32U);
-  for (int s = 0; s < 2; ++s) {
-    for (int i = 0; i < 16; ++i) {
+  for (std::size_t s = 0; s < 2U; ++s) {
+    for (std::size_t i = 0; i < 16U; ++i) {
       ViewportApp::CityLight light{};
       light.pos[0] = -42.0f + 5.6f * static_cast<float>(i);
       light.pos[1] = 6.2f;
@@ -3765,7 +3765,7 @@ bool setup_city_scene(ViewportApp& app) {
     const float uvs[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
     const float corners[4][3] = {{-w, 0, -d}, {w, 0, -d}, {w, 0, d}, {-w, 0, d}};
     const std::uint32_t quad[6] = {0, 2, 1, 0, 3, 2};
-    for (int i = 0; i < 4; ++i) {
+    for (std::size_t i = 0; i < 4U; ++i) {
       verts.insert(verts.end(),
                    {corners[i][0], corners[i][1], corners[i][2],
                     1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 0.0f, uvs[i][0], uvs[i][1]});
@@ -3793,7 +3793,7 @@ bool setup_city_scene(ViewportApp& app) {
     for (const Face& f : faces) {
       const std::uint32_t base =
           static_cast<std::uint32_t>(verts.size() / 11U);
-      for (int i = 0; i < 4; ++i) {
+      for (std::size_t i = 0; i < 4U; ++i) {
         verts.insert(verts.end(),
                      {f.c[i][0] * sx, f.c[i][1] * sy, f.c[i][2] * sz,
                       1.0f, 1.0f, 1.0f, f.n[0], f.n[1], f.n[2],
@@ -3835,7 +3835,7 @@ bool setup_city_scene(ViewportApp& app) {
                                ViewportApp::CityPart& out) {
     out.rt_triangles.reserve(indices.size() / 3U * 9U);
     for (std::size_t i = 0; i + 2U < indices.size(); i += 3U) {
-      for (int k = 0; k < 3; ++k) {
+      for (std::size_t k = 0; k < 3U; ++k) {
         const std::size_t b = static_cast<std::size_t>(indices[i + k]) * 11U;
         const float x = local_verts[b + 0], y = local_verts[b + 1],
                     z = local_verts[b + 2];
@@ -3868,8 +3868,8 @@ bool setup_city_scene(ViewportApp& app) {
 
   // Buildings: 2 rows of 8, subdivided street grid (seeded jitter).
   std::uniform_real_distribution<float> hue(0.0f, 1.0f);
-  for (int row = 0; row < 2; ++row) {
-    for (int i = 0; i < 8; ++i) {
+  for (std::size_t row = 0; row < 2U; ++row) {
+    for (std::size_t i = 0; i < 8U; ++i) {
       const float bx = -42.0f + 12.0f * static_cast<float>(i);
       const float bz = row == 0 ? -14.0f : 14.0f;
       const float w = 4.5f + hue(rng) * 1.5f;
@@ -5151,7 +5151,8 @@ bool ViewportApp::initialize() {
     if (!capture.initialize(
             context.device(), allocator, render_pass.render_pass(),
             swapchain.image_format(), depth_format, kWidth, kHeight,
-            context.queue_families().graphics_family)) {
+            static_cast<std::uint32_t>(context.queue_families()
+                                           .graphics_family))) {
       std::fprintf(stderr, "viewport: frame capture initialization failed\n");
       return false;
     }

@@ -86,11 +86,11 @@ void build_bar(std::vector<float>& verts, std::vector<uint32_t>& idx,
   const float upper[4][3] = {{-0.2f, 0.0f, 0.0f}, {0.2f, 0.0f, 0.0f},
                              {0.2f, 1.0f, 0.0f}, {-0.2f, 1.0f, 0.0f}};
   verts.clear();
-  for (int i = 0; i < 4; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i) {
     verts.insert(verts.end(),
                  {lower[i][0], lower[i][1], lower[i][2], 1, 1, 1, 0, 0, 1, 0, 0});
   }
-  for (int i = 0; i < 4; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i) {
     verts.insert(verts.end(),
                  {upper[i][0], upper[i][1], upper[i][2], 1, 1, 1, 0, 0, 1, 0, 0});
   }
@@ -100,11 +100,11 @@ void build_bar(std::vector<float>& verts, std::vector<uint32_t>& idx,
   // Skinning payload: 8 floats per vertex (joints x4 + weights x4).
   // Joint indices stored as float (shader casts to uint).
   skin_data.clear();
-  for (int i = 0; i < 4; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i) {
     skin_data.insert(skin_data.end(),
                      {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f});
   }
-  for (int i = 0; i < 4; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i) {
     skin_data.insert(skin_data.end(),
                      {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f});
   }

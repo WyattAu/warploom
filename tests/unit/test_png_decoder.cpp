@@ -174,7 +174,7 @@ std::uint32_t builder_crc32(const std::uint8_t* data, std::size_t size) {
     std::array<std::uint32_t, 256> table{};
     for (std::uint32_t n = 0; n < 256; ++n) {
       std::uint32_t c = n;
-      for (int k = 0; k < 8; ++k) {
+      for (std::size_t k = 0; k < static_cast<std::size_t>(8); ++k) {
         c = (c & 1U) != 0U ? 0xedb88320U ^ (c >> 1) : c >> 1;
       }
       table[n] = c;
@@ -201,7 +201,7 @@ void append_chunk(std::vector<std::uint8_t>& out, const char* type,
   out.push_back(static_cast<std::uint8_t>(length >> 8));
   out.push_back(static_cast<std::uint8_t>(length));
   const std::size_t type_offset = out.size();
-  for (int i = 0; i < 4; ++i) out.push_back(static_cast<std::uint8_t>(type[i]));
+  for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i) out.push_back(static_cast<std::uint8_t>(type[i]));
   out.insert(out.end(), data.begin(), data.end());
   const std::uint32_t crc = builder_crc32(out.data() + type_offset,
                                           out.size() - type_offset);

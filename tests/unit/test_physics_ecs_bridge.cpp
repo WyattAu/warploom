@@ -34,7 +34,7 @@ constexpr double kDt = 1.0 / 60.0;
 //! Give a session `count` cubes with full transforms, each with a body.
 void seed_scene(EditorSession& session, int count, float inverse_mass) {
   omnicpp::editor::SceneDocument document{};
-  for (int i = 0; i < count; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(count); ++i) {
     omnicpp::editor::SceneObject object{};
     object.id = static_cast<std::uint64_t>(i) + 1U;
     object.type_id = 1U;
@@ -53,7 +53,7 @@ void seed_scene(EditorSession& session, int count, float inverse_mass) {
   session.reset_from(std::move(document));
   (void)session.tick({0U, kDt, false});
 
-  for (int i = 0; i < count; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(count); ++i) {
     PhysicsBody body{};
     const float f = static_cast<float>(i);
     body.position[0] = -10.0F + std::fmod(f * 0.37F, 20.0F);
@@ -112,7 +112,7 @@ TEST(PhysicsEcsBridge, ThousandInstancesDeterministic) {
   // about PhysicsWorld rather than about ECS plumbing.
   const auto run = [] {
     PhysicsWorld world(-9.81F);
-    for (int i = 0; i < 1000; ++i) {
+    for (std::size_t i = 0; i < static_cast<std::size_t>(1000); ++i) {
       PhysicsBody b;
       const float f = static_cast<float>(i);
       // Deterministic pseudo-scatter over a 20x20 m field.
@@ -123,7 +123,7 @@ TEST(PhysicsEcsBridge, ThousandInstancesDeterministic) {
       b.restitution = 0.3F + 0.2F * std::fmod(f * 0.023F, 1.0F);
       (void)world.add_body(b);
     }
-    for (int i = 0; i < 240; ++i) {  // 4 sim seconds
+    for (std::size_t i = 0; i < static_cast<std::size_t>(240); ++i) {  // 4 sim seconds
       world.step(1.0F / 60.0F);
     }
     return world.position_fingerprint();

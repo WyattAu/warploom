@@ -169,7 +169,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
   std::vector<Allocation> ring_a;
   std::vector<Allocation> ring_b;
   std::vector<Allocation> ring_cmd;
-  for (int i = 0; i < kFrames; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(kFrames); ++i) {
     auto a = allocator.create_buffer(
         kRingAWords * 4U, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
@@ -197,19 +197,19 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
       {-150.0f, -20.0f},  // frame 1: first beyond zfar -> instanceCount 1
       {-9.0f, -11.0f},    // frame 2: both inside -> instanceCount 2
   };
-  for (int f = 0; f < kFrames; ++f) {
+  for (std::size_t f = 0; f < static_cast<std::size_t>(kFrames); ++f) {
     auto* b = static_cast<std::uint32_t*>(ring_b[f].mapped);
     ASSERT_NE(b, nullptr);
     b[0] = kCubes;  // instance_count
     b[1] = 0U;      // compaction cursor (GPU-atomic, reset per frame)
     float planes[24];
     make_frustum_planes(1.05f, 1.0f, 0.1f, 100.0f, planes);
-    for (int p = 0; p < 24; ++p) {
+    for (std::size_t p = 0; p < static_cast<std::size_t>(24); ++p) {
       b[2U + static_cast<std::uint32_t>(p)] = bits(planes[p]);
     }
     for (std::uint32_t i = 0; i < kCubes; ++i) {
       const float s[4] = {0.0f, 0.0f, sphere_z[f][i], 0.7f};
-      for (int k = 0; k < 4; ++k) {
+      for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) {
         b[kSphereOffB + i * 4U + static_cast<std::uint32_t>(k)] = bits(s[k]);
       }
     }
@@ -231,7 +231,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
   auto a_layout = manager.create_layout(a_bindings, kFrames);
   ASSERT_TRUE(a_layout.is_ok());
   std::vector<VkDescriptorSet> a_sets;
-  for (int f = 0; f < kFrames; ++f) {
+  for (std::size_t f = 0; f < static_cast<std::size_t>(kFrames); ++f) {
     auto s = manager.allocate_set(a_layout.value());
     ASSERT_TRUE(s.is_ok());
     ASSERT_TRUE(manager.write_buffer(s.value(), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -245,7 +245,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
   auto cull_layout = manager.create_layout(cull_bindings, kFrames);
   ASSERT_TRUE(cull_layout.is_ok());
   std::vector<VkDescriptorSet> cull_sets;
-  for (int f = 0; f < kFrames; ++f) {
+  for (std::size_t f = 0; f < static_cast<std::size_t>(kFrames); ++f) {
     auto s = manager.allocate_set(cull_layout.value());
     ASSERT_TRUE(s.is_ok());
     ASSERT_TRUE(manager.write_buffer(s.value(), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -307,7 +307,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
   // VUID-vkResetFences-pFences-01123.
   std::vector<VkCommandBuffer> gfx_cbs;
   std::vector<VkFence> gfx_fences;
-  for (int i = 0; i < kFrames; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(kFrames); ++i) {
     auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
         context.device(), gfx_pool);
     ASSERT_TRUE(cb_result.is_ok());
@@ -329,7 +329,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
   // Graphics N consumes ring A[N] while compute N+1 writes ring A[N+1] —
   // no aliasing, no CPU synchronization. ---
   std::uint64_t compute_signal[kFrames] = {};
-  for (int n = 0; n < kFrames; ++n) {
+  for (std::size_t n = 0; n < static_cast<std::size_t>(kFrames); ++n) {
     // Producer: frame n's compute (animate + cull).
     FrameComputeCtx ctx{gen_pipe.pipeline(), gen_pipe.pipeline_layout(),
                         a_sets[n], cull_pipe.pipeline(), cull_pipe.pipeline_layout(),
@@ -409,7 +409,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
   // --- Verify per frame: compute output analytically exact, cull result
   // correct, pixels present (frames 0/2 draw 2 cubes; frame 1 draws 1). ---
   const std::uint32_t expect_count[kFrames] = {2U, 1U, 2U};
-  for (int n = 0; n < kFrames; ++n) {
+  for (std::size_t n = 0; n < static_cast<std::size_t>(kFrames); ++n) {
     const auto* a = static_cast<const float*>(ring_a[n].mapped);
     ASSERT_NE(a, nullptr);
     // Identity list intact: words[0..kCubes) == 0..kCubes-1.
@@ -453,7 +453,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
   cull_pipe.cleanup(context.device());
   gen_pipe.cleanup(context.device());
   target.cleanup(context.device());
-  for (int i = 0; i < kFrames; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(kFrames); ++i) {
     Allocation a = ring_a[i]; allocator.destroy_allocation(a);
     Allocation b = ring_b[i]; allocator.destroy_allocation(b);
     Allocation c = ring_cmd[i]; allocator.destroy_allocation(c);

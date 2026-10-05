@@ -164,7 +164,7 @@ TEST(BoundedQueue, OverflowTracking) {
   constexpr std::size_t kCapacity = 4;
   omnicpp::core::BoundedQueue<int, kCapacity> queue;
 
-  for (int i = 0; i < 10; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(10); ++i) {
     static_cast<void>(queue.try_push(i));
   }
   // Only kCapacity items should be stored

@@ -140,10 +140,10 @@ SceneMatrix make_scale(float x, float y, float z) {
 
 SceneMatrix mat4_multiply(const SceneMatrix& a, const SceneMatrix& b) {
   SceneMatrix out{};
-  for (int col = 0; col < 4; ++col) {
-    for (int row = 0; row < 4; ++row) {
+  for (std::size_t col = 0; col < static_cast<std::size_t>(4); ++col) {
+    for (std::size_t row = 0; row < static_cast<std::size_t>(4); ++row) {
       float acc = 0.0f;
-      for (int k = 0; k < 4; ++k) {
+      for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) {
         acc += a[static_cast<std::size_t>(k) * 4U +
                  static_cast<std::size_t>(row)] *
                b[static_cast<std::size_t>(col) * 4U +
@@ -166,7 +166,7 @@ std::vector<float> make_box_triangles(float hx, float hy, float hz) {
   std::vector<float> out;
   out.reserve(36U * 3U);
   for (const std::uint32_t vi : c) {
-    for (int k = 0; k < 3; ++k) {
+    for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
       out.push_back(((vi >> k) & 1U) != 0U ? h[k] : -h[k]);
     }
   }
@@ -198,9 +198,9 @@ BufferPair make_cube_mesh(VulkanMemoryAllocator& alloc,
       {0, -1, 0, -1, -1, -1, 1, -1, -1, 1, -1, 1, -1, -1, 1}};
   std::vector<float> v;
   std::vector<std::uint32_t> i;
-  for (int f = 0; f < 6; ++f) {
+  for (std::size_t f = 0; f < static_cast<std::size_t>(6); ++f) {
     const std::uint32_t base = static_cast<std::uint32_t>(v.size() / 11U);
-    for (int vert = 0; vert < 4; ++vert) {
+    for (std::size_t vert = 0; vert < static_cast<std::size_t>(4); ++vert) {
       v.push_back(faces[f][3 + vert * 3 + 0] * 0.5f);
       v.push_back(faces[f][3 + vert * 3 + 1] * 0.5f);
       v.push_back(faces[f][3 + vert * 3 + 2] * 0.5f);
@@ -328,7 +328,7 @@ bool segment_hits_box(const std::array<float, 3>& o,
                       const std::array<float, 3>& h) {
   float tmin = 0.001f;
   float tmax = 1.0e30f;
-  for (int k = 0; k < 3; ++k) {
+  for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
     if (std::fabs(L[static_cast<std::size_t>(k)]) < 1.0e-9f) {
       if (std::fabs(o[static_cast<std::size_t>(k)] -
                     c[static_cast<std::size_t>(k)]) >
@@ -743,8 +743,12 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
     return {px, py};
   };
   auto channels = [&](const omnicpp_test::ReadbackResult& r, int px, int py) {
+    // px/py arrive as ints for readability at the call sites; every caller
+    // passes a non-negative pixel coordinate, and the buffer index needs all
+    // three terms unsigned.
     const std::uint32_t packed =
-        r.pixels[static_cast<std::size_t>(py) * kImg + px];
+        r.pixels[static_cast<std::size_t>(py) * static_cast<std::size_t>(kImg) +
+                 static_cast<std::size_t>(px)];
     return std::array<float, 3>{static_cast<float>(packed & 0xffU) / 255.0f,
                                 static_cast<float>((packed >> 8) & 0xffU) /
                                     255.0f,
@@ -768,8 +772,8 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
     // Empirical: reddest pixel in the frame + probe values.
     int best_x = -1, best_y = -1;
     float best_gap = -1.0f;
-    for (int py = 0; py < static_cast<int>(kImg); ++py) {
-      for (int px = 0; px < static_cast<int>(kImg); ++px) {
+    for (std::size_t py = 0; py < static_cast<std::size_t>(static_cast<int>(kImg)); ++py) {
+      for (std::size_t px = 0; px < static_cast<std::size_t>(static_cast<int>(kImg)); ++px) {
         const auto c = channels(rb, px, py);
         const float gap = c[0] - std::max(c[1], c[2]);
         if (gap > best_gap) {
@@ -790,9 +794,9 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
                 control[2]);
     // 16px-cell classification map: R = red-dominant (cube/reflection),
     // f = bright gray (floor), . = dark/miss, ' ' = clear.
-    for (int cy = 0; cy < static_cast<int>(kImg) / 16; ++cy) {
+    for (std::size_t cy = 0; cy < static_cast<std::size_t>(static_cast<int>(kImg) / 16); ++cy) {
       std::string row;
-      for (int cx = 0; cx < static_cast<int>(kImg) / 16; ++cx) {
+      for (std::size_t cx = 0; cx < static_cast<std::size_t>(static_cast<int>(kImg) / 16); ++cx) {
         const auto c = channels(rb, cx * 16 + 8, cy * 16 + 8);
         const float gap = c[0] - std::max(c[1], c[2]);
         const float lum = 0.3f * c[0] + 0.6f * c[1] + 0.1f * c[2];

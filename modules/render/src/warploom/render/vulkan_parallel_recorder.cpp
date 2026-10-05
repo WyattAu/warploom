@@ -135,7 +135,11 @@ void VulkanParallelRecorder::cleanup() noexcept {
     // creation and no heap allocation per frame. Band 0 runs on the calling
     // thread (it has nothing better to do), bands 1..n-1 as raw jobs.
     ::warploom::core::JobCounter counter;
-    counter.add(static_cast<int>(band_count - 1));
+    // One tick per SECONDARY band: bands 1..n-1, since band 0 runs on the
+    // calling thread. band_count_ is the uint32_t the recorder was initialized
+    // with and equals bands_.size(), so this needs no cast at all -- the old
+    // size_t -> int -> uint32_t round trip was a narrowing in disguise.
+    counter.add(band_count_ - 1U);
     for (std::size_t i = 1; i < band_count; ++i) {
       if (!job_system_->submit_raw(::warploom::core::JobPriority::render,
                                    &counter, &run_band_job, &band_jobs_[i])) {

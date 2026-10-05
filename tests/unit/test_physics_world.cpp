@@ -34,7 +34,7 @@ TEST(PhysicsWorld, ProjectileMatchesAnalyticTrajectory) {
   const float dt = kDt;
   float expected_y = 1000.0f;
   float expected_vy = 0.0f;
-  for (int i = 0; i < 30; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(30); ++i) {
     w.step(dt);
     expected_vy += -9.81f * dt;
     expected_y += expected_vy * dt;
@@ -57,7 +57,7 @@ TEST(PhysicsWorld, BounceConservesEnergyPerRestitution) {
   const float v_in = std::sqrt(2.0f * 9.81f * 0.5f);
   // Run until the first ground contact, then check the reflected speed.
   bool contacted = false;
-  for (int i = 0; i < 240 && !contacted; ++i) {
+  for (std::size_t i = 0; i < 240U && !contacted; ++i) {
     w.step(kDt);
     contacted = !w.contacts().empty();
   }
@@ -135,7 +135,7 @@ TEST(PhysicsWorld, RepeatedRunsAreBitIdentical) {
     (void)ground.inverse_mass;
     (void)w.add_body(a);
     (void)w.add_body(b);
-    for (int i = 0; i < 600; ++i) w.step(kDt);
+    for (std::size_t i = 0; i < static_cast<std::size_t>(600); ++i) w.step(kDt);
     return w.position_fingerprint();
   };
   const std::uint64_t h1 = run();
@@ -154,7 +154,7 @@ TEST(PhysicsWorld, StackedBodiesSettleWithoutExplosion) {
   (void)w.add_body(lower);
   (void)w.add_body(upper);
 
-  for (int i = 0; i < 600; ++i) w.step(kDt);
+  for (std::size_t i = 0; i < static_cast<std::size_t>(600); ++i) w.step(kDt);
   // Both spheres rest at ~one radius above the plane (stacking is approximate
   // with a single solver iteration, but must be stable and in contact).
   EXPECT_NEAR(w.body(0).position[1], 0.5f, 0.05f);
@@ -191,7 +191,7 @@ TEST(PhysicsWorld, BroadphaseAgreesWithAllPairsAtSeveralScales) {
       b.restitution = 0.3F + 0.2F * std::fmod(f * 0.023F, 1.0F);
       (void)world.add_body(b);
     }
-    for (int step = 0; step < 60; ++step) world.step(1.0F / 60.0F);
+    for (std::size_t step = 0; step < static_cast<std::size_t>(60); ++step) world.step(1.0F / 60.0F);
     return world.position_fingerprint();
   };
 

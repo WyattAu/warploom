@@ -306,7 +306,7 @@ TEST(VulkanHardware, GpuLodOcclusionCounters) {
   };
   const auto read_result = [&]() {
     CullResult r{};
-    for (int b = 0; b < 3; ++b) {
+    for (std::size_t b = 0; b < static_cast<std::size_t>(3); ++b) {
       auto* c = reinterpret_cast<const DrawCmd*>(cmd_words + b * 4U);
       r.band[b] = c->instance_count;
     }

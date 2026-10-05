@@ -35,14 +35,14 @@ TEST(ManualTimer, ElapsedIncreases) {
   omnicpp::core::ManualTimer timer;
   EXPECT_GE(timer.elapsed_ns(), 0);
   volatile int x = 0;
-  for (int i = 0; i < 1000; ++i) x += i;
+  for (std::size_t i = 0; i < static_cast<std::size_t>(1000); ++i) x += i;
   EXPECT_GT(timer.elapsed_ns(), 0);
 }
 
 TEST(ManualTimer, ResetReturnsToZero) {
   omnicpp::core::ManualTimer timer;
   volatile int x = 0;
-  for (int i = 0; i < 1000; ++i) x += i;
+  for (std::size_t i = 0; i < static_cast<std::size_t>(1000); ++i) x += i;
   timer.reset();
   EXPECT_GE(timer.elapsed_ns(), 0);
 }
@@ -50,7 +50,7 @@ TEST(ManualTimer, ResetReturnsToZero) {
 TEST(ManualTimer, ElapsedSecondsMatchesNs) {
   omnicpp::core::ManualTimer timer;
   volatile int x = 0;
-  for (int i = 0; i < 1000; ++i) x += i;
+  for (std::size_t i = 0; i < static_cast<std::size_t>(1000); ++i) x += i;
   const auto ns = timer.elapsed_ns();
   const auto s = timer.elapsed_seconds();
   EXPECT_NEAR(s, static_cast<double>(ns) / 1e9, 1e-3);
@@ -65,7 +65,7 @@ TEST(ScopedTimer, MeasuresElapsedNanoseconds) {
   {
     omnicpp::core::ScopedTimer timer(elapsed);
     volatile int x = 0;
-    for (int i = 0; i < 1000; ++i) x += i;
+    for (std::size_t i = 0; i < static_cast<std::size_t>(1000); ++i) x += i;
   }
   EXPECT_GT(elapsed, 0);
 }
@@ -91,7 +91,7 @@ TEST(ThreadPool, SubmitsAndExecutesWork) {
   omnicpp::core::ThreadPool pool(2);
   std::atomic<int> counter{0};
 
-  for (int i = 0; i < 10; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(10); ++i) {
     pool.submit([&counter]() noexcept { counter.fetch_add(1, std::memory_order_relaxed); });
   }
 
@@ -108,7 +108,7 @@ TEST(ThreadPool, ConcurrentSubmission) {
   std::vector<std::thread> submitters;
   for (std::size_t t = 0; t < 4; ++t) {
     submitters.emplace_back([&pool, &counter] {
-      for (int i = 0; i < 100; ++i) {
+      for (std::size_t i = 0; i < static_cast<std::size_t>(100); ++i) {
         pool.submit([&counter]() noexcept { counter.fetch_add(1, std::memory_order_relaxed); });
       }
     });

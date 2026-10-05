@@ -549,7 +549,7 @@ struct FrameSpec {
         // Payload values arrive in zig-zag (scan) order; store them keyed by
         // the natural coefficient index so dequantization reads
         // block[natural] * quant[natural].
-        for (int i = 0; i < 64; ++i) {
+        for (std::size_t i = 0; i < 64U; ++i) {
           quant_tables[id][i] =
               payload[done + 1U +
                       static_cast<std::size_t>(kInverseZigzag[i])];

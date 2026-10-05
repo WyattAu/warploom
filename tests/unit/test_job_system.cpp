@@ -67,7 +67,7 @@ TEST(JobSystem, ExecuteAllJobs) {
   std::atomic<int> hits{0};
   JobCounter counter;
   counter.add(100);
-  for (int i = 0; i < 100; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(100); ++i) {
     ASSERT_TRUE(jobs.submit(JobPriority::background, &counter, [&hits] { hits.fetch_add(1); }));
   }
   counter.wait();
@@ -94,7 +94,7 @@ TEST(JobSystem, HigherPriorityDrainsFirst) {
   constexpr int kPerClass = 8;
   counter.add(4 * kPerClass);
   // Submit in reverse priority order so any FIFO queue would fail this test.
-  for (int round = 0; round < kPerClass; ++round) {
+  for (std::size_t round = 0; round < static_cast<std::size_t>(kPerClass); ++round) {
     ASSERT_TRUE(jobs.submit(JobPriority::background, &counter,
                             [&recorder] { recorder.record(JobPriority::background); }));
     ASSERT_TRUE(jobs.submit(JobPriority::upload, &counter,
@@ -109,7 +109,7 @@ TEST(JobSystem, HigherPriorityDrainsFirst) {
   ASSERT_EQ(recorder.order.size(), 4U * kPerClass);
   // First four must be exactly the render batch (highest priority drains
   // fully before lower classes on a single worker).
-  for (int i = 0; i < kPerClass; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(kPerClass); ++i) {
     EXPECT_EQ(recorder.order[static_cast<std::size_t>(i)], JobPriority::render);
   }
   // Global monotonicity: priority values never increase across the drain.
@@ -126,13 +126,13 @@ TEST(JobSystem, ForkJoinParallelSum) {
   std::vector<int> results(kJobs, 0);
   JobCounter counter;
   counter.add(kJobs);
-  for (int i = 0; i < kJobs; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(kJobs); ++i) {
     ASSERT_TRUE(jobs.submit(JobPriority::upload, &counter,
                             [&results, i] { results[static_cast<std::size_t>(i)] = i * i; }));
   }
   counter.wait();
   long long total = 0;
-  for (int i = 0; i < kJobs; ++i) total += results[static_cast<std::size_t>(i)];
+  for (std::size_t i = 0; i < static_cast<std::size_t>(kJobs); ++i) total += results[static_cast<std::size_t>(i)];
   constexpr long long kExpected = 63LL * 64LL * 127LL / 6LL;  // sum of squares 0..63
   EXPECT_EQ(total, kExpected);
   jobs.wait_idle();
@@ -145,7 +145,7 @@ TEST(JobSystem, SubmitFromJobThread) {
   JobCounter first, second;
   first.add(4);
   second.add(4);
-  for (int i = 0; i < 4; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i) {
     ASSERT_TRUE(jobs.submit(JobPriority::submit, &first, [&] {
       // Nested submission from a running job must be legal.
       EXPECT_TRUE(jobs.submit(JobPriority::background, &second,
@@ -166,7 +166,7 @@ TEST(JobSystem, ShutdownReleasesAllCountersQueuedOrRun) {
   // way the counter must reach zero: shutdown can never hang a waiter.
   JobCounter counter;
   counter.add(50);
-  for (int i = 0; i < 50; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(50); ++i) {
     ASSERT_TRUE(jobs.submit(JobPriority::background, &counter, [] {}));
   }
   jobs.shutdown();
@@ -178,7 +178,7 @@ TEST(JobSystem, WaitIdleReturnsWhenQuiescent) {
   JobSystem jobs;
   ASSERT_TRUE(jobs.initialize());
   std::atomic<int> hits{0};
-  for (int i = 0; i < 200; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(200); ++i) {
     ASSERT_TRUE(jobs.submit(JobPriority::upload, nullptr, [&hits] { hits.fetch_add(1); }));
   }
   jobs.wait_idle();
@@ -193,10 +193,10 @@ TEST(JobSystem, DispatchOverheadIsSubMicrosecond) {
   // property that matters when a frame's jobs are enqueued each tick.
   JobSystem jobs;
   ASSERT_TRUE(jobs.initialize());
-  for (int round = 0; round < 3; ++round) {  // Warm up allocator/branches.
+  for (std::size_t round = 0; round < static_cast<std::size_t>(3); ++round) {  // Warm up allocator/branches.
     JobCounter warm;
     warm.add(256);
-    for (int i = 0; i < 256; ++i) {
+    for (std::size_t i = 0; i < static_cast<std::size_t>(256); ++i) {
       static_cast<void>(jobs.submit(JobPriority::render, &warm, [] {}));
     }
     warm.wait();
@@ -207,7 +207,7 @@ TEST(JobSystem, DispatchOverheadIsSubMicrosecond) {
   counter.add(kBurst);
   std::vector<std::uint64_t> dispatch_ns;
   dispatch_ns.reserve(kBurst);
-  for (int i = 0; i < kBurst; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(kBurst); ++i) {
     const auto t0 = omnicpp::core::SteadyClock::now_ns();
     ASSERT_TRUE(jobs.submit(JobPriority::render, &counter, [] {}));
     const auto t1 = omnicpp::core::SteadyClock::now_ns();

@@ -106,12 +106,12 @@ TEST(VulkanHardware, LodSelectByDistance) {
     std::memcpy(plane_words, planes, sizeof(plane_words));
     std::uint32_t pw[24];
     std::memcpy(pw, plane_words, sizeof(pw));
-    for (int i = 0; i < 24; ++i) words[2 + i] = pw[i];
+    for (std::size_t i = 0; i < static_cast<std::size_t>(24); ++i) words[2 + i] = pw[i];
   }
   for (std::uint32_t i = 0; i < kInstanceCount; ++i) {
     std::uint32_t sw[4];
     std::memcpy(sw, spheres[i], sizeof(sw));
-    for (int k = 0; k < 4; ++k) words[kSphereOffset + i * 4U + k] = sw[k];
+    for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) words[kSphereOffset + i * 4U + k] = sw[k];
   }
   for (std::uint32_t i = 0; i < 2U * kInstanceCount; ++i)
     words[kResultOffset + i] = 0xDEADBEEFU;  // poison: shader must overwrite

@@ -60,10 +60,10 @@ void build_unit_cube(std::vector<float>& vertices,
   const float n[6][3] = {{0, 0, 1}, {0, 0, -1}, {1, 0, 0},
                          {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}};
   const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-  for (int face = 0; face < 6; ++face) {
+  for (std::size_t face = 0; face < static_cast<std::size_t>(6); ++face) {
     const std::uint32_t base =
         static_cast<std::uint32_t>(vertices.size() / 11U);
-    for (int c = 0; c < 4; ++c) {
+    for (std::size_t c = 0; c < static_cast<std::size_t>(4); ++c) {
       vertices.push_back(f[face][c][0]);
       vertices.push_back(f[face][c][1]);
       vertices.push_back(f[face][c][2]);
@@ -77,7 +77,7 @@ void build_unit_cube(std::vector<float>& vertices,
       vertices.push_back(uv[c][1]);
     }
     const std::uint32_t tri[6] = {0, 1, 2, 0, 2, 3};
-    for (int k = 0; k < 6; ++k) indices.push_back(base + tri[k]);
+    for (std::size_t k = 0; k < static_cast<std::size_t>(6); ++k) indices.push_back(base + tri[k]);
   }
 }
 
@@ -117,10 +117,10 @@ omnicpp::render::SceneMatrix make_rotation_y(float radians) {
 //! Column-major matrix multiply a * b.
 omnicpp::render::SceneMatrix mat_mul(const SceneMatrix& a, const SceneMatrix& b) {
   SceneMatrix out{};
-  for (int col = 0; col < 4; ++col) {
-    for (int row = 0; row < 4; ++row) {
+  for (std::size_t col = 0; col < static_cast<std::size_t>(4); ++col) {
+    for (std::size_t row = 0; row < static_cast<std::size_t>(4); ++row) {
       float sum = 0.0f;
-      for (int k = 0; k < 4; ++k) {
+      for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) {
         sum += a[k * 4 + row] * b[col * 4 + k];
       }
       out[col * 4 + row] = sum;

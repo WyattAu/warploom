@@ -51,8 +51,12 @@ TEST(SpirvReflector, RejectsNullAndTrivialInputs) {
   std::vector<std::uint32_t> tiny = {kSpirvMagic};
   // Every sub-minimum word count is safely rejected (loop never over-reads).
   for (std::size_t words = 0; words <= 8; ++words) {
-    std::vector<std::uint32_t> truncated(tiny.begin(), tiny.begin() + std::min(words, tiny.size()));
-    if (words < 1) truncated.clear();
+    std::vector<std::uint32_t> truncated(
+        tiny.begin(),
+        tiny.begin() +
+            static_cast<std::vector<std::uint32_t>::difference_type>(
+                std::min<std::size_t>(words, tiny.size())));
+    if (words < 1U) truncated.clear();
     // These fuzz malformed SPIR-V on purpose. The claim under test is that
     // reflection survives it -- not any particular return value -- so the
     // reflected bindings are deliberately discarded.
@@ -119,7 +123,7 @@ TEST(SpirvReflector, SurvivesRandomByteCorruption) {
   const auto words = load_shader_words(WARPLOOM_TEST_SHADER_DIR "/ubo_triangle.frag.spv");
   ASSERT_GE(words.size(), 10U);
   std::mt19937 rng(0xC0FFEEU);  // fixed seed: deterministic, reproducible
-  for (int iteration = 0; iteration < 2000; ++iteration) {
+  for (std::size_t iteration = 0; iteration < static_cast<std::size_t>(2000); ++iteration) {
     std::vector<std::uint32_t> mutated = words;
     const auto flips = static_cast<std::size_t>(1 + rng() % 16);
     for (std::size_t f = 0; f < flips; ++f) {
@@ -188,7 +192,7 @@ TEST(VulkanAllocator, RandomizedAllocFreePreservesDisjointness) {
   };
 
   // Wave 1: random sizes, verify disjointness after every allocation.
-  for (int i = 0; i < 40; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(40); ++i) {
     const auto size = static_cast<std::size_t>(1 + rng() % 32768);
     auto result = make_buffer(size);
     ASSERT_TRUE(result.is_ok()) << "allocation of " << size << " bytes failed";
@@ -205,7 +209,7 @@ TEST(VulkanAllocator, RandomizedAllocFreePreservesDisjointness) {
   }
   live.erase(live.begin(), live.begin() + static_cast<std::ptrdiff_t>(half));
 
-  for (int i = 0; i < 20; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(20); ++i) {
     const auto size = static_cast<std::size_t>(1 + rng() % 65536);
     auto result = make_buffer(size);
     ASSERT_TRUE(result.is_ok());

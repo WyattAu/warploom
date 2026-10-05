@@ -108,10 +108,10 @@ SceneMatrix make_translation(float x, float y, float z) {
 
 SceneMatrix mat4_multiply(const SceneMatrix& a, const SceneMatrix& b) {
   SceneMatrix out{};
-  for (int col = 0; col < 4; ++col) {
-    for (int row = 0; row < 4; ++row) {
+  for (std::size_t col = 0; col < static_cast<std::size_t>(4); ++col) {
+    for (std::size_t row = 0; row < static_cast<std::size_t>(4); ++row) {
       float acc = 0.0f;
-      for (int k = 0; k < 4; ++k) {
+      for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) {
         acc += a[k * 4 + row] * b[col * 4 + k];
       }
       out[col * 4 + row] = acc;
@@ -165,7 +165,7 @@ std::vector<float> make_box_triangles(float hx, float hy, float hz) {
   std::vector<float> out;
   out.reserve(36U * 3U);
   for (const std::uint32_t vi : c) {
-    for (int k = 0; k < 3; ++k) {
+    for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
       out.push_back(((vi >> k) & 1U) != 0U ? h[k] : -h[k]);
     }
   }
@@ -197,9 +197,9 @@ BufferPair make_cube_mesh(VulkanMemoryAllocator& alloc,
       {0, -1, 0, -1, -1, -1, 1, -1, -1, 1, -1, 1, -1, -1, 1}};
   std::vector<float> v;
   std::vector<std::uint32_t> i;
-  for (int f = 0; f < 6; ++f) {
+  for (std::size_t f = 0; f < static_cast<std::size_t>(6); ++f) {
     const std::uint32_t base = static_cast<std::uint32_t>(v.size() / 11U);
-    for (int vert = 0; vert < 4; ++vert) {
+    for (std::size_t vert = 0; vert < static_cast<std::size_t>(4); ++vert) {
       v.push_back(faces[f][3 + vert * 3 + 0] * 0.5f);
       v.push_back(faces[f][3 + vert * 3 + 1] * 0.5f);
       v.push_back(faces[f][3 + vert * 3 + 2] * 0.5f);
@@ -579,7 +579,7 @@ bool segment_hits_box(const std::array<float, 3>& o,
                       const std::array<float, 3>& h) {
   float tmin = 0.001f;
   float tmax = 1.0e30f;
-  for (int k = 0; k < 3; ++k) {
+  for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
     if (std::fabs(L[k]) < 1.0e-9f) {
       if (o[k] < c[k] - h[k] || o[k] > c[k] + h[k]) return false;
       continue;
@@ -1074,7 +1074,8 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
       return 0.0f;
     }
     const std::uint32_t packed =
-        r.pixels[static_cast<std::size_t>(py) * kImg + px];
+        r.pixels[static_cast<std::size_t>(py) * static_cast<std::size_t>(kImg) +
+                 static_cast<std::size_t>(px)];
     const float rf = static_cast<float>(packed & 0xffU) / 255.0f;
     const float gf = static_cast<float>((packed >> 8) & 0xffU) / 255.0f;
     const float bf = static_cast<float>((packed >> 16) & 0xffU) / 255.0f;
@@ -1084,10 +1085,13 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
   // bounding boxes of non-black pixels (row extents at each occupied row are
   // summarized as min/max), plus luminance at the probe sites.
   if (std::getenv("WARPLOOM_RT_SHADOW_DEBUG") != nullptr) {
-    int min_px = kImg, max_px = -1, min_py = kImg, max_py = -1;
-    for (int py = 0; py < static_cast<int>(kImg); ++py) {
-      int row_min = kImg, row_max = -1;
-      for (int px = 0; px < static_cast<int>(kImg); ++px) {
+    std::size_t min_px = kImg, max_px = 0, min_py = kImg, max_py = 0;
+    bool any_lit = false;
+    const std::size_t img = static_cast<std::size_t>(kImg);
+    for (std::size_t py = 0; py < img; ++py) {
+      std::size_t row_min = kImg, row_max = 0;
+      bool row_any = false;
+      for (std::size_t px = 0; px < img; ++px) {
         const std::uint32_t packed =
             ra.pixels[static_cast<std::size_t>(py) * kImg + px];
         const float rf = static_cast<float>(packed & 0xffU) / 255.0f;
@@ -1095,13 +1099,15 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
         const float bf = static_cast<float>((packed >> 16) & 0xffU) / 255.0f;
         const float lum = 0.2126f * rf + 0.7152f * gf + 0.0722f * bf;
         if (lum > 0.02f) {
-          row_min = std::min(row_min, px);
-          row_max = std::max(row_max, px);
-          min_py = std::min(min_py, py);
-          max_py = std::max(max_py, py);
+          row_min = row_any ? std::min(row_min, px) : px;
+          row_max = row_any ? std::max(row_max, px) : px;
+          row_any = true;
+          any_lit = true;
+          min_py = any_lit ? std::min(min_py, py) : py;
+          max_py = any_lit ? std::max(max_py, py) : py;
         }
       }
-      if (row_max >= 0) {
+      if (row_any) {
         min_px = std::min(min_px, row_min);
         max_px = std::max(max_px, row_max);
         if (py % 8 == 0 || row_min != row_max) {

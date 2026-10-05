@@ -158,10 +158,10 @@ void compute_globals(const GltfAnimationDocument& doc,
   };
   auto mul = [](const SceneMatrix& a, const SceneMatrix& b) {
     SceneMatrix out{};
-    for (int c = 0; c < 4; ++c) {
-      for (int r = 0; r < 4; ++r) {
+    for (std::size_t c = 0; c < static_cast<std::size_t>(4); ++c) {
+      for (std::size_t r = 0; r < static_cast<std::size_t>(4); ++r) {
         float sum = 0.0f;
-        for (int k = 0; k < 4; ++k) {
+        for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) {
           sum += a[r + 4 * k] * b[k + 4 * c];
         }
         out[r + 4 * c] = sum;
@@ -616,10 +616,10 @@ TEST(VulkanHardware, GpuMannequinWalkCycle) {
       const auto& g = globals[skin.joints[j]];
       const auto& ibm = skin.inverse_bind_matrices[j];
       SceneMatrix out{};
-      for (int c = 0; c < 4; ++c) {
-        for (int r = 0; r < 4; ++r) {
+      for (std::size_t c = 0; c < static_cast<std::size_t>(4); ++c) {
+        for (std::size_t r = 0; r < static_cast<std::size_t>(4); ++r) {
           float sum = 0.0f;
-          for (int k = 0; k < 4; ++k) {
+          for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) {
             sum += g[r + 4 * k] * ibm[k + 4 * c];
           }
           out[r + 4 * c] = sum;
@@ -642,10 +642,10 @@ TEST(VulkanHardware, GpuMannequinWalkCycle) {
       const auto& g = globals[skin.joints[j]];
       const auto& ibm = skin.inverse_bind_matrices[j];
       SceneMatrix out{};
-      for (int c = 0; c < 4; ++c) {
-        for (int r = 0; r < 4; ++r) {
+      for (std::size_t c = 0; c < static_cast<std::size_t>(4); ++c) {
+        for (std::size_t r = 0; r < static_cast<std::size_t>(4); ++r) {
           float sum = 0.0f;
-          for (int k = 0; k < 4; ++k) {
+          for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) {
             sum += g[r + 4 * k] * ibm[k + 4 * c];
           }
           out[r + 4 * c] = sum;
@@ -727,10 +727,10 @@ TEST(VulkanHardware, GpuMannequinThroughRecordPbrScene) {
       const auto& g = globals[skin.joints[j]];
       const auto& ibm = skin.inverse_bind_matrices[j];
       SceneMatrix out{};
-      for (int c = 0; c < 4; ++c) {
-        for (int r = 0; r < 4; ++r) {
+      for (std::size_t c = 0; c < static_cast<std::size_t>(4); ++c) {
+        for (std::size_t r = 0; r < static_cast<std::size_t>(4); ++r) {
           float sum = 0.0f;
-          for (int k = 0; k < 4; ++k) {
+          for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) {
             sum += g[r + 4 * k] * ibm[k + 4 * c];
           }
           out[r + 4 * c] = sum;

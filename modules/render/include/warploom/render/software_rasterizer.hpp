@@ -82,7 +82,13 @@ public:
           const float b2 = w2 / abs_area;
 
           const float z = b0 * z0 + b1 * z1 + b2 * z2;
-          const auto idx = static_cast<std::size_t>(y) * width_ + x;
+          // Both coordinates are pixel positions for a fragment already
+          // proven inside the triangle (the w0/w1/w2 >= 0 test above), so
+          // neither can be negative here. Casting both makes that explicit;
+          // casting only y would leave a negative x wrapping to a huge index.
+          const auto idx = static_cast<std::size_t>(y) *
+                               static_cast<std::size_t>(width_) +
+                           static_cast<std::size_t>(x);
 
           if (z < depth_buffer_[idx]) {
             depth_buffer_[idx] = z;

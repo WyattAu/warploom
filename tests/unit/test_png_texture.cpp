@@ -38,7 +38,7 @@ std::uint32_t fixture_crc32(const std::uint8_t* data, std::size_t size) {
   std::uint32_t crc = 0xffffffffU;
   for (std::size_t i = 0; i < size; ++i) {
     crc ^= data[i];
-    for (int bit = 0; bit < 8; ++bit) {
+    for (std::size_t bit = 0; bit < static_cast<std::size_t>(8); ++bit) {
       crc = (crc & 1U) != 0U ? (crc >> 1) ^ 0xedb88320U : crc >> 1;
     }
   }
@@ -53,7 +53,7 @@ void fixture_chunk(std::vector<std::uint8_t>& out, const char* type,
   out.push_back(static_cast<std::uint8_t>(length >> 8));
   out.push_back(static_cast<std::uint8_t>(length));
   const std::size_t type_offset = out.size();
-  for (int i = 0; i < 4; ++i) out.push_back(static_cast<std::uint8_t>(type[i]));
+  for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i) out.push_back(static_cast<std::uint8_t>(type[i]));
   out.insert(out.end(), data.begin(), data.end());
   const std::uint32_t crc =
       fixture_crc32(out.data() + type_offset, out.size() - type_offset);

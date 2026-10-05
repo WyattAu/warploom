@@ -85,9 +85,9 @@ void build_unit_cube(std::vector<float>& verts, std::vector<uint32_t>& idx) {
     { 0,-1, 0, -1,-1,-1,  1,-1,-1,  1,-1, 1, -1,-1, 1}
   };
   verts.clear(); idx.clear();
-  for (int f = 0; f < 6; ++f) {
+  for (std::size_t f = 0; f < static_cast<std::size_t>(6); ++f) {
     uint32_t base = (uint32_t)(verts.size() / 11);
-    for (int v = 0; v < 4; ++v) {
+    for (std::size_t v = 0; v < static_cast<std::size_t>(4); ++v) {
       float x = faces[f][3+v*3+0] * 0.5f;
       float y = faces[f][3+v*3+1] * 0.5f;
       float z = faces[f][3+v*3+2] * 0.5f;

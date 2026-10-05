@@ -256,17 +256,17 @@ TEST(GltfAnimation, RestPoseSkinningReproducesBindPose) {
     const auto& g = globals[skin.joints[j]];
     const auto& ibm = skin.inverse_bind_matrices[j];
     float product[16]{};
-    for (int c = 0; c < 4; ++c) {
-      for (int r = 0; r < 4; ++r) {
+    for (std::size_t c = 0; c < static_cast<std::size_t>(4); ++c) {
+      for (std::size_t r = 0; r < static_cast<std::size_t>(4); ++r) {
         float sum = 0.0f;
-        for (int k = 0; k < 4; ++k) {
+        for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) {
           sum += g[static_cast<std::size_t>(r + 4 * k)] *
                  ibm[static_cast<std::size_t>(k + 4 * c)];
         }
         product[r + 4 * c] = sum;
       }
     }
-    for (int c = 0; c < 16; ++c) {
+    for (std::size_t c = 0; c < static_cast<std::size_t>(16); ++c) {
       EXPECT_NEAR(product[c], (c % 5 == 0) ? 1.0f : 0.0f, 1e-4f)
           << "joint " << j << " element " << c;
     }
@@ -285,7 +285,7 @@ TEST(GltfAnimation, RestPoseSkinningReproducesBindPose) {
         const float w = binding.weights[v * 4U + c];
         weight_sum += w;
         const auto& jm = joints[binding.joints[v * 4U + c]];
-        for (int r = 0; r < 3; ++r) {
+        for (std::size_t r = 0; r < static_cast<std::size_t>(3); ++r) {
           skinned[r] += w * (jm[r + 0] * mesh.vertices[base + 0] +
                              jm[r + 4] * mesh.vertices[base + 1] +
                              jm[r + 8] * mesh.vertices[base + 2] +
@@ -293,7 +293,7 @@ TEST(GltfAnimation, RestPoseSkinningReproducesBindPose) {
         }
       }
       EXPECT_NEAR(weight_sum, 1.0f, 1e-5f);
-      for (int r = 0; r < 3; ++r) {
+      for (std::size_t r = 0; r < static_cast<std::size_t>(3); ++r) {
         EXPECT_NEAR(skinned[r], mesh.vertices[base + r], 1e-3f)
             << "mesh " << mesh_i << " vertex " << v << " axis " << r;
       }

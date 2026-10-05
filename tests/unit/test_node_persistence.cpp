@@ -508,7 +508,7 @@ TEST(NodeScriptNodes, ScriptNodeIsDeterministicAcrossEvaluations) {
   std::string err;
   ASSERT_TRUE(doc.node_graph.evaluate(err)) << err;
   const std::string first = doc.to_json();
-  for (int i = 0; i < 10; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(10); ++i) {
     ASSERT_TRUE(doc.node_graph.evaluate(err)) << err;
   }
   // Note: to_json does not carry runtime outputs; determinism is proven by

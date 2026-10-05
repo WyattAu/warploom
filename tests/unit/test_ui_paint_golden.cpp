@@ -115,10 +115,11 @@ class UiRasterizer final {
     for (const char ch : text) {
       const char* rows = glyph(ch);
       if (rows != nullptr) {
-        for (int gy = 0; gy < kGlyphH; ++gy) {
-          for (int gx = 0; gx < kGlyphW; ++gx) {
-            if (rows[gy * kGlyphW + gx] == '1') {
-              draw_px(static_cast<int>(cx) + gx, static_cast<int>(y) + gy,
+        for (std::size_t gy = 0; gy < static_cast<std::size_t>(kGlyphH); ++gy) {
+          for (std::size_t gx = 0; gx < static_cast<std::size_t>(kGlyphW); ++gx) {
+            if (rows[gy * static_cast<std::size_t>(kGlyphW) + gx] == '1') {
+              draw_px(static_cast<int>(cx) + static_cast<int>(gx),
+               static_cast<int>(y) + static_cast<int>(gy),
                       color);
             }
           }

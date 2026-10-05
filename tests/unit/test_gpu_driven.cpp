@@ -136,7 +136,7 @@ TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
       std::uint32_t pw[4], cw[4];
       std::memcpy(pw, pf, 16U);
       std::memcpy(cw, cf, 16U);
-      for (int k = 0; k < 4; ++k) {
+      for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) {
         words[base + k] = pw[k];
         words[base + 4U + k] = cw[k];
       }
@@ -160,12 +160,12 @@ TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
     make_frustum_planes(kFovY, kAspect, kNear, kFar, planes);
     std::uint32_t plane_words[24];
     std::memcpy(plane_words, planes, sizeof(plane_words));
-    for (int i = 0; i < 24; ++i) words[2 + i] = plane_words[i];
+    for (std::size_t i = 0; i < static_cast<std::size_t>(24); ++i) words[2 + i] = plane_words[i];
     for (std::uint32_t i = 0; i < kInstanceCount; ++i) {
       const float sphere[4] = {positions[i][0], positions[i][1], positions[i][2], 0.9f};
       std::uint32_t sw[4];
       std::memcpy(sw, sphere, sizeof(sw));
-      for (int k = 0; k < 4; ++k) words[kSphereOffset + i * 4U + k] = sw[k];
+      for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) words[kSphereOffset + i * 4U + k] = sw[k];
     }
   }
   {
@@ -386,7 +386,7 @@ TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
       const float sphere[4] = {0.0f, 0.0f, 10.0f, 0.9f};
       std::uint32_t sw[4];
       std::memcpy(sw, sphere, sizeof(sw));
-      for (int k = 0; k < 4; ++k) words[kSphereOffset + i * 4U + k] = sw[k];
+      for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) words[kSphereOffset + i * 4U + k] = sw[k];
     }
   }
   const std::uint32_t accepted2 = submit_frame();
@@ -484,7 +484,7 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
       float cf[4] = {0.15f + 0.7f * r, 0.3f, 1.0f - 0.7f * r, 0.0f};
       std::uint32_t cw[4];
       std::memcpy(cw, cf, 16U);
-      for (int k = 0; k < 4; ++k) words[base + 4U + k] = cw[k];
+      for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) words[base + 4U + k] = cw[k];
     }
   }
 
@@ -561,7 +561,7 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
       make_frustum_planes(kFovY, kAspect, kNear, kFar, planes);
       std::uint32_t plane_words[24];
       std::memcpy(plane_words, planes, sizeof(plane_words));
-      for (int i = 0; i < 24; ++i) words[2 + i] = plane_words[i];
+      for (std::size_t i = 0; i < static_cast<std::size_t>(24); ++i) words[2 + i] = plane_words[i];
       const float t = static_cast<float>(frame) * (1.0f / 60.0f);
       for (std::uint32_t i = 0; i < kInstanceCount; ++i) {
         const float ring = (i % 2 == 0) ? 10.0f : 22.0f;
@@ -571,7 +571,7 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
         const float sphere[4] = {std::cos(ang) * 3.0f, std::sin(ang) * 3.0f, z, 0.9f};
         std::uint32_t sw[4];
         std::memcpy(sw, sphere, sizeof(sw));
-        for (int k = 0; k < 4; ++k) words[kSphereOffset + i * 4U + k] = sw[k];
+        for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) words[kSphereOffset + i * 4U + k] = sw[k];
       }
       auto* cmd = static_cast<DrawCmd*>(draw_buf.value().mapped);
       cmd->instance_count = 0;

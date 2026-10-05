@@ -474,7 +474,9 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
     // match the selection dispatch). Objects without a chain always draw
     // level 0; culled objects are skipped.
     if (lod_active) {
-      const std::size_t obj = &object - scene.objects.data();
+      // A distance within one vector, so non-negative by construction; the cast
+  // makes that explicit rather than leaving a ptrdiff_t in a size_t.
+  const std::size_t obj = static_cast<std::size_t>(&object - scene.objects.data());
       const std::uint32_t lod = scene.lod_results[lod_result_base + 2U * obj];
       const std::uint32_t visible =
           scene.lod_results[lod_result_base + 2U * obj + 1U];

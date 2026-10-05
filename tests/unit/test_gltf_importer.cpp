@@ -845,7 +845,7 @@ std::uint32_t tex_crc32(const std::uint8_t* data, std::size_t size) {
   std::uint32_t crc = 0xffffffffU;
   for (std::size_t i = 0; i < size; ++i) {
     crc ^= data[i];
-    for (int bit = 0; bit < 8; ++bit) {
+    for (std::size_t bit = 0; bit < static_cast<std::size_t>(8); ++bit) {
       crc = (crc & 1U) != 0U ? (crc >> 1) ^ 0xedb88320U : crc >> 1;
     }
   }
@@ -860,7 +860,7 @@ void tex_chunk(std::vector<std::uint8_t>& out, const char* type,
     if (shift == 0U) break;
   }
   const std::size_t type_offset = out.size();
-  for (int i = 0; i < 4; ++i) out.push_back(static_cast<std::uint8_t>(type[i]));
+  for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i) out.push_back(static_cast<std::uint8_t>(type[i]));
   out.insert(out.end(), data.begin(), data.end());
   const std::uint32_t crc =
       tex_crc32(out.data() + type_offset, out.size() - type_offset);
@@ -1277,7 +1277,7 @@ SceneFixture scene_triangle(std::string nodes, std::string scenes) {
 std::array<float, 3> apply_matrix(const std::array<float, 16>& m,
                                   const std::array<float, 3>& p) {
   std::array<float, 3> out{};
-  for (int r = 0; r < 3; ++r) {
+  for (std::size_t r = 0; r < static_cast<std::size_t>(3); ++r) {
     out[static_cast<std::size_t>(r)] =
         m[static_cast<std::size_t>(r)] * p[0] +
         m[static_cast<std::size_t>(r) + 4U] * p[1] +

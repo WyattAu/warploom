@@ -162,7 +162,7 @@ TEST(VulkanHardware, RealDepthPyramidOcclusion) {
         {0.0f, 0.0f, -30.0f, 0.7f},
     };
     for (std::uint32_t i = 0; i < kInstances; ++i) {
-      for (int k = 0; k < 4; ++k) {
+      for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) {
         words[kSphereOff + i * 4U + static_cast<std::uint32_t>(k)] =
             bits(spheres[i][k]);
       }
@@ -204,7 +204,7 @@ TEST(VulkanHardware, RealDepthPyramidOcclusion) {
   // are unused in this test (counts read from stats), but the shader declares
   // them — bind the payload buffer as a stand-in.
   std::vector<omnicpp::render::ReflectedBinding> cull_bindings(4);
-  for (int i = 0; i < 4; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i) {
     cull_bindings[i] = {0, static_cast<std::uint32_t>(i), 1,
                         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT};
   }

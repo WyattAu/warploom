@@ -92,7 +92,7 @@ std::vector<float> make_box_triangles(float hx, float hy, float hz) {
   std::vector<float> out;
   out.reserve(36U * 3U);
   for (const std::uint32_t vi : c) {
-    for (int k = 0; k < 3; ++k) {
+    for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
       out.push_back(((vi >> k) & 1U) != 0U ? h[k] : -h[k]);
     }
   }
@@ -110,7 +110,9 @@ std::array<float, 12> translated_instance(float tx, float ty, float tz) {
 // Face 4 (max |n.y|, normal +y) of the ceiling box is emissive in mode 1.
 
 struct RoomHit {
-  int box;        // 0 = none, 1..5 = slab, wall -z, wall +z, wall -x, wall +x
+  // 0 = none, 1..5 = slab, wall -z, wall +z, wall -x, wall +x. An index, so
+  // unsigned: the 0 sentinel only works if nothing can go negative.
+  std::size_t box;
   double t;
   double n[3];
 };
@@ -121,7 +123,7 @@ bool ray_box_fp64(const double o[3], const double d[3], const double c[3],
   double tmin = 0.0, tmax = 1.0e30;
   int axis_min = -1;
   double sign_min = 0.0;
-  for (int k = 0; k < 3; ++k) {
+  for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
     if (std::fabs(d[k]) < 1.0e-15) {
       if (std::fabs(o[k] - c[k]) > h[k]) return false;
       continue;
@@ -160,10 +162,10 @@ RoomHit room_hit_fp64(const double o[3], const double d[3]) {
   RoomHit best{};
   best.box = 0;
   best.t = 1.0e30;
-  for (int b = 0; b < 5; ++b) {
+  for (std::size_t b = 0; b < static_cast<std::size_t>(5); ++b) {
     double t, n[3] = {0, 0, 0};
     if (ray_box_fp64(o, d, boxes[b].c, boxes[b].h, t, n) && t < best.t) {
-      best = {b + 1, t, {n[0], n[1], n[2]}};
+      best = {b + 1U, t, {n[0], n[1], n[2]}};
     }
   }
   return best;
@@ -191,7 +193,7 @@ void cosine_dir_fp64(const double n[3], std::mt19937_64& rng, double out[3]) {
   const double tyv[3] = {n[1] * txv[2] - n[2] * txv[1],
                          n[2] * txv[0] - n[0] * txv[2],
                          n[0] * txv[1] - n[1] * txv[0]};
-  for (int k = 0; k < 3; ++k) {
+  for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
     out[k] = txv[k] * tz[0] + tyv[k] * tz[1] + n[k] * tz[2];
   }
 }
@@ -207,7 +209,7 @@ void trace_path_fp64(const double o0[3], const double d0[3], int bounces,
   double T = 1.0;  // scalar throughput (grey albedo)
   double o[3] = {o0[0], o0[1], o0[2]};
   double d[3] = {d0[0], d0[1], d0[2]};
-  for (int b = 0; b < bounces; ++b) {
+  for (std::size_t b = 0; b < static_cast<std::size_t>(bounces); ++b) {
     const RoomHit h = room_hit_fp64(o, d);
     if (h.box == 0) {
       L[0] += T; L[1] += T; L[2] += T;  // sky = 1
@@ -218,7 +220,7 @@ void trace_path_fp64(const double o0[3], const double d0[3], int bounces,
     T *= sc.albedo;
     double nd[3];
     cosine_dir_fp64(h.n, rng, nd);
-    for (int k = 0; k < 3; ++k) {
+    for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
       o[k] = hit[k] + h.n[k] * 1.0e-4;
       d[k] = nd[k];
     }
@@ -238,7 +240,7 @@ std::array<double, 3> mc_reference(double ndc_x, double ndc_y,
   std::uniform_real_distribution<double> U(-1.0 / kImg, 1.0 / kImg);
   std::array<double, 3> acc{0.0, 0.0, 0.0};
   constexpr int kSpp = 262144;
-  for (int s = 0; s < kSpp; ++s) {
+  for (std::size_t s = 0; s < static_cast<std::size_t>(kSpp); ++s) {
     const double jx = U(rng);
     const double jy = U(rng);
     const double ndx = ndc_x + jx;
@@ -253,7 +255,7 @@ std::array<double, 3> mc_reference(double ndc_x, double ndc_y,
     trace_path_fp64(o0, d, bounces, sc, rng, L);
     acc[0] += L[0]; acc[1] += L[1]; acc[2] += L[2];
   }
-  for (int c = 0; c < 3; ++c) acc[c] /= kSpp;
+  for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) acc[c] /= kSpp;
   return acc;
 }
 
@@ -281,12 +283,12 @@ int room_hit_fp32(const std::array<float, 3>& o,
   int best_box = 0;
   float best_t = 1.0e30f;
   std::array<float, 3> best_n{0.0f, 0.0f, 0.0f};
-  for (int b = 0; b < 5; ++b) {
+  for (std::size_t b = 0; b < static_cast<std::size_t>(5); ++b) {
     float tmin = 0.0f, tmax = 1.0e30f;
     int axis = -1;
     float sgn = 0.0f;
     bool hit = true;
-    for (int k = 0; k < 3; ++k) {
+    for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
       const float dk = d[static_cast<std::size_t>(k)];
       const float ok = o[static_cast<std::size_t>(k)];
       const float ck = boxes[static_cast<std::size_t>(b)].c[static_cast<std::size_t>(k)];
@@ -338,7 +340,7 @@ std::array<float, 3> gpu_first_segments(std::uint32_t px, std::uint32_t py,
   std::array<float, 3> radiance{0.0f, 0.0f, 0.0f};
   float T = 1.0f;
   std::array<float, 3> o = kCamEye;
-  for (int s = 0; s < segments; ++s) {
+  for (std::size_t s = 0; s < static_cast<std::size_t>(segments); ++s) {
     float t;
     std::array<float, 3> n{};
     const int box = room_hit_fp32(o, d, t, n);
@@ -675,7 +677,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   VkShaderModule mods[3] = {};
   const char* files[3] = {"/pt_real.rgen.spv", "/pt_real.rmiss.spv",
                           "/pt_real.rchit.spv"};
-  for (int i = 0; i < 3; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(3); ++i) {
     std::string path = sd + files[i];
     FILE* f = std::fopen(path.c_str(), "rb");
     ASSERT_NE(f, nullptr) << path;
@@ -696,7 +698,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   const VkShaderStageFlagBits stage_bits[3] = {
       VK_SHADER_STAGE_RAYGEN_BIT_KHR, VK_SHADER_STAGE_MISS_BIT_KHR,
       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
-  for (int i = 0; i < 3; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(3); ++i) {
     stages[i].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[i].stage = stage_bits[i];
     stages[i].module = mods[i];
@@ -931,12 +933,12 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   const int probe_px[3] = {slab_px, wz_px, wx_px};
   const int probe_py[3] = {slab_py, wz_py, wx_py};
   std::array<std::array<double, 3>, 3> ref8{};
-  for (int i = 0; i < 3; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(3); ++i) {
     const auto [nx, ny] = probe_dir_ndc(probes[static_cast<std::size_t>(i)].second);
     ref8[static_cast<std::size_t>(i)] = mc_reference(
         nx, ny, R, Uv, F, static_cast<int>(kBounces), sc,
         0x9E3779B97F4A7C15ULL + 0x1000ULL * static_cast<std::uint64_t>(i));
-    for (int c = 0; c < 3; ++c) {
+    for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
       EXPECT_NEAR(
           pixel(img, probe_px[i], probe_py[i], c),
           ref8[static_cast<std::size_t>(i)][static_cast<std::size_t>(c)], 0.40)
@@ -956,7 +958,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
     const auto ref1 = mc_reference(nx, ny, R, Uv, F, 1, sc,
                                    0x9E3779B97F4A7C15ULL);
     double gap = 0.0;
-    for (int c = 0; c < 3; ++c) {
+    for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
       gap += ref8[0][static_cast<std::size_t>(c)] -
              ref1[static_cast<std::size_t>(c)];
     }
@@ -965,8 +967,8 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   }
 
   // Absorption sanity: interior probes are strictly below the sky radiance.
-  for (int i = 0; i < 3; ++i) {
-    for (int c = 0; c < 3; ++c) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(3); ++i) {
+    for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
       EXPECT_LT(pixel(img, probe_px[i], probe_py[i], c),
                 static_cast<float>(kSky) - 0.05f)
           << probes[static_cast<std::size_t>(i)].first
@@ -979,7 +981,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
     const auto expect = gpu_first_segments(
         static_cast<std::uint32_t>(sky_px), static_cast<std::uint32_t>(sky_py),
         0U, right, up, 1);
-    for (int c = 0; c < 3; ++c) {
+    for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
       EXPECT_FLOAT_EQ(pixel(img, sky_px, sky_py, c),
                       expect[static_cast<std::size_t>(c)])
           << "open-sky probe channel " << c;
@@ -1001,7 +1003,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   alloc.destroy_allocation(inst_alloc);
   alloc.destroy_allocation(params_alloc);
   alloc.destroy_allocation(accum_allocation);
-  for (int i = 0; i < 3; ++i) vkDestroyShaderModule(ctx.device(), mods[i], nullptr);
+  for (std::size_t i = 0; i < static_cast<std::size_t>(3); ++i) vkDestroyShaderModule(ctx.device(), mods[i], nullptr);
   rt.cleanup(ctx.device());
   vkDestroyPipelineLayout(ctx.device(), pipe_layout_handle, nullptr);
   vkDestroyCommandPool(ctx.device(), cmd_pool, nullptr);

@@ -135,7 +135,7 @@ bool segment_hits_box(const std::array<float, 3>& o,
                       const std::array<float, 3>& h) noexcept {
   float tmin = 0.001f;
   float tmax = 1.0e30f;
-  for (int k = 0; k < 3; ++k) {
+  for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
     if (std::fabs(L[static_cast<std::size_t>(k)]) < 1.0e-9f) {
       if (std::fabs(o[static_cast<std::size_t>(k)] -
                     c[static_cast<std::size_t>(k)]) >
@@ -161,14 +161,14 @@ bool segment_hits_box(const std::array<float, 3>& o,
 //! 1 = cube, 2 = slab, and the hit point.
 int closest_hit(const std::array<float, 3>& o, const std::array<float, 3>& L,
                 std::array<float, 3>& hit_pos) noexcept {
-  struct Candidate { int id; float t; };
+  struct Candidate { std::size_t id; float t; };
   Candidate best{0, 1.0e30f};
   const std::pair<const std::array<float, 3>*, const std::array<float, 3>*>
       boxes[2] = {{&kCubeCenter, &kCubeHalf}, {&kSlabCenter, &kSlabHalf}};
-  for (int b = 0; b < 2; ++b) {
+  for (std::size_t b = 0; b < static_cast<std::size_t>(2); ++b) {
     float tmin = 0.001f, tmax = 1.0e30f;
     bool hit = true;
-    for (int k = 0; k < 3; ++k) {
+    for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
       const float dk = L[static_cast<std::size_t>(k)];
       const float ok = o[static_cast<std::size_t>(k)];
       const float ck = (*boxes[static_cast<std::size_t>(b)].first)
@@ -188,7 +188,7 @@ int closest_hit(const std::array<float, 3>& o, const std::array<float, 3>& L,
       if (tmin > tmax) { hit = false; break; }
     }
     if (hit && tmin < best.t) {
-      best = {b + 1, tmin};
+      best = {b + 1U, tmin};
     }
   }
   if (best.id == 0) return 0;
@@ -276,7 +276,7 @@ std::vector<float> make_box_triangles(float hx, float hy, float hz) {
   std::vector<float> out;
   out.reserve(36U * 3U);
   for (const std::uint32_t vi : c) {
-    for (int k = 0; k < 3; ++k) {
+    for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
       out.push_back(((vi >> k) & 1U) != 0U ? h[k] : -h[k]);
     }
   }
@@ -586,7 +586,7 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
                           "/pt_pathtrace_leaf.rmiss.spv",
                           "/pt_pathtrace.rchit.spv",
                           "/pt_pathtrace_leaf.rchit.spv"};
-  for (int i = 0; i < 5; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(5); ++i) {
     std::string path = sd + files[i];
     FILE* f = std::fopen(path.c_str(), "rb");
     ASSERT_NE(f, nullptr) << path;
@@ -608,7 +608,7 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
       VK_SHADER_STAGE_RAYGEN_BIT_KHR, VK_SHADER_STAGE_MISS_BIT_KHR,
       VK_SHADER_STAGE_MISS_BIT_KHR, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
-  for (int i = 0; i < 5; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(5); ++i) {
     stages[i].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[i].stage = stage_bits[i];
     stages[i].module = mods[i];
@@ -819,7 +819,7 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
       const auto slab = simulate_pixel(static_cast<std::uint32_t>(slab_px),
                                        static_cast<std::uint32_t>(slab_py), f,
                                        false, right, up);
-      for (int c = 0; c < 3; ++c) {
+      for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
         sky_mean[static_cast<std::size_t>(c)] +=
             sky[static_cast<std::size_t>(c)] / static_cast<float>(kFrames);
         cube_mean[static_cast<std::size_t>(c)] +=
@@ -828,7 +828,7 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
             slab[static_cast<std::size_t>(c)] / static_cast<float>(kFrames);
       }
     }
-    for (int c = 0; c < 3; ++c) {
+    for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
       EXPECT_FLOAT_EQ(pixel(flat, sky_px, sky_py, c),
                       sky_mean[static_cast<std::size_t>(c)])
           << "sky probe channel " << c;
@@ -861,14 +861,14 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
       const auto mir = simulate_pixel(static_cast<std::uint32_t>(mir_px),
                                       static_cast<std::uint32_t>(mir_py), f,
                                       true, right, up);
-      for (int c = 0; c < 3; ++c) {
+      for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
         top_mean[static_cast<std::size_t>(c)] +=
             top[static_cast<std::size_t>(c)] / static_cast<float>(kFrames);
         mirror_mean[static_cast<std::size_t>(c)] +=
             mir[static_cast<std::size_t>(c)] / static_cast<float>(kFrames);
       }
     }
-    for (int c = 0; c < 3; ++c) {
+    for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
       EXPECT_FLOAT_EQ(pixel(bounce, ctop_px, ctop_py, c),
                       top_mean[static_cast<std::size_t>(c)])
           << "cube-top bounce probe channel " << c;
@@ -911,7 +911,7 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
   }
 
   // ---- Cleanup (move-then-destroy per the non-copyable handles) ---------------
-  for (int i = 0; i < 5; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(5); ++i) {
     if (mods[i] != VK_NULL_HANDLE) {
       vkDestroyShaderModule(ctx.device(), mods[i], nullptr);
     }

@@ -84,7 +84,7 @@ TEST(AnimationStateMachine, TransitionEasesWeightAtFadeRate) {
   m.tick(none, kDt);
   EXPECT_FLOAT_EQ(m.blended_weight(), 0.8333333f + 2.5f * kDt);
   // ~0.4 s at 2.5/s to settle; 30 more ticks must saturate exactly.
-  for (int i = 0; i < 30; ++i) m.tick(none, kDt);
+  for (std::size_t i = 0; i < static_cast<std::size_t>(30); ++i) m.tick(none, kDt);
   EXPECT_FLOAT_EQ(m.blended_weight(), 1.0f);
   EXPECT_FALSE(m.fading());
 }
@@ -116,7 +116,7 @@ TEST(AnimationStateMachine, ScriptedSequenceIsByteDeterministic) {
     auto m = make_walk_idle();
     std::string trace;
     trace.reserve(200 * 64);
-    for (int tick = 0; tick < 200; ++tick) {
+    for (std::size_t tick = 0; tick < static_cast<std::size_t>(200); ++tick) {
       // Press every 40th tick for 3 ticks: walk -> idle -> walk ...
       const bool held = (tick % 40) < 3;
       const FakeSnapshot snap{held ? "fade_toggle" : ""};

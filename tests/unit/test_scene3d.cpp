@@ -77,10 +77,10 @@ void make_view(const float eye[3], const float target[3], float* m16) {
 
 void mat4_multiply(const float* a, const float* b, float* out) {
   float r[16];
-  for (int col = 0; col < 4; ++col) {
-    for (int row = 0; row < 4; ++row) {
+  for (std::size_t col = 0; col < static_cast<std::size_t>(4); ++col) {
+    for (std::size_t row = 0; row < static_cast<std::size_t>(4); ++row) {
       float sum = 0.0f;
-      for (int k = 0; k < 4; ++k) sum += a[k * 4 + row] * b[col * 4 + k];
+      for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) sum += a[k * 4 + row] * b[col * 4 + k];
       r[col * 4 + row] = sum;
     }
   }

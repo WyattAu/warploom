@@ -1240,7 +1240,7 @@ using namespace gltf_detail;
           error, node_context + " must not define both matrix and TRS"));
     }
     if (has_matrix) {
-      for (int c = 0; c < 16; ++c) node.local[c] = node.matrix[c];
+      for (std::size_t c = 0; c < 16U; ++c) node.local[c] = node.matrix[c];
     } else {
       trs_matrix(t ? node.translation : nullptr,
                  r ? node.rotation : nullptr,

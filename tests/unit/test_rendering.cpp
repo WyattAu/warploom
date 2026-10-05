@@ -1006,7 +1006,7 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
   ASSERT_TRUE(staging0.is_ok());
   auto staging1 = ring.acquire(kTexBytes);
   ASSERT_TRUE(staging1.is_ok());
-  for (int t = 0; t < 2; ++t) {
+  for (std::size_t t = 0; t < static_cast<std::size_t>(2); ++t) {
     auto* dst = static_cast<std::uint32_t*>(t == 0 ? staging0.value().host_data
                                                    : staging1.value().host_data);
     for (std::size_t p = 0; p < static_cast<std::size_t>(kTexSize) * kTexSize; ++p) {
@@ -1029,7 +1029,7 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
 
   // Staging buffer image-copies need a staging-visible buffer handle; the
   // ring exposes its own buffer as the copy source.
-  for (int t = 0; t < 2; ++t) {
+  for (std::size_t t = 0; t < static_cast<std::size_t>(2); ++t) {
     ASSERT_EQ(vkCreateImage(context.device(), &image_info, nullptr, &images[t]), VK_SUCCESS);
     auto mem = allocator.bind_image(images[t], VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     ASSERT_TRUE(mem.is_ok());
@@ -1062,7 +1062,7 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     ASSERT_EQ(vkBeginCommandBuffer(upload_cmd, &begin), VK_SUCCESS);
-    for (int t = 0; t < 2; ++t) {
+    for (std::size_t t = 0; t < static_cast<std::size_t>(2); ++t) {
       // UNDEFINED -> TRANSFER_DST: the copy's destination layout requirement.
       VkImageMemoryBarrier to_transfer{};
       to_transfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -1088,7 +1088,7 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
     }
     // Transition both into shader read after the copies.
-    for (int t = 0; t < 2; ++t) {
+    for (std::size_t t = 0; t < static_cast<std::size_t>(2); ++t) {
       VkImageMemoryBarrier to_shader{};
       to_shader.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
       to_shader.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -1221,7 +1221,7 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
   ring.cleanup();
   manager.cleanup();
   vkDestroySampler(context.device(), sampler, nullptr);
-  for (int t = 0; t < 2; ++t) {
+  for (std::size_t t = 0; t < static_cast<std::size_t>(2); ++t) {
     if (views[t]) vkDestroyImageView(context.device(), views[t], nullptr);
     if (images[t]) vkDestroyImage(context.device(), images[t], nullptr);
     allocator.destroy_allocation(allocations[t]);
@@ -1570,7 +1570,7 @@ TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
   // proving the graphics pass consumed THIS frame's compute output. ---
   constexpr int kFrames = 2;
   std::uint64_t last_signalled = 0;
-  for (int frame = 0; frame < kFrames; ++frame) {
+  for (std::size_t frame = 0; frame < static_cast<std::size_t>(kFrames); ++frame) {
     async.begin();
     struct CompCtx {
       VkPipeline pipeline;
@@ -2061,7 +2061,7 @@ TEST(VulkanHardware, ParallelRecorderContentionStress) {
   ASSERT_EQ(vkCreateFence(context.device(), &fence_info, nullptr, &fence), VK_SUCCESS);
 
   constexpr int kWaves = 12;
-  for (int wave = 0; wave < kWaves; ++wave) {
+  for (std::size_t wave = 0; wave < static_cast<std::size_t>(kWaves); ++wave) {
     // Even waves: job-system workers. Odd waves: ad-hoc threads (fallback).
     recorder.set_job_system((wave % 2 == 0) ? &jobs : nullptr);
     auto secondaries = record_frame(wave);

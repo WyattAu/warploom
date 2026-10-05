@@ -92,10 +92,10 @@ void build_bar(float height, std::vector<float>& vertices,
   const float n[6][3] = {{0, 0, 1}, {0, 0, -1}, {1, 0, 0},
                          {-1, 0, 0}, {0, 1, 0},  {0, -1, 0}};
   const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-  for (int face = 0; face < 6; ++face) {
+  for (std::size_t face = 0; face < static_cast<std::size_t>(6); ++face) {
     const std::uint32_t base =
         static_cast<std::uint32_t>(vertices.size() / 11U);
-    for (int c = 0; c < 4; ++c) {
+    for (std::size_t c = 0; c < static_cast<std::size_t>(4); ++c) {
       vertices.push_back(f[face][c][0]);
       vertices.push_back(f[face][c][1]);
       vertices.push_back(f[face][c][2]);
@@ -110,7 +110,7 @@ void build_bar(float height, std::vector<float>& vertices,
     }
     // CW in view space -> CCW in framebuffer space (COUNTER_CLOCKWISE).
     const std::uint32_t tri[6] = {0, 2, 1, 0, 3, 2};
-    for (int k = 0; k < 6; ++k) indices.push_back(base + tri[k]);
+    for (std::size_t k = 0; k < static_cast<std::size_t>(6); ++k) indices.push_back(base + tri[k]);
   }
 }
 

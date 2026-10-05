@@ -90,8 +90,8 @@ TEST(LatencyTelemetry, WindowWrapsKeepingMostRecentSamples) {
   constexpr std::size_t kCap = 64;
   LatencyTracker<kCap> tracker;
   // Fill with small values, then push kCap large ones: only larges remain.
-  for (int i = 0; i < 100; ++i) tracker.record(1U);
-  for (int i = 0; i < static_cast<int>(kCap); ++i) tracker.record(100'000'000U);
+  for (std::size_t i = 0; i < static_cast<std::size_t>(100); ++i) tracker.record(1U);
+  for (std::size_t i = 0; i < static_cast<std::size_t>(static_cast<int>(kCap)); ++i) tracker.record(100'000'000U);
   ASSERT_EQ(tracker.window_count(), kCap);
   ASSERT_EQ(tracker.total_count(), 164U);
   const auto stats = tracker.percentiles();

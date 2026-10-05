@@ -77,10 +77,10 @@ SceneMatrix make_rotation_x(float radians) {
 
 SceneMatrix make_multiply(const SceneMatrix& a, const SceneMatrix& b) {
   SceneMatrix out = scene_identity_matrix();
-  for (int col = 0; col < 4; ++col) {
-    for (int row = 0; row < 4; ++row) {
+  for (std::size_t col = 0; col < static_cast<std::size_t>(4); ++col) {
+    for (std::size_t row = 0; row < static_cast<std::size_t>(4); ++row) {
       float sum = 0.0f;
-      for (int k = 0; k < 4; ++k) sum += a[k * 4 + row] * b[col * 4 + k];
+      for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k) sum += a[k * 4 + row] * b[col * 4 + k];
       out[col * 4 + row] = sum;
     }
   }
@@ -102,18 +102,18 @@ void build_bar(std::vector<float>& verts, std::vector<std::uint32_t>& idx,
   const float upper[4][3] = {{-0.2f, 0.0f, 0.0f}, {0.2f, 0.0f, 0.0f},
                              {0.2f, 1.0f, 0.0f}, {-0.2f, 1.0f, 0.0f}};
   verts.clear();
-  for (int i = 0; i < 4; ++i)
+  for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i)
     verts.insert(verts.end(), {lower[i][0], lower[i][1], lower[i][2],
                                1, 1, 1, 0, 0, 1, 0, 0});
-  for (int i = 0; i < 4; ++i)
+  for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i)
     verts.insert(verts.end(), {upper[i][0], upper[i][1], upper[i][2],
                                1, 1, 1, 0, 0, 1, 0, 0});
   idx = {0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7};
 
   skin.clear();
-  for (int i = 0; i < 4; ++i)
+  for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i)
     skin.insert(skin.end(), {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f});
-  for (int i = 0; i < 4; ++i)
+  for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i)
     skin.insert(skin.end(), {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f});
 }
 
@@ -121,7 +121,7 @@ void build_cube(std::vector<float>& verts, std::vector<std::uint32_t>& idx) {
   const float p[8][3] = {{-1, -1, -1}, {1, -1, -1}, {1, 1, -1}, {-1, 1, -1},
                          {-1, -1, 1},  {1, -1, 1},  {1, 1, 1},  {-1, 1, 1}};
   verts.clear();
-  for (int i = 0; i < 8; ++i)
+  for (std::size_t i = 0; i < static_cast<std::size_t>(8); ++i)
     verts.insert(verts.end(), {p[i][0], p[i][1], p[i][2],
                                1, 1, 1, 0, 0, 1, 0, 0});
   const std::uint32_t t[36] = {0, 3, 1, 1, 3, 2, 4, 5, 7, 5, 6, 7,

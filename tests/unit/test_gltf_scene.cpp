@@ -91,7 +91,7 @@ CubeFixture make_cube_gltf(const float color[3], const float factor[4],
     for (float component : p) (void)push_float(component);
   }
   const std::size_t color_offset = bin.size();
-  for (int i = 0; i < 8; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(8); ++i) {
     (void)push_float(color[0]);
     (void)push_float(color[1]);
     (void)push_float(color[2]);
@@ -104,7 +104,7 @@ CubeFixture make_cube_gltf(const float color[3], const float factor[4],
     (void)push_float(p[2] / length);
   }
   const std::size_t uv_offset = bin.size();
-  for (int i = 0; i < 8; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(8); ++i) {
     (void)push_float(0.0f);
     (void)push_float(0.0f);
   }
@@ -177,7 +177,7 @@ CubeFixture make_cube_gltf_textured(const char* name,
     for (float component : p) (void)push_float(component);
   }
   const std::size_t color_offset = bin.size();
-  for (int i = 0; i < 8; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(8); ++i) {
     (void)push_float(1.0f);
     (void)push_float(1.0f);
     (void)push_float(1.0f);
@@ -190,7 +190,7 @@ CubeFixture make_cube_gltf_textured(const char* name,
     (void)push_float(p[2] / length);
   }
   const std::size_t uv_offset = bin.size();
-  for (int i = 0; i < 8; ++i) {
+  for (std::size_t i = 0; i < static_cast<std::size_t>(8); ++i) {
     (void)push_float(0.0f);
     (void)push_float(0.0f);
   }
@@ -414,7 +414,7 @@ TwoCubeFixture make_two_cube_multimaterial_gltf(const std::string& red_uri,
   // normals, uvs, then uint16 indices — each cube its own view set.
   std::vector<std::size_t> pos_offsets, col_offsets, nrm_offsets, uv_offsets,
       idx_offsets;
-  for (int cube = 0; cube < 2; ++cube) {
+  for (std::size_t cube = 0; cube < static_cast<std::size_t>(2); ++cube) {
     const float x_offset = cube == 0 ? 0.0f : 2.5f;
     pos_offsets.push_back(bin.size());
     for (const auto& p : kCubePositions) {
@@ -423,7 +423,7 @@ TwoCubeFixture make_two_cube_multimaterial_gltf(const std::string& red_uri,
       (void)push_float(p[2]);
     }
     col_offsets.push_back(bin.size());
-    for (int i = 0; i < 8; ++i) {
+    for (std::size_t i = 0; i < static_cast<std::size_t>(8); ++i) {
       (void)push_float(1.0f);
       (void)push_float(1.0f);
       (void)push_float(1.0f);
@@ -437,7 +437,7 @@ TwoCubeFixture make_two_cube_multimaterial_gltf(const std::string& red_uri,
       (void)push_float(p[2] / length);
     }
     uv_offsets.push_back(bin.size());
-    for (int i = 0; i < 8; ++i) {
+    for (std::size_t i = 0; i < static_cast<std::size_t>(8); ++i) {
       (void)push_float(0.0f);
       (void)push_float(0.0f);
     }
