@@ -132,6 +132,5 @@ Known-broken, and must not be reported as working:
   56 `-Werror` diagnostics against ~270 warnings of debt. Until that debt is
   paid, the only verified configuration is `default` — which means memory safety
   is currently unverified by sanitizers.
-- GPU timestamp queries never resolve (`VK_NOT_READY`); see the roadmap.
 - A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystemsConcurrently`,
   roughly one full-suite run in five.

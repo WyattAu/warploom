@@ -2712,29 +2712,40 @@ void VulkanRenderer::resolve_gpu_timestamps(std::uint32_t slot) noexcept {
       timestamp_pool_ == VK_NULL_HANDLE || timestamp_period_ns_ <= 0.0f) {
     return;
   }
-  // KNOWN BUG: resolution has never succeeded on this path. Instrumenting it
-  // shows vkGetQueryPoolResults returning VK_NOT_READY on every attempt, even
-  // immediately after the slot's fence wait, so last_total_ns has always been
-  // 0 and queries_resolved has always been 0. The fence IS reset before reuse
-  // and IS passed to the submit, and the pool IS sized for six stamps per slot,
-  // so the obvious causes are ruled out. Not yet root-caused; do not present
-  // these numbers as measurements until queries_resolved > 0.
+  // Timing is resolved here, after this slot's completion wait, rather than at
+  // the top of begin_frame where it used to sit and raced the GPU.
   const std::uint32_t base = slot * kGpuStampsPerFrame;
   if (slot >= timestamp_valid_.size() || !timestamp_valid_[slot]) {
     timestamp_valid_[slot] = true;  // armed: written at record time this frame
     return;
   }
   std::uint64_t stamps[kGpuStampsPerFrame] = {};
-  // Deliberately no WAIT_BIT. A query whose submit never happened -- a slot
-  // not yet recorded into, or a frame that failed before submit -- would block
-  // the CPU forever, and that is exactly what happened when this was tried.
-  // Correctness has to come from resolving only once the frame's own
-  // completion is known, not from blocking here.
-  const VkResult result = vkGetQueryPoolResults(
-      device_, timestamp_pool_, base, kGpuStampsPerFrame, sizeof(stamps), stamps,
-      sizeof(std::uint64_t), VK_QUERY_RESULT_64_BIT);
-  if (result != VK_SUCCESS) {
-    return;  // VK_NOT_READY or device loss: keep the previous value
+  std::uint64_t availability[kGpuStampsPerFrame] = {};
+  // Queried ONE STAMP AT A TIME, deliberately.
+  //
+  // A range query returns VK_NOT_READY if ANY query in the range is
+  // unavailable, and two stamps are legitimately unwritten on a given frame --
+  // the H-Z boundary when occlusion is off, and any boundary belonging to a
+  // stage that was skipped. So the range query could never succeed, which is
+  // why timing here reported 0 for every frame: the call failed and the
+  // failure was swallowed.
+  //
+  // The per-query alternative, VK_QUERY_RESULT_WITH_AVAILABILITY_BIT, is the
+  // tidier API but needs Vulkan 1.2, which this engine does not target. Six
+  // one-query calls cost nothing at this point in the frame -- they run after
+  // the slot's completion wait, so every written stamp is already resident.
+  //
+  // No WAIT_BIT either: a query whose submit never happened would block the
+  // CPU forever, which is what happened when this was tried.
+  for (std::uint32_t i = 0; i < kGpuStampsPerFrame; ++i) {
+    std::uint64_t value = 0U;
+    const VkResult single = vkGetQueryPoolResults(
+        device_, timestamp_pool_, base + i, 1U, sizeof(value), &value,
+        sizeof(std::uint64_t), VK_QUERY_RESULT_64_BIT);
+    if (single == VK_SUCCESS) {
+      stamps[i] = value;
+      availability[i] = 1U;
+    }
   }
   // A stamp that did not land this frame (a pass that was skipped) reads 0 and
   // would otherwise subtract backwards. Each segment is emitted only when both
@@ -2742,8 +2753,11 @@ void VulkanRenderer::resolve_gpu_timestamps(std::uint32_t slot) noexcept {
   const auto ns = [this](std::uint64_t delta) {
     return static_cast<double>(delta) * static_cast<double>(timestamp_period_ns_);
   };
+  // Both endpoints must be present and ordered. A segment whose pass did not
+  // run reads 0, which is a different fact from "that pass took no time".
   const auto segment = [&](GpuSegment which, std::uint32_t from, std::uint32_t to) {
-    if (stamps[from] == 0U || stamps[to] < stamps[from]) return;
+    if (availability[from] == 0U || availability[to] == 0U) return;
+    if (stamps[to] < stamps[from]) return;
     gpu_timing_.segment_ns[static_cast<std::size_t>(which)] =
         ns(stamps[to] - stamps[from]);
   };
@@ -2753,8 +2767,9 @@ void VulkanRenderer::resolve_gpu_timestamps(std::uint32_t slot) noexcept {
   segment(GpuSegment::HZ, kStampAfterCompose, kStampAfterHZ);
   segment(GpuSegment::Present, kStampAfterHZ, kStampFrameEnd);
 
-  if (stamps[kStampFrameEnd] >= stamps[kStampFrameStart] &&
-      stamps[kStampFrameStart] != 0U) {
+  if (availability[kStampFrameStart] != 0U &&
+      availability[kStampFrameEnd] != 0U &&
+      stamps[kStampFrameEnd] >= stamps[kStampFrameStart]) {
     gpu_timing_.last_total_ticks =
         stamps[kStampFrameEnd] - stamps[kStampFrameStart];
     gpu_timing_.last_total_ns = ns(gpu_timing_.last_total_ticks);
