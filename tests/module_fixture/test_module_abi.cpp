@@ -2,6 +2,8 @@
 //! @brief Malformed fixture: full contract but declares ABI version 2 — the
 //!        host (ABI 1) must reject it with an explicit version error.
 
+#include "module_abi.h"
+
 #include <cstdint>
 
 extern "C" std::int32_t omnicpp_module_abi() { return 2; }

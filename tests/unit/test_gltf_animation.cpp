@@ -251,7 +251,7 @@ TEST(GltfAnimation, RestPoseSkinningReproducesBindPose) {
       reinterpret_cast<const std::uint8_t*>(m.bin.data()), m.bin.size(),
       &error);
   ASSERT_TRUE(result.is_ok()) << error;
-  auto doc = std::move(result.value());
+  auto doc = result.value();
 
   // Rest pose: global(j) * IBM(j) must be identity for every joint.
   std::vector<omnicpp::asset::GltfTransform> globals;
@@ -315,7 +315,7 @@ TEST(GltfAnimation, WalkCycleSamplingMatchesKeyframes) {
       reinterpret_cast<const std::uint8_t*>(m.bin.data()), m.bin.size(),
       &error);
   ASSERT_TRUE(result.is_ok()) << error;
-  auto doc = std::move(result.value());
+  auto doc = result.value();
   const auto& anim = doc.animations[0];
 
   // Every sampler is LINEAR; rotations/translations share the 5-key grid,
@@ -365,7 +365,7 @@ TEST(GltfAnimation, AnimationMovesTheMannequin) {
       reinterpret_cast<const std::uint8_t*>(m.bin.data()), m.bin.size(),
       &error);
   ASSERT_TRUE(result.is_ok()) << error;
-  auto doc = std::move(result.value());
+  auto doc = result.value();
   const auto anim = doc.animations[0];
 
   // Skinned foot position at rest vs mid-stride: the left foot must swing

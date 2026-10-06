@@ -63,15 +63,15 @@ struct DrawCmd {
   std::uint32_t first_instance;
 };
 
-std::uint32_t bits(float f) {
+[[maybe_unused]] std::uint32_t bits(float f) {
   std::uint32_t u;
   std::memcpy(&u, &f, 4U);
   return u;
 }
 
 
-void make_perspective(float fov_y, float aspect, float znear, float zfar,
-                      float* m16) {
+[[maybe_unused]] void make_perspective(float fov_y, float aspect,
+                                     float znear, float zfar, float* m16) {
   const float f = 1.0f / std::tan(fov_y * 0.5f);
   const float zn = 1.0f / (znear - zfar);
   m16[0] = f / aspect; m16[1] = 0; m16[2] = 0; m16[3] = 0;

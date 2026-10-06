@@ -55,7 +55,7 @@ struct CubeFixture {
 
 //! Build a self-contained single-cube glTF 2.0 document. `color` tints the
 //! COLOR_0 attribute; the material factor is fixed by `factor`.
-CubeFixture make_cube_gltf(const float color[3], const float factor[4],
+[[maybe_unused]] CubeFixture make_cube_gltf(const float color[3], const float factor[4],
                            const char* name) {
   constexpr float kPositions[8][3] = {
       {-1.0f, -1.0f, -1.0f}, {1.0f, -1.0f, -1.0f},
@@ -148,7 +148,7 @@ CubeFixture make_cube_gltf(const float color[3], const float factor[4],
 //! Single-cube glTF whose material additionally binds baseColorTexture 0 to an
 //! embedded PNG data URI. Vertex colors are white and the factor is opaque
 //! white, so any output colour must come from the decoded texture.
-CubeFixture make_cube_gltf_textured(const char* name,
+[[maybe_unused]] CubeFixture make_cube_gltf_textured(const char* name,
                                     const std::string& png_uri) {
   constexpr float kPositions[8][3] = {
       {-1.0f, -1.0f, -1.0f}, {1.0f, -1.0f, -1.0f},
@@ -229,7 +229,7 @@ CubeFixture make_cube_gltf_textured(const char* name,
 //! Column-major perspective-projection matrix matching the scene camera
 //! convention (vertical fov, z in [-1, 1] NDC after the depth mapping the
 //! engine's projection uses). Pure arithmetic — no Vulkan types involved.
-void make_perspective(float fov_y, float aspect, float znear, float zfar,
+[[maybe_unused]] void make_perspective(float fov_y, float aspect, float znear, float zfar,
                       SceneMatrix& m) {
   m.fill(0.0f);
   const float f = 1.0f / std::tan(fov_y * 0.5f);
@@ -242,7 +242,7 @@ void make_perspective(float fov_y, float aspect, float znear, float zfar,
 }
 
 //! Column-major translation matrix (translation lives in [12],[13],[14]).
-void make_translation(float x, float y, float z, SceneMatrix& m) {
+[[maybe_unused]] void make_translation(float x, float y, float z, SceneMatrix& m) {
   m = scene_identity_matrix();
   m[12] = x;
   m[13] = y;

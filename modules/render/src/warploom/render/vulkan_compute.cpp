@@ -18,8 +18,9 @@
 
 namespace warploom::render {
 
-void cmd_signal_event(VkCommandBuffer command_buffer, VkEvent event,
-                      std::uint32_t src_stage) {
+void cmd_signal_event([[maybe_unused]] VkCommandBuffer command_buffer,
+                      [[maybe_unused]] VkEvent event,
+                      [[maybe_unused]] std::uint32_t src_stage) {
 #ifdef OMNICPP_HAS_VULKAN
   OMNICPP_CONTRACT(event != VK_NULL_HANDLE);
   vkCmdSetEvent(command_buffer, event, src_stage);

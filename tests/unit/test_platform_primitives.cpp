@@ -35,14 +35,20 @@ TEST(ManualTimer, ElapsedIncreases) {
   omnicpp::core::ManualTimer timer;
   EXPECT_GE(timer.elapsed_ns(), 0);
   volatile int x = 0;
-  for (std::size_t i = 0; i < static_cast<std::size_t>(1000); ++i) x += i;
+  for (int i = 0; i < 1000; ++i) x += i;
+  // Reading x is what keeps the busy-work alive; the sum is not the point,
+  // the elapsed time is. 0..999 == 499500.
+  EXPECT_EQ(x, 499500);
   EXPECT_GT(timer.elapsed_ns(), 0);
 }
 
 TEST(ManualTimer, ResetReturnsToZero) {
   omnicpp::core::ManualTimer timer;
   volatile int x = 0;
-  for (std::size_t i = 0; i < static_cast<std::size_t>(1000); ++i) x += i;
+  for (int i = 0; i < 1000; ++i) x += i;
+  // Reading x is what keeps the busy-work alive; the sum is not the point,
+  // the elapsed time is. 0..999 == 499500.
+  EXPECT_EQ(x, 499500);
   timer.reset();
   EXPECT_GE(timer.elapsed_ns(), 0);
 }
@@ -50,7 +56,10 @@ TEST(ManualTimer, ResetReturnsToZero) {
 TEST(ManualTimer, ElapsedSecondsMatchesNs) {
   omnicpp::core::ManualTimer timer;
   volatile int x = 0;
-  for (std::size_t i = 0; i < static_cast<std::size_t>(1000); ++i) x += i;
+  for (int i = 0; i < 1000; ++i) x += i;
+  // Reading x is what keeps the busy-work alive; the sum is not the point,
+  // the elapsed time is. 0..999 == 499500.
+  EXPECT_EQ(x, 499500);
   const auto ns = timer.elapsed_ns();
   const auto s = timer.elapsed_seconds();
   EXPECT_NEAR(s, static_cast<double>(ns) / 1e9, 1e-3);
@@ -65,7 +74,10 @@ TEST(ScopedTimer, MeasuresElapsedNanoseconds) {
   {
     omnicpp::core::ScopedTimer timer(elapsed);
     volatile int x = 0;
-    for (std::size_t i = 0; i < static_cast<std::size_t>(1000); ++i) x += i;
+    for (int i = 0; i < 1000; ++i) x += i;
+  // Reading x is what keeps the busy-work alive; the sum is not the point,
+  // the elapsed time is. 0..999 == 499500.
+  EXPECT_EQ(x, 499500);
   }
   EXPECT_GT(elapsed, 0);
 }

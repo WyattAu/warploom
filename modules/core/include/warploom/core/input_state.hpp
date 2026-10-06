@@ -162,8 +162,14 @@ class VirtualInputDriver final : public InputDriver {
         held_axes_[event.name] = event.value;
         state.set_axis(event.name, event.value);
       } else {
+        // Exact, and deliberately so: a non-zero value means held. The sign
+        // is the writer's business, so `> 0.0F` would silently redefine a
+        // negative value as released. Do not "fix" this with a threshold.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfloat-equal"
         held_actions_[event.name] = event.value != 0.0f;
         state.set_action(event.name, event.value != 0.0f);
+#pragma GCC diagnostic pop
       }
       ++cursor_;
     }

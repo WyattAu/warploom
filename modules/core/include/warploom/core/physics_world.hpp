@@ -84,7 +84,7 @@ class PhysicsWorld final {
 
     // --- 1. Integration -------------------------------------------------
     for (PhysicsBody& b : bodies_) {
-      if (b.inverse_mass == 0.0f) continue;
+      if (b.inverse_mass <= 0.0F) continue;  // 0 == static
       b.velocity[1] += g * dt;
       b.position[0] += b.velocity[0] * dt;
       b.position[1] += b.velocity[1] * dt;
@@ -93,7 +93,7 @@ class PhysicsWorld final {
 
     // --- 2. Ground plane contacts (y = 0) -------------------------------
     for (PhysicsBody& b : bodies_) {
-      if (b.inverse_mass == 0.0f) continue;
+      if (b.inverse_mass <= 0.0F) continue;  // 0 == static
       if (b.position[1] - b.radius < 0.0f) {
         const float depth = b.radius - b.position[1];
         b.position[1] = b.radius;

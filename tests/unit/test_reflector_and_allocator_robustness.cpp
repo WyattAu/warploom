@@ -25,7 +25,7 @@ namespace {
 
 constexpr std::uint32_t kSpirvMagic = 0x07230203U;
 
-std::vector<std::uint32_t> load_shader_words(const char* path) {
+[[maybe_unused]] std::vector<std::uint32_t> load_shader_words(const char* path) {
   std::vector<std::uint32_t> words;
   std::FILE* file = std::fopen(path, "rb");
   if (!file) return words;

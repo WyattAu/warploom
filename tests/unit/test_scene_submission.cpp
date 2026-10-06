@@ -24,7 +24,7 @@ namespace {
 
 using omnicpp::render::SceneMatrix;
 
-void make_perspective(float fov_y, float aspect, float znear, float zfar,
+[[maybe_unused]] void make_perspective(float fov_y, float aspect, float znear, float zfar,
                       SceneMatrix& m) {
   m.fill(0.0f);
   const float f = 1.0f / std::tan(fov_y * 0.5f);
@@ -36,7 +36,7 @@ void make_perspective(float fov_y, float aspect, float znear, float zfar,
   m[14] = znear * zfar * zn;
 }
 
-void make_translation(float x, float y, float z, SceneMatrix& m) {
+[[maybe_unused]] void make_translation(float x, float y, float z, SceneMatrix& m) {
   m.fill(0.0f);
   m[0] = m[5] = m[10] = m[15] = 1.0f;
   m[12] = x;
@@ -44,7 +44,7 @@ void make_translation(float x, float y, float z, SceneMatrix& m) {
   m[14] = z;
 }
 
-void make_scale_rotation_y_translation(float angle, float x, float y, float z,
+[[maybe_unused]] void make_scale_rotation_y_translation(float angle, float x, float y, float z,
                                         SceneMatrix& m) {
   m.fill(0.0f);
   const float c = std::cos(angle);
@@ -63,7 +63,7 @@ void make_scale_rotation_y_translation(float angle, float x, float y, float z,
 //! Write a cube in the canonical eleven-float layout: position.xyz,
 //! color.rgb, normal.xyz (radial, so every face is lit from any direction),
 //! uv.xy.
-void write_cube(float* vertices, float r, float g, float b) {
+[[maybe_unused]] void write_cube(float* vertices, float r, float g, float b) {
   constexpr float positions[8][3] = {
       {-1.0f, -1.0f, -1.0f}, {1.0f, -1.0f, -1.0f},
       {1.0f, 1.0f, -1.0f}, {-1.0f, 1.0f, -1.0f},

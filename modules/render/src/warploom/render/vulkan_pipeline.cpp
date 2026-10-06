@@ -229,8 +229,8 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
     bool enable_depth_test,
     bool enable_depth_write,
     bool enable_backface_cull,
-    float depth_bias_slope,
-    bool dynamic_depth_bias) {
+    [[maybe_unused]] float depth_bias_slope,
+    [[maybe_unused]] bool dynamic_depth_bias) {
 #ifdef OMNICPP_HAS_VULKAN
   device_ = device;
   if (!device || !render_pass || !vertex_shader_ || !fragment_shader_) {
@@ -296,7 +296,9 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
   // vkCmdSetDepthBias for the shadow pass, and recording that command against
   // a pipeline that never declared VK_DYNAMIC_STATE_DEPTH_BIAS is a VUID and
   // leaves the rasterizer unbiased. Hence the explicit dynamic_depth_bias.
-  const bool has_dynamic_bias = depth_bias_slope != 0.0f || dynamic_depth_bias;
+  // A slope factor is non-negative, so 0 means "no bias" and `> 0.0F` is the
+  // same test without a float equality.
+  const bool has_dynamic_bias = depth_bias_slope > 0.0F || dynamic_depth_bias;
   VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT,
                                      VK_DYNAMIC_STATE_SCISSOR,
                                      VK_DYNAMIC_STATE_DEPTH_BIAS};

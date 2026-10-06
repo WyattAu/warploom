@@ -378,12 +378,13 @@ class JsonReader final {
       if (key == "frame_offset") {
         double v = 0.0;
         if (!r.expect(':', error) || !r.read_number(v, error)) return false;
-        if (v < 0.0 || v != std::floor(v) ||
-            v > static_cast<double>(UINT64_MAX)) {
+        std::uint64_t parsed_u64 = 0;
+        if (v < 0.0 ||
+            !::warploom::core::checked_double_to_uint64(v, parsed_u64)) {
           r.fail(error, "frame_offset must be a non-negative integer");
           return false;
         }
-        sample.frame_offset = static_cast<std::uint64_t>(v);
+        sample.frame_offset = parsed_u64;
         seen_offset = true;
       } else if (key == "value") {
         if (!r.expect(':', error)) return false;
@@ -446,12 +447,13 @@ class JsonReader final {
     if (key == "id") {
       double v = 0.0;
       if (!r.expect(':', error) || !r.read_number(v, error)) return false;
-      if (v < 1.0 || v != std::floor(v) ||
-          v > static_cast<double>(UINT64_MAX)) {
+      std::uint64_t parsed_u64 = 0;
+      if (v < 1.0 ||
+          !::warploom::core::checked_double_to_uint64(v, parsed_u64)) {
         r.fail(error, "clip id must be a positive integer");
         return false;
       }
-      clip.id = static_cast<std::uint64_t>(v);
+      clip.id = parsed_u64;
       seen_id = true;
     } else if (key == "name") {
       if (!r.expect(':', error) || !r.read_string(clip.name, error)) {
@@ -461,22 +463,24 @@ class JsonReader final {
     } else if (key == "start_frame") {
       double v = 0.0;
       if (!r.expect(':', error) || !r.read_number(v, error)) return false;
-      if (v < 0.0 || v != std::floor(v) ||
-          v > static_cast<double>(UINT64_MAX)) {
+      std::uint64_t parsed_u64 = 0;
+      if (v < 0.0 ||
+          !::warploom::core::checked_double_to_uint64(v, parsed_u64)) {
         r.fail(error, "start_frame must be a non-negative integer");
         return false;
       }
-      clip.start_frame = static_cast<std::uint64_t>(v);
+      clip.start_frame = parsed_u64;
       seen_start = true;
     } else if (key == "length_frames") {
       double v = 0.0;
       if (!r.expect(':', error) || !r.read_number(v, error)) return false;
-      if (v < 0.0 || v != std::floor(v) ||
-          v > static_cast<double>(UINT64_MAX)) {
+      std::uint64_t parsed_u64 = 0;
+      if (v < 0.0 ||
+          !::warploom::core::checked_double_to_uint64(v, parsed_u64)) {
         r.fail(error, "length_frames must be a non-negative integer");
         return false;
       }
-      clip.length_frames = static_cast<std::uint64_t>(v);
+      clip.length_frames = parsed_u64;
       seen_length = true;
     } else if (key == "tracks") {
       if (!r.expect(':', error) || !r.expect('{', error)) return false;
@@ -506,12 +510,13 @@ class JsonReader final {
               if (!r.expect(':', error) || !r.read_number(v, error)) {
                 return false;
               }
-              if (v < 0.0 || v != std::floor(v) ||
-                  v > static_cast<double>(UINT64_MAX)) {
+              std::uint64_t parsed_u64 = 0;
+              if (v < 0.0 ||
+                  !::warploom::core::checked_double_to_uint64(v, parsed_u64)) {
                 r.fail(error, "track object_id must be a non-negative integer");
                 return false;
               }
-              track.object_id = static_cast<std::uint64_t>(v);
+              track.object_id = parsed_u64;
               seen_oid = true;
             } else if (tk == "property") {
               if (!r.expect(':', error) ||
@@ -620,6 +625,11 @@ class JsonReader final {
 // SceneDocument
 // ============================================================================
 
+// File-local JSON readers. Intended file-local, but they had external
+// linkage and nothing declared them, which is what -Wmissing-declarations
+// flagged. Wrapping them gives the internal linkage they were written for.
+namespace {
+
 //! Reads one PropValue in BARE form (the node-graph JSON dialect: untagged
 //! numbers/bools/strings/[x,y,z] arrays — machine-written by to_json).
 [[nodiscard]] bool read_bare_prop_value(JsonReader& r, PropValue& out,
@@ -694,12 +704,13 @@ class JsonReader final {
               if (!r.expect(':', error)) return false;
               double v = 0.0;
               if (!r.read_number(v, error)) return false;
-              if (v < 1.0 || v != std::floor(v) ||
-                  v > static_cast<double>(UINT64_MAX)) {
+              std::uint64_t parsed_u64 = 0;
+              if (v < 1.0 ||
+                  !::warploom::core::checked_double_to_uint64(v, parsed_u64)) {
                 r.fail(error, "node id must be a positive integer");
                 return false;
               }
-              id = static_cast<std::uint64_t>(v);
+              id = parsed_u64;
               seen_id = true;
             } else if (nkey == "type") {
               if (!r.expect(':', error) || !r.read_string(type, error)) {
@@ -796,12 +807,13 @@ class JsonReader final {
               if (!r.expect(':', error)) return false;
               double v = 0.0;
               if (!r.read_number(v, error)) return false;
-              if (v < 1.0 || v != std::floor(v) ||
-                  v > static_cast<double>(UINT64_MAX)) {
+              std::uint64_t parsed_u64 = 0;
+              if (v < 1.0 ||
+                  !::warploom::core::checked_double_to_uint64(v, parsed_u64)) {
                 r.fail(error, "link from-node must be a positive integer");
                 return false;
               }
-              from = static_cast<std::uint64_t>(v);
+              from = parsed_u64;
               seen_from = true;
             } else if (lkey == "out") {
               if (!r.expect(':', error) || !r.read_string(out_pin, error)) {
@@ -812,12 +824,13 @@ class JsonReader final {
               if (!r.expect(':', error)) return false;
               double v = 0.0;
               if (!r.read_number(v, error)) return false;
-              if (v < 1.0 || v != std::floor(v) ||
-                  v > static_cast<double>(UINT64_MAX)) {
+              std::uint64_t parsed_u64 = 0;
+              if (v < 1.0 ||
+                  !::warploom::core::checked_double_to_uint64(v, parsed_u64)) {
                 r.fail(error, "link to-node must be a positive integer");
                 return false;
               }
-              to = static_cast<std::uint64_t>(v);
+              to = parsed_u64;
               seen_to = true;
             } else if (lkey == "in") {
               if (!r.expect(':', error) || !r.read_string(in_pin, error)) {
@@ -892,12 +905,13 @@ class JsonReader final {
       const char* first = key.c_str();
       const char* last = first + key.size();
       const auto [ptr, ec] = std::from_chars(first, last, v);
-      if (ec != std::errc{} || ptr != last || v < 1.0 || v != std::floor(v) ||
-          v > static_cast<double>(UINT64_MAX)) {
+      std::uint64_t parsed_u64 = 0;
+      if (ec != std::errc{} || ptr != last || v < 1.0 ||
+          !::warploom::core::checked_double_to_uint64(v, parsed_u64)) {
         r.fail(error, "node_layout key must be a positive integer id");
         return false;
       }
-      id = static_cast<std::uint64_t>(v);
+      id = parsed_u64;
     }
     if (!r.expect(':', error) || !r.expect('[', error)) return false;
     std::pair<double, double> xy{};
@@ -918,6 +932,9 @@ class JsonReader final {
     if (!r.expect(',', error)) return false;
   }
 }
+
+}  // namespace
+
 
 // ============================================================================
 // SceneDocument (from_json)
@@ -1277,12 +1294,13 @@ bool SceneDocument::from_json(std::string_view text,
       }
       double v = 0.0;
       if (!r.expect(':', error) || !r.read_number(v, error)) return false;
-      if (v < 1.0 || v != std::floor(v) ||
-          v > static_cast<double>(UINT64_MAX)) {
+      std::uint64_t parsed_u64 = 0;
+      if (v < 1.0 ||
+          !::warploom::core::checked_double_to_uint64(v, parsed_u64)) {
         r.fail(error, "next_object_id must be a positive integer");
         return false;
       }
-      parsed.next_object_id = static_cast<std::uint64_t>(v);
+      parsed.next_object_id = parsed_u64;
       seen_next_id = true;
     } else if (key == "objects") {
       if (seen_objects) {
@@ -1314,12 +1332,13 @@ bool SceneDocument::from_json(std::string_view text,
               if (!r.expect(':', error) || !r.read_number(v, error)) {
                 return false;
               }
-              if (v < 1.0 || v != std::floor(v) ||
-                  v > static_cast<double>(UINT64_MAX)) {
+              std::uint64_t parsed_u64 = 0;
+              if (v < 1.0 ||
+                  !::warploom::core::checked_double_to_uint64(v, parsed_u64)) {
                 r.fail(error, "object id must be a positive integer");
                 return false;
               }
-              object.id = static_cast<std::uint64_t>(v);
+              object.id = parsed_u64;
               seen_id = true;
             } else if (okey == "type_id") {
               double v = 0.0;
@@ -1397,12 +1416,13 @@ bool SceneDocument::from_json(std::string_view text,
       }
       double v = 0.0;
       if (!r.expect(':', error) || !r.read_number(v, error)) return false;
-      if (v < 1.0 || v != std::floor(v) ||
-          v > static_cast<double>(UINT64_MAX)) {
+      std::uint64_t parsed_u64 = 0;
+      if (v < 1.0 ||
+          !::warploom::core::checked_double_to_uint64(v, parsed_u64)) {
         r.fail(error, "next_clip_id must be a positive integer");
         return false;
       }
-      parsed.next_clip_id = static_cast<std::uint64_t>(v);
+      parsed.next_clip_id = parsed_u64;
       seen_next_clip_id = true;
     } else if (key == "clips") {
       if (seen_clips) {

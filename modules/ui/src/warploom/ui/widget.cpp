@@ -48,8 +48,9 @@ void measure_leaf(Widget& w, const TextMetrics& metrics) {
   if (w.kind != WidgetKind::Container) {
     pref_h += metrics.line_height;
   }
-  w.w = (w.fixed_w != 0.0F) ? w.fixed_w : pref_w;
-  w.h = (w.fixed_h != 0.0F) ? w.fixed_h : pref_h;
+  // fixed_* is a non-negative dimension: 0 means auto.
+  w.w = (w.fixed_w > 0.0F) ? w.fixed_w : pref_w;
+  w.h = (w.fixed_h > 0.0F) ? w.fixed_h : pref_h;
 }
 
 //! Bottom-up: childless widgets measure from content; widgets WITH children
@@ -85,10 +86,10 @@ void measure(WidgetTree& tree, std::uint32_t handle,
     }
     const float pref_w = vertical ? cross_extent : main_extent;
     const float pref_h = vertical ? main_extent : cross_extent;
-    w.w = (w.fixed_w != 0.0F)
+    w.w = (w.fixed_w > 0.0F)
               ? w.fixed_w
               : pref_w + 2.0F * w.padding;
-    w.h = (w.fixed_h != 0.0F)
+    w.h = (w.fixed_h > 0.0F)
               ? w.fixed_h
               : pref_h + 2.0F * w.padding;
   } else {
@@ -157,10 +158,12 @@ void arrange(WidgetTree& tree, std::uint32_t handle,
 
     // Fixed size wins on its own axis; flex applies only to an auto main
     // axis; stretch applies only to an auto cross axis.
+    // Dimensions are non-negative, so 0 means "auto" and `> 0.0F` is the
+    // same test as `!= 0.0F` without a float equality.
     const bool main_fixed =
-        vertical ? (child.fixed_h != 0.0F) : (child.fixed_w != 0.0F);
+        vertical ? (child.fixed_h > 0.0F) : (child.fixed_w > 0.0F);
     const bool cross_fixed =
-        vertical ? (child.fixed_w != 0.0F) : (child.fixed_h != 0.0F);
+        vertical ? (child.fixed_w > 0.0F) : (child.fixed_h > 0.0F);
 
     // Main axis: fixed > flex share > preferred (already in w/h).
     float main = vertical ? child.h : child.w;

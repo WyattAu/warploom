@@ -72,7 +72,13 @@ void XcbKeyMouseTranslator::apply(InputState& state) {
   // Arrows mirror WASD in both the axes and the actions.
   float mx = ((d || right) ? 1.0f : 0.0f) - ((a || left) ? 1.0f : 0.0f);
   float my = (w ? 1.0f : 0.0f) - (s ? 1.0f : 0.0f);
+  // Exact: mx/my are each built from a ternary as exactly -1.0f, 0.0f or
+  // 1.0f, so a non-zero test is exact and a tolerance would only blur whether
+  // the stick is centred. Do not "fix" this with an epsilon.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfloat-equal"
   if (mx != 0.0f || my != 0.0f) {
+#pragma GCC diagnostic pop
     const float len = std::sqrt(mx * mx + my * my);
     if (len > 1.0f) {
       mx /= len;

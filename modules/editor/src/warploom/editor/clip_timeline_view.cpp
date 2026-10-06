@@ -169,7 +169,9 @@ void ClipTimelineView::sync(ui::WidgetTree& tree,
 ClipTimelineView::ClipHit ClipTimelineView::clip_at(float px,
                                                     float py) const {
   ClipHit hit;
-  if (rows_.empty() || tw_ == 0.0F) {
+  // tw_ is a width: non-negative, and 0 means "not laid out yet", so `<= 0.0F`
+  // selects exactly the same values without a float equality.
+  if (rows_.empty() || tw_ <= 0.0F) {
     return hit;
   }
   // One block per row, rows in ascending id order with disjoint y-bands —
@@ -262,7 +264,7 @@ bool ClipTimelineView::block_rect(std::uint64_t clip_id, float& x, float& y,
 
 bool ClipTimelineView::playhead_rect(float& x, float& y, float& w,
                                      float& h) const {
-  if (root_ == ui::kInvalidWidget || tw_ == 0.0F) {
+  if (root_ == ui::kInvalidWidget || tw_ <= 0.0F) {  // tw_ 0 = not laid out
     return false;
   }
   x = frame_to_x(playhead_frame_) - kPlayheadW * 0.5F;

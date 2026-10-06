@@ -33,13 +33,13 @@ constexpr std::uint32_t kSphereOffset = 8U;
 constexpr std::uint32_t kCompactOffset = kSphereOffset + kCullCount * 4U;
 constexpr std::uint32_t kCullWords = kCompactOffset + kCullCount;
 
-std::uint32_t bits(float value) {
+[[maybe_unused]] std::uint32_t bits(float value) {
   std::uint32_t out = 0;
   std::memcpy(&out, &value, sizeof(out));
   return out;
 }
 
-void make_perspective(float fov_y, float aspect, float znear, float zfar,
+[[maybe_unused]] void make_perspective(float fov_y, float aspect, float znear, float zfar,
                       float* m16) {
   const float f = 1.0f / std::tan(fov_y * 0.5f);
   const float zn = 1.0f / (znear - zfar);

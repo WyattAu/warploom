@@ -196,7 +196,7 @@ public:
     while (input_.read_byte(b)) {
       if (b != 0xFF) {
         cache_ = (cache_ << 8U) | b;
-        bits_ += 8U;
+        bits_ += 8;
         return true;
       }
       // 0xFF followed by 0x00 is a stuffed data byte.
@@ -207,7 +207,7 @@ public:
       }
       if (next == 0x00) {
         cache_ = (cache_ << 8U) | 0xFFU;
-        bits_ += 8U;
+        bits_ += 8;
         return true;
       }
       // next is a marker or another fill 0xFF; consume fill bytes, then the

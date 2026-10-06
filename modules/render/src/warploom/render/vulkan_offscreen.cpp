@@ -12,7 +12,8 @@ VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(); }
 ::warploom::core::Result<void> VulkanOffscreenTarget::create(
     VkDevice device, VkPhysicalDevice physical_device,
     VkFormat format, std::uint32_t width, std::uint32_t height,
-    VulkanMemoryAllocator* allocator, VkImageUsageFlags extra_image_usage) {
+    VulkanMemoryAllocator* allocator,
+    [[maybe_unused]] VkImageUsageFlags extra_image_usage) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !physical_device || format == VK_FORMAT_UNDEFINED || width == 0 || height == 0) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
@@ -214,7 +215,7 @@ VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(); }
 }
 
 ::warploom::core::Result<void> VulkanOffscreenTarget::create_render_pass(
-    VkDevice device, VkImageLayout color_final_layout) {
+    VkDevice device, [[maybe_unused]] VkImageLayout color_final_layout) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !image_ || render_pass_) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);

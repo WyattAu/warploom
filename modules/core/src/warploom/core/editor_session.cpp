@@ -139,6 +139,8 @@ void append_float(std::string& out, float value) {
 // G3: timeline clips — armed-record/playback tick + disarm points
 // ============================================================================
 
+// File-local by intent; external linkage is what -Wmissing-declarations flags.
+namespace {
 //! Splits "property" or "property.<x|y|z>" (the M10 axis-suffix form).
 //! axis = -1 for the whole-property form.
 void split_axis_property(const std::string& property, std::string& base,
@@ -154,6 +156,9 @@ void split_axis_property(const std::string& property, std::string& base,
   base = property;
   axis = -1;
 }
+
+}  // namespace
+
 
 namespace {
 //! Append a double in a form that round-trips EXACTLY. Physics state has to

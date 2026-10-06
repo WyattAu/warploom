@@ -80,7 +80,12 @@ TEST(NumericCast, RejectsIntegersPastTwoPow53) {
   // Accepting it would decode a tick the writer never wrote.
   std::uint64_t out = 3;
   const double just_past = 9007199254740992.0 + 2.0;
+  // Exact: establishing that the double is integral is the premise of the
+  // test, so an approximate comparison would make the assertion meaningless.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfloat-equal"
   EXPECT_TRUE(std::floor(just_past) == just_past) << "double really is integral";
+#pragma GCC diagnostic pop
   EXPECT_FALSE(checked_double_to_uint64(just_past, out));
   EXPECT_EQ(out, 3U);
 }

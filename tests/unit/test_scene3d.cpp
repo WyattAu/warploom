@@ -35,13 +35,13 @@ namespace {
 
 constexpr std::uint32_t kSize = 256U;
 
-std::uint32_t bits(float f) {
+[[maybe_unused]] std::uint32_t bits(float f) {
   std::uint32_t u;
   std::memcpy(&u, &f, 4U);
   return u;
 }
 
-void make_perspective(float fov_y, float aspect, float znear, float zfar,
+[[maybe_unused]] void make_perspective(float fov_y, float aspect, float znear, float zfar,
                       float* m16) {
   const float f = 1.0f / std::tan(fov_y * 0.5f);
   const float zn = 1.0f / (znear - zfar);
@@ -53,7 +53,7 @@ void make_perspective(float fov_y, float aspect, float znear, float zfar,
 
 //! Camera looking at `target` from `eye` (right-handed, -z forward view
 //! space). Column-major.
-void make_view(const float eye[3], const float target[3], float* m16) {
+[[maybe_unused]] void make_view(const float eye[3], const float target[3], float* m16) {
   float fwd[3] = {target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]};
   const float fl = std::sqrt(fwd[0]*fwd[0] + fwd[1]*fwd[1] + fwd[2]*fwd[2]);
   for (float& v : fwd) v /= fl;
@@ -75,7 +75,7 @@ void make_view(const float eye[3], const float target[3], float* m16) {
   m16[15] = 1.0f;
 }
 
-void mat4_multiply(const float* a, const float* b, float* out) {
+[[maybe_unused]] void mat4_multiply(const float* a, const float* b, float* out) {
   float r[16];
   for (std::size_t col = 0; col < static_cast<std::size_t>(4); ++col) {
     for (std::size_t row = 0; row < static_cast<std::size_t>(4); ++row) {

@@ -590,7 +590,7 @@ const DescriptorSetLayoutInfo* VulkanDescriptorManager::find_layout(
 ::warploom::core::Result<void> VulkanDescriptorManager::write_image(
     VkDescriptorSet set, std::uint32_t binding, VkDescriptorType type,
     VkSampler sampler, VkImageView view, VkImageLayout layout,
-    std::uint32_t array_element) {
+    [[maybe_unused]] std::uint32_t array_element) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device_ || !set || !view) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);

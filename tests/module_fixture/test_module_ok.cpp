@@ -2,6 +2,8 @@
 //! @brief Well-formed script-module fixture (real .so for the dlopen path).
 //! Contract: warploom_module_abi / warploom_module_name / warploom_module_tick.
 
+#include "module_abi.h"
+
 #include <cstdint>
 
 extern "C" std::int32_t warploom_module_abi() { return 1; }

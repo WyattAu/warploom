@@ -41,7 +41,7 @@ struct DrawCmd {
 constexpr std::uint32_t kSphereOffset = 26U;  // word index of spheres in binding 0
 
 //! Perspective projection, Vulkan clip space (y down, z into [0,1]).
-void make_perspective(float fov_y, float aspect, float znear, float zfar,
+[[maybe_unused]] void make_perspective(float fov_y, float aspect, float znear, float zfar,
                       float* m16) {
   const float f = 1.0f / std::tan(fov_y * 0.5f);
   const float zn = 1.0f / (znear - zfar);
@@ -60,7 +60,7 @@ void make_perspective(float fov_y, float aspect, float znear, float zfar,
 //!   right inside: x <= -z*(r/znear)  (z<0) -> plane (-znear, 0, -r)
 //!   top   inside: y >= z*(t/znear)   (z<0) -> plane (0, znear, -t)
 //!   bottom inside: y <= -z*(t/znear) (z<0) -> plane (0, -znear, -t)
-void make_frustum_planes(float fov_y, float aspect, float znear, float zfar,
+[[maybe_unused]] void make_frustum_planes(float fov_y, float aspect, float znear, float zfar,
                          float* p24) {
   const float t = znear * std::tan(fov_y * 0.5f);  // near half-height
   const float r = t * aspect;                       // near half-width

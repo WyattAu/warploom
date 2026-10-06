@@ -54,19 +54,19 @@ constexpr std::uint32_t kLodOff = kSphereOff + 4U * kInstances;
 constexpr std::uint32_t kComp0Off = kLodOff + kInstances;
 constexpr std::uint32_t kCullWords = kComp0Off + kInstances;
 
-std::uint32_t bits(float f) {
+[[maybe_unused]] std::uint32_t bits(float f) {
   std::uint32_t u;
   std::memcpy(&u, &f, 4U);
   return u;
 }
 
-float unbits(std::uint32_t u) {
+[[maybe_unused]] float unbits(std::uint32_t u) {
   float f;
   std::memcpy(&f, &u, 4U);
   return f;
 }
 
-void make_perspective(float fov_y, float aspect, float znear, float zfar,
+[[maybe_unused]] void make_perspective(float fov_y, float aspect, float znear, float zfar,
                       float* m16) {
   const float f = 1.0f / std::tan(fov_y * 0.5f);
   const float zn = 1.0f / (znear - zfar);

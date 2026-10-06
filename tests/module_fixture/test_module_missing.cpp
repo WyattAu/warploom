@@ -2,6 +2,8 @@
 //! @brief Malformed fixture (LEGACY family): exports abi + name but NOT the tick symbol —
 //!        the host must reject it with a precise "missing symbol" error.
 
+#include "module_abi.h"
+
 #include <cstdint>
 
 extern "C" std::int32_t omnicpp_module_abi() { return 1; }

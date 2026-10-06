@@ -541,8 +541,11 @@ struct PbrFrameRecordCtx {
   bool shadow;
 };
 
-void pbr_frame_render_cb(VkCommandBuffer cb, const GraphPass& pass,
-                         void* user_data) {
+// Maybe unused: the only reference is the execute_graph call inside
+// #ifdef OMNICPP_HAS_VULKAN, and the sanitizer presets build with Vulkan off.
+[[maybe_unused]] void pbr_frame_render_cb(VkCommandBuffer cb,
+                                         const GraphPass& pass,
+                                         void* user_data) {
   auto& ctx = *static_cast<PbrFrameRecordCtx*>(user_data);
   if (ctx.shadow) {
     (void)ctx.self->record_shadow_pre_pass(cb, *ctx.scene, pass.width,

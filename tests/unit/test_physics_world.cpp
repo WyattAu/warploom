@@ -108,7 +108,9 @@ TEST(PhysicsWorld, StaticBodyImmovable) {
 
   w.step(kDt);
   EXPECT_FLOAT_EQ(w.body(0).position[0], 0.0f);   // wall never moves
-  EXPECT_TRUE(w.body(0).velocity[0] == 0.0f);
+  // Exact, and the point of the test: a static body is never integrated, so its
+  // velocity must stay bit-exactly zero rather than merely near it.
+  EXPECT_FLOAT_EQ(w.body(0).velocity[0], 0.0f);
   EXPECT_LT(w.body(1).position[0], -1.4f);        // ball pushed back out
   // e = 0.4 default: the ball reflects with speed 5 * 0.4 = 2.0 away from
   // the wall (velocity flips to -X).

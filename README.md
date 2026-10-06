@@ -117,21 +117,34 @@ that it does not:
 The Vulkan CI leg is Mesa lavapipe, which has no ray-tracing extensions, so
 every RT test skips there. Hardware RT is verified locally, not in CI.
 
-### Known broken: the sanitizer and headless presets
+### Sanitizer and headless presets
 
-`headless-debug`, `asan-ubsan` and `tsan` do not currently compile. They
-inherit `WARPLOOM_WARNINGS_AS_ERRORS=ON`, and both clang and GCC report zero in `default`, but the sanitizer presets' Debug/Vulkan-off configuration still carries 124
-(`-Wfloat-equal`, `-Wsign-conversion`, `-Wswitch-enum`, `-Wshadow`), so each
-fails with 56 `-Werror` diagnostics. `asan-ubsan` and `tsan` were worse: their
-binary dirs carried a `CPM_DIRECTORY` cache entry pointing at the location CPM
-used before it was vendored in-tree, so the vendored script treated it as a
-foreign newer version and returned without ever defining `CPMAddPackage`. That
-made configure fail outright, permanently, for anyone whose build dir predated
-vendoring. `cmake/CPM.cmake` now detects and clears the stale pointer, so old
-build dirs heal themselves.
+All four presets build warning-free on both clang and GCC, and the sanitizer
+presets are now actually run rather than merely configured.
 
-Until the warning debt is paid down, the only verified configuration is the
-`default` preset.
+`asan-ubsan` (Debug, `WARPLOOM_USE_VULKAN=OFF`) reports 0 AddressSanitizer
+diagnostics, 0 UndefinedBehaviorSanitizer diagnostics and 0 leaks across 540
+unit tests plus the 39 editor, 10 core, 19 ui and 10 runtime suites. `tsan`
+reports 0 data races over the same 540 tests, which is the first real
+verification of the job system's concurrency claims. `headless-debug` builds
+clean and is what CI's live-proof job uses.
+
+Reaching that took paying every warning in a configuration the default preset
+never compiles, which is worth knowing: a clean build in one configuration is
+not a clean build. It also turned up two memory-safety defects that no clang
+warning had reported -- a dangling pointer in the property registry and a null
+dereference in the latency telemetry -- and a logic bug in `default_registry()`
+where each `register_type` call overwrote the previous success flag, directly
+under a comment claiming every registration was checked.
+
+`asan-ubsan` and `tsan` had a second problem: their binary directories carried
+a `CPM_DIRECTORY` cache entry pointing at the location CPM used before it was
+vendored in-tree, so the vendored script treated it as a foreign newer version
+and returned without ever defining `CPMAddPackage`. That made configure fail
+outright for anyone whose build directory predated vendoring. `cmake/CPM.cmake`
+now detects and clears the stale pointer, so old build directories heal
+themselves.
+
 
 ## Layout
 

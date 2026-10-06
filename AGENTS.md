@@ -126,16 +126,11 @@ Nothing is claimed without these, on the `default` preset:
 - viewport configurations (hdr, bloom, rt+bloom, no-hdr, node editor): clean
 - pixel A/B against the previous commit where behaviour should be unchanged
 
-Known-broken, and must not be reported as working:
-
-- `headless-debug`, `asan-ubsan` and `tsan` configure but do not **compile**:
-  they inherit `WARPLOOM_WARNINGS_AS_ERRORS=ON` and the tree carries warning
-  debt. `-Wunused-result` is paid (86 -> 0, and it hid a deadlock); the
-  `-Wsign-conversion` is paid too (104 -> 0). GoogleTest is built from source
-  here, so its own TUs are compiled with our flags; warnings from it are
-  relaxed per-target (`-w`) because they are not actionable and they mask ours.
-  Both clang and GCC are at ZERO in the default configuration, reached in two
-  stages. The second stage is the one worth remembering: clang hit zero first,
+All four presets build warning-free on both compilers. `-Wunused-result` is
+  paid (86 -> 0, and it hid a deadlock) and so is `-Wsign-conversion`
+  (104 -> 0). GoogleTest is built from source here, so its own TUs are compiled
+  with our flags; warnings from it are relaxed per-target (`-w`) because they
+  are not actionable and they mask ours. The second stage is the one worth remembering: clang hit zero first,
   and a separate `-DCMAKE_CXX_COMPILER=g++` probe then reported 203 warnings
   clang never emitted. A "warnings are clean" claim measured on one compiler
   is the same mistake as a correctness claim measured at one size.
@@ -148,25 +143,38 @@ Known-broken, and must not be reported as working:
   directly under a comment claiming "every registration is checked". The four
   `all_ok` reads GCC could not see through are now `&& all_ok`.
 
-  Still open, and this is the honest status: the sanitizer presets build a
-  different tree (`WARPLOOM_USE_VULKAN=OFF`, Debug) and that configuration
-  still carries 124 GCC warnings under
-  `-DWARPLOOM_WARNINGS_AS_ERRORS=OFF` -- 60 `-Wfloat-equal`, 29 unused
-  variables, 12 `-Wmissing-declarations`, 8 unused parameters, 11 sign or
-  value conversions, 3 `-Wredundant-move`. So `asan-ubsan` and `tsan` still
-  do not build and memory safety is still unverified by sanitizers. The
-  clang campaign that reached zero also paid
-  `-Wunused-result` (86, hid a deadlock), `-Wsign-conversion` (104),
-  `-Wshorten-64-to-32` (24), `-Wdouble-promotion` (37),
-  `-Wmissing-field-initializers` (21), `-Wunused-variable` (23),
-  `-Wshadow` (10), `-Wold-style-cast` (9) and `-Wunused-function` (7), and it
-  found real bugs on the way: an uninitialised `tlas_capacity` sum, a
-  `switch` with no default and no trailing return in `bridge_control_command`,
-  a 36-bit colour literal silently losing its alpha byte, `%3d` applied to
-  `std::size_t` in a printf, a `[[nodiscard]]` reply discarded by a test
-  fixture, and three parsers casting `double` to an integer before
-  range-checking the value.
-  Until that GCC debt is paid, the only verified configuration is `default` — which
-  means memory safety is currently unverified by sanitizers.
+  The sanitizer presets were the last thing standing, and they build a
+  DIFFERENT tree -- Debug, `WARPLOOM_USE_VULKAN=OFF` -- which compiles code
+  the default configuration never reaches. That configuration started at 124
+  GCC warnings. Paying them was mostly mechanical (`[[maybe_unused]]` on
+  `#ifdef OMNICPP_HAS_VULKAN` parameters and on Vulkan-only test helpers, int
+  loop counters that fed an int accumulator) and surfaced one more real bug:
+  12 document parsers reused the cast-before-range-check with the bound
+  `v > static_cast<double>(UINT64_MAX)`. `(double)UINT64_MAX` rounds UP to
+  2^64, so exactly 2^64 passed the guard and `static_cast<std::uint64_t>(2^64)`
+  is undefined. Reachable from a `.warploom` document, so from untrusted
+  input. All 12 now go through `checked_double_to_uint64`.
+
+  All four presets now build warning-free on GCC, and memory safety is
+  verified rather than assumed:
+
+  - `asan-ubsan`: 540 tests, 0 AddressSanitizer and 0 UndefinedBehaviorSanitizer
+    diagnostics, 0 leaks; plus 39 editor, 10 core, 19 ui and 10 runtime tests,
+    all clean. 6/6 ctest under sanitizers.
+  - `tsan`: 540 tests, 0 ThreadSanitizer data races. The first real
+    verification of the job system's concurrency claims.
+  - `headless-debug`: builds clean, and is what CI's live-proof job uses.
+
+  Along the way both compilers also paid `-Wunused-result` (86, hid a
+  deadlock), `-Wsign-conversion` (104), `-Wshorten-64-to-32` (24),
+  `-Wdouble-promotion` (37), `-Wmissing-field-initializers` (21),
+  `-Wunused-variable` (23), `-Wshadow` (10), `-Wold-style-cast` (9),
+  `-Wunused-function` (7), and the bugs listed above: an uninitialised
+  `tlas_capacity` sum, a `switch` with no default and no trailing return in
+  `bridge_control_command`, a 36-bit colour literal silently losing its alpha
+  byte, `%3d` applied to `std::size_t` in a printf, a `[[nodiscard]]` reply
+  discarded by a test fixture, a literal `\n` inside an `#include` that meant
+  `<cstdint>` was never included, and 15 parsers casting a `double` to an
+  integer before range-checking it.
 - A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystemsConcurrently`,
   roughly one full-suite run in five.
