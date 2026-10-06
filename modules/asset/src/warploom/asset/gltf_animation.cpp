@@ -219,13 +219,13 @@ std::uint32_t read_joint_element(const std::vector<View>& views,
                           context + " matrix must be an array of 16 numbers");
       }
       float m[16];
-      for (std::size_t i = 0; i < 16U; ++i) {
+      for (std::size_t e = 0; e < 16U; ++e) {
         double value = 0.0;
-        if (!as_real(matrix->items[i], value, error,
-                     context + "[" + std::to_string(i) + "]")) {
+        if (!as_real(matrix->items[e], value, error,
+                     context + "[" + std::to_string(e) + "]")) {
           return false;
         }
-        m[i] = static_cast<float>(value);
+        m[e] = static_cast<float>(value);
       }
       if (!decompose_trs_matrix(m, node.translation, node.rotation,
                                 node.scale, context, error)) {

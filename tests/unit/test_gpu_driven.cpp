@@ -451,11 +451,12 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
       context.device(), shader_dir + "/gpu_objects.frag.spv", "fragment").is_ok());
 
   constexpr std::uint32_t kInstanceCount = 64;
-  constexpr std::uint32_t kSphereOffset = 26U;
   constexpr std::uint32_t kCompactOffset = kSphereOffset + 4U * kInstanceCount;
   constexpr std::uint32_t kFrames = 300;
-  constexpr float kFovY = 1.05f, kAspect = 1.0f, kNear = 0.1f, kFar = 100.0f;
-
+  // Prefixed: the identically-valued kFovY/kAspect/kNear/kFar at lines 99-102
+  // are local to the test above, and reusing those names shadowed them.
+  constexpr float kBenchFovY = 1.05f, kBenchAspect = 1.0f, kBenchNear = 0.1f,
+                    kBenchFar = 100.0f;
   auto cull_buf = allocator.create_buffer(
       (kCompactOffset + kInstanceCount) * 4U,
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -558,7 +559,7 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
       words[0] = kInstanceCount;
       words[1] = 0;
       float planes[24];
-      make_frustum_planes(kFovY, kAspect, kNear, kFar, planes);
+      make_frustum_planes(kBenchFovY, kBenchAspect, kBenchNear, kBenchFar, planes);
       std::uint32_t plane_words[24];
       std::memcpy(plane_words, planes, sizeof(plane_words));
       for (std::size_t i = 0; i < static_cast<std::size_t>(24); ++i) words[2 + i] = plane_words[i];
@@ -657,7 +658,7 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
       std::uint32_t lod_scale;
       std::uint32_t pad0;
     } gfx_push_data{};
-    make_perspective(kFovY, kAspect, kNear, kFar, gfx_push_data.view_proj);
+    make_perspective(kBenchFovY, kBenchAspect, kBenchNear, kBenchFar, gfx_push_data.view_proj);
     gfx_push_data.data_offset = kInstanceCount;
     gfx_push_data.comp_offset = 0U;
     {

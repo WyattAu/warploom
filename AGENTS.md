@@ -134,8 +134,12 @@ Known-broken, and must not be reported as working:
   `-Wsign-conversion` is paid too (104 -> 0). GoogleTest is built from source
   here, so its own TUs are compiled with our flags; warnings from it are
   relaxed per-target (`-w`) because they are not actionable and they mask ours.
-  59 remain, dominated by `-Wfloat-equal` (16), `-Wunused-parameter` (10),
-  `-Wshadow` (10) and `-Wold-style-cast` (9). `-Wunused-variable` is paid too
+  49 remain, dominated by `-Wfloat-equal` (16), `-Wunused-parameter` (10),
+  `-Wold-style-cast` (9) and `-Wunused-function` (7). `-Wshadow` is paid too
+  (10 -> 0): the city scene's camera framing shadowed the outer orbit
+  variables, and a telemetry `objects` manifest shadowed the function's
+  `ScenePbrObject` list. Renamed, and the city rename was A/B'd byte-identical
+  over 15 protocol commands against a pre-rename host. `-Wunused-variable` is paid too
   (23 -> 0) by deletion rather than `(void)` casts: dead code is the finding,
   and marking it used would only hide it. Two were checked before deleting --
   `grep -c port` on node_editor.cpp is 0, so the unused in_count/out_count

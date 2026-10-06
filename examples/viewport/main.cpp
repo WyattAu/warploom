@@ -4093,41 +4093,42 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     // Camera: slow orbiting overview. With the Sponza landmark the orbit
     // rises ABOVE the atrium (walls reach ~11m and span |x|<=16m, so the
     // 16m-radius street orbit would put the lens inside the walls).
-    const float orbit_radius = app.sponza_enabled ? 34.0f : 16.0f;
-    const float orbit_height = app.sponza_enabled ? 22.0f : 14.0f;
+    const float city_orbit_radius = app.sponza_enabled ? 34.0f : 16.0f;
+    const float city_orbit_height = app.sponza_enabled ? 22.0f : 14.0f;
     const float cam_angle = t * 0.05f;
     // Control-channel override (set_camera command) replaces the orbit.
-    float eye[3];
-    float target[3];
+    float city_eye[3];
+    float city_target[3];
     if (app.camera_override_) {
-      eye[0] = app.camera_eye_[0];
-      eye[1] = app.camera_eye_[1];
-      eye[2] = app.camera_eye_[2];
-      target[0] = app.camera_target_[0];
-      target[1] = app.camera_target_[1];
-      target[2] = app.camera_target_[2];
+      city_eye[0] = app.camera_eye_[0];
+      city_eye[1] = app.camera_eye_[1];
+      city_eye[2] = app.camera_eye_[2];
+      city_target[0] = app.camera_target_[0];
+      city_target[1] = app.camera_target_[1];
+      city_target[2] = app.camera_target_[2];
     } else {
-      eye[0] = orbit_radius * std::cos(cam_angle);
-      eye[1] = orbit_height;
-      eye[2] = orbit_radius * std::sin(cam_angle);
-      target[0] = 0.0f;
-      target[1] = 1.0f;
-      target[2] = 0.0f;
+      city_eye[0] = city_orbit_radius * std::cos(cam_angle);
+      city_eye[1] = city_orbit_height;
+      city_eye[2] = city_orbit_radius * std::sin(cam_angle);
+      city_target[0] = 0.0f;
+      city_target[1] = 1.0f;
+      city_target[2] = 0.0f;
     }
-    const float up[3] = {0.0f, 1.0f, 0.0f};
+    const float city_up[3] = {0.0f, 1.0f, 0.0f};
     app.scene.camera.view_projection =
         omnicpp::render::scene_camera_view_projection(
-            eye, target, up, 1.05f,
+            city_eye, city_target, city_up, 1.05f,
             static_cast<float>(width) / static_cast<float>(height), 0.5f,
             300.0f);
-    app.scene.camera_position = {eye[0], eye[1], eye[2], 1.0f};
+    app.scene.camera_position = {city_eye[0], city_eye[1], city_eye[2], 1.0f};
     // Sun ortho box covering the street grid.
-    const float light_eye[3] = {app.sun_direction[0] * 30.0f,
-                                app.sun_direction[1] * 30.0f,
-                                app.sun_direction[2] * 30.0f};
+    const float city_light_eye[3] = {app.sun_direction[0] * 30.0f,
+                                     app.sun_direction[1] * 30.0f,
+                                     app.sun_direction[2] * 30.0f};
     app.scene.shadow_light_vp = multiply(
         make_ortho(-55.0f, 55.0f, -55.0f, 55.0f, -60.0f, 60.0f),
-        omnicpp::render::scene_camera_look_at(light_eye, target, up));
+        omnicpp::render::scene_camera_look_at(city_light_eye, city_target,
+                                               city_up));
     if (app.shadow_ubo_allocation.mapped != nullptr) {
       std::memcpy(app.shadow_ubo_allocation.mapped,
                   app.scene.shadow_light_vp.data(), 64U);
@@ -5054,18 +5055,18 @@ bool ViewportApp::initialize() {
     // Static scene manifest: readable structure of everything on screen.
     // ----------------------------------------------------------------------
     if (telemetry_enabled) {
-      std::vector<std::tuple<std::string, std::size_t, std::size_t>> objects;
-      objects.emplace_back("ground", 1U, 2U);
+      std::vector<std::tuple<std::string, std::size_t, std::size_t>> manifest_objects;
+      manifest_objects.emplace_back("ground", 1U, 2U);
       if (has_mannequin) {
         for (std::size_t i = 0; i < mannequin_meshes.size(); ++i) {
-          objects.emplace_back("figure_part_" + std::to_string(i),
+          manifest_objects.emplace_back("figure_part_" + std::to_string(i),
                                2U + i, 3U);
         }
       } else {
-        objects.emplace_back("spinner_cube", 0U, 0U);
-        objects.emplace_back("rough_cube", 0U, 1U);
+        manifest_objects.emplace_back("spinner_cube", 0U, 0U);
+        manifest_objects.emplace_back("rough_cube", 0U, 1U);
       }
-      telemetry.log_scene_objects(objects);
+      telemetry.log_scene_objects(manifest_objects);
 
       if (has_mannequin) {
         const auto& skin = mannequin.skins[0];
@@ -5148,12 +5149,12 @@ bool ViewportApp::initialize() {
   }
 
   if (run_config.capture_every != 0U || control_requested) {
-    const VkFormat depth_format =
+    const VkFormat capture_depth_format =
         omnicpp::render::VulkanRenderPass::find_supported_depth_format(
             context.physical_device());
     if (!capture.initialize(
             context.device(), allocator, render_pass.render_pass(),
-            swapchain.image_format(), depth_format, kWidth, kHeight,
+            swapchain.image_format(), capture_depth_format, kWidth, kHeight,
             static_cast<std::uint32_t>(context.queue_families()
                                            .graphics_family))) {
       std::fprintf(stderr, "viewport: frame capture initialization failed\n");

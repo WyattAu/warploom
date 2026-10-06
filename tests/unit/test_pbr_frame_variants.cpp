@@ -204,11 +204,11 @@ bool make_white(VkDevice d, VkPhysicalDevice pd, VkQueue q, std::uint32_t fam,
     a.destroy_allocation(out.alloc); vkDestroyImage(d, out.img, nullptr);
     return false;
   }
-  VkSamplerCreateInfo si{};
-  si.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-  si.magFilter = si.minFilter = VK_FILTER_NEAREST;
-  si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-  if (vkCreateSampler(d, &si, nullptr, &out.sampler) != VK_SUCCESS) {
+  VkSamplerCreateInfo sampler_si{};
+  sampler_si.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  sampler_si.magFilter = sampler_si.minFilter = VK_FILTER_NEAREST;
+  sampler_si.addressModeU = sampler_si.addressModeV = sampler_si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  if (vkCreateSampler(d, &sampler_si, nullptr, &out.sampler) != VK_SUCCESS) {
     vkDestroyImageView(d, out.view, nullptr);
     a.destroy_allocation(out.alloc); vkDestroyImage(d, out.img, nullptr);
     return false;
@@ -256,11 +256,11 @@ bool make_white(VkDevice d, VkPhysicalDevice pd, VkQueue q, std::uint32_t fam,
     ok = vkEndCommandBuffer(cb) == VK_SUCCESS;
   }
   if (ok) {
-    VkSubmitInfo si{};
-    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    si.commandBufferCount = 1;
-    si.pCommandBuffers = &cb;
-    ok = vkQueueSubmit(q, 1, &si, fence) == VK_SUCCESS;
+    VkSubmitInfo submit_si{};
+    submit_si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_si.commandBufferCount = 1;
+    submit_si.pCommandBuffers = &cb;
+    ok = vkQueueSubmit(q, 1, &submit_si, fence) == VK_SUCCESS;
   }
   if (ok)
     ok = vkWaitForFences(d, 1, &fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS;
