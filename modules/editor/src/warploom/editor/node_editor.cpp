@@ -106,11 +106,6 @@ void NodeEditorView::rebuild(ui::WidgetTree& tree,
 
   // Deterministic card order: ascending node id (nodes_ is id-ordered).
   for (const auto& node : graph_->nodes()) {
-    const auto* type = graph_->find_type(node.type);
-    const int in_count =
-        type != nullptr ? static_cast<int>(type->inputs.size()) : 0;
-    const int out_count =
-        type != nullptr ? static_cast<int>(type->outputs.size()) : 0;
 
     // Default grid position; session-layer drags override via set_position.
     NodeView view;

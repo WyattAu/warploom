@@ -137,7 +137,6 @@ class PhysicsWorld final {
       }
 
       solve_contacts_.clear();
-      const std::size_t count = bodies_.size();
       rebuild_candidate_pairs();
       for (const std::pair<std::uint32_t, std::uint32_t>& pair :
            candidate_pairs_) {

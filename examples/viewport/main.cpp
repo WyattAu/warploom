@@ -1978,7 +1978,6 @@ bool setup_gpu_driven(ViewportApp& app) {
               app.gd_table.index_data.data(), app.gd_table.index_bytes());
 
   // --- Payload (per-image) + indirect buffers -----------------------------
-  const std::uint32_t instance_count = app.gd_instance_count;
   constexpr VkDeviceSize kPayloadBytes =
       (2U + 24U * kGdMaxInstances) * 4U;
   constexpr VkDeviceSize kDrawWords = 5U * kGdMaxInstances + 1U;  // + counter
@@ -3650,7 +3649,6 @@ bool setup_city_scene(ViewportApp& app) {
     return false;
   }
   if (app.mannequin.skins.empty()) return false;
-  VkDevice dev = app.context.device();
   const std::string shader_dir = warploom_shader_dir();
 
   // ------------------------------------------------------------------

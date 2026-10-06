@@ -29,10 +29,6 @@ using omnicpp_test::readback_swapchain_image;
 
 namespace {
 
-constexpr float kFovY = 1.05f;
-constexpr float kAspect = 1.0f;
-constexpr float kNear = 0.1f;
-constexpr float kFar = 100.0f;
 constexpr std::uint32_t kSize = 256U;
 
 void make_perspective(float fov_y, float aspect, float znear, float zfar,

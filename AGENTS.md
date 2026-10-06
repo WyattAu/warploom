@@ -134,8 +134,13 @@ Known-broken, and must not be reported as working:
   `-Wsign-conversion` is paid too (104 -> 0). GoogleTest is built from source
   here, so its own TUs are compiled with our flags; warnings from it are
   relaxed per-target (`-w`) because they are not actionable and they mask ours.
-  87 remain, dominated by `-Wunused-variable` (23), `-Wfloat-equal` (16),
-  `-Wunused-parameter` (10) and `-Wshadow` (10).
+  59 remain, dominated by `-Wfloat-equal` (16), `-Wunused-parameter` (10),
+  `-Wshadow` (10) and `-Wold-style-cast` (9). `-Wunused-variable` is paid too
+  (23 -> 0) by deletion rather than `(void)` casts: dead code is the finding,
+  and marking it used would only hide it. Two were checked before deleting --
+  `grep -c port` on node_editor.cpp is 0, so the unused in_count/out_count
+  cannot be needed; and the joystick's unused kTypeInit is already explained by
+  the comment beneath it.
   `-Wmissing-field-initializers` is paid too (21 -> 0): 17 were Vulkan structs
   written `VkFoo info{VK_STRUCTURE_TYPE_FOO};`, which leaves every other field
   value-initialized -- correct, but it reads as "only sType is set". They are

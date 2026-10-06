@@ -121,7 +121,6 @@ void JoystickTranslator::ensure_button(std::size_t index) {
 void JoystickTranslator::on_event(const JsEvent& event) {
   constexpr std::uint8_t kTypeButton = 0x01;
   constexpr std::uint8_t kTypeAxis = 0x02;
-  constexpr std::uint8_t kTypeInit = 0x80;
 
   if (event.type & kTypeAxis) {
     ensure_axis(event.number);

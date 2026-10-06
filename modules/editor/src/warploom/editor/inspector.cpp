@@ -66,7 +66,6 @@ void InspectorPanel::rebuild(
   // ---------------- OUTLINER ----------------
   (void)tree.add(make_label("outliner_title", "OUTLINER", 0xFF9FC4E0), panel_);
   for (const auto& obj : doc.objects) {
-    const auto* type = registry.find(obj.type_id);
     const bool selected = obj.id == selected_id;
     Widget row;
     row.kind = WidgetKind::Panel;

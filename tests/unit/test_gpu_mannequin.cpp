@@ -389,7 +389,6 @@ struct MannequinHarness {
   bool upload_mesh(const omnicpp::asset::GltfMeshImport& import,
                    const omnicpp::asset::GltfSkinBinding& binding,
                    const PbrMaterialData& material) {
-    VkDevice dev = ctx.device();
     // Combined SSBO: [static verts][joints as float x4][weights x4].
     std::vector<float> combined = import.vertices;
     const std::size_t vertex_count = import.vertex_count();

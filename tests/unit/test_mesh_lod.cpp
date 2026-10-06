@@ -69,7 +69,6 @@ TEST(VulkanHardware, LodSelectByDistance) {
   auto* words = static_cast<std::uint32_t*>(lod_buf.value().mapped);
 
   // Camera at origin looking down -Z, fov 60, viewport 720.
-  const float fov_y = 1.0471976f;  // 60 degrees
   const float tan_half = 0.57735026f;
   const float aspect = 1.0f;
   const float near_z = 0.1f;

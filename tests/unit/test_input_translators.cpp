@@ -30,7 +30,6 @@ constexpr std::uint8_t kKeyW = 25;
 constexpr std::uint8_t kKeyA = 38;
 constexpr std::uint8_t kKeyS = 39;
 constexpr std::uint8_t kKeyD = 40;
-constexpr std::uint8_t kKeySpace = 65;
 constexpr std::uint8_t kKeyLeft = 113;
 constexpr std::uint8_t kKeyRight = 114;
 constexpr std::uint8_t kKeyUp = 111;

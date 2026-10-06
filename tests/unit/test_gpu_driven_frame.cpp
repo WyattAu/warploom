@@ -63,7 +63,6 @@ omnicpp::render::SceneMatrix make_perspective(float fov_y, float aspect,
                                               float znear, float zfar) {
   const float f =
       1.0f / std::tan(fov_y * 3.14159265f / 360.0f);
-  const float zn = 1.0f / (znear - zfar);
   omnicpp::render::SceneMatrix m =
       omnicpp::render::scene_identity_matrix();
   m[0] = f / aspect;
