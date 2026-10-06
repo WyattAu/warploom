@@ -5442,8 +5442,8 @@ void ViewportApp::run() {
             VkCommandBufferBeginInfo bi{};
             bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             vkBeginCommandBuffer(cb.value(), &bi);
-            VkImageMemoryBarrier to_src{
-                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+            VkImageMemoryBarrier to_src{};
+            to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
             to_src.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
             to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
             to_src.oldLayout =

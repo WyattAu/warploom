@@ -179,13 +179,13 @@ TEST(SystemScheduler, TopologicalOrdering) {
 
   scheduler.add_system({"input", [&](omnicpp::core::World&, std::uint64_t) noexcept {
     order.push_back("input");
-  }, {}});
+  }, {}, {}});
   scheduler.add_system({"physics", [&](omnicpp::core::World&, std::uint64_t) noexcept {
     order.push_back("physics");
-  }, {"input"}});
+  }, {"input"}, {}});
   scheduler.add_system({"render", [&](omnicpp::core::World&, std::uint64_t) noexcept {
     order.push_back("render");
-  }, {"physics"}});
+  }, {"physics"}, {}});
 
   EXPECT_TRUE(scheduler.build_schedule());
   omnicpp::core::World world;
@@ -199,8 +199,8 @@ TEST(SystemScheduler, TopologicalOrdering) {
 
 TEST(SystemScheduler, DetectsCycle) {
   omnicpp::core::SystemScheduler scheduler;
-  scheduler.add_system({"a", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {"b"}});
-  scheduler.add_system({"b", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {"a"}});
+  scheduler.add_system({"a", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {"b"}, {}});
+  scheduler.add_system({"b", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {"a"}, {}});
   EXPECT_FALSE(scheduler.build_schedule());
 }
 
@@ -210,13 +210,13 @@ TEST(SystemScheduler, IndependentSystemsRunInRegistrationOrder) {
 
   scheduler.add_system({"x", [&](omnicpp::core::World&, std::uint64_t) noexcept {
     order.push_back("x");
-  }, {}});
+  }, {}, {}});
   scheduler.add_system({"y", [&](omnicpp::core::World&, std::uint64_t) noexcept {
     order.push_back("y");
-  }, {}});
+  }, {}, {}});
   scheduler.add_system({"z", [&](omnicpp::core::World&, std::uint64_t) noexcept {
     order.push_back("z");
-  }, {}});
+  }, {}, {}});
 
   EXPECT_TRUE(scheduler.build_schedule());
   omnicpp::core::World world;

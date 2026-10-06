@@ -134,9 +134,14 @@ Known-broken, and must not be reported as working:
   `-Wsign-conversion` is paid too (104 -> 0). GoogleTest is built from source
   here, so its own TUs are compiled with our flags; warnings from it are
   relaxed per-target (`-w`) because they are not actionable and they mask ours.
-  108 remain, dominated by `-Wunused-variable` (23),
-  `-Wmissing-field-initializers` (21), `-Wfloat-equal` (16) and
-  `-Wunused-parameter` (10). `-Wdouble-promotion` is paid too (37 -> 0): every
+  87 remain, dominated by `-Wunused-variable` (23), `-Wfloat-equal` (16),
+  `-Wunused-parameter` (10) and `-Wshadow` (10).
+  `-Wmissing-field-initializers` is paid too (21 -> 0): 17 were Vulkan structs
+  written `VkFoo info{VK_STRUCTURE_TYPE_FOO};`, which leaves every other field
+  value-initialized -- correct, but it reads as "only sType is set". They are
+  now `{}` followed by an explicit `.sType =`, which is the Vulkan idiom and
+  says what it means. The rest were `Accepted` and ECS `System`, both of which
+  now name every member at construction. `-Wdouble-promotion` is paid too (37 -> 0): every
   one of the 37 was in a test, none in engine code -- printf `%f` varargs
   require the double, and the Monte-Carlo reference is deliberately double
   against a float GPU result. Both are explicit casts now.

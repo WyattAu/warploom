@@ -342,7 +342,8 @@ class FrameCapture {
     queue_family_ = queue_family;
 
     // --- device-local targets -------------------------------------------
-    VkImageCreateInfo image_info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    VkImageCreateInfo image_info{};
+  image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     image_info.imageType = VK_IMAGE_TYPE_2D;
     image_info.format = color_format;
     image_info.extent = {width, height, 1U};
@@ -363,7 +364,8 @@ class FrameCapture {
     if (!color_alloc.is_ok()) return false;
     color_allocation_ = color_alloc.value();
 
-    VkImageViewCreateInfo view_info{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    VkImageViewCreateInfo view_info{};
+  view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     view_info.image = color_image_;
     view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
     view_info.format = color_format;
@@ -396,7 +398,8 @@ class FrameCapture {
       return false;
     }
 
-    VkFramebufferCreateInfo fb_info{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+    VkFramebufferCreateInfo fb_info{};
+  fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     fb_info.renderPass = render_pass_;
     fb_info.attachmentCount = 2U;
     VkImageView fb_attachments[2] = {color_view_, depth_view_};
@@ -432,16 +435,16 @@ class FrameCapture {
         color_format == VK_FORMAT_B8G8R8A8_SRGB;
 
     // --- capture command plumbing --------------------------------------
-    VkCommandPoolCreateInfo pool_info{
-        VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+    VkCommandPoolCreateInfo pool_info{};
+    pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     pool_info.queueFamilyIndex = queue_family;
     if (vkCreateCommandPool(device, &pool_info, nullptr, &command_pool_) !=
         VK_SUCCESS) {
       return false;
     }
-    VkCommandBufferAllocateInfo alloc_info{
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    VkCommandBufferAllocateInfo alloc_info{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     alloc_info.commandPool = command_pool_;
     alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc_info.commandBufferCount = 1U;
@@ -449,7 +452,8 @@ class FrameCapture {
         VK_SUCCESS) {
       return false;
     }
-    VkFenceCreateInfo fence_info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFenceCreateInfo fence_info{};
+  fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     if (vkCreateFence(device, &fence_info, nullptr, &fence_) != VK_SUCCESS) {
       return false;
     }
@@ -461,8 +465,8 @@ class FrameCapture {
   [[nodiscard]] bool capture(
       VkQueue queue, const std::function<bool(VkCommandBuffer)>& record_scene) {
     if (vkResetCommandBuffer(command_buffer_, 0U) != VK_SUCCESS) return false;
-    VkCommandBufferBeginInfo begin{
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     if (vkBeginCommandBuffer(command_buffer_, &begin) != VK_SUCCESS) {
       return false;
@@ -471,7 +475,8 @@ class FrameCapture {
     VkClearValue clears[2]{};
     clears[0].color = {{0.06f, 0.07f, 0.09f, 1.0f}};
     clears[1].depthStencil = {1.0f, 0U};
-    VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    VkRenderPassBeginInfo pass{};
+    pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     pass.renderPass = render_pass_;  // shared with the window path
     pass.framebuffer = framebuffer_;
     pass.renderArea = {{0, 0}, {width_, height_}};
@@ -488,7 +493,8 @@ class FrameCapture {
     // The shared pass leaves the color attachment in PRESENT_SRC and the
     // depth attachment in DEPTH_STENCIL_ATTACHMENT_OPTIMAL; transition each
     // from its actual final layout to TRANSFER_SRC before the copies.
-    VkImageMemoryBarrier to_src{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    VkImageMemoryBarrier to_src{};
+    to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     to_src.srcAccessMask = 0U;  // layout transitions are acquire/release
     to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
     to_src.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
@@ -529,7 +535,8 @@ class FrameCapture {
                            depth_readback_.buffer, 1U, &depth_region);
     vkEndCommandBuffer(command_buffer_);
 
-    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1U;
     submit.pCommandBuffers = &command_buffer_;
     if (vkQueueSubmit(queue, 1U, &submit, fence_) != VK_SUCCESS) {

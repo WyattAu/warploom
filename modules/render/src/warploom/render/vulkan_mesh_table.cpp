@@ -55,8 +55,8 @@ std::uint32_t SceneMeshTableBuilder::add(const SceneMesh& mesh,
       build_.entries.push_back(entry);
       build_.dedup_count += 1U;
       Accepted acc{hash, prior.vertex_first, vertex_float_count,
-                   prior.index_first, index_count};
-      acc.slot = static_cast<std::uint32_t>(build_.entries.size() - 1U);
+                   prior.index_first, index_count,
+                   static_cast<std::uint32_t>(build_.entries.size() - 1U)};
       accepted_.push_back(acc);
       return static_cast<std::uint32_t>(build_.entries.size() - 1U);
     }
@@ -87,8 +87,8 @@ std::uint32_t SceneMeshTableBuilder::add(const SceneMesh& mesh,
   build_.entries.push_back(entry);
 
   Accepted acc{hash, vertex_first, vertex_float_count, index_first,
-               index_count};
-  acc.slot = static_cast<std::uint32_t>(build_.entries.size() - 1U);
+               index_count,
+               static_cast<std::uint32_t>(build_.entries.size() - 1U)};
   accepted_.push_back(acc);
   return acc.slot;
 }
