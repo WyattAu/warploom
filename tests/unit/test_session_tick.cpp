@@ -11,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 #include "warploom/core/document_projection.hpp"
@@ -472,4 +473,54 @@ TEST(SessionTick, PausedTicksIgnoreTheSubFramePosition) {
   // Time is stopped: a paused tick must not advance playback either.
   EXPECT_NEAR(cube_x(session), 0.0, 1e-6);
   (void)before;
+}
+
+// Physics state goes into the snapshot every frame. Serialising the float via
+// double is exact but prints the double's shortest form, three to four times
+// longer: 1e+20 becomes 21 characters and 3.4e+38 becomes 22. This pins both
+// properties that matter -- the text is short, and it still recovers the exact
+// float.
+TEST(SessionTick, PhysicsFloatsSerialiseShortAndExactly) {
+  EditorSession session{};
+  seed_cube(session);
+  (void)session.tick({0U, kDt, 0.0, false});
+
+  ::omnicpp::physics::PhysicsBody body{};
+  // Component 0 is the first array element, which is what the token extractor
+  // below reads; component 1 would need different indexing and proves nothing
+  // extra about the formatter.
+  body.position[0] = 0.123456789012345F;
+  body.velocity[0] = -3.0517578125e-05F;
+  body.radius = 1.0e20F;
+  ASSERT_TRUE(session.spawn_physics_body(1U, body));
+
+  const std::string json = session.snapshot_json();
+  const auto body_json = json.find("\"bodies\"");
+  ASSERT_NE(body_json, std::string::npos) << json.substr(0, 400);
+
+  // Short: the exact text the float formatter produces, not the double's.
+  EXPECT_NE(json.find("\"radius\":1e+20"), std::string::npos)
+      << "serialising through double emits 21 characters for this value";
+  EXPECT_EQ(json.find("100000002004087734272"), std::string::npos);
+
+  // And exact: parse each emitted token back and compare to the world.
+  const auto token_after = [&json](const std::string& key) {
+    const std::size_t at = json.find(key);
+    if (at == std::string::npos) return std::string{};
+    std::size_t cursor = at + key.size();
+    while (cursor < json.size() &&
+           (json[cursor] == ':' || json[cursor] == '[' || json[cursor] == ' ')) {
+      ++cursor;
+    }
+    const std::size_t end = json.find_first_of(",}]", cursor);
+    return json.substr(cursor, end - cursor);
+  };
+  const auto* live = session.physics_body_for(1U);
+  ASSERT_NE(live, nullptr);
+  EXPECT_FLOAT_EQ(std::strtof(token_after("\"pos\"").c_str(), nullptr),
+                  live->position[0]);
+  EXPECT_FLOAT_EQ(std::strtof(token_after("\"vel\"").c_str(), nullptr),
+                  live->velocity[0]);
+  EXPECT_FLOAT_EQ(std::strtof(token_after("\"radius\"").c_str(), nullptr),
+                  live->radius);
 }

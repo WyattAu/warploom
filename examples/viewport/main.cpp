@@ -5095,8 +5095,12 @@ bool ViewportApp::initialize() {
                         lighting_ready ? "composed (ibl+shadow+pbr_full)"
                                        : "legacy fallback");
     char sun_buf[64];
+    // varargs promote float to double per the standard; spelled out so the
+    // printf contract is visible rather than a warning.
     std::snprintf(sun_buf, sizeof(sun_buf), "%.4f,%.4f,%.4f",
-                  sun_direction[0], sun_direction[1], sun_direction[2]);
+                  static_cast<double>(sun_direction[0]),
+                  static_cast<double>(sun_direction[1]),
+                  static_cast<double>(sun_direction[2]));
     telemetry.log_event("sun_direction", sun_buf);
     if (no_shadow) {
       telemetry.log_event("shadow_mode", "disabled (OMNICPP_NO_SHADOW)");

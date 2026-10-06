@@ -785,7 +785,7 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
     }
     std::printf("reddest pixel: (%d,%d) gap=%.3f  predicted cube center (%d,%d)"
                 " mirror (%d,%d) control (%d,%d)\n",
-                best_x, best_y, best_gap, cx2, cy2, mx, my, qx, qy);
+                best_x, best_y, static_cast<double>(best_gap), cx2, cy2, mx, my, qx, qy);
     const auto bc = channels(rb, best_x, best_y);
     std::printf("reddest rgb=(%.3f,%.3f,%.3f)  direct=(%.3f,%.3f,%.3f)"
                 "  mirror=(%.3f,%.3f,%.3f)  control=(%.3f,%.3f,%.3f)\n",

@@ -108,7 +108,7 @@ TEST(GraphAnimBridge, PulseDrivesWalkIdleLikeAHeldKey) {
   const float dt = 0.1F;
   std::string trace;
   for (int i = 0; i < 60; ++i) {  // 6 seconds = 1.5 pulse periods @0.5Hz
-    ctx.time = i * dt;
+    ctx.time = static_cast<double>(i) * dt;
     ctx.tick = static_cast<std::uint64_t>(i);
     ASSERT_TRUE(g.evaluate_with(ctx, err)) << err;
     const auto snap = adapter.build(g);

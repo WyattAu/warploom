@@ -98,6 +98,16 @@ if(WARPLOOM_USE_VULKAN AND Vulkan_FOUND)
     target_sources(warploom_unit_tests PRIVATE ${WARPLOOM_GPU_TEST_SOURCES})
 endif()
 target_link_libraries(warploom_unit_tests PRIVATE Warploom::engine Threads::Threads gtest gtest_main)
+
+# GoogleTest's headers are third-party: their warnings are not ours to fix, and
+# CPM does not mark its include directories SYSTEM. Marking them so stops ~26
+# diagnostics from third-party headers polluting the count and, more
+# importantly, stops them from masking warnings in OUR code -- which is exactly
+# what happened twice during this cleanup.
+get_target_property(WARPLOOM_GTEST_INCLUDES gtest INTERFACE_INCLUDE_DIRECTORIES)
+if(WARPLOOM_GTEST_INCLUDES)
+    target_include_directories(warploom_unit_tests SYSTEM PRIVATE ${WARPLOOM_GTEST_INCLUDES})
+endif()
 # Asset directory for file-based tests (mannequin model); shader-dir define
 # only applies when the test shader targets exist (GPU presets).
 target_compile_definitions(warploom_unit_tests PRIVATE
@@ -150,6 +160,9 @@ add_executable(warploom_runtime_only_tests
 )
 set_target_properties(warploom_runtime_only_tests PROPERTIES OUTPUT_NAME warploom_runtime_only_tests)  # S5-B phase 2 binary rename
 target_link_libraries(warploom_runtime_only_tests PRIVATE Warploom::engine Threads::Threads gtest gtest_main)
+if(WARPLOOM_GTEST_INCLUDES)
+    target_include_directories(warploom_runtime_only_tests SYSTEM PRIVATE ${WARPLOOM_GTEST_INCLUDES})
+endif()
 
 add_executable(warploom_deterministic_runtime_benchmark
     performance/deterministic_runtime_benchmark.cpp

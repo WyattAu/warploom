@@ -84,6 +84,14 @@ if(WARPLOOM_EDITOR_BUILD_TESTS AND (NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_clip_timeline_view.cpp
         )
         target_link_libraries(warploom_editor_tests PRIVATE warploom_editor warploom_render gtest gtest_main)
+        # Third-party headers included as SYSTEM: warnings raised inside
+        # GoogleTest are not actionable here, and letting them through masks
+        # warnings in our own code -- which happened repeatedly during the
+        # warning-debt cleanup.
+        get_target_property(WARPLOOM_GTEST_INCLUDES gtest INTERFACE_INCLUDE_DIRECTORIES)
+        if(WARPLOOM_GTEST_INCLUDES)
+            target_include_directories(warploom_editor_tests SYSTEM PRIVATE ${WARPLOOM_GTEST_INCLUDES})
+        endif()
         target_include_directories(warploom_editor_tests
             PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests

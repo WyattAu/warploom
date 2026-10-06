@@ -64,6 +64,14 @@ if(WARPLOOM_UI_BUILD_TESTS AND (NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME))
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_glyphs.cpp
         )
         target_link_libraries(warploom_ui_tests PRIVATE warploom_ui gtest gtest_main)
+        # Third-party headers included as SYSTEM: warnings raised inside
+        # GoogleTest are not actionable here, and letting them through masks
+        # warnings in our own code -- which happened repeatedly during the
+        # warning-debt cleanup.
+        get_target_property(WARPLOOM_GTEST_INCLUDES gtest INTERFACE_INCLUDE_DIRECTORIES)
+        if(WARPLOOM_GTEST_INCLUDES)
+            target_include_directories(warploom_ui_tests SYSTEM PRIVATE ${WARPLOOM_GTEST_INCLUDES})
+        endif()
         target_include_directories(warploom_ui_tests
             PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
         add_test(NAME WarploomUiTests COMMAND warploom_ui_tests)

@@ -68,8 +68,8 @@ constexpr std::uint32_t kBounces = 8;   // path segments per frame
 // ---- Scene: interior of a box, open top ------------------------------------
 // Walls: |x|=5, |z|=5 for y in [-5,0]; slab (floor) y=-5; ceiling is OPEN
 // (no geometry) — the sky is the only light.
-constexpr float kRoomHx = 5.0f;   // half extent x/z
-constexpr float kRoomHy = 5.0f;   // walls span y in [-2*hy, 0]
+constexpr double kRoomHx = 5.0;  // half extent x/z
+constexpr double kRoomHy = 5.0;  // walls span y in [-2*hy, 0]
 constexpr float kAlbedo = 0.8f;
 constexpr float kSky = 1.0f;
 

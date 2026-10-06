@@ -83,6 +83,14 @@ if(WARPLOOM_CORE_BUILD_TESTS AND (NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME))
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_timeline.cpp
         )
         target_link_libraries(warploom_core_tests PRIVATE warploom_core gtest gtest_main)
+        # Third-party headers included as SYSTEM: warnings raised inside
+        # GoogleTest are not actionable here, and letting them through masks
+        # warnings in our own code -- which happened repeatedly during the
+        # warning-debt cleanup.
+        get_target_property(WARPLOOM_GTEST_INCLUDES gtest INTERFACE_INCLUDE_DIRECTORIES)
+        if(WARPLOOM_GTEST_INCLUDES)
+            target_include_directories(warploom_core_tests SYSTEM PRIVATE ${WARPLOOM_GTEST_INCLUDES})
+        endif()
         target_include_directories(warploom_core_tests
             PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
         add_test(NAME WarploomCoreTests COMMAND warploom_core_tests)

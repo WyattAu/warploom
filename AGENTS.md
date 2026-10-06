@@ -131,9 +131,12 @@ Known-broken, and must not be reported as working:
 - `headless-debug`, `asan-ubsan` and `tsan` configure but do not **compile**:
   they inherit `WARPLOOM_WARNINGS_AS_ERRORS=ON` and the tree carries warning
   debt. `-Wunused-result` is paid (86 -> 0, and it hid a deadlock); the
-  `-Wsign-conversion` is paid too (104 -> 0). What remains is dominated by
-  `-Wdouble-promotion` (95) plus `-Wshorten-64-to-32` (24), which surfaced only
-  once the sign warnings stopped masking it.
+  `-Wsign-conversion` is paid too (104 -> 0). GoogleTest is built from source
+  here, so its own TUs are compiled with our flags; warnings from it are
+  relaxed per-target (`-w`) because they are not actionable and they mask ours.
+  About 200 remain, dominated by `-Wdouble-promotion`, `-Wshorten-64-to-32`
+  (24, surfaced only once the sign warnings stopped masking it) and dead-code
+  warnings.
   Until that debt is paid, the only verified configuration is `default` — which
   means memory safety is currently unverified by sanitizers.
 - A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystemsConcurrently`,

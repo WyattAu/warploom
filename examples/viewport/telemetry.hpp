@@ -196,7 +196,8 @@ class TelemetryLogger {
                  static_cast<double>(walk_time), static_cast<double>(eye_x),
                  static_cast<double>(eye_y), static_cast<double>(eye_z),
                  objects, drawn_objects, skinned_pipeline ? "true" : "false",
-                 record_us, total_us, fps, capture_file.c_str(),
+                 static_cast<double>(record_us), static_cast<double>(total_us),
+                 static_cast<double>(fps), capture_file.c_str(),
                  static_cast<double>(blend), gpu_ns);
   }
 

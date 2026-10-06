@@ -63,4 +63,34 @@ if(WARPLOOM_BUILD_TESTS)
                 "INSTALL_GTEST OFF"
     )
     message(STATUS "googletest ${googletest_VERSION}")
+
+    # GoogleTest is built from source in this tree, so its own translation
+    # units are compiled with OUR warning flags and emit ~26 diagnostics we
+    # cannot act on. Two things follow from that:
+    #
+    #   - They are counted against us. A green build would have to mean "our
+    #     code is warning-free", not "ours plus GoogleTest's headers".
+    #   - They MASK ours. That is not hypothetical: fixing
+    #     -Wsign-conversion revealed -Wshorten-64-to-32 hiding behind it, and
+    #     third-party noise did the same thing twice.
+    #
+    # Relax warnings for the third-party targets only. DEFERRED because CPM
+    # declares its targets at the end of the directory, after this file runs.
+    # Scoped by target, so a warning in our code is still an error.
+    cmake_language(DEFER DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" CALL
+        warploom_relax_third_party_warnings)
 endif()
+
+# Defined here rather than as a command because it must be visible to the
+# deferred call above.
+function(warploom_relax_third_party_warnings)
+    foreach(_warploom_third_party_target IN ITEMS gtest gtest_main gmock)
+        if(TARGET ${_warploom_third_party_target})
+            if(MSVC)
+                target_compile_options(${_warploom_third_party_target} PRIVATE /w)
+            else()
+                target_compile_options(${_warploom_third_party_target} PRIVATE -w)
+            endif()
+        endif()
+    endforeach()
+endfunction()

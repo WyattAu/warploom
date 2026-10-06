@@ -114,6 +114,25 @@ std::string object_to_json(const SceneObject& o) {
   return false;
 }
 
+//! Append a float in a form that round-trips EXACTLY as a float.
+//!
+//! Widening to double and printing that would also round-trip -- every float is
+//! representable in double, and narrowing back is lossless -- but it prints the
+//! double's shortest form, which is three to four times longer: 1e+20 becomes
+//! 21 characters and 3.4e+38 becomes 22. Physics telemetry is written every
+//! frame, so that is bytes spent saying nothing. Serialising at float precision
+//! gives the shortest text that still recovers the original float exactly, and
+//! keeps the format independent of double entirely.
+void append_float(std::string& out, float value) {
+  char buffer[32];
+  const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
+  if (result.ec == std::errc{}) {
+    out.append(buffer, static_cast<std::size_t>(result.ptr - buffer));
+  } else {
+    out += "0";
+  }
+}
+
 }  // namespace
 
 // ============================================================================
@@ -1670,25 +1689,25 @@ std::string EditorSession::snapshot_json() const {
     const auto& body = physics_.body(body_id);
     out += "{\"oid\":" + std::to_string(object_id);
     out += ",\"pos\":[";
-    append_number(out, body.position[0]);
+    append_float(out, body.position[0]);
     out += ",";
-    append_number(out, body.position[1]);
+    append_float(out, body.position[1]);
     out += ",";
-    append_number(out, body.position[2]);
+    append_float(out, body.position[2]);
     out += "]";
     out += ",\"vel\":[";
-    append_number(out, body.velocity[0]);
+    append_float(out, body.velocity[0]);
     out += ",";
-    append_number(out, body.velocity[1]);
+    append_float(out, body.velocity[1]);
     out += ",";
-    append_number(out, body.velocity[2]);
+    append_float(out, body.velocity[2]);
     out += "]";
     out += ",\"radius\":";
-    append_number(out, body.radius);
+    append_float(out, body.radius);
     out += ",\"inv_mass\":";
-    append_number(out, body.inverse_mass);
+    append_float(out, body.inverse_mass);
     out += ",\"restitution\":";
-    append_number(out, body.restitution);
+    append_float(out, body.restitution);
     out += "}";
   }
   out += "]}";

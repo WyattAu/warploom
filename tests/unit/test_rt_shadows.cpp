@@ -1118,7 +1118,7 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
     std::printf("overall bbox: px [%d..%d] py [%d..%d]\n", min_px, max_px,
                 min_py, max_py);
     std::printf("probe near (128,128) lum=%.4f packed=0x%08x (r=%u g=%u b=%u)\n",
-                luminance(ra, 128, 128), ra.pixels[128U * kImg + 128U],
+                static_cast<double>(luminance(ra, 128, 128)), ra.pixels[128U * kImg + 128U],
                 ra.pixels[128U * kImg + 128U] & 0xffU,
                 (ra.pixels[128U * kImg + 128U] >> 8) & 0xffU,
                 (ra.pixels[128U * kImg + 128U] >> 16) & 0xffU);
@@ -1172,7 +1172,7 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
         }
         std::printf(
             "shadow map: sampled<1.0 count=%u  min=%.4f max=%.4f\n", written,
-            mn, mx);
+            static_cast<double>(mn), static_cast<double>(mx));
         // Central 64x64 block (the occluder should occupy ~the middle):
         float c_mn = 1.0f, c_mx = 0.0f;
         for (std::uint32_t y = 480; y < 544; ++y) {
@@ -1181,7 +1181,7 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
             c_mx = std::max(c_mx, d[y * kShadowRes + x]);
           }
         }
-        std::printf("shadow map center block: min=%.4f max=%.4f\n", c_mn, c_mx);
+        std::printf("shadow map center block: min=%.4f max=%.4f\n", static_cast<double>(c_mn), static_cast<double>(c_mx));
         // Occupied bbox (non-background) of the whole map.
         {
           int bmn_x = kShadowRes, bmx_x = -1, bmn_y = kShadowRes, bmx_y = -1;
