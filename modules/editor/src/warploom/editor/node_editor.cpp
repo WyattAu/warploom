@@ -797,7 +797,7 @@ void NodeEditorView::append_param_editor(ui::PaintList& list) const {
   text.x = v->x + 4.0F;
   text.y = ry + 1.0F;
   text.text = edit_text_ + "_";
-  text.color = 0xFFEFFFFFFFU;
+  text.color = 0xFFEFFFFF;
   list.texts.push_back(text);
 }
 

@@ -185,8 +185,13 @@ BridgeOutcome bridge_control_command(const ::warploom::core::ControlCommand& c,
 
     case CK::Unknown:
       return BridgeOutcome{BK::Rejected, nullptr, "unknown command kind"};
+
+    default:
+      // This bridge owns three document-editing kinds. Everything else -- the
+      // graph, timeline, clip, and capture kinds -- is not an error here: the
+      // session handles those, and SessionOnly is what tells it to.
+      return BridgeOutcome{BK::SessionOnly, nullptr, {}};
   }
-  return BridgeOutcome{BK::Rejected, nullptr, "unknown command kind"};
 }
 
 }  // namespace warploom::editor

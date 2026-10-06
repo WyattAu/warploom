@@ -298,8 +298,8 @@ TEST(NodeLibrary, GraphDrivenAnimationIsReplayable) {
   auto g2 = build();
   std::string err;
   GraphContext ctx;
-  for (std::size_t i = 0; i < static_cast<std::size_t>(100); ++i) {
-    ctx.time = i * 0.016;
+  for (std::uint64_t i = 0; i < 100U; ++i) {
+    ctx.time = static_cast<double>(i) * 0.016;
     ctx.tick = static_cast<std::uint64_t>(i);
     ASSERT_TRUE(g1.evaluate_with(ctx, err)) << err;
     ASSERT_TRUE(g2.evaluate_with(ctx, err)) << err;

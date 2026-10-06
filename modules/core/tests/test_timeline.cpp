@@ -273,7 +273,7 @@ TEST(TimelineSession, RecordAndPlaybackDeterministic) {
   omnicpp::core::ControlCommand rec;
   rec.kind = CK::ClipRecord;
   rec.numbers[0] = 1;
-  rec.numbers[1] = cube_id;
+  rec.numbers[1] = static_cast<double>(cube_id);
   rec.text = "position.x";
   rec.number_count = 2;
   ok(s, rec);

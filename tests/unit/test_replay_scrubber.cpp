@@ -264,7 +264,7 @@ TEST(ReplayScrubber, RestoreWithGraphNodesSeedsRegistry) {
   // Mutate the graph after the checkpoint.
   omnicpp::core::ControlCommand rm;
   rm.kind = CK::NodeRemove;
-  rm.numbers[0] = session.document().node_graph.nodes()[0].id;
+  rm.numbers[0] = static_cast<double>(session.document().node_graph.nodes()[0].id);
   rm.number_count = 1;
   reply = session.on_control(rm);
   ASSERT_TRUE(reply.ok) << reply.error;

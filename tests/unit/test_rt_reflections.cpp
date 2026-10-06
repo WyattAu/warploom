@@ -772,8 +772,8 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
     // Empirical: reddest pixel in the frame + probe values.
     int best_x = -1, best_y = -1;
     float best_gap = -1.0f;
-    for (std::size_t py = 0; py < static_cast<std::size_t>(static_cast<int>(kImg)); ++py) {
-      for (std::size_t px = 0; px < static_cast<std::size_t>(static_cast<int>(kImg)); ++px) {
+    for (int py = 0; py < static_cast<int>(kImg); ++py) {
+      for (int px = 0; px < static_cast<int>(kImg); ++px) {
         const auto c = channels(rb, px, py);
         const float gap = c[0] - std::max(c[1], c[2]);
         if (gap > best_gap) {
@@ -794,9 +794,9 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
                 control[2]);
     // 16px-cell classification map: R = red-dominant (cube/reflection),
     // f = bright gray (floor), . = dark/miss, ' ' = clear.
-    for (std::size_t cy = 0; cy < static_cast<std::size_t>(static_cast<int>(kImg) / 16); ++cy) {
+    for (int cy = 0; cy < static_cast<int>(kImg) / 16; ++cy) {
       std::string row;
-      for (std::size_t cx = 0; cx < static_cast<std::size_t>(static_cast<int>(kImg) / 16); ++cx) {
+      for (int cx = 0; cx < static_cast<int>(kImg) / 16; ++cx) {
         const auto c = channels(rb, cx * 16 + 8, cy * 16 + 8);
         const float gap = c[0] - std::max(c[1], c[2]);
         const float lum = 0.3f * c[0] + 0.6f * c[1] + 0.1f * c[2];

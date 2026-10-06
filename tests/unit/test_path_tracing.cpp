@@ -161,7 +161,7 @@ bool segment_hits_box(const std::array<float, 3>& o,
 //! 1 = cube, 2 = slab, and the hit point.
 int closest_hit(const std::array<float, 3>& o, const std::array<float, 3>& L,
                 std::array<float, 3>& hit_pos) noexcept {
-  struct Candidate { std::size_t id; float t; };
+  struct Candidate { int id; float t; };
   Candidate best{0, 1.0e30f};
   const std::pair<const std::array<float, 3>*, const std::array<float, 3>*>
       boxes[2] = {{&kCubeCenter, &kCubeHalf}, {&kSlabCenter, &kSlabHalf}};
@@ -188,7 +188,7 @@ int closest_hit(const std::array<float, 3>& o, const std::array<float, 3>& L,
       if (tmin > tmax) { hit = false; break; }
     }
     if (hit && tmin < best.t) {
-      best = {b + 1U, tmin};
+      best = {static_cast<int>(b) + 1, tmin};
     }
   }
   if (best.id == 0) return 0;
@@ -793,8 +793,8 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
     return mean;
   };
 
-  auto pixel = [](const std::vector<float>& img, int px, int py,
-                  int channel) {
+  auto pixel = [](const std::vector<float>& img, std::uint32_t px,
+                  std::uint32_t py, int channel) {
     const std::size_t idx = (static_cast<std::size_t>(py) * kImg +
                              static_cast<std::size_t>(px)) *
                                 4U +
@@ -819,7 +819,7 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
       const auto slab = simulate_pixel(static_cast<std::uint32_t>(slab_px),
                                        static_cast<std::uint32_t>(slab_py), f,
                                        false, right, up);
-      for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
+      for (int c = 0; c < 3; ++c) {
         sky_mean[static_cast<std::size_t>(c)] +=
             sky[static_cast<std::size_t>(c)] / static_cast<float>(kFrames);
         cube_mean[static_cast<std::size_t>(c)] +=
@@ -828,25 +828,25 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
             slab[static_cast<std::size_t>(c)] / static_cast<float>(kFrames);
       }
     }
-    for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
-      EXPECT_FLOAT_EQ(pixel(flat, sky_px, sky_py, c),
+    for (int c = 0; c < 3; ++c) {
+      EXPECT_FLOAT_EQ(pixel(flat, static_cast<std::uint32_t>(sky_px), static_cast<std::uint32_t>(sky_py), c),
                       sky_mean[static_cast<std::size_t>(c)])
           << "sky probe channel " << c;
-      EXPECT_FLOAT_EQ(pixel(flat, cube_px, cube_py, c),
+      EXPECT_FLOAT_EQ(pixel(flat, static_cast<std::uint32_t>(cube_px), static_cast<std::uint32_t>(cube_py), c),
                       cube_mean[static_cast<std::size_t>(c)])
           << "cube probe channel " << c;
-      EXPECT_FLOAT_EQ(pixel(flat, slab_px, slab_py, c),
+      EXPECT_FLOAT_EQ(pixel(flat, static_cast<std::uint32_t>(slab_px), static_cast<std::uint32_t>(slab_py), c),
                       slab_mean[static_cast<std::size_t>(c)])
           << "slab probe channel " << c;
     }
     // Sanity: the probe classes must actually differ (rays went where the
     // CPU says: sky pixel is sky, cube pixel is blue-dominant, slab is
     // green-dominant).
-    EXPECT_GT(pixel(flat, sky_px, sky_py, 2), pixel(flat, sky_px, sky_py, 0));
-    EXPECT_GT(pixel(flat, cube_px, cube_py, 2),
-              pixel(flat, cube_px, cube_py, 1));
-    EXPECT_GT(pixel(flat, slab_px, slab_py, 1),
-              pixel(flat, slab_px, slab_py, 2));
+    EXPECT_GT(pixel(flat, static_cast<std::uint32_t>(sky_px), static_cast<std::uint32_t>(sky_py), 2), pixel(flat, static_cast<std::uint32_t>(sky_px), static_cast<std::uint32_t>(sky_py), 0));
+    EXPECT_GT(pixel(flat, static_cast<std::uint32_t>(cube_px), static_cast<std::uint32_t>(cube_py), 2),
+              pixel(flat, static_cast<std::uint32_t>(cube_px), static_cast<std::uint32_t>(cube_py), 1));
+    EXPECT_GT(pixel(flat, static_cast<std::uint32_t>(slab_px), static_cast<std::uint32_t>(slab_py), 1),
+              pixel(flat, static_cast<std::uint32_t>(slab_px), static_cast<std::uint32_t>(slab_py), 2));
   }
 
   // ---- Pass 2: bounce mode — reflection probes -------------------------------
@@ -861,36 +861,36 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
       const auto mir = simulate_pixel(static_cast<std::uint32_t>(mir_px),
                                       static_cast<std::uint32_t>(mir_py), f,
                                       true, right, up);
-      for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
+      for (int c = 0; c < 3; ++c) {
         top_mean[static_cast<std::size_t>(c)] +=
             top[static_cast<std::size_t>(c)] / static_cast<float>(kFrames);
         mirror_mean[static_cast<std::size_t>(c)] +=
             mir[static_cast<std::size_t>(c)] / static_cast<float>(kFrames);
       }
     }
-    for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
-      EXPECT_FLOAT_EQ(pixel(bounce, ctop_px, ctop_py, c),
+    for (int c = 0; c < 3; ++c) {
+      EXPECT_FLOAT_EQ(pixel(bounce, static_cast<std::uint32_t>(ctop_px), static_cast<std::uint32_t>(ctop_py), c),
                       top_mean[static_cast<std::size_t>(c)])
           << "cube-top bounce probe channel " << c;
-      EXPECT_FLOAT_EQ(pixel(bounce, mir_px, mir_py, c),
+      EXPECT_FLOAT_EQ(pixel(bounce, static_cast<std::uint32_t>(mir_px), static_cast<std::uint32_t>(mir_py), c),
                       mirror_mean[static_cast<std::size_t>(c)])
           << "mirror bounce probe channel " << c;
     }
     // Structural claims: cube-top bounce adds the drifting sky (blue rises
     // above the flat color), and the mirror point's bounce adds the cube's
     // blue (both channels rise above the same pixel's flat-mode values).
-    EXPECT_GT(pixel(bounce, ctop_px, ctop_py, 2),
-              pixel(flat, ctop_px, ctop_py, 2))
+    EXPECT_GT(pixel(bounce, static_cast<std::uint32_t>(ctop_px), static_cast<std::uint32_t>(ctop_py), 2),
+              pixel(flat, static_cast<std::uint32_t>(ctop_px), static_cast<std::uint32_t>(ctop_py), 2))
         << "cube-top bounce must add sky radiance";
     // The GPU bounce at this point self-hits the slab (dominant-axis normal
     // at the probe point is +z): radiance = green + 0.5*green — the exact
     // equality probe above pins this per-frame, so only the aggregate
     // response is asserted here.
-    EXPECT_GT(pixel(bounce, mir_px, mir_py, 2),
-              pixel(flat, mir_px, mir_py, 2))
+    EXPECT_GT(pixel(bounce, static_cast<std::uint32_t>(mir_px), static_cast<std::uint32_t>(mir_py), 2),
+              pixel(flat, static_cast<std::uint32_t>(mir_px), static_cast<std::uint32_t>(mir_py), 2))
         << "mirror bounce adds bounce radiance (blue component rises)";
-    EXPECT_GT(pixel(bounce, mir_px, mir_py, 0),
-              pixel(flat, mir_px, mir_py, 0))
+    EXPECT_GT(pixel(bounce, static_cast<std::uint32_t>(mir_px), static_cast<std::uint32_t>(mir_py), 0),
+              pixel(flat, static_cast<std::uint32_t>(mir_px), static_cast<std::uint32_t>(mir_py), 0))
         << "mirror bounce red rises (0.5*0.2)";
   }
 

@@ -26,7 +26,7 @@ TEST(SpscChannel, TransfersOrderedValuesBetweenThreads) {
   omnicpp::core::SpscChannel<int, 1024> channel;
   constexpr int count = 10000;
   std::thread producer([&] {
-    for (std::size_t value = 0; value < static_cast<std::size_t>(count); ++value) {
+    for (int value = 0; value < count; ++value) {
       while (!channel.try_push(value)) std::this_thread::yield();
     }
   });

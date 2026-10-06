@@ -92,7 +92,7 @@ std::vector<float> make_box_triangles(float hx, float hy, float hz) {
   std::vector<float> out;
   out.reserve(36U * 3U);
   for (const std::uint32_t vi : c) {
-    for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
+    for (int k = 0; k < 3; ++k) {
       out.push_back(((vi >> k) & 1U) != 0U ? h[k] : -h[k]);
     }
   }
@@ -123,7 +123,7 @@ bool ray_box_fp64(const double o[3], const double d[3], const double c[3],
   double tmin = 0.0, tmax = 1.0e30;
   int axis_min = -1;
   double sign_min = 0.0;
-  for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
+  for (int k = 0; k < 3; ++k) {
     if (std::fabs(d[k]) < 1.0e-15) {
       if (std::fabs(o[k] - c[k]) > h[k]) return false;
       continue;
@@ -283,12 +283,12 @@ int room_hit_fp32(const std::array<float, 3>& o,
   int best_box = 0;
   float best_t = 1.0e30f;
   std::array<float, 3> best_n{0.0f, 0.0f, 0.0f};
-  for (std::size_t b = 0; b < static_cast<std::size_t>(5); ++b) {
+  for (int b = 0; b < 5; ++b) {
     float tmin = 0.0f, tmax = 1.0e30f;
     int axis = -1;
     float sgn = 0.0f;
     bool hit = true;
-    for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
+    for (int k = 0; k < 3; ++k) {
       const float dk = d[static_cast<std::size_t>(k)];
       const float ok = o[static_cast<std::size_t>(k)];
       const float ck = boxes[static_cast<std::size_t>(b)].c[static_cast<std::size_t>(k)];
@@ -302,7 +302,11 @@ int room_hit_fp32(const std::array<float, 3>& o,
       float t1 = (ck + hk - ok) * inv;
       float s = -1.0f;
       if (t0 > t1) { std::swap(t0, t1); s = 1.0f; }
-      if (t0 > tmin) { tmin = t0; axis = k; sgn = s; }
+      if (t0 > tmin) {
+        tmin = t0;
+        axis = k;
+        sgn = s;
+      }
       tmax = std::min(tmax, t1);
       if (tmin > tmax) { hit = false; break; }
     }
@@ -938,7 +942,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
     ref8[static_cast<std::size_t>(i)] = mc_reference(
         nx, ny, R, Uv, F, static_cast<int>(kBounces), sc,
         0x9E3779B97F4A7C15ULL + 0x1000ULL * static_cast<std::uint64_t>(i));
-    for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
+    for (int c = 0; c < 3; ++c) {
       EXPECT_NEAR(
           pixel(img, probe_px[i], probe_py[i], c),
           ref8[static_cast<std::size_t>(i)][static_cast<std::size_t>(c)], 0.40)
@@ -958,7 +962,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
     const auto ref1 = mc_reference(nx, ny, R, Uv, F, 1, sc,
                                    0x9E3779B97F4A7C15ULL);
     double gap = 0.0;
-    for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
+    for (int c = 0; c < 3; ++c) {
       gap += ref8[0][static_cast<std::size_t>(c)] -
              ref1[static_cast<std::size_t>(c)];
     }
@@ -968,7 +972,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
 
   // Absorption sanity: interior probes are strictly below the sky radiance.
   for (std::size_t i = 0; i < static_cast<std::size_t>(3); ++i) {
-    for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
+    for (int c = 0; c < 3; ++c) {
       EXPECT_LT(pixel(img, probe_px[i], probe_py[i], c),
                 static_cast<float>(kSky) - 0.05f)
           << probes[static_cast<std::size_t>(i)].first
@@ -981,7 +985,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
     const auto expect = gpu_first_segments(
         static_cast<std::uint32_t>(sky_px), static_cast<std::uint32_t>(sky_py),
         0U, right, up, 1);
-    for (std::size_t c = 0; c < static_cast<std::size_t>(3); ++c) {
+    for (int c = 0; c < 3; ++c) {
       EXPECT_FLOAT_EQ(pixel(img, sky_px, sky_py, c),
                       expect[static_cast<std::size_t>(c)])
           << "open-sky probe channel " << c;

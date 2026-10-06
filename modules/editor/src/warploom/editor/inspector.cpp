@@ -75,7 +75,7 @@ void InspectorPanel::rebuild(
     row.color = selected ? 0xFF2E6E4E : 0xFF1A2026;
     row.border_color = selected ? 0xFF66D9A0 : 0x00000000;
     row.fixed_h = 16.0F;
-    row.text_color = selected ? 0xFFEFFFFFFF : 0xFFC8D2DA;
+    row.text_color = selected ? 0xFFEFFFFF : 0xFFC8D2DA;
     (void)tree.add(row, panel_);
   }
 

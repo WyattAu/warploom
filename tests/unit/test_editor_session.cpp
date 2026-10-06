@@ -31,7 +31,10 @@ using omnicpp::editor::EditorSession;
 struct SessionFixture {
   EditorSession session;
 
-  SessionFixture() { spawn_cube(1.0, 0.5, -1.0, 2.0); }
+  SessionFixture() {
+    const ControlReply reply = spawn_cube(1.0, 0.5, -1.0, 2.0);
+    EXPECT_TRUE(reply.ok) << "fixture spawn failed: " << reply.error;
+  }
 
   [[nodiscard]] ControlReply send(ControlCommand::Kind kind,
                                   const double* numbers = nullptr,

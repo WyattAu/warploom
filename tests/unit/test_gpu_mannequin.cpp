@@ -82,8 +82,12 @@ struct MannequinAsset {
 MannequinAsset load_asset() {
   MannequinAsset asset;
   const std::string dir =
-      WARPLOOM_TEST_ASSET_DIR[0] != 0 ? WARPLOOM_TEST_ASSET_DIR
-                                     : "assets/models";
+#ifdef WARPLOOM_TEST_ASSET_DIR
+      WARPLOOM_TEST_ASSET_DIR
+#else
+      "assets/models"
+#endif
+      ;
   std::ifstream json_file(dir + "/mannequin.gltf", std::ios::binary);
   if (!json_file) return asset;
   std::vector<char> json_bytes((std::istreambuf_iterator<char>(json_file)),

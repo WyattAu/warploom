@@ -2542,9 +2542,10 @@ bool setup_rt_shadows(ViewportApp& app) {
   // --- 4. TLAS storage (capacity = worst-case instance count). ----------
   // City scene: 25 buildings + 32 poles/heads + 3 ground/static + actors.
   const std::uint32_t tlas_capacity =
-      2U + app.mannequin_meshes.size() +
+      2U + static_cast<std::uint32_t>(app.mannequin_meshes.size()) +
       static_cast<std::uint32_t>(app.city_parts.size()) +
-      app.city_actor_count * app.mannequin_meshes.size() +
+      static_cast<std::uint32_t>(app.city_actor_count) *
+          static_cast<std::uint32_t>(app.mannequin_meshes.size()) +
       static_cast<std::uint32_t>(app.rt_blas_sponza.size()) + 8U;
   auto tlas = app.rt_builder.create_tlas(dev, app.allocator, tlas_capacity);
   if (!tlas.is_ok()) {

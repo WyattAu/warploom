@@ -126,7 +126,7 @@ TEST(JobSystem, ForkJoinParallelSum) {
   std::vector<int> results(kJobs, 0);
   JobCounter counter;
   counter.add(kJobs);
-  for (std::size_t i = 0; i < static_cast<std::size_t>(kJobs); ++i) {
+  for (int i = 0; i < static_cast<int>(kJobs); ++i) {
     ASSERT_TRUE(jobs.submit(JobPriority::upload, &counter,
                             [&results, i] { results[static_cast<std::size_t>(i)] = i * i; }));
   }

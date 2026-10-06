@@ -2061,7 +2061,7 @@ TEST(VulkanHardware, ParallelRecorderContentionStress) {
   ASSERT_EQ(vkCreateFence(context.device(), &fence_info, nullptr, &fence), VK_SUCCESS);
 
   constexpr int kWaves = 12;
-  for (std::size_t wave = 0; wave < static_cast<std::size_t>(kWaves); ++wave) {
+  for (int wave = 0; wave < static_cast<int>(kWaves); ++wave) {
     // Even waves: job-system workers. Odd waves: ad-hoc threads (fallback).
     recorder.set_job_system((wave % 2 == 0) ? &jobs : nullptr);
     auto secondaries = record_frame(wave);

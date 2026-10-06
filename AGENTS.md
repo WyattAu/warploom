@@ -134,12 +134,18 @@ Known-broken, and must not be reported as working:
   `-Wsign-conversion` is paid too (104 -> 0). GoogleTest is built from source
   here, so its own TUs are compiled with our flags; warnings from it are
   relaxed per-target (`-w`) because they are not actionable and they mask ours.
-  About 190 remain, dominated by `-Wdouble-promotion`, `-Wshorten-64-to-32`
-  (24, surfaced only once the sign warnings stopped masking it) and dead-code
-  warnings. `-Wswitch-enum` was tried and deliberately dropped: it fires even
-  when a switch has a `default:`, and every site here partitions an enum on
-  purpose. `-Wswitch` is enabled and still catches an enum switch with no
-  default at all.
+  147 remain, dominated by `-Wdouble-promotion` (37), `-Wunused-variable` (23),
+  `-Wmissing-field-initializers` (21) and `-Wfloat-equal` (19).
+  `-Wshorten-64-to-32` is paid too (24 -> 0), and it found a missing cast that
+  promoted a whole `tlas_capacity` sum to `size_t` before narrowing it.
+  `-Wswitch-enum` was tried and deliberately dropped: it fires even when a
+  switch has a `default:`, and every site here partitions an enum on purpose.
+  `-Wswitch` is enabled and still catches an enum switch with no default at
+  all -- it found one, in `bridge_control_command`, whose switch had no
+  `default` and no trailing return, so the 35 kinds that bridge does not own
+  fell off the end of a non-void function. Unreachable from its only caller,
+  and still UB.
+
   Until that debt is paid, the only verified configuration is `default` — which
   means memory safety is currently unverified by sanitizers.
 - A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystemsConcurrently`,

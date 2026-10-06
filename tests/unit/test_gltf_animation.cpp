@@ -8,7 +8,8 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
-#include <algorithm>\n#include <cstdint>
+#include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -46,8 +47,12 @@ Mannequin load_mannequin() {
   Mannequin mannequin;
   std::vector<char> json_bytes;
   const std::string asset_dir =
-      WARPLOOM_TEST_ASSET_DIR[0] != 0 ? WARPLOOM_TEST_ASSET_DIR
-                                     : "assets/models";
+#ifdef WARPLOOM_TEST_ASSET_DIR
+      WARPLOOM_TEST_ASSET_DIR
+#else
+      "assets/models"
+#endif
+      ;
   if (const std::string error =
           read_file(asset_dir + "/mannequin.gltf", json_bytes);
       !error.empty()) {

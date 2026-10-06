@@ -1111,12 +1111,12 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
         min_px = std::min(min_px, row_min);
         max_px = std::max(max_px, row_max);
         if (py % 8 == 0 || row_min != row_max) {
-          std::printf("row %3d: px [%3d..%3d]\n", py, row_min, row_max);
+          std::printf("row %3zu: px [%3zu..%3zu]\n", py, row_min, row_max);
         }
       }
     }
-    std::printf("overall bbox: px [%d..%d] py [%d..%d]\n", min_px, max_px,
-                min_py, max_py);
+    std::printf("overall bbox: px [%zu..%zu] py [%zu..%zu]\n", min_px,
+                max_px, min_py, max_py);
     std::printf("probe near (128,128) lum=%.4f packed=0x%08x (r=%u g=%u b=%u)\n",
                 static_cast<double>(luminance(ra, 128, 128)), ra.pixels[128U * kImg + 128U],
                 ra.pixels[128U * kImg + 128U] & 0xffU,
