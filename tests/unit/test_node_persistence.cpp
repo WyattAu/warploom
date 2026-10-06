@@ -269,7 +269,7 @@ TEST(NodeCommands, FullEditSequenceReplayIsByteDeterministic) {
   ed::CommandStack sa(doc_a);
   ed::CommandStack sb(doc_b);
 
-  const auto run = [&](ed::SceneDocument& doc, ed::CommandStack& stack) {
+  const auto run = [&](ed::SceneDocument& /*doc*/, ed::CommandStack& stack) {
     std::string err;
     auto n1 = std::make_unique<ed::AddNodeCommand>("const_number", 40.0, 40.0);
     ed::AddNodeCommand* n1p = n1.get();

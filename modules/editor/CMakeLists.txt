@@ -95,14 +95,6 @@ if(WARPLOOM_EDITOR_BUILD_TESTS AND (NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME
         target_include_directories(warploom_editor_tests
             PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests
-                # test_node_editor's two golden-pixel tests include the
-                # software rasterizer header (header-only, now in
-                # modules/render's include root post-S3; the include is
-                # spelled engine/render/software_rasterizer.hpp via the
-                # superproject forwarder). In-tree only: the gtest guard
-                # above keeps this block out of standalone configures, and
-                # module smoke tests never depend on the rasterizer.
-                ${CMAKE_CURRENT_SOURCE_DIR}/../../include
         )
         add_test(NAME WarploomEditorTests COMMAND warploom_editor_tests)
     endif()

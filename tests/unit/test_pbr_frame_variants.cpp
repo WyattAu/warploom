@@ -176,7 +176,7 @@ struct SolidTexture {
   omnicpp::render::Allocation alloc{};
 };
 
-bool make_white(VkDevice d, VkPhysicalDevice pd, VkQueue q, std::uint32_t fam,
+bool make_white(VkDevice d, VkPhysicalDevice /*pd*/, VkQueue q, std::uint32_t fam,
                 omnicpp::render::VulkanMemoryAllocator& a, SolidTexture& out) {
   out = {};
   VkImageCreateInfo ii{};

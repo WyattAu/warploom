@@ -704,7 +704,7 @@ namespace {
 //! Runs the bloom half of the chain over the already-rendered HDR image and
 //! returns the bloom output (bloom_b, 128x128) read back.
 omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
-                                          omnicpp::render::VulkanOffscreenTarget& out) {
+                                          omnicpp::render::VulkanOffscreenTarget& /*out*/) {
   VkDevice dev = h.ctx.device();
   auto pr = omnicpp::render::VulkanRenderer::create_command_pool(dev, h.qf);
   if (!pr.is_ok()) return {};
@@ -767,7 +767,7 @@ omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
   };
   const auto compiled = omnicpp::render::compile_graph(nodes);
   omnicpp::render::execute_graph(cb, nodes, compiled,
-      [](VkCommandBuffer command_buffer, const omnicpp::render::GraphPass& p,
+      [](VkCommandBuffer command_buffer, const omnicpp::render::GraphPass& /*p*/,
          void* user_data) {
         auto* cx = static_cast<Ctx*>(user_data);
         (void)cx->self->record_fullscreen_draw(command_buffer, *cx->pass,

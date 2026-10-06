@@ -134,59 +134,27 @@ Known-broken, and must not be reported as working:
   `-Wsign-conversion` is paid too (104 -> 0). GoogleTest is built from source
   here, so its own TUs are compiled with our flags; warnings from it are
   relaxed per-target (`-w`) because they are not actionable and they mask ours.
-  33 remain: `-Wfloat-equal` (16), `-Wunused-parameter` (10),
-  `-Wmissing-include-dirs` (5) and `-Wmissing-braces` (2).
-  `-Wold-style-cast` is paid too (9 -> 0): every one was a C-style narrowing
-  cast of an index or queue family id in a test, now an explicit
-  `static_cast<std::uint32_t>`. `-Wunused-function` is paid too (7 -> 0): five
-  were genuinely dead test helpers, one was a dead free-function shim in
-  vulkan_renderer.cpp whose replacement is the member
-  `record_fullscreen_pass`, and one -- `record_hiz_contract` -- was dead for a
-  reason worth knowing: `VK_USE_PLATFORM_XCB_KHR` is only defined for the
-  viewport and render targets, never for the unit-test target, so the HIZ
-  contract test body is preprocessed out entirely and the test always skips
-  with "Vulkan XCB support was not enabled for this build". That helper is now
-  behind the same condition, and the dead test is recorded here rather than
-  left looking like coverage. `-Wshadow` is paid too
-  (10 -> 0): the city scene's camera framing shadowed the outer orbit
-  variables, and a telemetry `objects` manifest shadowed the function's
-  `ScenePbrObject` list. Renamed, and the city rename was A/B'd byte-identical
-  over 15 protocol commands against a pre-rename host. `-Wunused-variable` is paid too
-  (23 -> 0) by deletion rather than `(void)` casts: dead code is the finding,
-  and marking it used would only hide it. Two were checked before deleting --
-  `grep -c port` on node_editor.cpp is 0, so the unused in_count/out_count
-  cannot be needed; and the joystick's unused kTypeInit is already explained by
-  the comment beneath it.
-  `-Wmissing-field-initializers` is paid too (21 -> 0): 17 were Vulkan structs
-  written `VkFoo info{VK_STRUCTURE_TYPE_FOO};`, which leaves every other field
-  value-initialized -- correct, but it reads as "only sType is set". They are
-  now `{}` followed by an explicit `.sType =`, which is the Vulkan idiom and
-  says what it means. The rest were `Accepted` and ECS `System`, both of which
-  now name every member at construction. `-Wdouble-promotion` is paid too (37 -> 0): every
-  one of the 37 was in a test, none in engine code -- printf `%f` varargs
-  require the double, and the Monte-Carlo reference is deliberately double
-  against a float GPU result. Both are explicit casts now.
-  `-Wshorten-64-to-32` is paid too (24 -> 0), and it found a missing cast that
-  promoted a whole `tlas_capacity` sum to `size_t` before narrowing it.
-  `-Wfloat-equal` is down to 16 and found a real one: three parsers read
-  numbers as `double` and hand-rolled the same "is this an exact integer?"
-  predicate as `v != static_cast<double>(static_cast<std::uint64_t>(v))`, which
-  casts BEFORE range-checking, so `"id": 1e300` was an undefined float->uint64
-  conversion. Verified, not assumed: a standalone `-fsanitize=float-cast-overflow
-  -fno-sanitize-recover=all` build aborts on the old form and exits 0 on the
-  replacement. One helper (`numeric_cast.hpp`) now owns it, with tests. Worth
-  noting the accidental-pass trap there -- on x86-64 the bad cast yields
-  0x8000000000000000, whose round-trip comparison then *fails*, so a naive
-  functional test passes against the broken code. Only UBSan catches it.
-  `-Wswitch-enum` was tried and deliberately dropped: it fires even when a
-  switch has a `default:`, and every site here partitions an enum on purpose.
-  `-Wswitch` is enabled and still catches an enum switch with no default at
-  all -- it found one, in `bridge_control_command`, whose switch had no
-  `default` and no trailing return, so the 35 kinds that bridge does not own
-  fell off the end of a non-void function. Unreachable from its only caller,
-  and still UB.
-
-  Until that debt is paid, the only verified configuration is `default` — which
+  Clang is now at ZERO. GCC is not, and the gap is the finding: a separate
+  probe build with `-DCMAKE_CXX_COMPILER=g++` reports 203 warnings clang never
+  emits, including 14 `-Wdangling-pointer` ("dangling pointer to an unnamed
+  temporary may be used") and 10 `-Wnull-dereference`. Both are real bug
+  classes, not style. A "warnings are clean" claim measured on one compiler is
+  the same mistake as a correctness claim measured at one size -- and the
+  sanitizer presets are GCC, so `asan-ubsan` and `tsan` still do not build.
+  The GCC-only warnings are `-Wfloat-equal` (67), `int`-to-`size_t` sign
+  conversions (58), `-Wredundant-move` (23), `-Wdangling-pointer` (14) and
+  `-Wnull-dereference` (10). The clang campaign that reached zero also paid
+  `-Wunused-result` (86, hid a deadlock), `-Wsign-conversion` (104),
+  `-Wshorten-64-to-32` (24), `-Wdouble-promotion` (37),
+  `-Wmissing-field-initializers` (21), `-Wunused-variable` (23),
+  `-Wshadow` (10), `-Wold-style-cast` (9) and `-Wunused-function` (7), and it
+  found real bugs on the way: an uninitialised `tlas_capacity` sum, a
+  `switch` with no default and no trailing return in `bridge_control_command`,
+  a 36-bit colour literal silently losing its alpha byte, `%3d` applied to
+  `std::size_t` in a printf, a `[[nodiscard]]` reply discarded by a test
+  fixture, and three parsers casting `double` to an integer before
+  range-checking the value.
+  Until that GCC debt is paid, the only verified configuration is `default` — which
   means memory safety is currently unverified by sanitizers.
 - A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystemsConcurrently`,
   roughly one full-suite run in five.

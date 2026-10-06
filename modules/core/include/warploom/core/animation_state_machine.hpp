@@ -98,6 +98,13 @@ class AnimationStateMachine final {
     }
 
     // Ease the blend weight toward the active state's settled level.
+    // Exact comparison is correct here, and only because of the snap in the
+    // branches below: they assign `target` itself when within one step, so
+    // convergence lands on the exact float rather than approaching it. A
+    // tolerance would make fading_ flicker on a sub-epsilon remainder and
+    // would depend on magnitude, which a fixed tick must not.
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wfloat-equal"
     const float target = states_[current_].weight_level;
     if (weight_ != target) {
       const float step = fade_rate * dt;
@@ -108,6 +115,7 @@ class AnimationStateMachine final {
       }
     }
     fading_[current_] = weight_ != target;
+    #pragma GCC diagnostic pop
   }
 
   //! The active state's name.

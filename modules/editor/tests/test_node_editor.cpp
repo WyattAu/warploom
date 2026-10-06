@@ -178,9 +178,15 @@ TEST(NodeEditorView, DragUpdatesWiresAndPins) {
   ASSERT_EQ(before.rects.size(), after.rects.size());
   bool moved = false;
   for (std::size_t i = 0; i < before.rects.size(); ++i) {
+    // Exact: the assertion is "the drag moved the card", and a position is
+    // copied bit-for-bit, so any change is a real one. A tolerance would let
+    // a sub-pixel no-op pass.
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wfloat-equal"
     if (before.rects[i].x != after.rects[i].x ||
         before.rects[i].y != after.rects[i].y) {
       moved = true;
+    #pragma GCC diagnostic pop
     }
   }
   EXPECT_TRUE(moved);

@@ -1049,7 +1049,13 @@ void sample_gltf_channel(const GltfSampler& sampler, float time,
       hi = mid;
     }
   }
-  // Exact keyframe hit returns the exact keyframe (determinism contract).
+  //! Exact float equality is the contract here, not an oversight: a time
+  //! that lands precisely on a keyframe must return that keyframe's values
+  //! byte-for-byte. A tolerance would interpolate instead and change the
+  //! sampled pose, which is what the determinism claim forbids. (An exact
+  //! keyframe hit must return the exact keyframe.)
+  #pragma GCC diagnostic push
+  #pragma GCC diagnostic ignored "-Wfloat-equal"
   if (sampler.times[lo] == time) {
     for (std::size_t c = 0; c < stride; ++c) out[c] = sampler.values[lo * stride + c];
     return;
@@ -1058,6 +1064,7 @@ void sample_gltf_channel(const GltfSampler& sampler, float time,
     for (std::size_t c = 0; c < stride; ++c) out[c] = sampler.values[hi * stride + c];
     return;
   }
+  #pragma GCC diagnostic pop
   const float t0 = sampler.times[lo];
   const float t1 = sampler.times[hi];
   const float alpha = (time - t0) / (t1 - t0);

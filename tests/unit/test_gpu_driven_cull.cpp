@@ -109,7 +109,7 @@ void build_bar(float height, std::vector<float>& vertices,
 //! \param out_image receives the VkImage handle. The caller MUST destroy it:
 //! the allocation only owns the backing memory, so a caller that keeps the
 //! view/sampler/alloc triple alone leaks the image until vkDestroyDevice.
-bool make_white_texture(VkDevice device, VkPhysicalDevice physical_device,
+bool make_white_texture(VkDevice device, VkPhysicalDevice /*physical_device*/,
                         VkQueue queue, std::uint32_t queue_family,
                         omnicpp::render::VulkanMemoryAllocator& allocator,
                         VkImageView& out_view, VkSampler& out_sampler,

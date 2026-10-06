@@ -743,7 +743,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   ASSERT_TRUE(rt.write_sbt(ctx.device(), handles.value(), sbt).is_ok());
 
   // ---- Per-frame recording (E3 pattern) --------------------------------------
-  auto record_round = [&](std::uint32_t frame, bool clear_first) {
+  auto record_round = [&](std::uint32_t /*frame*/, bool clear_first) {
     auto r_cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), cmd_pool);
     EXPECT_TRUE(r_cb_r.is_ok());

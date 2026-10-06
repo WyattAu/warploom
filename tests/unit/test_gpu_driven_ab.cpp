@@ -136,7 +136,7 @@ struct SolidTexture {
   omnicpp::render::Allocation allocation{};
 };
 
-bool make_solid_texture(VkDevice device, VkPhysicalDevice physical_device,
+bool make_solid_texture(VkDevice device, VkPhysicalDevice /*physical_device*/,
                         VkQueue queue, std::uint32_t queue_family,
                         omnicpp::render::VulkanMemoryAllocator& allocator,
                         const std::uint8_t (&rgba)[4], SolidTexture& out) {

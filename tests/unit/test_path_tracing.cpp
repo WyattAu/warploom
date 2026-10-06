@@ -625,7 +625,7 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
   // round 0 additionally clears accum; each round updates the frame index on
   // the host, traces, and orders shader-write -> shader-read for the next
   // round. flat mode first (dims.z=0), then bounce mode (dims.z=1).
-  auto record_round = [&](std::uint32_t frame, bool clear_first) {
+  auto record_round = [&](std::uint32_t /*frame*/, bool clear_first) {
     auto r_cb_r =
         omnicpp::render::VulkanRenderer::allocate_command_buffer(ctx.device(),
                                                                  cmd_pool);

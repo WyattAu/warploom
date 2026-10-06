@@ -135,7 +135,7 @@ std::size_t count_red_run(const std::vector<std::uint32_t>& pixels,
 }
 
 //! 1x1 opaque-white R8G8B8A8 texture (bindless element 0 fallback).
-bool make_white_texture(VkDevice device, VkPhysicalDevice physical_device,
+bool make_white_texture(VkDevice device, VkPhysicalDevice /*physical_device*/,
                         VkQueue queue, std::uint32_t queue_family,
                         omnicpp::render::VulkanMemoryAllocator& allocator,
                         VkImage& out_image, VkImageView& out_view,

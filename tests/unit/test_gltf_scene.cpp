@@ -1071,10 +1071,10 @@ TEST(VulkanHardware, SrgbBaseColorTextureLinearisesAtSample) {
   omnicpp::render::VulkanSceneResourceRegistry registry;
   const auto mesh_handle = registry.create_mesh(upload.mesh);
   const auto factor_material = registry.create_material(
-      {kLinearGrey, kLinearGrey, kLinearGrey, 1.0f});
+      {{kLinearGrey, kLinearGrey, kLinearGrey, 1.0f}, {}});
   const auto grey_texture = registry.create_texture({grey_tex.view, grey_tex.sampler, 1U});
   const auto textured_material =
-      registry.create_material({1.0f, 1.0f, 1.0f, 1.0f, grey_texture});
+      registry.create_material({{1.0f, 1.0f, 1.0f, 1.0f}, grey_texture});
   ASSERT_TRUE(mesh_handle.valid());
   ASSERT_TRUE(factor_material.valid());
   ASSERT_TRUE(textured_material.valid());
