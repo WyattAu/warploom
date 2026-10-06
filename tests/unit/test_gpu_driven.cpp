@@ -561,7 +561,10 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
       const float t = static_cast<float>(frame) * (1.0f / 60.0f);
       for (std::uint32_t i = 0; i < kInstanceCount; ++i) {
         const float ring = (i % 2 == 0) ? 10.0f : 22.0f;
-        const float ang = t * (0.3f + 0.1f * (i % 5)) + static_cast<float>(i);
+        // i % 5 is 0..4 and i is the loop index, so both narrow to float
+        // exactly; the casts say so instead of leaving it implicit.
+        const float ang = t * (0.3f + 0.1f * static_cast<float>(i % 5U)) +
+                          static_cast<float>(i);
         const float bob = (i % 4 == 0) ? std::sin(t * 2.0f) * 14.0f : 0.0f;
         const float z = -ring + bob;  // z<0 in front; bob>14 pushes behind camera
         const float sphere[4] = {std::cos(ang) * 3.0f, std::sin(ang) * 3.0f, z, 0.9f};

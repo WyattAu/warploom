@@ -798,13 +798,18 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
                 dbl(control[1]), dbl(control[2]));
     // 16px-cell classification map: R = red-dominant (cube/reflection),
     // f = bright gray (floor), . = dark/miss, ' ' = clear.
+    // Matches the tolerances below it: an exact 0.0f test would report a
+    // pixel as "clear" only if every channel landed on exactly zero, which
+    // is not what this map is for.
+    constexpr float kClearEpsilon = 1.0e-6F;
     for (int cy = 0; cy < static_cast<int>(kImg) / 16; ++cy) {
       std::string row;
       for (int cx = 0; cx < static_cast<int>(kImg) / 16; ++cx) {
         const auto c = channels(rb, cx * 16 + 8, cy * 16 + 8);
         const float gap = c[0] - std::max(c[1], c[2]);
         const float lum = 0.3f * c[0] + 0.6f * c[1] + 0.1f * c[2];
-        if (c[0] == 0.0f && c[1] == 0.0f && c[2] == 0.0f) {
+        if (c[0] <= kClearEpsilon && c[1] <= kClearEpsilon &&
+            c[2] <= kClearEpsilon) {
           row += ' ';
         } else if (gap > 0.08f) {
           row += 'R';
@@ -835,18 +840,18 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
       << "control floor pixel tinted (b)";
 
   // Cleanup (move-then-destroy, per the builder's non-copyable handles).
-  BottomLevelAS out_floor = std::move(blas_floor.value());
-  BottomLevelAS out_cube = std::move(blas_cube.value());
-  TopLevelAS out_t = std::move(tlas.value());
-  Allocation out_gf = std::move(geom_floor.value());
-  Allocation out_gc = std::move(geom_cube.value());
+  BottomLevelAS out_floor = blas_floor.value();
+  BottomLevelAS out_cube = blas_cube.value();
+  TopLevelAS out_t = tlas.value();
+  Allocation out_gf = geom_floor.value();
+  Allocation out_gc = geom_cube.value();
   builder.destroy_blas(h.ctx.device(), h.alloc, out_floor);
   builder.destroy_blas(h.ctx.device(), h.alloc, out_cube);
   builder.destroy_tlas(h.ctx.device(), h.alloc, out_t);
   h.alloc.destroy_allocation(out_gf);
   h.alloc.destroy_allocation(out_gc);
   scratch_pool.cleanup(h.alloc);
-  Allocation out_colors = std::move(colors.value());
+  Allocation out_colors = colors.value();
   h.alloc.destroy_allocation(out_colors);
   pipe.cleanup(h.ctx.device());
   vkDestroyCommandPool(h.ctx.device(), pool.value(), nullptr);

@@ -380,9 +380,9 @@ TEST(ray_query_first_contact, blas_tlas_build_and_ray_query) {
   vkDestroyFence(context.device(), fence, nullptr);
   pipe.cleanup(context.device());
   vkDestroyCommandPool(context.device(), pool.value(), nullptr);
-  omnicpp::render::BottomLevelAS out_a = std::move(blas_a.value());
-  omnicpp::render::BottomLevelAS out_b = std::move(blas_b.value());
-  omnicpp::render::TopLevelAS out_t = std::move(tlas.value());
+  omnicpp::render::BottomLevelAS out_a = blas_a.value();
+  omnicpp::render::BottomLevelAS out_b = blas_b.value();
+  omnicpp::render::TopLevelAS out_t = tlas.value();
   scratch.cleanup(allocator);
   builder.destroy_blas(context.device(), allocator, out_a);
   builder.destroy_blas(context.device(), allocator, out_b);

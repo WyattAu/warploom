@@ -621,7 +621,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   }
   auto tlas_r = builder.create_tlas(ctx.device(), alloc, 5U);
   ASSERT_TRUE(tlas_r.is_ok());
-  TopLevelAS tlas = std::move(tlas_r.value());
+  TopLevelAS tlas = tlas_r.value();
 
   VulkanScratchPool scratch_pool;
   auto scratch1 = scratch_pool.acquire(alloc, ctx.device(), 1U << 20U);

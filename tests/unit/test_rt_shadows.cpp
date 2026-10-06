@@ -1267,11 +1267,11 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
   EXPECT_GT(far_a, 0.10f) << "PCF path: far cube below ambient floor";
   EXPECT_GT(far_b, 0.10f) << "RT path: far cube below ambient floor";
 
-  omnicpp::render::BottomLevelAS out_near = std::move(blas_near.value());
-  omnicpp::render::BottomLevelAS out_far = std::move(blas_far.value());
-  omnicpp::render::TopLevelAS out_t = std::move(tlas.value());
-  Allocation out_gn = std::move(geom_near.value());
-  Allocation out_gf = std::move(geom_far.value());
+  omnicpp::render::BottomLevelAS out_near = blas_near.value();
+  omnicpp::render::BottomLevelAS out_far = blas_far.value();
+  omnicpp::render::TopLevelAS out_t = tlas.value();
+  Allocation out_gn = geom_near.value();
+  Allocation out_gf = geom_far.value();
   builder.destroy_blas(h.ctx.device(), h.alloc, out_near);
   builder.destroy_blas(h.ctx.device(), h.alloc, out_far);
   builder.destroy_tlas(h.ctx.device(), h.alloc, out_t);

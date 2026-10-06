@@ -481,11 +481,11 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
   auto blas_slab_r = builder.create_blas(ctx.device(), alloc, in_slab);
   ASSERT_TRUE(blas_cube_r.is_ok());
   ASSERT_TRUE(blas_slab_r.is_ok());
-  BottomLevelAS blas_cube = std::move(blas_cube_r.value());
-  BottomLevelAS blas_slab = std::move(blas_slab_r.value());
+  BottomLevelAS blas_cube = blas_cube_r.value();
+  BottomLevelAS blas_slab = blas_slab_r.value();
   auto tlas_r = builder.create_tlas(ctx.device(), alloc, 2U);
   ASSERT_TRUE(tlas_r.is_ok());
-  TopLevelAS tlas = std::move(tlas_r.value());
+  TopLevelAS tlas = tlas_r.value();
 
   VulkanScratchPool scratch_pool;
   auto scratch1 = scratch_pool.acquire(alloc, ctx.device(), 1U << 20U);

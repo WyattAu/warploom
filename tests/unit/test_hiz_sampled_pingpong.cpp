@@ -413,7 +413,8 @@ TEST(VulkanHardware, SampledHiZPreviousFramePingPong) {
                                    : VK_IMAGE_LAYOUT_UNDEFINED,
           VK_IMAGE_LAYOUT_GENERAL,
           destination_initialized ? VK_ACCESS_SHADER_READ_BIT
-                                   : static_cast<VkAccessFlags>(0),
+                                   : VkAccessFlags{},
+
           VK_ACCESS_SHADER_WRITE_BIT,
           destination_initialized ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
                                    : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,

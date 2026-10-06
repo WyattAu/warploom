@@ -564,7 +564,7 @@ TEST(VulkanHardware, GpuMannequinWalkCycle) {
       reinterpret_cast<const std::uint8_t*>(asset.bin.data()), asset.bin.size(),
       &error);
   ASSERT_TRUE(imported.is_ok()) << error;
-  GltfAnimationDocument doc = std::move(imported.value());
+  GltfAnimationDocument doc = imported.value();
   ASSERT_EQ(doc.skins.size(), 1U);
   ASSERT_FALSE(doc.animations.empty());
   const auto& anim = doc.animations[0];
@@ -686,7 +686,7 @@ TEST(VulkanHardware, GpuMannequinThroughRecordPbrScene) {
       reinterpret_cast<const std::uint8_t*>(asset.bin.data()), asset.bin.size(),
       &error);
   ASSERT_TRUE(imported.is_ok()) << error;
-  GltfAnimationDocument doc = std::move(imported.value());
+  GltfAnimationDocument doc = imported.value();
   const auto& anim = doc.animations[0];
 
   MannequinHarness h;

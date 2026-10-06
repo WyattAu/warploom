@@ -48,32 +48,47 @@ PropertyRegistry& default_registry() {
   // from the cause. 0 is the failure value.
   static const bool built = [&] {
     bool all_ok = true;
-    all_ok = registry.register_type(
-                 std::string(kTypeCube), "Axis-aligned unit cube scaled per-axis",
-        {{"position", PropValue::make_vec3(0.0, 0.0, 0.0), "World position"},
-         {"rotation", PropValue::make_vec3(0.0, 0.0, 0.0), "Euler XYZ degrees"},
-         {"scale", PropValue::make_vec3(1.0, 1.0, 1.0), "Per-axis scale"},
-         {"color", PropValue::make_vec3(0.8, 0.8, 0.8), "Linear albedo RGB"}}) != 0U && all_ok;
-    all_ok = registry.register_type(
-                 std::string(kTypeSphere), "Unit sphere centered at the origin",
-        {{"position", PropValue::make_vec3(0.0, 0.0, 0.0), "World position"},
-         {"radius", PropValue::make_number(0.5), "Radius in meters"},
-         {"color", PropValue::make_vec3(0.8, 0.8, 0.8), "Linear albedo RGB"}});
-    all_ok = registry.register_type(
-                 std::string(kTypeLight), "Omnidirectional point light",
-        {{"position", PropValue::make_vec3(0.0, 2.0, 0.0), "World position"},
-         {"color", PropValue::make_vec3(1.0, 1.0, 1.0), "Linear RGB"},
-         {"intensity", PropValue::make_number(1.0), "Candela"}}) != 0U && all_ok;
+    // Named vectors rather than braced-init-lists at the call site: the
+    // initializer_list temporary has to outlive the copy into the by-value
+    // parameter, and a named local states that lifetime instead of relying on
+    // the rule.
+    const std::vector<PropertyDesc> cube_props{
+        {"position", PropValue::make_vec3(0.0, 0.0, 0.0), "World position"},
+        {"rotation", PropValue::make_vec3(0.0, 0.0, 0.0), "Euler XYZ degrees"},
+        {"scale", PropValue::make_vec3(1.0, 1.0, 1.0), "Per-axis scale"},
+        {"color", PropValue::make_vec3(0.8, 0.8, 0.8), "Linear albedo RGB"}};
+    const std::vector<PropertyDesc> sphere_props{
+        {"position", PropValue::make_vec3(0.0, 0.0, 0.0), "World position"},
+        {"radius", PropValue::make_number(0.5), "Radius in meters"},
+        {"color", PropValue::make_vec3(0.8, 0.8, 0.8), "Linear albedo RGB"}};
+    const std::vector<PropertyDesc> light_props{
+        {"position", PropValue::make_vec3(0.0, 2.0, 0.0), "World position"},
+        {"color", PropValue::make_vec3(1.0, 1.0, 1.0), "Linear RGB"},
+        {"intensity", PropValue::make_number(1.0), "Candela"}};
+    const std::vector<PropertyDesc> env_props{
+        {"camera_eye", PropValue::make_vec3(8.0, 3.0, 8.0), "Camera position"},
+        {"camera_target", PropValue::make_vec3(0.0, 1.0, 0.0), "Camera look-at"},
+        {"camera_fov", PropValue::make_number(60.0), "Vertical fov degrees"},
+        {"sun_direction", PropValue::make_vec3(0.3, 0.65, 0.7),
+         "Normalized sun vector"}};
+    all_ok = registry.register_type(std::string(kTypeCube),
+                                    "Axis-aligned unit cube scaled per-axis",
+                                    cube_props) != 0U &&
+             all_ok;
+    all_ok = registry.register_type(std::string(kTypeSphere),
+                                    "Unit sphere centered at the origin",
+                                    sphere_props) != 0U &&
+             all_ok;
+    all_ok = registry.register_type(std::string(kTypeLight),
+                                    "Omnidirectional point light", light_props) !=
+                 0U &&
+             all_ok;
     all_ok = registry.register_type(
                  std::string(kTypeEnvironment),
-        "Scene environment: singleton object holding camera and sun state",
-        {{"camera_eye", PropValue::make_vec3(8.0, 3.0, 8.0), "Camera position"},
-         {"camera_target", PropValue::make_vec3(0.0, 1.0, 0.0),
-          "Camera look-at"},
-         {"camera_fov", PropValue::make_number(60.0), "Vertical fov degrees"},
-         {"sun_direction", PropValue::make_vec3(0.3, 0.65, 0.7),
-          "Normalized sun vector"}});
-    return true;
+                 "Scene environment: singleton object holding camera and sun state",
+                 env_props) != 0U &&
+             all_ok;
+    return all_ok;
   }();
   (void)built;
   return registry;

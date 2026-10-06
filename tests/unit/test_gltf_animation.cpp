@@ -909,6 +909,7 @@ TEST(GltfAnimation, GlbContainerRejectsMalformedContainers) {
   // Bad magic: not a GLB header and not a JSON document.
   {
     std::vector<char> broken = glb;
+    ASSERT_FALSE(broken.empty()) << "pack_glb produced no bytes to corrupt";
     broken[0] = 'X';
     std::string error;
     const auto imported = omnicpp::asset::import_gltf_animation_document(

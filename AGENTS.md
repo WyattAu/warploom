@@ -134,16 +134,28 @@ Known-broken, and must not be reported as working:
   `-Wsign-conversion` is paid too (104 -> 0). GoogleTest is built from source
   here, so its own TUs are compiled with our flags; warnings from it are
   relaxed per-target (`-w`) because they are not actionable and they mask ours.
-  Clang is now at ZERO. GCC is not, and the gap is the finding: a separate
-  probe build with `-DCMAKE_CXX_COMPILER=g++` reports 203 warnings clang never
-  emits, including 14 `-Wdangling-pointer` ("dangling pointer to an unnamed
-  temporary may be used") and 10 `-Wnull-dereference`. Both are real bug
-  classes, not style. A "warnings are clean" claim measured on one compiler is
-  the same mistake as a correctness claim measured at one size -- and the
-  sanitizer presets are GCC, so `asan-ubsan` and `tsan` still do not build.
-  The GCC-only warnings are `-Wfloat-equal` (67), `int`-to-`size_t` sign
-  conversions (58), `-Wredundant-move` (23), `-Wdangling-pointer` (14) and
-  `-Wnull-dereference` (10). The clang campaign that reached zero also paid
+  Both clang and GCC are at ZERO in the default configuration, reached in two
+  stages. The second stage is the one worth remembering: clang hit zero first,
+  and a separate `-DCMAKE_CXX_COMPILER=g++` probe then reported 203 warnings
+  clang never emitted. A "warnings are clean" claim measured on one compiler
+  is the same mistake as a correctness claim measured at one size.
+
+  That GCC gap contained the only memory-safety findings in the whole
+  campaign: 14 `-Wdangling-pointer` and 10 `-Wnull-dereference`. Paying them
+  also found a logic bug no compiler had reported -- `default_registry()`
+  assigned `all_ok = registry.register_type(...)` once per type, so each
+  registration OVERWROTE the previous result and only the last one counted,
+  directly under a comment claiming "every registration is checked". The four
+  `all_ok` reads GCC could not see through are now `&& all_ok`.
+
+  Still open, and this is the honest status: the sanitizer presets build a
+  different tree (`WARPLOOM_USE_VULKAN=OFF`, Debug) and that configuration
+  still carries 124 GCC warnings under
+  `-DWARPLOOM_WARNINGS_AS_ERRORS=OFF` -- 60 `-Wfloat-equal`, 29 unused
+  variables, 12 `-Wmissing-declarations`, 8 unused parameters, 11 sign or
+  value conversions, 3 `-Wredundant-move`. So `asan-ubsan` and `tsan` still
+  do not build and memory safety is still unverified by sanitizers. The
+  clang campaign that reached zero also paid
   `-Wunused-result` (86, hid a deadlock), `-Wsign-conversion` (104),
   `-Wshorten-64-to-32` (24), `-Wdouble-promotion` (37),
   `-Wmissing-field-initializers` (21), `-Wunused-variable` (23),

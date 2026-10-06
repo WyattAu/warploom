@@ -15,6 +15,8 @@
  * relevant quantity for steady-state tail tracking.
  */
 
+#include "warploom/core/contract.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -73,6 +75,9 @@ public:
     stats.p90_ns = nearest_rank_percentile(snapshot, 0.90);
     stats.p99_ns = nearest_rank_percentile(snapshot, 0.99);
     stats.p999_ns = nearest_rank_percentile(snapshot, 0.999);
+    // snapshot has exactly filled_ elements and filled_ != 0 past the early
+    // return above, so max_element cannot be end().
+    OMNICPP_CONTRACT(!snapshot.empty());
     stats.max_ns = *std::max_element(snapshot.begin(), snapshot.end());
     return stats;
   }

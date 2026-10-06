@@ -61,7 +61,12 @@ public:
 
     // Edge function — supports both winding orders
     const float area = edge_function(x0, y0, x1, y1, x2, y2);
+    // Exact: a zero-area triangle is exactly degenerate, and this is the
+    // guard against dividing by it below.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfloat-equal"
     if (area == 0.0f) return; // Degenerate
+#pragma GCC diagnostic pop
     const float abs_area = (area > 0.0f) ? area : -area;
 
     for (int y = min_y; y <= max_y; ++y) {

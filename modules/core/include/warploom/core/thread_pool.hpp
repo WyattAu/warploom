@@ -113,8 +113,15 @@ public:
   [[nodiscard]] static bool pin_to_cpu(std::size_t cpu_index) noexcept {
 #if defined(__linux__)
     cpu_set_t set;
+    // CPU_ZERO/CPU_SET expand inside <sched.h> and GCC's -Wsign-conversion
+    // fires inside glibc's own macro body -- 35 diagnostics for two calls.
+    // System code we cannot fix, and not a reason to relax the flag tree-wide,
+    // so the suppression is scoped to exactly the macro invocations.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
     CPU_ZERO(&set);
     CPU_SET(static_cast<int>(cpu_index), &set);
+#pragma GCC diagnostic pop
     return sched_setaffinity(0, sizeof(set), &set) == 0;
 #else
     // Platform doesn't support CPU affinity; no-op.
