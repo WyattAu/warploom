@@ -27,6 +27,7 @@ set(WARPLOOM_GPU_TEST_SOURCES
 
 add_executable(warploom_unit_tests
     unit/test_contract.cpp
+    unit/test_numeric_cast.cpp
     unit/test_deterministic_runtime.cpp
     unit/test_animation_state_machine.cpp
     unit/test_physics_world.cpp

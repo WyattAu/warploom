@@ -134,10 +134,20 @@ Known-broken, and must not be reported as working:
   `-Wsign-conversion` is paid too (104 -> 0). GoogleTest is built from source
   here, so its own TUs are compiled with our flags; warnings from it are
   relaxed per-target (`-w`) because they are not actionable and they mask ours.
-  147 remain, dominated by `-Wdouble-promotion` (37), `-Wunused-variable` (23),
-  `-Wmissing-field-initializers` (21) and `-Wfloat-equal` (19).
+  145 remain, dominated by `-Wdouble-promotion` (37), `-Wunused-variable` (23),
+  `-Wmissing-field-initializers` (21) and `-Wfloat-equal` (16).
   `-Wshorten-64-to-32` is paid too (24 -> 0), and it found a missing cast that
   promoted a whole `tlas_capacity` sum to `size_t` before narrowing it.
+  `-Wfloat-equal` is down to 16 and found a real one: three parsers read
+  numbers as `double` and hand-rolled the same "is this an exact integer?"
+  predicate as `v != static_cast<double>(static_cast<std::uint64_t>(v))`, which
+  casts BEFORE range-checking, so `"id": 1e300` was an undefined float->uint64
+  conversion. Verified, not assumed: a standalone `-fsanitize=float-cast-overflow
+  -fno-sanitize-recover=all` build aborts on the old form and exits 0 on the
+  replacement. One helper (`numeric_cast.hpp`) now owns it, with tests. Worth
+  noting the accidental-pass trap there -- on x86-64 the bad cast yields
+  0x8000000000000000, whose round-trip comparison then *fails*, so a naive
+  functional test passes against the broken code. Only UBSan catches it.
   `-Wswitch-enum` was tried and deliberately dropped: it fires even when a
   switch has a `default:`, and every site here partitions an enum on purpose.
   `-Wswitch` is enabled and still catches an enum switch with no default at

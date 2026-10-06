@@ -17,6 +17,7 @@
 #include <cstring>
 
 #include "warploom/core/contract.hpp"
+#include "warploom/core/numeric_cast.hpp"
 
 namespace warploom::core {
 
@@ -120,11 +121,10 @@ namespace {
                                        std::uint64_t& out) {
   double value = 0.0;
   if (!find_number_field(line, key, value)) return false;
-  if (value < 0.0 || value != static_cast<double>(static_cast<std::uint64_t>(value))) {
-    return false;
-  }
-  out = static_cast<std::uint64_t>(value);
-  return true;
+  // Rejects NaN, +-inf, negatives, fractions, and anything >= 2^53 -- the
+  // previous hand-rolled form cast before range-checking, so "id": 1e300 hit
+  // an undefined float->uint64 conversion.
+  return ::warploom::core::checked_double_to_uint64(value, out);
 }
 
 //! Parses one protocol line. Returns false with `error` set for malformed

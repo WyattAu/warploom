@@ -120,7 +120,7 @@ every RT test skips there. Hardware RT is verified locally, not in CI.
 ### Known broken: the sanitizer and headless presets
 
 `headless-debug`, `asan-ubsan` and `tsan` do not currently compile. They
-inherit `WARPLOOM_WARNINGS_AS_ERRORS=ON`, and the tree carries 147 warnings
+inherit `WARPLOOM_WARNINGS_AS_ERRORS=ON`, and the tree carries 145 warnings
 (`-Wfloat-equal`, `-Wsign-conversion`, `-Wswitch-enum`, `-Wshadow`), so each
 fails with 56 `-Werror` diagnostics. `asan-ubsan` and `tsan` were worse: their
 binary dirs carried a `CPM_DIRECTORY` cache entry pointing at the location CPM

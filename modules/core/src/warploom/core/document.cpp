@@ -11,6 +11,8 @@
 
 #include "warploom/core/document.hpp"
 
+#include "warploom/core/numeric_cast.hpp"
+
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -1254,12 +1256,12 @@ bool SceneDocument::from_json(std::string_view text,
       }
       double v = 0.0;
       if (!r.expect(':', error) || !r.read_number(v, error)) return false;
-      if (v != static_cast<double>(static_cast<std::uint32_t>(v)) ||
-          v < 1.0) {
+      std::uint32_t schema_version = 0;
+      if (v < 1.0 || !::warploom::core::checked_double_to_uint32(v, schema_version)) {
         r.fail(error, "schema_version must be a positive integer");
         return false;
       }
-      parsed.schema_version = static_cast<std::uint32_t>(v);
+      parsed.schema_version = schema_version;
       if (parsed.schema_version > kDocumentSchemaVersion) {
         r.fail(error, "document schema v" +
                           std::to_string(parsed.schema_version) +
@@ -1324,12 +1326,10 @@ bool SceneDocument::from_json(std::string_view text,
               if (!r.expect(':', error) || !r.read_number(v, error)) {
                 return false;
               }
-              if (v < 0.0 || v != std::floor(v) ||
-                  v > static_cast<double>(UINT32_MAX)) {
+              if (!::warploom::core::checked_double_to_uint32(v, object.type_id)) {
                 r.fail(error, "type_id must be a non-negative integer");
                 return false;
               }
-              object.type_id = static_cast<std::uint32_t>(v);
               seen_type = true;
             } else if (okey == "name") {
               if (!r.expect(':', error) ||

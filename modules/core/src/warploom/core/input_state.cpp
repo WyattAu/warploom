@@ -4,6 +4,8 @@
 
 #include "warploom/core/input_state.hpp"
 
+#include "warploom/core/numeric_cast.hpp"
+
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
@@ -68,13 +70,14 @@ bool VirtualInputDriver::load_script(const std::string& path,
     }
     Event event;
     double tick = 0.0;
-    if (!find_number(line, "tick", tick) || tick < 0.0 ||
-        tick != static_cast<double>(static_cast<std::uint64_t>(tick))) {
+    std::uint64_t parsed_tick = 0;
+    if (!find_number(line, "tick", tick) ||
+        !::warploom::core::checked_double_to_uint64(tick, parsed_tick)) {
       error = "input script line " + std::to_string(line_number) +
               ": tick must be a non-negative integer";
       return false;
     }
-    event.tick = static_cast<std::uint64_t>(tick);
+    event.tick = parsed_tick;
     std::string action;
     std::string axis;
     const bool has_action = find_string(line, "action", action);
