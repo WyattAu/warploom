@@ -941,8 +941,10 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
       if (custom != 0U) {
         std::printf(
             "ray %2u (r%u,c%u) custom=%u hit=(%.3f, %.3f, %.3f)\n", i,
-            i / kTracerDim, i % kTracerDim, custom, p[8 * i + 4],
-            p[8 * i + 5], p[8 * i + 6]);
+            i / kTracerDim, i % kTracerDim, custom,
+            static_cast<double>(p[8 * i + 4]),
+            static_cast<double>(p[8 * i + 5]),
+            static_cast<double>(p[8 * i + 6]));
       }
     }
     std::fflush(stdout);
@@ -1204,12 +1206,16 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
           const std::uint32_t lx = 489U, ly = 554U;
           std::printf("map at lookup texel (%u,%u) 3x3:\n", lx, ly);
           for (std::uint32_t y = ly - 1U; y <= ly + 1U; ++y) {
-            std::printf("  %.5f %.5f %.5f\n", d[(y) * kShadowRes + lx - 1U],
-                        d[y * kShadowRes + lx], d[y * kShadowRes + lx + 1U]);
+            std::printf(
+                "  %.5f %.5f %.5f\n",
+                static_cast<double>(d[(y) * kShadowRes + lx - 1U]),
+                static_cast<double>(d[y * kShadowRes + lx]),
+                static_cast<double>(d[y * kShadowRes + lx + 1U]));
           }
           std::printf("vertical profile x=%u, y 530..590 step 4:\n", lx);
           for (std::uint32_t y = 530U; y <= 590U; y += 4U) {
-            std::printf("  y=%3u  %.5f\n", y, d[y * kShadowRes + lx]);
+            std::printf("  y=%3u  %.5f\n", y,
+                        static_cast<double>(d[y * kShadowRes + lx]));
           }
         }
         std::printf("shadow map ASCII (32x32, char = depth band):\n");

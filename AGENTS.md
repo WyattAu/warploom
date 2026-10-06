@@ -134,8 +134,12 @@ Known-broken, and must not be reported as working:
   `-Wsign-conversion` is paid too (104 -> 0). GoogleTest is built from source
   here, so its own TUs are compiled with our flags; warnings from it are
   relaxed per-target (`-w`) because they are not actionable and they mask ours.
-  145 remain, dominated by `-Wdouble-promotion` (37), `-Wunused-variable` (23),
-  `-Wmissing-field-initializers` (21) and `-Wfloat-equal` (16).
+  108 remain, dominated by `-Wunused-variable` (23),
+  `-Wmissing-field-initializers` (21), `-Wfloat-equal` (16) and
+  `-Wunused-parameter` (10). `-Wdouble-promotion` is paid too (37 -> 0): every
+  one of the 37 was in a test, none in engine code -- printf `%f` varargs
+  require the double, and the Monte-Carlo reference is deliberately double
+  against a float GPU result. Both are explicit casts now.
   `-Wshorten-64-to-32` is paid too (24 -> 0), and it found a missing cast that
   promoted a whole `tlas_capacity` sum to `size_t` before narrowing it.
   `-Wfloat-equal` is down to 16 and found a real one: three parsers read

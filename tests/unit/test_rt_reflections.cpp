@@ -48,6 +48,9 @@
 
 namespace {
 
+//! %f varargs consume a double; make the required promotion explicit.
+inline double dbl(float v) noexcept { return static_cast<double>(v); }
+
 using omnicpp::render::Allocation;
 using omnicpp::render::BlasBuildInput;
 using omnicpp::render::BottomLevelAS;
@@ -789,9 +792,10 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
     const auto bc = channels(rb, best_x, best_y);
     std::printf("reddest rgb=(%.3f,%.3f,%.3f)  direct=(%.3f,%.3f,%.3f)"
                 "  mirror=(%.3f,%.3f,%.3f)  control=(%.3f,%.3f,%.3f)\n",
-                bc[0], bc[1], bc[2], direct[0], direct[1], direct[2],
-                mirror[0], mirror[1], mirror[2], control[0], control[1],
-                control[2]);
+                dbl(bc[0]), dbl(bc[1]), dbl(bc[2]), dbl(direct[0]),
+                dbl(direct[1]), dbl(direct[2]), dbl(mirror[0]),
+                dbl(mirror[1]), dbl(mirror[2]), dbl(control[0]),
+                dbl(control[1]), dbl(control[2]));
     // 16px-cell classification map: R = red-dominant (cube/reflection),
     // f = bright gray (floor), . = dark/miss, ' ' = clear.
     for (int cy = 0; cy < static_cast<int>(kImg) / 16; ++cy) {

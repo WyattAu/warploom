@@ -460,8 +460,10 @@ TEST(VulkanHardware, MipPyramidOcclusionAdaptive) {
   const float l3_expect = 1.002f - 0.2002f / 9.3f;     // ~0.98047
   EXPECT_NEAR(unbits(words[kWordPyramid + 3U * 8U + 3U]), l0_expect, 0.001f);
   std::fprintf(stderr, "[mips] L0(3,3)=%.6f expect=%.6f  L3=%.6f expect=%.6f\n",
-               static_cast<double>(unbits(words[kWordPyramid + 3U * 8U + 3U])), l0_expect,
-               static_cast<double>(unbits(words[kWordPyramid + 84U])), l3_expect);
+               static_cast<double>(unbits(words[kWordPyramid + 3U * 8U + 3U])),
+               static_cast<double>(l0_expect),
+               static_cast<double>(unbits(words[kWordPyramid + 84U])),
+               static_cast<double>(l3_expect));
   EXPECT_NEAR(unbits(words[kWordPyramid + 0U]), 1.0f, 1e-6f);
 
   // ---- Cycle 2: footprint-adaptive cull against the chain. ----

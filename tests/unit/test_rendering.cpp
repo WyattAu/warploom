@@ -2216,7 +2216,7 @@ TEST(VulkanHardware, OffscreenTriangleReadback) {
             VK_SUCCESS);
   const auto render_pass_ns = static_cast<std::uint64_t>(
       static_cast<double>(timestamps[1] - timestamps[0]) *
-      context.device_properties().timestamp_period_ns);
+      static_cast<double>(context.device_properties().timestamp_period_ns));
   EXPECT_GT(render_pass_ns, 0ULL);
   std::cout << "GPU render-pass time: " << render_pass_ns << " ns" << std::endl;
 

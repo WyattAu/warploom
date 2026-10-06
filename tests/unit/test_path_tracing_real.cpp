@@ -49,6 +49,9 @@
 
 namespace {
 
+//! %f varargs consume a double; make the required promotion explicit.
+inline double dbl(float v) noexcept { return static_cast<double>(v); }
+
 using omnicpp::render::Allocation;
 using omnicpp::render::BlasBuildInput;
 using omnicpp::render::BottomLevelAS;
@@ -903,8 +906,9 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
                               std::tuple{60, 30, "right"},
                               std::tuple{10, 45, "floor-left"}}) {
       std::fprintf(stderr, "%s(%d,%d) rgb=(%.4f, %.4f, %.4f) a=%.4f\n", nm,
-                   px, py, pixel(img, px, py, 0), pixel(img, px, py, 1),
-                   pixel(img, px, py, 2), pixel(img, px, py, 3));
+                   px, py, dbl(pixel(img, px, py, 0)),
+                   dbl(pixel(img, px, py, 1)), dbl(pixel(img, px, py, 2)),
+                   dbl(pixel(img, px, py, 3)));
     }
   }
 
@@ -925,11 +929,17 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
     return std::make_pair(static_cast<double>(dr / df),
                           static_cast<double>(-du / df));
   };
-  const double R[3] = {right[0], right[1], right[2]};
-  const double Uv[3] = {up[0], up[1], up[2]};
-  const double F[3] = {kCamFwd[0], kCamFwd[1], kCamFwd[2]};
+  const double R[3] = {static_cast<double>(right[0]),
+                     static_cast<double>(right[1]),
+                     static_cast<double>(right[2])};
+  const double Uv[3] = {static_cast<double>(up[0]),
+                      static_cast<double>(up[1]),
+                      static_cast<double>(up[2])};
+  const double F[3] = {static_cast<double>(kCamFwd[0]),
+                     static_cast<double>(kCamFwd[1]),
+                     static_cast<double>(kCamFwd[2])};
   PtScene sc{};
-  sc.albedo = kAlbedo;
+  sc.albedo = static_cast<double>(kAlbedo);
   const std::pair<const char*, std::array<float, 3>> probes[3] = {
       {"slab", {0.0f, -5.0f, -3.0f}},
       {"wall-z", {0.0f, -0.5f, -5.0f}},
