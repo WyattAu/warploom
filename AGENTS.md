@@ -134,9 +134,12 @@ Known-broken, and must not be reported as working:
   `-Wsign-conversion` is paid too (104 -> 0). GoogleTest is built from source
   here, so its own TUs are compiled with our flags; warnings from it are
   relaxed per-target (`-w`) because they are not actionable and they mask ours.
-  About 200 remain, dominated by `-Wdouble-promotion`, `-Wshorten-64-to-32`
+  About 190 remain, dominated by `-Wdouble-promotion`, `-Wshorten-64-to-32`
   (24, surfaced only once the sign warnings stopped masking it) and dead-code
-  warnings.
+  warnings. `-Wswitch-enum` was tried and deliberately dropped: it fires even
+  when a switch has a `default:`, and every site here partitions an enum on
+  purpose. `-Wswitch` is enabled and still catches an enum switch with no
+  default at all.
   Until that debt is paid, the only verified configuration is `default` — which
   means memory safety is currently unverified by sanitizers.
 - A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystemsConcurrently`,

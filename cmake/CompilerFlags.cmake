@@ -115,7 +115,21 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         -Wdouble-promotion
         -Wfloat-equal
         -Wimplicit-int-float-conversion
-        -Wswitch-enum
+        # -Wswitch-enum (every enumerator named) was tried and reverted.
+        #
+        # It fires even when a switch has a `default:`, which is the case for
+        # every site here: each switch partitions one enum and routes the rest
+        # elsewhere -- the viewport handles host-mirrored visual commands and
+        # leaves session commands to the session, the text parser handles
+        # payload kinds and leaves the rest, is_recorded names the documented
+        # recorded-kinds set and its complement has to be a decision. Enumerating
+        # 44 protocol kinds at each of those sites would duplicate the default
+        # and go stale the moment a kind is added; enumerating 40 VkImageLayout
+        # values or 15 shader-stage bits is pure noise.
+        #
+        # The guarantee that actually matters -- a new Kind cannot be silently
+        # unhandled -- comes from -Wswitch, which IS enabled and does fire when
+        # an enum switch has no default at all.
     )
 
     set(_warploom_enabled_warnings ${_warploom_always_warnings})
