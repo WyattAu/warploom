@@ -69,11 +69,6 @@ std::uint32_t bits(float f) {
   return u;
 }
 
-float unbits(std::uint32_t u) {
-  float f;
-  std::memcpy(&f, &u, 4U);
-  return f;
-}
 
 void make_perspective(float fov_y, float aspect, float znear, float zfar,
                       float* m16) {

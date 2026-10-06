@@ -35,39 +35,45 @@ struct HiZCallbackState {
   omnicpp::render::VulkanRenderer* renderer{nullptr};
 };
 
-bool record_hiz_contract(VkCommandBuffer, const omnicpp::render::HiZFrameRecord& record,
-                         void* user_data) {
-  auto* state = static_cast<HiZCallbackState*>(user_data);
-  if (state == nullptr || record.depth_image == VK_NULL_HANDLE ||
-      record.depth_view == VK_NULL_HANDLE || !record.depth_is_sampleable ||
-      record.destination_pyramid == nullptr || record.render_width == 0U ||
-      record.render_height == 0U || record.tile_size == 0U || record.levels == 0U) {
-    if (state != nullptr) state->valid = false;
-    return false;
-  }
-  if (state->reject) return false;
-  ++state->calls;
-  state->saw_previous = state->saw_previous || record.token.has_previous;
-  if (state->renderer != nullptr) {
-    const auto plan = state->renderer->make_hiz_graph_plan(record);
-    const std::size_t expected_passes =
-        record.levels + (record.token.has_previous ? 1U : 0U);
-    const auto compiled = plan.compile();
-    if (compiled.barriers_per_node.empty() || compiled.barriers_per_node[0].size() < 2U ||
-        compiled.barriers_per_node[0][1].old_layout != VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ||
-        compiled.barriers_per_node[0][1].src_access == 0U) {
-      state->valid = false;
+  // Only compiled where the XCB test below can reference it: the unit-test
+  // target does not define VK_USE_PLATFORM_XCB_KHR, so the test body is
+  // preprocessed out and this would otherwise be an unused function.
+  #if defined(VK_USE_PLATFORM_XCB_KHR)
+  bool record_hiz_contract(VkCommandBuffer, const omnicpp::render::HiZFrameRecord& record,
+                           void* user_data) {
+    auto* state = static_cast<HiZCallbackState*>(user_data);
+    if (state == nullptr || record.depth_image == VK_NULL_HANDLE ||
+        record.depth_view == VK_NULL_HANDLE || !record.depth_is_sampleable ||
+        record.destination_pyramid == nullptr || record.render_width == 0U ||
+        record.render_height == 0U || record.tile_size == 0U || record.levels == 0U) {
+      if (state != nullptr) state->valid = false;
       return false;
     }
-    if (plan.passes.size() != expected_passes ||
-        compiled.barriers_per_node.size() != expected_passes) {
-      state->valid = false;
-      return false;
+    if (state->reject) return false;
+    ++state->calls;
+    state->saw_previous = state->saw_previous || record.token.has_previous;
+    if (state->renderer != nullptr) {
+      const auto plan = state->renderer->make_hiz_graph_plan(record);
+      const std::size_t expected_passes =
+          record.levels + (record.token.has_previous ? 1U : 0U);
+      const auto compiled = plan.compile();
+      if (compiled.barriers_per_node.empty() || compiled.barriers_per_node[0].size() < 2U ||
+          compiled.barriers_per_node[0][1].old_layout != VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ||
+          compiled.barriers_per_node[0][1].src_access == 0U) {
+        state->valid = false;
+        return false;
+      }
+      if (plan.passes.size() != expected_passes ||
+          compiled.barriers_per_node.size() != expected_passes) {
+        state->valid = false;
+        return false;
+      }
+      ++state->plans;
     }
-    ++state->plans;
+    return true;
   }
-  return true;
-}
+  #endif
+
 
 
 // Image-readback helpers live in the shared test header.

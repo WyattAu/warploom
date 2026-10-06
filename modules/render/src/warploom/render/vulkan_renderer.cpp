@@ -1617,21 +1617,6 @@ void gpu_driven_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 
 namespace {
 
-//! Fullscreen-record shim for execute_graph: user_data carries a
-//! FullscreenCtx (renderer + pass + set), the callback records the draw.
-struct FullscreenCtx {
-  const VulkanRenderer* self;
-  const VulkanRenderer::FullscreenPass* pass;
-  VkDescriptorSet set0;
-};
-
-void fullscreen_render_cb(VkCommandBuffer cb, const GraphPass& pass,
-                          void* user_data) {
-  auto& fx = *static_cast<FullscreenCtx*>(user_data);
-  (void)pass;
-  (void)fx.self->record_fullscreen_draw(cb, *fx.pass, fx.set0);
-}
-
 }  // namespace
 
 VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(

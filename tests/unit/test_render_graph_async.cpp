@@ -31,15 +31,6 @@ namespace {
 
 constexpr std::uint32_t kSize = 256U;
 
-void make_perspective(float fov_y, float aspect, float znear, float zfar,
-                      float* m16) {
-  const float f = 1.0f / std::tan(fov_y * 0.5f);
-  const float zn = 1.0f / (znear - zfar);
-  m16[0] = f / aspect; m16[1] = 0; m16[2] = 0; m16[3] = 0;
-  m16[4] = 0; m16[5] = f; m16[6] = 0; m16[7] = 0;
-  m16[8] = 0; m16[9] = 0; m16[10] = zfar * zn; m16[11] = -1.0f;
-  m16[12] = 0; m16[13] = 0; m16[14] = znear * zfar * zn; m16[15] = 0;
-}
 
 }  // namespace
 

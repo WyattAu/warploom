@@ -177,7 +177,7 @@ struct SkinningHarness {
     if (!ctx.has_descriptor_indexing()) { ctx.cleanup(); return false; }
     if (!alloc.initialize(ctx.device(), ctx.physical_device()).is_ok()) { ctx.cleanup(); return false; }
     if (!desc.initialize(ctx.device()).is_ok()) return false;
-    qf = (uint32_t)ctx.queue_families().graphics_family;
+    qf = static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
     VkDevice dev = ctx.device();
 
     auto r0 = desc.create_layout({{0,0,1,VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_VERTEX_BIT}}, 8);
@@ -237,7 +237,7 @@ struct SkinningHarness {
     EXPECT_TRUE(desc.write_buffer(ds.value(), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, bar.va.buffer, 0, VK_WHOLE_SIZE).is_ok());
     bar.mesh.vertex_buffer = bar.va.buffer;
     bar.mesh.index_buffer = bar.ia.buffer;
-    bar.mesh.index_count = (uint32_t)i.size();
+    bar.mesh.index_count = static_cast<std::uint32_t>(i.size());
     bar.mesh.descriptor_set = ds.value();
 
     if (!target.create(dev, ctx.physical_device(), VK_FORMAT_B8G8R8A8_UNORM, 256, 256, &alloc).is_ok()||

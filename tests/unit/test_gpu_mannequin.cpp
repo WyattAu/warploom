@@ -289,7 +289,7 @@ struct MannequinHarness {
       return false;
     }
     if (!desc.initialize(ctx.device()).is_ok()) return false;
-    qf = (uint32_t)ctx.queue_families().graphics_family;
+    qf = static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
     VkDevice dev = ctx.device();
 
     // Pool sized for the 9 mannequin meshes plus headroom.

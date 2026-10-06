@@ -129,33 +129,6 @@ std::array<float, 3> dominant_axis(const std::array<float, 3>& v) noexcept {
   return {0.0f, 0.0f, sz};
 }
 
-bool segment_hits_box(const std::array<float, 3>& o,
-                      const std::array<float, 3>& L,
-                      const std::array<float, 3>& c,
-                      const std::array<float, 3>& h) noexcept {
-  float tmin = 0.001f;
-  float tmax = 1.0e30f;
-  for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
-    if (std::fabs(L[static_cast<std::size_t>(k)]) < 1.0e-9f) {
-      if (std::fabs(o[static_cast<std::size_t>(k)] -
-                    c[static_cast<std::size_t>(k)]) >
-          h[static_cast<std::size_t>(k)]) {
-        return false;
-      }
-      continue;
-    }
-    const float inv = 1.0f / L[static_cast<std::size_t>(k)];
-    float t0 = (c[static_cast<std::size_t>(k)] - h[static_cast<std::size_t>(k)] -
-                o[static_cast<std::size_t>(k)]) * inv;
-    float t1 = (c[static_cast<std::size_t>(k)] + h[static_cast<std::size_t>(k)] -
-                o[static_cast<std::size_t>(k)]) * inv;
-    if (t0 > t1) std::swap(t0, t1);
-    tmin = std::max(tmin, t0);
-    tmax = std::min(tmax, t1);
-    if (tmin > tmax) return false;
-  }
-  return true;
-}
 
 //! Closest hit of ray (o, L) against the two AABBs. Returns 0 = none,
 //! 1 = cube, 2 = slab, and the hit point.

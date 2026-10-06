@@ -86,7 +86,7 @@ void build_unit_cube(std::vector<float>& verts, std::vector<uint32_t>& idx) {
   };
   verts.clear(); idx.clear();
   for (std::size_t f = 0; f < static_cast<std::size_t>(6); ++f) {
-    uint32_t base = (uint32_t)(verts.size() / 11);
+    std::uint32_t base = static_cast<std::uint32_t>(verts.size() / 11U);
     for (std::size_t v = 0; v < static_cast<std::size_t>(4); ++v) {
       float x = faces[f][3+v*3+0] * 0.5f;
       float y = faces[f][3+v*3+1] * 0.5f;
@@ -197,7 +197,7 @@ struct ShadowHarness {
     if (!ctx.has_descriptor_indexing()) { ctx.cleanup(); return false; }
     if (!alloc.initialize(ctx.device(), ctx.physical_device()).is_ok()) { ctx.cleanup(); return false; }
     if (!desc.initialize(ctx.device()).is_ok()) return false;
-    qf = (uint32_t)ctx.queue_families().graphics_family;
+    qf = static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
 
     // set 0: mesh SSBO
     auto r0 = desc.create_layout({{0,0,1,VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_VERTEX_BIT}}, 8);
@@ -247,7 +247,7 @@ struct ShadowHarness {
         cube.va.buffer, 0, VK_WHOLE_SIZE).is_ok()) return false;
     cube.mesh.vertex_buffer = cube.va.buffer;
     cube.mesh.index_buffer = cube.ia.buffer;
-    cube.mesh.index_count = (uint32_t)i.size();
+    cube.mesh.index_count = static_cast<std::uint32_t>(i.size());
     cube.mesh.descriptor_set = ds.value();
 
     // offscreen target

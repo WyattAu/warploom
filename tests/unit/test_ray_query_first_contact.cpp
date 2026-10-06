@@ -79,11 +79,6 @@ std::array<float, 12> translated_instance(float tx, float ty, float tz) {
           0.0f, 0.0f, 1.0f, tz};
 }
 
-std::array<float, 12> identity_instance() {
-  return {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
-          0.0f, 0.0f, 1.0f, 0.0f};
-}
-
 }  // namespace
 
 TEST(ray_query_first_contact, blas_tlas_build_and_ray_query) {

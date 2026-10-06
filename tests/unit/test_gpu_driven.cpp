@@ -76,11 +76,6 @@ void make_frustum_planes(float fov_y, float aspect, float znear, float zfar,
   plane(0, -znear, -t, 0, p24 + 20);
 }
 
-std::vector<std::uint8_t> load_spv(const std::string& path) {
-  std::ifstream f(path, std::ios::binary);
-  return std::vector<std::uint8_t>((std::istreambuf_iterator<char>(f)),
-                                   std::istreambuf_iterator<char>());
-}
 
 }  // namespace
 

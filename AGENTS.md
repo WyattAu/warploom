@@ -134,8 +134,20 @@ Known-broken, and must not be reported as working:
   `-Wsign-conversion` is paid too (104 -> 0). GoogleTest is built from source
   here, so its own TUs are compiled with our flags; warnings from it are
   relaxed per-target (`-w`) because they are not actionable and they mask ours.
-  49 remain, dominated by `-Wfloat-equal` (16), `-Wunused-parameter` (10),
-  `-Wold-style-cast` (9) and `-Wunused-function` (7). `-Wshadow` is paid too
+  33 remain: `-Wfloat-equal` (16), `-Wunused-parameter` (10),
+  `-Wmissing-include-dirs` (5) and `-Wmissing-braces` (2).
+  `-Wold-style-cast` is paid too (9 -> 0): every one was a C-style narrowing
+  cast of an index or queue family id in a test, now an explicit
+  `static_cast<std::uint32_t>`. `-Wunused-function` is paid too (7 -> 0): five
+  were genuinely dead test helpers, one was a dead free-function shim in
+  vulkan_renderer.cpp whose replacement is the member
+  `record_fullscreen_pass`, and one -- `record_hiz_contract` -- was dead for a
+  reason worth knowing: `VK_USE_PLATFORM_XCB_KHR` is only defined for the
+  viewport and render targets, never for the unit-test target, so the HIZ
+  contract test body is preprocessed out entirely and the test always skips
+  with "Vulkan XCB support was not enabled for this build". That helper is now
+  behind the same condition, and the dead test is recorded here rather than
+  left looking like coverage. `-Wshadow` is paid too
   (10 -> 0): the city scene's camera framing shadowed the outer orbit
   variables, and a telemetry `objects` manifest shadowed the function's
   `ScenePbrObject` list. Renamed, and the city rename was A/B'd byte-identical
