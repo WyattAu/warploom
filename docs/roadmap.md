@@ -149,10 +149,16 @@ declares a slot 3.
            `vulkan_fullscreen.hpp/.cpp` as free functions over caller-owned
            handles; the renderer no longer owns them and the nested struct is
            gone. 606 tests green, both compilers, all four presets.
-        2. Give the chain a queue handle and its own layout tracker, and move
-           the post-scene `hdr_layout_` re-seed into `record()`.
-        3. Move the chain's allocator/descriptor-manager ownership wholesale
-           rather than sharing the renderer's.
+        2. DONE (with 3): everything now lives in `VulkanComposeChain`
+           (vulkan_compose_chain.hpp/.cpp) — allocator, descriptor manager,
+           HDR/bloom targets, pipelines, samplers, the black fallback, and the
+           graph-driven `record()`. Layout tracking was already in
+           `compile_graph` (done with B2); the roadmap's `hdr_layout_` note
+           predated that. The chain submits on the caller's command buffer, so
+           no queue handle of its own was needed.
+        3. DONE — see 2. The renderer holds one `std::unique_ptr
+           <VulkanComposeChain>` and hands it the presentation pass/format at
+           initialize; the chain captures every resource it creates.
         4. Then a second instance is instantiable and B3b follows.
 
       Note for whoever does it: the project defines `OMNICPP_HAS_VULKAN` with
