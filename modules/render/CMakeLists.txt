@@ -54,6 +54,7 @@ add_library(warploom_render SHARED
     src/warploom/render/vulkan_parallel_recorder.cpp
     src/warploom/render/vulkan_pipeline.cpp
     src/warploom/render/vulkan_renderer.cpp
+    src/warploom/render/vulkan_fullscreen.cpp
     src/warploom/render/vulkan_render_graph.cpp
     src/warploom/render/vulkan_render_pass.cpp
     src/warploom/render/vulkan_rt_pipeline.cpp

@@ -8,6 +8,8 @@
 //!   (3) A bright HDR source (base_color 5.0) maps to an LDR value via ACES
 //!       compression — brighter than ambient but not clipped to 255.
 
+#include "warploom/render/vulkan_fullscreen.hpp"
+
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <array>
@@ -516,11 +518,11 @@ struct PostProcessHarness {
     } scene_ctx{&scene, &frame_renderer};
     struct TmCtx {
       omnicpp::render::VulkanRenderer* self;
-      omnicpp::render::VulkanRenderer::FullscreenPass* pass;
+      omnicpp::render::FullscreenPass* pass;
       VkDescriptorSet set0;
     } tm_ctx{&frame_renderer, nullptr, hdr_ds};
     hdr_pass.user_data = &scene_ctx;
-    omnicpp::render::VulkanRenderer::FullscreenPass tm{};
+    omnicpp::render::FullscreenPass tm{};
     tm.pipeline = tonemap_pipe.pipeline();
     tm.pipeline_layout = tonemap_pipe.pipeline_layout();
     tm.render_pass = out_target.render_pass();
@@ -543,7 +545,7 @@ struct PostProcessHarness {
     tm_ctx.pass = &tm;
 
     omnicpp::render::GraphPass tm_pass =
-        frame_renderer.fullscreen_graph_pass(tm);
+        omnicpp::render::fullscreen_graph_pass(tm);
     tm_pass.name = "tonemap_fxaa";
     tm_pass.user_data = &tm_ctx;
 
@@ -562,7 +564,7 @@ struct PostProcessHarness {
                                             p.height);
           } else {
             auto& fx = *static_cast<TmCtx*>(user_data);
-            (void)fx.self->record_fullscreen_draw(command_buffer, *fx.pass,
+            (void)omnicpp::render::record_fullscreen_draw(command_buffer, *fx.pass,
                                                   fx.set0);
           }
         },
@@ -719,7 +721,7 @@ omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
   vkBeginCommandBuffer(cb, &bi);
 
   omnicpp::render::VulkanRenderer frame_renderer;
-  omnicpp::render::VulkanRenderer::FullscreenPass down{};
+  omnicpp::render::FullscreenPass down{};
   down.pipeline = h.bloom_down_pipe.pipeline();
   down.pipeline_layout = h.bloom_down_pipe.pipeline_layout();
   down.render_pass = h.bloom_a_rp;
@@ -731,7 +733,7 @@ omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
   down.samples[0] = {h.hdr_image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                      VK_IMAGE_ASPECT_COLOR_BIT};
   down.sample_count = 1;
-  auto down_pass = frame_renderer.fullscreen_graph_pass(down);
+  auto down_pass = omnicpp::render::fullscreen_graph_pass(down);
   down_pass.name = "bloom_down";
   // Declare the write: bloom_a is the color attachment (graph metadata so
   // compile_graph emits the write->sample barrier for the up pass).
@@ -739,7 +741,7 @@ omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
       h.bloom_a_image, h.bloom_a_view, VK_FORMAT_R16G16B16A16_SFLOAT,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)};
 
-  omnicpp::render::VulkanRenderer::FullscreenPass up{};
+  omnicpp::render::FullscreenPass up{};
   up.pipeline = h.bloom_up_pipe.pipeline();
   up.pipeline_layout = h.bloom_up_pipe.pipeline_layout();
   up.render_pass = h.bloom_b_rp;
@@ -749,14 +751,14 @@ omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
   up.samples[0] = {h.bloom_a_image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                    VK_IMAGE_ASPECT_COLOR_BIT};
   up.sample_count = 1;
-  auto up_pass = frame_renderer.fullscreen_graph_pass(up);
+  auto up_pass = omnicpp::render::fullscreen_graph_pass(up);
   up_pass.name = "bloom_up";
 
   struct Ctx { omnicpp::render::VulkanRenderer* self;
-               omnicpp::render::VulkanRenderer::FullscreenPass* pass;
+               omnicpp::render::FullscreenPass* pass;
                VkDescriptorSet set; } dctx{&frame_renderer, &down, h.bloom_src_ds};
   struct Uctx { omnicpp::render::VulkanRenderer* self;
-                omnicpp::render::VulkanRenderer::FullscreenPass* pass;
+                omnicpp::render::FullscreenPass* pass;
                 VkDescriptorSet set; } uctx{&frame_renderer, &up, h.bloom_a_ds};
   down_pass.user_data = &dctx;
   up_pass.user_data = &uctx;
@@ -770,7 +772,7 @@ omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
       [](VkCommandBuffer command_buffer, const omnicpp::render::GraphPass& /*p*/,
          void* user_data) {
         auto* cx = static_cast<Ctx*>(user_data);
-        (void)cx->self->record_fullscreen_draw(command_buffer, *cx->pass,
+        (void)omnicpp::render::record_fullscreen_draw(command_buffer, *cx->pass,
                                                cx->set);
       },
       nullptr);

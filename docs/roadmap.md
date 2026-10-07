@@ -144,9 +144,11 @@ declares a slot 3.
       private static `create_command_pool`/`allocate_command_buffer` plus the
       nested `FullscreenPass` and `record_fullscreen_draw`. So extraction means
       four things, not one:
-        1. Promote `FullscreenPass` + `record_fullscreen_draw` into shared
-           infrastructure (both the graph callbacks and the chain need them,
-           and neither should own the other's helpers).
+        1. DONE — `FullscreenPass`, `record_fullscreen_draw`,
+           `record_fullscreen_pass` and `fullscreen_graph_pass` now live in
+           `vulkan_fullscreen.hpp/.cpp` as free functions over caller-owned
+           handles; the renderer no longer owns them and the nested struct is
+           gone. 606 tests green, both compilers, all four presets.
         2. Give the chain a queue handle and its own layout tracker, and move
            the post-scene `hdr_layout_` re-seed into `record()`.
         3. Move the chain's allocator/descriptor-manager ownership wholesale

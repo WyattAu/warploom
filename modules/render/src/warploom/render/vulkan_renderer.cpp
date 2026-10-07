@@ -5,6 +5,8 @@
 
 #include "warploom/render/vulkan_renderer.hpp"
 
+#include "warploom/render/vulkan_fullscreen.hpp"
+
 #include "warploom/core/diagnostics.hpp"
 #include "warploom/core/clock.hpp"
 #include <algorithm>
@@ -1283,7 +1285,7 @@ void VulkanRenderer::record_compose_chain(VkCommandBuffer command_buffer,
                   const auto* stage =
                       static_cast<const ComposeStage*>(user);
                   if (stage == nullptr || stage->pipeline == nullptr) return;
-                  FullscreenPass draw{};
+                  ::warploom::render::FullscreenPass draw{};
                   draw.pipeline = stage->pipeline->pipeline();
                   draw.pipeline_layout = stage->pipeline->pipeline_layout();
                   draw.render_pass = pass.render_pass;
@@ -1295,8 +1297,7 @@ void VulkanRenderer::record_compose_chain(VkCommandBuffer command_buffer,
                   draw.push_data = stage->push;
                   draw.push_size = stage->push_size;
                   draw.push_stage_flags = VK_SHADER_STAGE_FRAGMENT_BIT;
-                  (void)VulkanRenderer::record_fullscreen_draw(cb, draw,
-                                                        stage->set);
+                  (void)record_fullscreen_draw(cb, draw, stage->set);
                 },
                 nullptr);
 #else
@@ -1667,80 +1668,6 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
   return usable(swapchain_depth) ? swapchain_depth : HiZDepthSource{};
 }
 
-::warploom::core::Result<void> VulkanRenderer::record_fullscreen_draw(
-    VkCommandBuffer command_buffer, const FullscreenPass& pass,
-    VkDescriptorSet set0) {
-#ifdef OMNICPP_HAS_VULKAN
-  if (!command_buffer || pass.pipeline == VK_NULL_HANDLE ||
-      pass.pipeline_layout == VK_NULL_HANDLE) {
-    return ::warploom::core::Result<void>::error(
-        ::warploom::core::RuntimeError::invalid_config);
-  }
-  // Dynamic viewport/scissor: safe inside an active render pass (graph
-  // callback path) and idempotent before one (direct path).
-  VkViewport viewport{};
-  viewport.width = static_cast<float>(pass.width);
-  viewport.height = static_cast<float>(pass.height);
-  viewport.minDepth = 0.0f;
-  viewport.maxDepth = 1.0f;
-  vkCmdSetViewport(command_buffer, 0, 1, &viewport);
-  VkRect2D scissor{};
-  scissor.extent = {pass.width, pass.height};
-  vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-
-  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    pass.pipeline);
-  if (set0 != VK_NULL_HANDLE) {
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pass.pipeline_layout, 0, 1, &set0, 0, nullptr);
-  }
-  if (pass.push_data != nullptr && pass.push_size > 0U) {
-    vkCmdPushConstants(command_buffer, pass.pipeline_layout,
-                       pass.push_stage_flags, 0U, pass.push_size,
-                       pass.push_data);
-  }
-  vkCmdDraw(command_buffer, pass.vertex_count, pass.instance_count, 0, 0);
-  return ::warploom::core::Result<void>::ok();
-#else
-  (void)command_buffer;
-  (void)pass;
-  (void)set0;
-  return ::warploom::core::Result<void>::error(
-      ::warploom::core::RuntimeError::vulkan_not_available);
-#endif
-}
-
-::warploom::core::Result<void> VulkanRenderer::record_fullscreen_pass(
-    VkCommandBuffer command_buffer, const FullscreenPass& pass,
-    VkDescriptorSet set0) const {
-#ifdef OMNICPP_HAS_VULKAN
-  if (!command_buffer || pass.render_pass == VK_NULL_HANDLE ||
-      pass.framebuffer == VK_NULL_HANDLE || pass.width == 0U ||
-      pass.height == 0U) {
-    return ::warploom::core::Result<void>::error(
-        ::warploom::core::RuntimeError::invalid_config);
-  }
-
-  VkRenderPassBeginInfo begin{};
-  begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-  begin.renderPass = pass.render_pass;
-  begin.framebuffer = pass.framebuffer;
-  begin.renderArea.extent = {pass.width, pass.height};
-  begin.clearValueCount = pass.clear_value_count;
-  begin.pClearValues = pass.clear_values;
-  vkCmdBeginRenderPass(command_buffer, &begin, VK_SUBPASS_CONTENTS_INLINE);
-
-  const auto draw = record_fullscreen_draw(command_buffer, pass, set0);
-  vkCmdEndRenderPass(command_buffer);
-  return draw;
-#else
-  (void)command_buffer;
-  (void)pass;
-  (void)set0;
-  return ::warploom::core::Result<void>::error(
-      ::warploom::core::RuntimeError::vulkan_not_available);
-#endif
-}
 
 ::warploom::core::Result<void> VulkanRenderer::record_sky_pre_draw(
     VkCommandBuffer command_buffer, const VulkanPbrScene& scene) const {
