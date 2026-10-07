@@ -113,7 +113,19 @@ endif()
 # only applies when the test shader targets exist (GPU presets).
 target_compile_definitions(warploom_unit_tests PRIVATE
     WARPLOOM_TEST_ASSET_DIR=\"${CMAKE_SOURCE_DIR}/assets/models\"
-    WARPLOOM_TEST_BIN_DIR=\"${CMAKE_BINARY_DIR}/bin\")
+    WARPLOOM_TEST_BIN_DIR=\"${CMAKE_BINARY_DIR}/bin\"
+    # VK_USE_PLATFORM_XCB_KHR gates the swapchain tests in test_rendering.cpp.
+    # It was never defined here, so those tests were preprocessed out entirely
+    # while the suite counted them as coverage -- the swapchain surface path
+    # (the only consumer of vkAcquireNextImageKHR's result) had no executing
+    # test anywhere. libxcb is a test-only dependency: find_package would make
+    # it look optional to the engine, which it is not.
+    VK_USE_PLATFORM_XCB_KHR)
+# The XCB-gated tests call xcb_* directly (window + surface creation), so the
+# test target links xcb. Engine targets do not: nothing under modules/ touches
+# a window system.
+find_package(X11 REQUIRED)
+target_link_libraries(warploom_unit_tests PRIVATE X11::xcb)
 
 # Native script-module fixtures: real shared objects exercising the dlopen
 # path of the script-module host (ok / missing-symbol / ABI-mismatch).

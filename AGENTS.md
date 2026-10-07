@@ -199,6 +199,16 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   its framebuffer, depth image, view and memory. The class now captures its
   device at create().
 
+  The two swapchain tests were dead for the same reason, and are now alive:
+  `VK_USE_PLATFORM_XCB_KHR` is defined for the unit-test target and the target
+  links xcb (test-only; no engine target touches a window system). On a runner
+  with a display both execute -- 8 rendered frames, readback and golden hash on
+  the surface path, and a recreation stress loop -- which also gives the H-Z
+  contract a second, independent execution through the real swapchain instead
+  of only the headless framebuffer. This machine has `DISPLAY=:0`, so they run
+  here; on a headless CI runner they skip at runtime for a stated reason
+  rather than not existing.
+
 - ~~A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystems-
   Concurrently`, roughly one full-suite run in five.~~ FIXED. Now that `tsan`
   builds, ThreadSanitizer reproduced it with full stacks: `run_parallel`
