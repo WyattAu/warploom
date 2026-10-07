@@ -176,6 +176,29 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   discarded by a test fixture, a literal `\n` inside an `#include` that meant
   `<cstdint>` was never included, and 15 parsers casting a `double` to an
   integer before range-checking it.
+- The H-Z graph barrier contract had no executing test in ANY configuration:
+  it lived inside an XCB-gated swapchain test, behind
+  `defined(VK_USE_PLATFORM_XCB_KHR)` -- a macro the unit-test target is never
+  given -- so its body was preprocessed out everywhere while the suite counted
+  it as coverage. Deeper: `begin_frame` calls `vkAcquireNextImageKHR`, so the
+  renderer's whole frame loop was unexercisable without a window system;
+  `record_commands` appeared in exactly one test file, the gated one. Fixed
+  with `initialize_headless`, which shares ONE body with `initialize()` (a
+  first draft duplicated it and missed the fence-signaled flag and the
+  timeline decision within thirty lines) and
+  `HiZGraph.ContractHoldsOnARealFrame`, which now runs everywhere and was
+  validated by sabotage: corrupting the depth use's initial_layout fails it;
+  corrupting an unrelated layout constant does not, which is how the first
+  sabotage attempt was found to be a no-op.
+
+  The first headless run also caught a real VUID the swapchain path masks --
+  submit_frame signaled the binary render_finished semaphore every frame and
+  only the present ever waits on it -- and, via the leak check that had been
+  counting nothing, a production bug: `VulkanRenderPass::~VulkanRenderPass`
+  called `cleanup(nullptr)`, which frees nothing, so every render pass leaked
+  its framebuffer, depth image, view and memory. The class now captures its
+  device at create().
+
 - ~~A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystems-
   Concurrently`, roughly one full-suite run in five.~~ FIXED. Now that `tsan`
   builds, ThreadSanitizer reproduced it with full stacks: `run_parallel`
