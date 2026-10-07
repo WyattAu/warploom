@@ -176,5 +176,21 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   discarded by a test fixture, a literal `\n` inside an `#include` that meant
   `<cstdint>` was never included, and 15 parsers casting a `double` to an
   integer before range-checking it.
-- A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystemsConcurrently`,
-  roughly one full-suite run in five.
+- ~~A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystems-
+  Concurrently`, roughly one full-suite run in five.~~ FIXED. Now that `tsan`
+  builds, ThreadSanitizer reproduced it with full stacks: `run_parallel`
+  incremented its completion counter *outside* the mutex and locked only to
+  `notify_one`, so a worker could finish the increment and still be inside
+  `notify_one` when the main thread's predicate turned true, woke, and
+  destroyed the mutex and condvar. Destroying a `condition_variable` while
+  another thread is notifying it is undefined. Replaced with C++20 atomic
+  `wait`/`notify_one`, where the notify is part of the atomic operation so the
+  window does not exist and there is no separate object whose lifetime can end
+  early.
+
+  Honest note on the evidence: the race was *observed* by TSan on the old code
+  with complete stacks, and 57 hammer runs of the new code are clean -- but
+  this machine runs at load 37 on 6 cores, so the old code also went 20 runs
+  clean in a later batch. The A/B is therefore not statistically conclusive.
+  What makes the fix certain is structural, not statistical: the old ordering
+  was undefined by the standard, and the new one has no window to hit.

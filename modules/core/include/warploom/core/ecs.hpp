@@ -801,25 +801,41 @@ public:
       if (wave.size() == 1) {
         systems_[wave[0]].update(world, tick);
       } else {
-        // Submit all systems in this wave to the thread pool
+        // Submit all systems in this wave to the thread pool.
+        //
+        // This used a condition_variable, and that was a genuine data race.
+        // The counter was incremented OUTSIDE the mutex and the worker locked
+        // only to notify, so a worker could have finished its increment and
+        // still be inside notify_one() when the main thread's predicate became
+        // true, woke, returned from wait(), and destroyed the mutex and the
+        // condvar. Destroying a condition_variable while another thread is in
+        // notify_one() on it is undefined and can crash; ThreadSanitizer
+        // flagged exactly that in
+        // SystemScheduler.ParallelExecutionRunsIndependentSystemsConcurrently,
+        // which matches the "roughly one full-suite run in five" failure this
+        // test had.
+        //
+        // C++20 atomic wait/notify has no such window: notify_one() is part of
+        // the atomic operation, so wait() cannot return until the increment
+        // that satisfied it has completed, and there is no separate object
+        // whose lifetime can end early.
         std::atomic<std::size_t> completed{0};
-        std::mutex wave_mutex;
-        std::condition_variable wave_cv;
 
         for (auto idx : wave) {
           pool.submit([&, idx]() {
             systems_[idx].update(world, tick);
             completed.fetch_add(1, std::memory_order_release);
-            std::lock_guard lock(wave_mutex);
-            wave_cv.notify_one();
+            completed.notify_one();
           });
         }
 
-        // Wait for all systems in this wave to complete
-        std::unique_lock lock(wave_mutex);
-        wave_cv.wait(lock, [&]() {
-          return completed.load(std::memory_order_acquire) >= wave.size();
-        });
+        // Wait for all systems in this wave to complete. Waiting on the value
+        // observed rather than on wave.size() avoids spinning when several
+        // systems finish between two wakeups.
+        while (completed.load(std::memory_order_acquire) < wave.size()) {
+          completed.wait(completed.load(std::memory_order_acquire),
+                         std::memory_order_acquire);
+        }
       }
     }
   }
