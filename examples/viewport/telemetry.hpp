@@ -462,8 +462,29 @@ class FrameCapture {
 
   //! Records clear + `record_scene` + copy-back and submits. `record_scene`
   //! records the scene draws into the begun render pass (no pass begin/end).
+  //! When HDR compose is active the scene cannot record into this capture's
+  //! LDR pass (the scene pipelines are built for the chain's float
+  //! intermediate), so the caller routes the frame through its capture chain:
+  //! scene into the chain's HDR target, the chain's tonemap into this
+  //! capture's LDR target. `compose_scene_depth` replaces this object's own
+  //! depth image as the readback source -- the tonemap pass writes color only,
+  //! so the depth that matches the captured color is the scene pass's.
+  struct ComposePath {
+    VkRenderPass scene_pass{VK_NULL_HANDLE};
+    VkFramebuffer scene_framebuffer{VK_NULL_HANDLE};
+    VkImage scene_depth{VK_NULL_HANDLE};
+    std::function<void(VkCommandBuffer)> record_compose;
+  };
+  //! Handles the compose chain's tonemap writes into (the LDR target this
+  //! object owns). Valid after initialize().
+  [[nodiscard]] VkRenderPass pass_handle() const noexcept { return render_pass_; }
+  [[nodiscard]] VkFramebuffer framebuffer_handle() const noexcept {
+    return framebuffer_;
+  }
+
   [[nodiscard]] bool capture(
-      VkQueue queue, const std::function<bool(VkCommandBuffer)>& record_scene) {
+      VkQueue queue, const std::function<bool(VkCommandBuffer)>& record_scene,
+      const ComposePath* compose = nullptr) {
     if (vkResetCommandBuffer(command_buffer_, 0U) != VK_SUCCESS) return false;
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -472,23 +493,49 @@ class FrameCapture {
       return false;
     }
 
-    VkClearValue clears[2]{};
-    clears[0].color = {{0.06f, 0.07f, 0.09f, 1.0f}};
-    clears[1].depthStencil = {1.0f, 0U};
-    VkRenderPassBeginInfo pass{};
-    pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    pass.renderPass = render_pass_;  // shared with the window path
-    pass.framebuffer = framebuffer_;
-    pass.renderArea = {{0, 0}, {width_, height_}};
-    pass.clearValueCount = 2U;
-    pass.pClearValues = clears;
-    vkCmdBeginRenderPass(command_buffer_, &pass, VK_SUBPASS_CONTENTS_INLINE);
-    if (!record_scene(command_buffer_)) {
+    const VkImage depth_source =
+        compose != nullptr ? compose->scene_depth : depth_image_;
+    if (compose != nullptr) {
+      // Scene into the chain's HDR intermediate. The clear color is
+      // irrelevant here (the tonemap reads linear values), but the depth
+      // clear matches what the live frame's scene pass does.
+      VkClearValue scene_clears[2]{};
+      scene_clears[1].depthStencil = {1.0f, 0U};
+      VkRenderPassBeginInfo scene_pass{};
+      scene_pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+      scene_pass.renderPass = compose->scene_pass;
+      scene_pass.framebuffer = compose->scene_framebuffer;
+      scene_pass.renderArea = {{0, 0}, {width_, height_}};
+      scene_pass.clearValueCount = 2U;
+      scene_pass.pClearValues = scene_clears;
+      vkCmdBeginRenderPass(command_buffer_, &scene_pass,
+                           VK_SUBPASS_CONTENTS_INLINE);
+      if (!record_scene(command_buffer_)) {
+        vkCmdEndRenderPass(command_buffer_);
+        (void)vkEndCommandBuffer(command_buffer_);
+        return false;
+      }
       vkCmdEndRenderPass(command_buffer_);
-      (void)vkEndCommandBuffer(command_buffer_);
-      return false;
+      compose->record_compose(command_buffer_);
+    } else {
+      VkClearValue clears[2]{};
+      clears[0].color = {{0.06f, 0.07f, 0.09f, 1.0f}};
+      clears[1].depthStencil = {1.0f, 0U};
+      VkRenderPassBeginInfo pass{};
+      pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+      pass.renderPass = render_pass_;  // shared with the window path
+      pass.framebuffer = framebuffer_;
+      pass.renderArea = {{0, 0}, {width_, height_}};
+      pass.clearValueCount = 2U;
+      pass.pClearValues = clears;
+      vkCmdBeginRenderPass(command_buffer_, &pass, VK_SUBPASS_CONTENTS_INLINE);
+      if (!record_scene(command_buffer_)) {
+        vkCmdEndRenderPass(command_buffer_);
+        (void)vkEndCommandBuffer(command_buffer_);
+        return false;
+      }
+      vkCmdEndRenderPass(command_buffer_);
     }
-    vkCmdEndRenderPass(command_buffer_);
 
     // The shared pass leaves the color attachment in PRESENT_SRC and the
     // depth attachment in DEPTH_STENCIL_ATTACHMENT_OPTIMAL; transition each
@@ -511,7 +558,7 @@ class FrameCapture {
     VkImageMemoryBarrier depth_to_src = to_src;
     depth_to_src.oldLayout =
         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    depth_to_src.image = depth_image_;
+    depth_to_src.image = depth_source;
     depth_to_src.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 1U, 0U,
                                      1U};
     vkCmdPipelineBarrier(command_buffer_,
@@ -530,7 +577,7 @@ class FrameCapture {
     VkBufferImageCopy depth_region{};
     depth_region.imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 0U, 1U};
     depth_region.imageExtent = {width_, height_, 1U};
-    vkCmdCopyImageToBuffer(command_buffer_, depth_image_,
+    vkCmdCopyImageToBuffer(command_buffer_, depth_source,
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                            depth_readback_.buffer, 1U, &depth_region);
     vkEndCommandBuffer(command_buffer_);

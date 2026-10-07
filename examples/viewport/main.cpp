@@ -666,6 +666,12 @@ struct ViewportApp {
   viewport::RunConfig run_config{};
   viewport::TelemetryLogger telemetry;
   viewport::FrameCapture capture;
+  //! Second compose-chain instance (B3b step 4): capture composes into its own
+  //! LDR target instead of sharing the renderer's live intermediates, which is
+  //! what the first B3b attempt did wrong -- bloom's upsample overwrote the
+  //! HDR image the capture was reading. Created only when capture is requested
+  //! AND HDR compose is on.
+  std::unique_ptr<omnicpp::render::VulkanComposeChain> capture_chain;
   bool telemetry_enabled{false};
 
   // ---- M0 control channel (OMNICPP_CONTROL_SOCKET=path). -----------------
@@ -5142,10 +5148,21 @@ bool ViewportApp::initialize() {
   // would overwrite the live frame. Refuse rather than corrupt either.
   if ((run_config.capture_every != 0U || control_requested) &&
       renderer.hdr_compose_active()) {
-    std::fprintf(stderr,
-                 "viewport: frame capture is unavailable while HDR compose is "
-                 "active. Re-run with WARPLOOM_NO_HDR=1 to capture.\n");
-    return false;
+    // B3b: a second chain instance composes the captured frame into the
+    // capture's own LDR target. Same scene config as the live chain; the
+    // tonemap pipeline bakes in the capture target's pass + format, which is
+    // exactly the sharing the first attempt got wrong.
+    capture_chain = std::make_unique<omnicpp::render::VulkanComposeChain>();
+    const auto ensured = capture_chain->ensure(
+        context.device(), context.physical_device(),
+        context.graphics_queue(), renderer.compose_config(),
+        render_pass.render_pass(), swapchain.image_format(), kWidth, kHeight);
+    if (!ensured.is_ok() || !capture_chain->ready()) {
+      std::fprintf(stderr,
+                   "viewport: capture compose chain refused; re-run with "
+                   "WARPLOOM_NO_HDR=1 to capture without it.\n");
+      return false;
+    }
   }
 
   if (run_config.capture_every != 0U || control_requested) {
@@ -5348,11 +5365,24 @@ void ViewportApp::run() {
          (frame_index + 1U) % run_config.capture_every == 0U &&
          telemetry_enabled) ||
         control_capture) {
+      viewport::FrameCapture::ComposePath compose_path{};
+      const viewport::FrameCapture::ComposePath* compose_path_ptr = nullptr;
+      if (capture_chain != nullptr && capture_chain->ready()) {
+        compose_path.scene_pass = capture_chain->scene_pass();
+        compose_path.scene_framebuffer = capture_chain->scene_framebuffer();
+        compose_path.scene_depth = capture_chain->scene_depth_image();
+        compose_path.record_compose = [&](VkCommandBuffer cmd) {
+          capture_chain->record(cmd, capture.pass_handle(),
+                                capture.framebuffer_handle(), kWidth, kHeight);
+        };
+        compose_path_ptr = &compose_path;
+      }
       const bool captured = capture.capture(
           context.graphics_queue(), [&](VkCommandBuffer cmd) {
             return record_scene_into(cmd, *this, last_recorded_time,
                                      last_recorded_walk, kWidth, kHeight);
-          });
+          },
+          compose_path_ptr);
       if (captured) {
         if (capture.save(frame_index + 1U, run_config.telemetry_dir,
                          capture_name)) {
@@ -5508,6 +5538,7 @@ void ViewportApp::run() {
 void ViewportApp::shutdown() {
   renderer.wait_idle();
   capture.cleanup(context.device(), &allocator);
+  if (capture_chain != nullptr) capture_chain->destroy();
   telemetry.flush();
   if (node_editor) {
     ui_renderer.cleanup(context.device());

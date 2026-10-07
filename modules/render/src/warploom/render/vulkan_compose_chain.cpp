@@ -313,6 +313,10 @@ namespace warploom::render {
   const std::uint32_t bw = std::max(1U, width / static_cast<std::uint32_t>(config_.bloom_downscale));
   const std::uint32_t bh = std::max(1U, height / static_cast<std::uint32_t>(config_.bloom_downscale));
 
+  // Direct members in the renderer became unique_ptrs here; construct before
+  // first use (and again on every resize below).
+  if (hdr_target_ == nullptr) hdr_target_ = std::make_unique<VulkanOffscreenTarget>();
+  if (bloom_target_ == nullptr) bloom_target_ = std::make_unique<VulkanOffscreenTarget>();
   hdr_target_->cleanup();
   bloom_target_->cleanup();
   // The pipelines below bake in a render pass and attachment formats, so they

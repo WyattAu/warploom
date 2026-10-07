@@ -127,10 +127,18 @@ declares a slot 3.
       validation layer in eight configurations (default, no-HDR, bloom, RT,
       RT+bloom, GPU-driven, node editor, city), 0 diagnostics. Exposure is
       `WARPLOOM_EXPOSURE`.
-- [ ] **B3b frame capture through the compose chain** — the capture
-      re-records the scene into its own 8-bit target, which cannot sample a
-      float intermediate, so it refuses with a clear message while compose is
-      on. A first attempt was reverted: pointing the capture at the renderer's
+- [x] **B3b frame capture through the compose chain** — DONE. The viewport
+      creates a SECOND `VulkanComposeChain` when capture is requested and
+      compose is on; the capture records the scene into that chain's HDR
+      intermediate and the chain tonemaps into the capture's LDR target, then
+      readback proceeds unchanged. Depth reads from the chain's scene depth
+      (`TRANSFER_SRC` was already in its usage), so color and depth stay
+      matched. Measured on the RTX 2060 at 1280x720: frame_30 mean 25.71, max
+      188, 15.2% non-black; the LDR path's highlights capped at 110, so the
+      composed capture preserves brighter highlights than the old LDR capture
+      could -- that is the compose pipeline arriving in the capture, not a
+      regression. Depth all-finite 0.0016..1.0. The refusal and the
+      `WARPLOOM_NO_HDR=1` workaround are gone. Originally: A first attempt was reverted: pointing the capture at the renderer's
       intermediates corrupts the live frame, because the bloom upsample writes
       the HDR image. The fix is to make the compose chain instantiable per
       target rather than per renderer (its own intermediate set), plus a
