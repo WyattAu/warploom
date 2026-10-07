@@ -13,10 +13,25 @@ most important thing on this page: the renderer module's most impressive
 APIs are not used by the application.
 
 Proof runs under the Khronos validation layer. The full suite
-(546 tests, `warploom_unit_tests`) passes on an RTX 2060 with **0
+(607 tests, `warploom_unit_tests`) passes on an RTX 2060 with **0
 validation diagnostics and 0 leaked objects**; on CI's Mesa lavapipe
 software Vulkan, every ray-tracing test skips because the extensions are
-absent.
+absent. asan-ubsan (540 tests, 0 diagnostics, 0 leaks) and tsan (540
+tests, 0 data races) build and run on the Vulkan-off Debug tree.
+
+Two verification milestones worth knowing when reading the Proof column:
+
+- The renderer's whole frame loop (`begin_frame`/`record_commands`/
+  `submit_frame`/`present_frame`) runs headlessly
+  (`VulkanRenderer::initialize_headless`), so tests exercise it without a
+  window system. Before that, every test using it was XCB-gated and
+  preprocessed out: the loop had no executing coverage at all.
+- The HDR compose chain is `VulkanComposeChain`, instantiable per target;
+  the viewport creates a second instance so frame capture works with
+  compose on (the old capture refused under compose). Equivalence across
+  the extraction is pinned: the LDR capture is byte-identical old-vs-new,
+  and `VulkanHardware.HeadlessComposeFrameGoldenHash` pins the composed
+  frame's canonical hash (16601212335261142594, RTX 2060).
 
 ## Legend
 
@@ -45,7 +60,8 @@ absent.
 | Mesh LOD selection (GPU projected-size) | yes | yes | `test_lod_integration`, `test_gpu_driven_cull` |
 | Per-object static/rigged pipeline switch in one pass | yes | yes | `test_pbr_frame_variants` |
 | Mesh simplification (decimation / LOD mesh generation) | no | no | selection exists; nothing generates lower-LOD meshes |
-| H-Z depth pyramid + occlusion culling | yes | **test-only** | `test_gpu_lod_occlusion`, `test_depth_pyramid_mips`; `enable_hiz` is only ever set in tests |
+| H-Z depth pyramid (built every frame) | yes | yes — `RendererConfig::enable_hiz`; contract checked on real frames by `HiZGraph.ContractHoldsOnARealFrame` (headless) and the swapchain golden test | tested |
+| H-Z occlusion CULLING (a consumer) | no | no | the pyramid is built and thrown away; B5b scopes the missing shader wiring (`cull_and_draw_lod_occlude.comp` needs a packed-buffer pyramid + a cull-only descriptor layout) |
 | GPU-driven draw: mesh table, vertex pull, compute cull → indirect | yes | yes | `test_lod_integration`, `test_gpu_driven_cull`; app A/B 921,600/921,600 pixels byte-identical |
 | GPU skinning (bone SSBO) | yes | yes | `test_gpu_skinning`, `test_gpu_mannequin` |
 | GPU timestamps / frame latency percentiles | yes | yes | `GpuTiming`; telemetry `gpu_ns` |
