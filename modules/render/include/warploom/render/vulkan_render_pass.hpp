@@ -37,6 +37,12 @@ public:
   void cleanup(VkDevice device) noexcept;
 
   [[nodiscard]] VkRenderPass render_pass() const noexcept { return render_pass_; }
+  //! Device captured at create() so the destructor can free resources. The
+  //! destructor used to call cleanup(nullptr), which frees nothing -- every
+  //! render pass leaked its framebuffer, depth image, view and memory unless
+  //! the caller remembered an explicit cleanup(device). Visible as 5 leaked
+  //! objects per VulkanRenderPass under the validation layer.
+  [[nodiscard]] VkDevice owning_device() const noexcept { return device_; }
   [[nodiscard]] std::size_t framebuffer_count() const noexcept { return framebuffers_.size(); }
   [[nodiscard]] VkFramebuffer framebuffer(std::size_t index) const noexcept { return framebuffers_[index]; }
   [[nodiscard]] VkImage depth_image() const noexcept { return depth_image_; }
@@ -49,6 +55,7 @@ public:
 
 private:
   VkRenderPass render_pass_{VK_NULL_HANDLE};
+  VkDevice device_{VK_NULL_HANDLE};  //!< Captured at create(); see owning_device().
   std::vector<VkFramebuffer> framebuffers_;
   VkImage depth_image_{VK_NULL_HANDLE};
   VkDeviceMemory depth_memory_{VK_NULL_HANDLE};

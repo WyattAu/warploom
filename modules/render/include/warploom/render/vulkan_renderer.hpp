@@ -179,6 +179,50 @@ public:
       const VulkanRenderPass& render_pass,
       const RendererConfig& config = {});
 
+  //! Initialize with NO swapchain, for recording into an offscreen framebuffer.
+  //!
+  //! Why this exists: a Vulkan swapchain can only be created from a surface, and
+  //! a surface needs a window system. That made begin_frame/submit_frame/
+  //! present_frame -- the renderer's whole frame loop -- unexercisable in CI,
+  //! because every test using it was behind VK_USE_PLATFORM_XCB_KHR, which is
+  //! never defined for the test target. The result was a frame loop with zero
+  //! executing tests and a "coverage" number that counted nothing.
+  //!
+  //! In headless mode begin_frame skips vkAcquireNextImageKHR (image index is
+  //! always 0), submit_frame waits on no semaphore (nothing signals
+  //! image_available without an acquire), and present_frame skips the queue
+  //! present. Everything else -- compose graph, H-Z, GPU timestamps, per-frame
+  //! fences, diagnostics -- behaves identically, which is the point: the test
+  //! covers the real path rather than a parallel one.
+  //! `width`/`height` replace the swapchain extent and size the H-Z pyramid and
+  //! the compose chain, exactly as the swapchain's extent would. They are
+  //! required for the same reason: a headless frame still has to allocate them
+  //! or the paths under test would not exist.
+  [[nodiscard]] ::warploom::core::Result<void> initialize_headless(
+      VulkanContext& context,
+      const VulkanRenderPass& render_pass,
+      std::uint32_t width,
+      std::uint32_t height,
+      const RendererConfig& config = {});
+
+ private:
+  //! Shared setup for initialize() and initialize_headless(); `swapchain` may
+  //! be null for the headless path. Private so the swapchain-optional contract
+  //! stays internal rather than becoming a second public way to start.
+  [[nodiscard]] ::warploom::core::Result<void> initialize_common(
+      VulkanContext& context,
+      const VulkanRenderPass& render_pass,
+      const RendererConfig& config,
+      const VulkanSwapchain* swapchain,
+      std::uint32_t target_width,
+      std::uint32_t target_height);
+
+ public:
+
+  //! True when initialized without a swapchain. Present is a no-op and the
+  //! frame always uses image index 0.
+  [[nodiscard]] bool is_headless() const noexcept { return headless_; }
+
   // --- HDR compose introspection ---------------------------------------
   // An application whose pipelines are built against a render pass must
   // build them against the HDR intermediate when compose is on. These
@@ -572,6 +616,9 @@ private:
   FramePrePassCallback frame_pre_pass_callback_{nullptr};
   void* frame_pre_pass_user_data_{nullptr};
   const VulkanSwapchain* swapchain_{nullptr};
+  //! No swapchain: recording goes to an offscreen framebuffer (see
+  //! initialize_headless). Nothing else in the renderer changes.
+  bool headless_{false};
   const VulkanRenderPass* render_pass_resource_{nullptr};
   std::vector<FrameResources> frames_;
 

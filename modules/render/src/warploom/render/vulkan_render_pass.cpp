@@ -12,7 +12,7 @@
 
 namespace warploom::render {
 
-VulkanRenderPass::~VulkanRenderPass() { cleanup(nullptr); }
+VulkanRenderPass::~VulkanRenderPass() { cleanup(device_); }
 
 ::warploom::core::Result<void> VulkanRenderPass::create(
     VkDevice device, VkFormat color_format, VkFormat depth_format,
@@ -22,6 +22,7 @@ VulkanRenderPass::~VulkanRenderPass() { cleanup(nullptr); }
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
+  device_ = device;  // For the destructor; see owning_device().
   depth_format_ = depth_format;
 
   // Color attachment
@@ -286,6 +287,7 @@ void VulkanRenderPass::cleanup([[maybe_unused]] VkDevice device) noexcept {
   depth_view_ = nullptr;
   depth_format_ = VK_FORMAT_UNDEFINED;
   depth_sampleable_ = false;
+  device_ = VK_NULL_HANDLE;
 #endif
 }
 

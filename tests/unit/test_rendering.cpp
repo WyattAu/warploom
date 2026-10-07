@@ -35,10 +35,9 @@ struct HiZCallbackState {
   omnicpp::render::VulkanRenderer* renderer{nullptr};
 };
 
-  // Only compiled where the XCB test below can reference it: the unit-test
-  // target does not define VK_USE_PLATFORM_XCB_KHR, so the test body is
-  // preprocessed out and this would otherwise be an unused function.
-  #if defined(VK_USE_PLATFORM_XCB_KHR)
+  // Used by HIZGraphContractRunsHeadless below, which executes in every
+  // configuration -- unlike the XCB-gated swapchain test, which never compiled
+  // into the unit-test target at all.
   bool record_hiz_contract(VkCommandBuffer, const omnicpp::render::HiZFrameRecord& record,
                            void* user_data) {
     auto* state = static_cast<HiZCallbackState*>(user_data);
@@ -72,8 +71,6 @@ struct HiZCallbackState {
     }
     return true;
   }
-  #endif
-
 
 
 // Image-readback helpers live in the shared test header.
@@ -150,6 +147,127 @@ TEST(QueueFamilyIndices, CompleteWhenBothSet) {
 // ============================================================================
 // VulkanSwapchain Tests
 // ============================================================================
+
+//! The H-Z graph contract, verified on a frame that actually executes.
+//!
+//! This test previously lived inside the XCB-gated swapchain test, behind
+//! `defined(VK_USE_PLATFORM_XCB_KHR)` -- a macro the unit-test target is never
+//! given. So the H-Z barrier contract had no executing test in ANY
+//! configuration, while the suite counted as if it had coverage. The headless
+//! renderer path exists so this can run without a window system.
+TEST(HiZGraph, ContractHoldsOnARealFrame) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  omnicpp::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("OmniCppHiZContract", true).is_ok());
+
+  constexpr std::uint32_t kWidth = 256U;
+  constexpr std::uint32_t kHeight = 256U;
+
+  omnicpp::render::VulkanMemoryAllocator allocator;
+  ASSERT_TRUE(
+      allocator.initialize(context.device(), context.physical_device()).is_ok());
+
+  // One colour image to render into. The render pass (and therefore the depth
+  // attachment the H-Z path reads) is the same VulkanRenderPass object
+  // initialize() receives, so the barriers under test are the real ones.
+  omnicpp::render::VulkanOffscreenTarget color_target;
+  ASSERT_TRUE(color_target
+                  .create(context.device(), context.physical_device(),
+                          VK_FORMAT_B8G8R8A8_UNORM, kWidth, kHeight, &allocator)
+                  .is_ok());
+
+  const VkFormat depth_format =
+      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+          context.physical_device());
+  ASSERT_NE(depth_format, VK_FORMAT_UNDEFINED);
+  omnicpp::render::VulkanRenderPass render_pass;
+  ASSERT_TRUE(render_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
+                                depth_format)
+                  .is_ok());
+  ASSERT_TRUE(
+      render_pass
+          .create_depth_resources(context.device(), context.physical_device(),
+                                  depth_format, kWidth, kHeight)
+          .is_ok());
+  if (!render_pass.depth_is_sampleable()) {
+    GTEST_SKIP() << "depth is not sampleable on this device; H-Z needs it";
+  }
+  ASSERT_TRUE(render_pass
+                  .create_framebuffers(
+                      context.device(), std::vector<VkImageView>{color_target.image_view()},
+                      kWidth, kHeight)
+                  .is_ok());
+  ASSERT_EQ(render_pass.framebuffer_count(), 1U);
+
+  omnicpp::render::RendererConfig config;
+  config.enable_hiz = true;
+  config.enable_hdr_compose = false;
+#ifdef WARPLOOM_TEST_SHADER_DIR
+  config.hiz_reduction_shader_path =
+      std::string(WARPLOOM_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
+#endif
+
+  omnicpp::render::VulkanRenderer renderer;
+  const auto init = renderer.initialize_headless(context, render_pass, kWidth,
+                                                 kHeight, config);
+  ASSERT_TRUE(init.is_ok()) << "initialize_headless: "
+                            << static_cast<std::uint32_t>(init.error());
+  EXPECT_TRUE(renderer.is_headless());
+  ASSERT_TRUE(renderer.hiz_direct_enabled());
+
+  HiZCallbackState state;
+  state.renderer = &renderer;
+  renderer.set_hiz_record_callback(record_hiz_contract, &state);
+
+  auto image = renderer.begin_frame();
+  ASSERT_TRUE(image.is_ok()) << "begin_frame must work without a swapchain";
+  EXPECT_EQ(image.value(), 0U) << "headless frames always use image index 0";
+
+  ASSERT_TRUE(
+      renderer
+          .record_commands(image.value(), render_pass.framebuffer(0U), kWidth,
+                           kHeight)
+          .is_ok());
+
+  // Out-of-range image index must be rejected even headless, not crash.
+  EXPECT_FALSE(
+      renderer.record_commands(7U, render_pass.framebuffer(0U), kWidth, kHeight).is_ok());
+
+  ASSERT_TRUE(renderer.submit_frame().is_ok());
+  EXPECT_TRUE(renderer.present_frame().is_ok()) << "present is a no-op headless";
+  renderer.wait_idle();
+
+  EXPECT_EQ(state.calls, 1U) << "the H-Z record callback must fire once per frame";
+  EXPECT_TRUE(state.valid) << "H-Z frame record failed the contract";
+  EXPECT_EQ(state.plans, 1U) << "the graph plan must compile";
+  EXPECT_FALSE(state.saw_previous) << "first frame has no previous frame";
+  EXPECT_NE(renderer.hiz_pyramid(0U), nullptr);
+  EXPECT_TRUE(renderer.hiz_frame_state().has_previous_frame());
+
+  // Second frame: the ping-pong pyramid now has a previous frame, so the plan
+  // must gain one extra pass. This is the part a first-frame-only check misses.
+  state.calls = 0U;
+  state.plans = 0U;
+  auto second = renderer.begin_frame();
+  ASSERT_TRUE(second.is_ok());
+  ASSERT_TRUE(
+      renderer
+          .record_commands(second.value(), render_pass.framebuffer(0U), kWidth,
+                           kHeight)
+          .is_ok());
+  ASSERT_TRUE(renderer.submit_frame().is_ok());
+  ASSERT_TRUE(renderer.present_frame().is_ok());
+  renderer.wait_idle();
+  EXPECT_EQ(state.calls, 1U);
+  EXPECT_TRUE(state.valid) << "second-frame H-Z record failed the contract";
+  EXPECT_TRUE(state.saw_previous) << "second frame must see the previous frame";
+#else
+  GTEST_SKIP() << "built without Vulkan types";
+#endif
+}
 
 TEST(VulkanSwapchain, QuerySupportReturnsEmptyWithoutVulkan) {
   auto details = omnicpp::render::VulkanSwapchain::query_swapchain_support(nullptr, nullptr);

@@ -74,10 +74,35 @@ void FrameResources::cleanup(VkDevice device) noexcept {
 VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
 
 ::warploom::core::Result<void> VulkanRenderer::initialize(
-    VulkanContext& context,
-    const VulkanSwapchain& swapchain,
-    const VulkanRenderPass& render_pass,
-    const RendererConfig& config) {
+    VulkanContext& context, const VulkanSwapchain& swapchain,
+    const VulkanRenderPass& render_pass, const RendererConfig& config) {
+  return initialize_common(context, render_pass, config, &swapchain,
+                           swapchain.extent_width(), swapchain.extent_height());
+}
+
+::warploom::core::Result<void> VulkanRenderer::initialize_headless(
+    VulkanContext& context, const VulkanRenderPass& render_pass,
+    std::uint32_t width, std::uint32_t height, const RendererConfig& config) {
+  if (width == 0U || height == 0U) {
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
+  }
+  return initialize_common(context, render_pass, config, nullptr, width, height);
+}
+
+//: Shared setup for initialize() and initialize_headless(). `swapchain` may be
+//: null, in which case the frame loop records into a caller-owned framebuffer
+//: with a single synthetic image (see initialize_headless for why this exists).
+//: Every path that used to be swapchain-specific -- acquire, per-image fences,
+//: present -- branches on `swapchain_ == nullptr` in the frame loop instead of
+//: having a second, diverging copy of this body. The first draft of headless
+//: support DID duplicate this function and missed the fence-signaled flag and
+//: the timeline decision within thirty lines; this is why it is one function.
+::warploom::core::Result<void> VulkanRenderer::initialize_common(
+    VulkanContext& context, const VulkanRenderPass& render_pass,
+    const RendererConfig& config, const VulkanSwapchain* swapchain,
+    [[maybe_unused]] std::uint32_t target_width,
+    [[maybe_unused]] std::uint32_t target_height) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!context.is_initialized() || !context.device()) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
@@ -86,7 +111,7 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
   WARPLOOM_INFO("render",
                 "initialize: %ux%u, %u frames in flight, hz=%s bloom=%s "
                 "exposure=%.2f",
-                swapchain.extent_width(), swapchain.extent_height(),
+                target_width, target_height,
                 config.max_frames_in_flight,
                 config.enable_hiz ? "on" : "off",
                 config.enable_bloom ? "on" : "off",
@@ -97,13 +122,19 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
   present_queue_ = context.present_queue();
   render_pass_ = render_pass.render_pass();
   render_pass_resource_ = &render_pass;
-  swapchain_ = &swapchain;
+  swapchain_ = swapchain;
+  headless_ = swapchain == nullptr;
   config_ = config;
+  // Headless has one synthetic image and no format of its own: the compose
+  // chain is disabled there, so the present format is never consumed.
+  const std::size_t image_count = headless_ ? 1U : swapchain->image_count();
+  const VkFormat target_format =
+      headless_ ? VK_FORMAT_UNDEFINED : swapchain->image_format();
   // Captured for the HDR compose chain: its tonemap pipeline must be built
   // for the swapchain's render pass and format, which is a different
   // attachment format from the HDR intermediate.
   present_pass_ = render_pass.render_pass();
-  present_format_ = swapchain.image_format();
+  present_format_ = target_format;
 
   auto pool_result = create_command_pool(
       device_, static_cast<std::uint32_t>(context.queue_families().graphics_family));
@@ -112,14 +143,14 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
   }
   command_pool_ = pool_result.value();
 
-  if (config.max_frames_in_flight == 0 || swapchain.image_count() == 0) {
+  if (config.max_frames_in_flight == 0 || image_count == 0) {
     cleanup(device_);
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
 
   frames_.resize(config.max_frames_in_flight);
-  images_in_flight_.assign(swapchain.image_count(), VK_NULL_HANDLE);
-  render_finished_semaphores_.assign(swapchain.image_count(), VK_NULL_HANDLE);
+  images_in_flight_.assign(image_count, VK_NULL_HANDLE);
+  render_finished_semaphores_.assign(image_count, VK_NULL_HANDLE);
   // GPU timestamp queries: 2 per frame slot (frame start, main-pass end).
   // Availability is a queue-family property; the pool is created regardless
   // so record paths can be unconditional, and results are only resolved
@@ -208,7 +239,7 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
       cleanup(device_);
       return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
     }
-    image_last_frame_.assign(swapchain.image_count(), 0);
+    image_last_frame_.assign(image_count, 0);
   }
 
   if (config_.enable_hiz &&
@@ -221,8 +252,8 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
 
   initialized_ = true;
   if (config_.enable_hiz) {
-    auto hiz_result = recreate_hiz_resources(swapchain.extent_width(),
-                                              swapchain.extent_height());
+    auto hiz_result = recreate_hiz_resources(target_width,
+                                              target_height);
     if (!hiz_result.is_ok()) {
       cleanup(device_);
       return hiz_result;
@@ -233,8 +264,8 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
   // HDR intermediate (see hdr_render_pass()), so the target has to exist
   // before the caller gets control back from initialize().
   if (config_.enable_hdr_compose) {
-    (void)ensure_compose_resources(swapchain.extent_width(),
-                                   swapchain.extent_height());
+    (void)ensure_compose_resources(target_width,
+                                   target_height);
   }
   return ::warploom::core::Result<void>::ok();
 #else
@@ -1801,8 +1832,15 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
   }
 
   std::uint32_t image_index = 0;
-  VkResult result = vkAcquireNextImageKHR(device_, swapchain_->swapchain(), UINT64_MAX,
-      frame.image_available_semaphore, VK_NULL_HANDLE, &image_index);
+  VkResult result = VK_SUCCESS;
+  if (headless_) {
+    // No swapchain to acquire from. The submit below waits on no semaphore, so
+    // nothing needs image_available signaled.
+  } else {
+    result = vkAcquireNextImageKHR(device_, swapchain_->swapchain(), UINT64_MAX,
+                                   frame.image_available_semaphore, VK_NULL_HANDLE,
+                                   &image_index);
+  }
 
   if (result == VK_ERROR_OUT_OF_DATE_KHR) {
     return ::warploom::core::Result<std::uint32_t>::error(::warploom::core::RuntimeError::invalid_config);
@@ -1852,17 +1890,19 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
 #endif
 }
 
+
 ::warploom::core::Result<void> VulkanRenderer::record_commands(
     std::uint32_t image_index, VkFramebuffer framebuffer,
     std::uint32_t width, std::uint32_t height) {
 #ifdef OMNICPP_HAS_VULKAN
-  if (!initialized_ || image_index >= swapchain_->image_count()) {
+  const std::size_t image_count =
+      headless_ ? 1U : (swapchain_ != nullptr ? swapchain_->image_count() : 0U);
+  if (!initialized_ || image_index >= image_count) {
     WARPLOOM_ERROR("render",
                    "record_commands: %s (image_index=%u of %u)",
                    initialized_ ? "image index out of range"
                                 : "renderer not initialized",
-                   image_index,
-                   initialized_ ? swapchain_->image_count() : 0U);
+                   image_index, static_cast<std::uint32_t>(image_count));
     return ::warploom::core::Result<void>::error(
         ::warploom::core::RuntimeError::vulkan_not_available);
   }
@@ -2088,15 +2128,26 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
   submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   VkSemaphore wait_semaphores[] = {frame.image_available_semaphore};
   VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-  submit_info.waitSemaphoreCount = 1;
-  submit_info.pWaitSemaphores = wait_semaphores;
-  submit_info.pWaitDstStageMask = wait_stages;
+  // Headless: no acquire, so image_available is never signaled -- waiting on
+  // it here would deadlock the queue forever. Wait on nothing instead.
+  if (!headless_) {
+    submit_info.waitSemaphoreCount = 1;
+    submit_info.pWaitSemaphores = wait_semaphores;
+    submit_info.pWaitDstStageMask = wait_stages;
+  }
   submit_info.commandBufferCount = 1;
   submit_info.pCommandBuffers = &frame.command_buffer;
+  // Headless: render_finished is consumed by the present queue, and there is
+  // no present. Signaling a binary semaphore twice with no intervening wait is
+  // a VUID violation (validation caught this on the first headless frame), so
+  // the signal is skipped entirely rather than left to trip on frame two.
+  const bool signal_render_finished = !headless_;
   const VkSemaphore render_finished_semaphore =
       render_finished_semaphores_[acquired_image_index_];
-  submit_info.signalSemaphoreCount = 1;
-  submit_info.pSignalSemaphores = &render_finished_semaphore;
+  if (signal_render_finished) {
+    submit_info.signalSemaphoreCount = 1;
+    submit_info.pSignalSemaphores = &render_finished_semaphore;
+  }
 
   // Timeline pacing: signal the monotonic frame counter on submit.
   const std::uint64_t signal_frame = frame_counter_ + 1;
@@ -2112,16 +2163,24 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
       wait_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
       wait_info.semaphore = frame.image_available_semaphore;
       wait_info.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+      if (headless_) wait_info = {};
       VkSemaphoreSubmitInfo signal_info{};
       signal_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
       signal_info.semaphore = render_finished_semaphores_[acquired_image_index_];
       signal_info.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+      if (headless_) signal_info.semaphore = VK_NULL_HANDLE;
       VkSubmitInfo2 submit2_info{};
       submit2_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
       submit2_info.commandBufferInfoCount = 1;
       submit2_info.pCommandBufferInfos = &command_info;
-      submit2_info.waitSemaphoreInfoCount = 1;
-      submit2_info.pWaitSemaphoreInfos = &wait_info;
+      if (!headless_) {
+        submit2_info.waitSemaphoreInfoCount = 1;
+        submit2_info.pWaitSemaphoreInfos = &wait_info;
+      }
+      if (headless_) {
+        submit2_info.signalSemaphoreInfoCount = 0;
+        submit2_info.pSignalSemaphoreInfos = nullptr;
+      }
       submit2_info.signalSemaphoreInfoCount = 1;
       submit2_info.pSignalSemaphoreInfos = &signal_info;
       if (timeline_pacing_) {
@@ -2209,6 +2268,13 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
   present_info.waitSemaphoreCount = 1;
   present_info.pWaitSemaphores = &render_finished_semaphore;
+  if (headless_) {
+    // Submitted, nothing to present. The render_finished semaphore was still
+    // signaled by submit_frame; there is no acquire/present pairing to honour.
+    frame_acquired_ = false;
+    return ::warploom::core::Result<void>::ok();
+  }
+
   VkSwapchainKHR swapchains[] = {swapchain_->swapchain()};
   const std::uint32_t image_index = acquired_image_index_;
   present_info.swapchainCount = 1;
