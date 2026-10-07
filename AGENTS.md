@@ -199,6 +199,35 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   its framebuffer, depth image, view and memory. The class now captures its
   device at create().
 
+  The compose-chain extraction (B3b) claimed to be behaviour-preserving, and
+  that claim is now verified rather than assumed, on both paths:
+
+  - LDR live path: the no-HDR capture is BYTE-IDENTICAL across the extraction
+    (commit 515c6e6 vs the chain-class commit): same 2,764,816-byte PPM, same
+    md5, from deterministic stepped frames. The screenshot route was tried
+    first and abandoned -- this machine's window manager lists three stale
+    viewports whose windows carry no _NET_WM_PID, so a grabbed frame could not
+    be attributed to a build. The capture path is the honest instrument: it
+    reads back the exact framebuffer.
+  - HDR live path: pinned by a new golden hash,
+    `VulkanHardware.HeadlessComposeFrameGoldenHash`, which renders a triangle
+    through headless-compose and reads the tonemapped result back
+    (canonical_hash 16601212335261142594 on the RTX 2060). The same test was
+    transplanted onto the pre-extraction commit -- its
+    `initialize_headless` gained the same present-format parameter the
+    extraction added, since the old signature could not express a headless
+    compose target at all -- and produced the identical hash. Old and new
+    agree bit-for-bit on the tonemapped frame.
+
+  Process note worth keeping: the first "leak" the new golden test reported was
+  PHANTOM -- the test binary had silently failed to rebuild (an
+  allocator.cleanup(device) signature error) and the stale binary, which
+  predated the cleanup calls, was what validation was reporting on. A build
+  that fails must be treated as evidence of nothing, not as a passing suite
+  with an odd leak. The real leak class it uncovered secondhand -- a test-local
+  VulkanPipeline needs explicit cleanup, the destructor is deliberately inert --
+  is handled by following the file's existing cleanup convention.
+
   The two swapchain tests were dead for the same reason, and are now alive:
   `VK_USE_PLATFORM_XCB_KHR` is defined for the unit-test target and the target
   links xcb (test-only; no engine target touches a window system). On a runner

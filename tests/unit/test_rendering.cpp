@@ -269,6 +269,123 @@ TEST(HiZGraph, ContractHoldsOnARealFrame) {
 #endif
 }
 
+//! Golden hash of a COMPOSED frame through the headless renderer.
+//!
+//! Why this exists: initialize_headless + the B3b chain extraction re-plumbed
+//! the HDR compose path (compose resources, record_compose_chain -> the
+//! VulkanComposeChain class). The LDR live path is pinned by
+//! HeadlessSwapchainAndRenderSubmission's golden hash, but nothing read a
+//! composed frame's pixels back. This does: scene triangle into the chain's
+//! HDR intermediate, tonemap+FXAA into an LDR target, readback, hash. The
+//! value is pinned per driver exactly like the LDR golden; old==new byte-hash
+//! across the extraction was verified separately (515c6e6 vs the chain-class
+//! commit) and this test keeps it pinned from now on.
+TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  constexpr std::uint32_t kSize = 256U;
+  omnicpp::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("OmniCppComposeHash", true).is_ok());
+  omnicpp::render::VulkanMemoryAllocator allocator;
+  ASSERT_TRUE(
+      allocator.initialize(context.device(), context.physical_device()).is_ok());
+
+  // LDR presentation stand-in: what the tonemap writes and what we read back.
+  omnicpp::render::VulkanOffscreenTarget ldr;
+  ASSERT_TRUE(ldr
+                  .create(context.device(), context.physical_device(),
+                          VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator,
+                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+                  .is_ok());
+  const VkFormat depth_format =
+      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+          context.physical_device());
+  omnicpp::render::VulkanRenderPass present_pass;
+  ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
+                                  depth_format)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_depth_resources(context.device(),
+                                          context.physical_device(),
+                                          depth_format, kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_framebuffers(context.device(), {ldr.image_view()},
+                                       kSize, kSize)
+                  .is_ok());
+
+  omnicpp::render::RendererConfig config;
+  config.enable_hiz = false;
+  config.enable_hdr_compose = true;
+  config.enable_bloom = false;
+  config.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
+
+  omnicpp::render::VulkanRenderer renderer;
+  const auto init =
+      renderer.initialize_headless(context, present_pass, kSize, kSize, config,
+                                   VK_FORMAT_B8G8R8A8_UNORM);
+  ASSERT_TRUE(init.is_ok()) << "headless compose init failed: "
+                            << static_cast<std::uint32_t>(init.error());
+  ASSERT_TRUE(renderer.hdr_compose_active());
+
+  // The scene pipeline must be built for the HDR intermediate, exactly as the
+  // viewport builds its scene pipelines when compose is on.
+  omnicpp::render::VulkanPipeline pipeline;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  ASSERT_TRUE(pipeline
+                  .load_shader_file(context.device(),
+                                     shader_dir + "/triangle.vert.spv")
+                  .is_ok());
+  ASSERT_TRUE(pipeline
+                  .load_shader_file(context.device(),
+                                     shader_dir + "/triangle.frag.spv")
+                  .is_ok());
+  ASSERT_TRUE(pipeline
+                  .create_graphics_pipeline(
+                      context.device(), renderer.hdr_render_pass(),
+                      renderer.hdr_format(), VK_NULL_HANDLE, true, true, false)
+                  .is_ok());
+  renderer.set_pipeline(pipeline.pipeline());
+
+  auto image = renderer.begin_frame();
+  ASSERT_TRUE(image.is_ok());
+  ASSERT_TRUE(renderer
+                  .record_commands(image.value(), present_pass.framebuffer(0U),
+                                   kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(renderer.submit_frame().is_ok());
+  renderer.wait_idle();
+
+  const auto readback = readback_swapchain_image(
+      context.physical_device(), context.device(), context.graphics_queue(),
+      static_cast<std::uint32_t>(context.queue_families().graphics_family),
+      ldr.image(), VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize);
+  ASSERT_GT(readback.non_clear_pixels, 0U)
+      << "composed frame came back empty";
+
+  renderer.cleanup(context.device());
+  pipeline.cleanup(context.device());
+  present_pass.cleanup(context.device());
+  ldr.cleanup();
+  allocator.cleanup();
+  // Composed output: tonemapped through ACES, so NOT the LDR golden values.
+  // The hash is driver-specific like the LDR one; each value is pinned here.
+  switch (readback.canonical_hash) {
+    case 16601212335261142594ULL:  // NVIDIA (RTX 2060)
+      SUCCEED();
+      break;
+    default:
+      ADD_FAILURE() << "unexpected composed canonical_hash="
+                    << readback.canonical_hash;
+      break;
+  }
+#else
+  GTEST_SKIP() << "Vulkan types or test shaders unavailable";
+#endif
+}
+
 TEST(VulkanSwapchain, QuerySupportReturnsEmptyWithoutVulkan) {
   auto details = omnicpp::render::VulkanSwapchain::query_swapchain_support(nullptr, nullptr);
   EXPECT_FALSE(details.is_valid());

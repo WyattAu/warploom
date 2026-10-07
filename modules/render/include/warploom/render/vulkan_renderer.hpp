@@ -196,15 +196,17 @@ public:
   //! fences, diagnostics -- behaves identically, which is the point: the test
   //! covers the real path rather than a parallel one.
   //! `width`/`height` replace the swapchain extent and size the H-Z pyramid and
-  //! the compose chain, exactly as the swapchain's extent would. They are
-  //! required for the same reason: a headless frame still has to allocate them
-  //! or the paths under test would not exist.
+  //! the compose chain, exactly as the swapchain's extent would. `present_format`
+  //! is the format of the target `record_commands` will write when compose is
+  //! enabled -- the tonemap pipeline bakes it in, and a headless frame has no
+  //! swapchain to read it from, so the caller states it.
   [[nodiscard]] ::warploom::core::Result<void> initialize_headless(
       VulkanContext& context,
       const VulkanRenderPass& render_pass,
       std::uint32_t width,
       std::uint32_t height,
-      const RendererConfig& config = {});
+      const RendererConfig& config = {},
+      VkFormat present_format = VK_FORMAT_B8G8R8A8_UNORM);
 
  private:
   //! Shared setup for initialize() and initialize_headless(); `swapchain` may
@@ -216,7 +218,8 @@ public:
       const RendererConfig& config,
       const VulkanSwapchain* swapchain,
       std::uint32_t target_width,
-      std::uint32_t target_height);
+      std::uint32_t target_height,
+      VkFormat headless_present_format);
 
  public:
 

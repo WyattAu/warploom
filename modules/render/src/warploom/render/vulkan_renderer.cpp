@@ -80,17 +80,20 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
     VulkanContext& context, const VulkanSwapchain& swapchain,
     const VulkanRenderPass& render_pass, const RendererConfig& config) {
   return initialize_common(context, render_pass, config, &swapchain,
-                           swapchain.extent_width(), swapchain.extent_height());
+                           swapchain.extent_width(), swapchain.extent_height(),
+                           swapchain.image_format());
 }
 
 ::warploom::core::Result<void> VulkanRenderer::initialize_headless(
     VulkanContext& context, const VulkanRenderPass& render_pass,
-    std::uint32_t width, std::uint32_t height, const RendererConfig& config) {
+    std::uint32_t width, std::uint32_t height, const RendererConfig& config,
+    VkFormat present_format) {
   if (width == 0U || height == 0U) {
     return ::warploom::core::Result<void>::error(
         ::warploom::core::RuntimeError::invalid_config);
   }
-  return initialize_common(context, render_pass, config, nullptr, width, height);
+  return initialize_common(context, render_pass, config, nullptr, width, height,
+                           present_format);
 }
 
 //: Shared setup for initialize() and initialize_headless(). `swapchain` may be
@@ -105,7 +108,8 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
     VulkanContext& context, const VulkanRenderPass& render_pass,
     const RendererConfig& config, const VulkanSwapchain* swapchain,
     [[maybe_unused]] std::uint32_t target_width,
-    [[maybe_unused]] std::uint32_t target_height) {
+    [[maybe_unused]] std::uint32_t target_height,
+    [[maybe_unused]] VkFormat headless_present_format) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!context.is_initialized() || !context.device()) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
@@ -132,7 +136,7 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
   // chain is disabled there, so the present format is never consumed.
   const std::size_t image_count = headless_ ? 1U : swapchain->image_count();
   const VkFormat target_format =
-      headless_ ? VK_FORMAT_UNDEFINED : swapchain->image_format();
+      headless_ ? headless_present_format : swapchain->image_format();
   // Captured for the HDR compose chain: its tonemap pipeline must be built
   // for the swapchain's render pass and format, which is a different
   // attachment format from the HDR intermediate.
