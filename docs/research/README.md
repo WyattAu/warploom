@@ -41,8 +41,15 @@ assessment, fit/cost, and what was adopted vs deliberately not.
 
 ## Follow-up searches for the next loop
 
-- Visual-scripting execution models (dataflow vs imperative stacks) for the
-  G4 script node's editor wiring.
-- Asset streaming/browser patterns (G5).
-- ECS scheduling — archetype vs sparse-set vs our bitmap masks, against the
-  SystemScheduler's wave partitioning.
+- Visual-scripting execution models (dataflow pull vs imperative push, and
+  Unreal BluePrint's graph re-instance costs) for the G4 script node's
+  editor wiring.
+- Asset streaming/browser patterns (G5) — idTech 6's mega-texture feedback
+  buffer (render pass reports which tiles are needed) is the closest shipped
+  analogue to a browser that reflects runtime state.
+- ECS scheduling — archetype (Bevy/Unity DOTS) vs sparse-set (EnTT) vs our
+  bitmap masks, against the SystemScheduler's wave partitioning; the question
+  to research is whether component-mask waves lose to archetype iteration at
+  our entity counts.
+- ReSTIR DI/GI with serialized reservoirs — revisit if the replay format
+  gains a generic blob-payload section for solver state.
