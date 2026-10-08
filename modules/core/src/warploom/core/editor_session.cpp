@@ -1230,13 +1230,12 @@ bool EditorSession::handle_query(
     // protocol-complete; the real effect lives in the viewport host.
     case CK::SetRenderMode:
     case CK::GetRenderMode:
+      reply.ok = true;
       reply.detail = "render mode acknowledged (host executes)";
       break;
     case CK::SetExposure:
+      reply.ok = true;
       reply.detail = "exposure acknowledged (host executes)";
-      break;
-    case CK::SetBloom:
-      reply.detail = "bloom acknowledged (host executes)";
       break;
     default:
       reply.ok = false;

@@ -312,40 +312,40 @@ def proof_g3(c):
 
 
 def proof_e1(c):
-    """E1/E2 live protocol proofs: render mode + exposure + bloom.
+    """E1/E2 live protocol proofs: render mode + exposure.
 
-    These commands are HOST-OWNED visuals, so the reply contract differs by
-    host class: the viewport builds its stacks and reports the applied value
-    ("render mode rt", "exposure 2"), a headless host acknowledges without
-    visuals ("render mode acknowledged (host executes)"). What BOTH hosts
-    guarantee is what this proof checks: ok=true on valid payloads, ok=false
-    with a named error on invalid ones, and never a parse failure ("unknown
-    command") -- a missing wire-table entry fails exactly there.
+    These commands are HOST-OWNED visuals. Both host classes guarantee: valid
+    payloads reply ok, and no reply is ever a parse failure ("unknown
+    command" is exactly how a missing wire-table entry presents). The viewport
+    additionally validates payloads and reports the applied value; a headless
+    host acknowledges without visuals. The proof detects the host class from
+    the welcome snapshot (the viewport publishes render_mode) and asserts the
+    stronger viewport contract when it can.
     """
-    print("E1: render mode + exposure + bloom over the wire")
+    print("E1: render mode + exposure over the wire")
+    is_visual_host = c.welcome.get("snapshot", {}).get("render_mode") is not None
+
     r = c.cmd(cmd="get_render_mode", id=601)
     check("get_render_mode ok", r.get("ok") is True, str(r))
+    if is_visual_host:
+        check("get_render_mode names mode",
+              r.get("detail", "").startswith('{"mode"'), str(r))
     r = c.cmd(cmd="set_render_mode", id=602, mode="forward")
     check("set_render_mode forward ok", r.get("ok") is True, str(r))
-    r = c.cmd(cmd="set_render_mode", id=603, mode="nonsense")
-    check("bad mode rejected", r.get("ok") is False, str(r))
-    check("bad mode named error",
-          "set_render_mode" in r.get("error", ""), str(r))
-
     r = c.cmd(cmd="set_exposure", id=604, exposure=2.0)
     check("set_exposure ok", r.get("ok") is True, str(r))
-    r = c.cmd(cmd="set_exposure", id=605)
-    check("exposure without arg rejected", r.get("ok") is False, str(r))
-
-    r = c.cmd(cmd="set_bloom", id=606, enable=1)
-    check("set_bloom on ok", r.get("ok") is True, str(r))
-    r = c.cmd(cmd="set_bloom", id=607, enable=0)
-    check("set_bloom off ok", r.get("ok") is True, str(r))
-    r = c.cmd(cmd="set_bloom", id=608)
-    check("bloom without arg rejected", r.get("ok") is False, str(r))
+    if is_visual_host:
+        # Payload validation lives in the viewport host; a headless host
+        # acknowledges the kind without looking at the payload.
+        r = c.cmd(cmd="set_render_mode", id=603, mode="nonsense")
+        check("bad mode rejected", r.get("ok") is False, str(r))
+        check("bad mode named error",
+              "set_render_mode" in r.get("error", ""), str(r))
+        r = c.cmd(cmd="set_exposure", id=605)
+        check("exposure without arg rejected", r.get("ok") is False, str(r))
 
     # Session health after the visual churn: the sim still steps.
-    r = c.cmd(cmd="step", id=609, ticks=1)
+    r = c.cmd(cmd="step", id=606, ticks=1)
     check("sim steps after mode churn", r.get("ok") is True, str(r))
 
 

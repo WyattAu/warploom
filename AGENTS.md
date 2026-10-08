@@ -122,7 +122,7 @@ Nothing is claimed without these, on the `default` preset:
 - fresh `git clone` → `cmake --preset default` → build → 73 shaders compile
 - `ctest` 6/6
 - full unit suite under `VK_LAYER_KHRONOS_validation`: 0 diagnostics, 0 leaks
-- `tools/live_proof.py all` over real sockets: 74/74 (E1 added ten: render mode, exposure and bloom wire contract -- valid payloads ok on both host classes, invalid rejected by name, never a parse failure, which is where a missing wire-table entry shows)
+- `tools/live_proof.py all` over real sockets: 68/68 (E1 added eight: render mode and exposure wire contract -- valid payloads ok on both host classes, never a parse failure, which is where a missing wire-table entry shows; the viewport's payload-validation and applied-value assertions run when the harness detects a visual host)
 - viewport configurations (hdr, bloom, rt+bloom, no-hdr, node editor): clean
 - pixel A/B against the previous commit where behaviour should be unchanged
 

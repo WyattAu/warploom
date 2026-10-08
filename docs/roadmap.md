@@ -560,15 +560,24 @@ declares a slot 3.
       every frame — the preserve is now explicit in the chain), plus a live
       socket check that the chain reports the applied value back. The capture
       chain is synced in the same handler, so captured frames cannot silently
-      disagree with the live frame. Bloom toggle is DONE too:
-      `set_bloom` (`numbers[0]` = 1/0) flags the chain's next ensure() to take
-      the full (re)creation path — ON builds the bloom pipelines, target and
-      descriptor rewrite; OFF rewrites the tonemap's bloom binding back to the
-      black fallback. Verified in-process by the golden test's bloom probe:
-      ON differs from the pinned bloom-off frame, OFF again returns EXACTLY to
-      it, and the whole sequence runs with 0 validation diagnostics. Live
-      socket on/off also clean. Remaining: path tracing, RT reflections/AO,
-      skinned gd scenes.
+      disagree with the live frame. Remaining: path tracing, RT
+      reflections/AO, skinned gd scenes.
+
+      (SetBloom was briefly added and REVERTED: see below.)
+
+      REVERTED attempt — runtime bloom toggle. The full-recreate path
+      invalidates the HDR render pass that app scene pipelines bake (12 VUIDs
+      and a stale pass in the golden test), so a light path was written:
+      create the bloom side in place, rewrite the tonemap's binding-1
+      descriptor. Result measured, not assumed: the bloom-ON frame came back
+      BLACK with a device leak — the light path's rebuild sequence does not
+      yet interleave correctly with the graph's cross-frame layout tracking
+      for the down/up stages (the up stage writes the HDR image the tonemap
+      is about to sample; ordering that against the scene pass at toggle time
+      is the actual problem, and it is the same shape as the original B3b
+      revert). Reverted rather than shipped black. The static config remains
+      correct: bloom at start-up works (the viewport matrix runs bloom clean),
+      and the toggle needs a design pass on its ordering contract first.
 - [ ] **E3 hardware CI runner** — every RT test skips on lavapipe, so the
       best subsystem has the least regression protection.
 - [x] **E4 warning debt, then `-Werror`** — DONE. All four presets build

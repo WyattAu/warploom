@@ -40,6 +40,7 @@ add_library(warploom_core SHARED
     src/warploom/core/property_registry.cpp
     src/warploom/core/replay_scrubber.cpp
     src/warploom/core/script_module.cpp
+    src/warploom/core/script_node.cpp
 )
 add_library(Warploom::core ALIAS warploom_core)
 

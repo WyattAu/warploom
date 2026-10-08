@@ -403,28 +403,6 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
                         : t / static_cast<double>(readback.pixels.size());
          }()
       << ")";
-  // E2/R4 bloom probe: toggle ON (rebuild), record, toggle OFF, record.
-  // OFF again must land back on the pinned bloom-off pixels — the descriptor
-  // rewrite is what makes the tonemap's bloom binding follow the toggle.
-  renderer.set_bloom(true);
-  auto image_bl = renderer.begin_frame();
-  ASSERT_TRUE(image_bl.is_ok());
-  ASSERT_TRUE(renderer
-                  .record_commands(image_bl.value(),
-                                   present_pass.framebuffer(0U), kSize, kSize)
-                  .is_ok());
-  ASSERT_TRUE(renderer.submit_frame().is_ok());
-  renderer.wait_idle();
-  const auto readback_bloom = readback_swapchain_image(
-      context.physical_device(), context.device(), context.graphics_queue(),
-      static_cast<std::uint32_t>(context.queue_families().graphics_family),
-      ldr.image(), VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize,
-      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, true);
-  ASSERT_GT(readback_bloom.non_clear_pixels, 0U);
-  EXPECT_NE(readback_bloom.hash, readback_pinned.hash)
-      << "bloom ON produced the bloom-off frame";
-  renderer.set_bloom(false);
-
   // Restore the pinned exposure and record the frame the hash below pins:
   // the probe leaves 0.25 in the chain, and ensure() deliberately preserves
   // the live value instead of resetting it.
@@ -444,13 +422,16 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
   ASSERT_GT(readback_pinned.non_clear_pixels, 0U);
 
 
+
+  // Composed output: tonemapped through ACES, so NOT the LDR golden values.
+  // The hash is driver-specific like the LDR one; each value is pinned here.
+
   renderer.cleanup(context.device());
   pipeline.cleanup(context.device());
   present_pass.cleanup(context.device());
   ldr.cleanup();
   allocator.cleanup();
-  // Composed output: tonemapped through ACES, so NOT the LDR golden values.
-  // The hash is driver-specific like the LDR one; each value is pinned here.
+
   switch (readback_pinned.canonical_hash) {
     case 16601212335261142594ULL:  // NVIDIA (RTX 2060)
       SUCCEED();

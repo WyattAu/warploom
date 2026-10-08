@@ -917,18 +917,6 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
                        std::to_string(app_.renderer.compose_exposure()) + ")";
         break;
       }
-      case CK::SetBloom: {
-        if (command.number_count < 1U) {
-          reply.ok = false;
-          reply.error = "set_bloom needs enable (0 or 1)";
-          break;
-        }
-        const bool on = command.numbers[0] != 0.0;
-        app_.renderer.set_bloom(on);
-        if (app_.capture_chain != nullptr) app_.capture_chain->set_bloom(on);
-        reply.detail = on ? "bloom on" : "bloom off";
-        break;
-      }
       // W1: scrub commands ride the session (single mutation authority);
       // the host mirrors the resulting state change so the frame loop
       // rebuilds the scene + node view.
