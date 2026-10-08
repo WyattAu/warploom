@@ -531,6 +531,18 @@ declares a slot 3.
 - [ ] **D3 game depth** — ECS as the app's data model, scene management,
       **G4 script node**, G2 subgraph copy/paste, G5 asset browser.
 
+      G2 SUBGRAPH COPY/PASTE DONE (engine half): `copy_subgraph(ids)`
+      serializes the selection plus every INTERNAL link as a fragment with
+      RENORMALIZED ids (smallest selected id -> 1), so structurally identical
+      subgraphs copy to byte-identical fragments regardless of source ids;
+      external links are dropped. `paste_subgraph(fragment)` parses it with a
+      strict scanner (machine-written shape only — the M5 engine-written
+      contract, hand-edits rejected), checks every type before mutating, and
+      ROLLS BACK completely on any link failure (cycle, pin mismatch):
+      verified by the round-trip test (copy -> paste -> copy is
+      byte-identical) and the rollback test (node count unchanged after both
+      failure shapes). Editor UI wiring remains.
+
       G4 ENGINE HALF DONE: `register_script_node_type`
       (modules/core/include/warploom/core/script_node.hpp) binds a script
       module to a node type named "script:<module>" — Number in/out pins sized

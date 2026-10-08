@@ -334,6 +334,10 @@ bool NodeGraph::evaluate_with(const GraphContext& context,
         break;
       }
     }
+    if (node == nullptr) {
+      error = "eval: missing node";
+      return false;
+    }
     const auto* type = find_type(node->type);
     if (type == nullptr) {
       error = "eval: unknown node type \"" + node->type + "\"";
@@ -406,6 +410,282 @@ std::string NodeGraph::to_json() const {
   }
   out += "]}";
   return out;
+}
+
+std::string NodeGraph::copy_subgraph(
+    const std::vector<std::uint64_t>& node_ids) const {
+  // Renormalize: sort the selection, map ids to 1..n in ascending order. The
+  // fragment is then a pure function of the subgraph STRUCTURE — copy, paste,
+  // copy again round-trips byte-identically, which the test pins.
+  std::vector<std::uint64_t> sorted(node_ids);
+  std::sort(sorted.begin(), sorted.end());
+  std::map<std::uint64_t, std::uint64_t> remap;
+  std::uint64_t next = 1U;
+  for (const std::uint64_t id : sorted) {
+    remap[id] = next++;
+  }
+
+  std::string out = "{\"nodes\":[";
+  bool first = true;
+  for (const std::uint64_t id : sorted) {
+    const GraphNode* n = find(id);
+    if (n == nullptr) continue;
+    if (!first) out += ",";
+    first = false;
+    out += "{\"id\":" + std::to_string(remap[id]) + ",\"type\":" + quote(n->type);
+    out += ",\"params\":{";
+    bool fp = true;
+    for (const auto& [key, value] : n->params) {
+      if (!fp) out += ",";
+      fp = false;
+      out += quote(key) + ":" + value_to_json(value);
+    }
+    out += "}}";
+  }
+  out += "],\"links\":[";
+  first = true;
+  for (const auto& l : links_) {
+    const auto fi = remap.find(l.from_node);
+    const auto ti = remap.find(l.to_node);
+    if (fi == remap.end() || ti == remap.end()) continue;  // leaves the subgraph
+    if (!first) out += ",";
+    first = false;
+    out += "{\"from\":" + std::to_string(fi->second) +
+           ",\"out\":" + quote(l.from_pin) +
+           ",\"to\":" + std::to_string(ti->second) +
+           ",\"in\":" + quote(l.to_pin) + "}";
+  }
+  out += "]}";
+  return out;
+}
+
+bool NodeGraph::paste_subgraph(std::string_view fragment,
+                               std::vector<std::uint64_t>& out_new_ids,
+                               std::string& error) {
+  out_new_ids.clear();
+  // Parse via the existing strict reader: wrap the fragment as a full graph
+  // document and read it into a scratch graph, then transplant with fresh ids.
+  // Parse the fragment. It is machine-written by copy_subgraph in the exact
+  // to_json shape, so the parser is strict to that shape and rejects anything
+  // else — hand-edits included (the M5 contract: graphs are engine-written).
+  struct FragNode {
+    std::uint64_t id{0};
+    std::string type;
+    std::map<std::string, NodeValue> params;
+  };
+  struct FragLink {
+    std::uint64_t from{0};
+    std::string out_pin;
+    std::uint64_t to{0};
+    std::string in_pin;
+  };
+  std::vector<FragNode> frag_nodes;
+  std::vector<FragLink> frag_links;
+  {
+    // Strict scanner over the exact shape. (A hand-rolled scanner matches the
+    // file's input-parsing style; a real JSON parser would be a dependency or
+    // 200 more lines, for input this code itself generates.)
+    std::string_view t = fragment;
+    const auto skip_ws = [&t] {
+      while (!t.empty() && (t.front() == ' ' || t.front() == '\n')) t.remove_prefix(1);
+    };
+    const auto expect = [&](char c) {
+      skip_ws();
+      if (t.empty() || t.front() != c) return false;
+      t.remove_prefix(1);
+      return true;
+    };
+    const auto read_uint = [&](std::uint64_t& v) {
+      skip_ws();
+      v = 0;
+      bool any = false;
+      while (!t.empty() && t.front() >= '0' && t.front() <= '9') {
+        v = v * 10U + static_cast<std::uint64_t>(t.front() - '0');
+        t.remove_prefix(1);
+        any = true;
+      }
+      return any;
+    };
+    const auto read_string = [&](std::string& v) {
+      skip_ws();
+      if (t.empty() || t.front() != '"') return false;
+      t.remove_prefix(1);
+      v.clear();
+      while (!t.empty() && t.front() != '"') {
+        v.push_back(t.front());
+        t.remove_prefix(1);
+      }
+      return !t.empty();  // closing quote consumed below
+    };
+    const auto read_key = [&](std::string_view key) {
+      skip_ws();
+      std::string k;
+      if (t.empty() || t.front() != '"') return false;
+      t.remove_prefix(1);
+      while (!t.empty() && t.front() != '"') {
+        k.push_back(t.front());
+        t.remove_prefix(1);
+      }
+      if (t.empty()) return false;
+      t.remove_prefix(1);  // closing quote
+      if (!expect(':')) return false;
+      return k == key;
+    };
+
+    if (!expect('{') || !read_key("nodes") || !expect('[')) {
+      error = "bad fragment";
+      return false;
+    }
+    skip_ws();
+    if (t.front() != ']') {
+      do {
+        if (!expect('{') || !read_key("id")) { error = "bad fragment"; return false; }
+        FragNode n;
+        if (!read_uint(n.id)) { error = "bad fragment"; return false; }
+        if (!expect(',') || !read_key("type")) { error = "bad fragment"; return false; }
+        if (!read_string(n.type)) { error = "bad fragment"; return false; }
+        expect('"');
+        if (!expect(',') || !read_key("params") || !expect('{')) {
+          error = "bad fragment";
+          return false;
+        }
+        skip_ws();
+        if (t.front() != '}') {
+          do {
+            std::string key;
+            if (!read_string(key)) { error = "bad fragment"; return false; }
+            expect('"');
+            if (!expect(':')) { error = "bad fragment"; return false; }
+            skip_ws();
+            if (t.front() == '[') {
+              // vec3
+              t.remove_prefix(1);
+              double v[3] = {0, 0, 0};
+              for (int vi = 0; vi < 3; ++vi) {
+                skip_ws();
+                v[vi] = std::strtod(std::string(t.substr(0, 48)).c_str(), nullptr);
+                while (!t.empty() && t.front() != ',' && t.front() != ']') {
+                  t.remove_prefix(1);
+                }
+                if (!t.empty() && t.front() == ',') t.remove_prefix(1);
+              }
+              expect(']');
+              n.params[key] = NodeValue::make_vec3(v[0], v[1], v[2]);
+            } else if (t.front() == '"') {
+              std::string sv;
+              read_string(sv);
+              expect('"');
+              n.params[key] = NodeValue::make_string(sv);
+            } else if (t.front() == 't') {
+              t.remove_prefix(4);  // true
+              n.params[key] = NodeValue::make_bool(true);
+            } else if (t.front() == 'f') {
+              t.remove_prefix(5);  // false
+              n.params[key] = NodeValue::make_bool(false);
+            } else {
+              double num = std::strtod(std::string(t.substr(0, 48)).c_str(), nullptr);
+              while (!t.empty() && (isdigit(static_cast<unsigned char>(t.front())) ||
+                                    t.front() == '-' || t.front() == '+' ||
+                                    t.front() == '.' || t.front() == 'e' ||
+                                    t.front() == 'E')) {
+                t.remove_prefix(1);
+              }
+              n.params[key] = NodeValue::make_number(num);
+            }
+          } while (expect(','));
+        }
+        if (!expect('}') || !expect('}')) { error = "bad fragment"; return false; }
+        frag_nodes.push_back(std::move(n));
+      } while (expect(','));
+    }
+    expect(']');
+    if (!expect(',') || !read_key("links") || !expect('[')) {
+      error = "bad fragment";
+      return false;
+    }
+    skip_ws();
+    if (t.front() != ']') {
+      do {
+        if (!expect('{') || !read_key("from")) { error = "bad fragment"; return false; }
+        FragLink l;
+        if (!read_uint(l.from)) { error = "bad fragment"; return false; }
+        if (!expect(',') || !read_key("out")) { error = "bad fragment"; return false; }
+        if (!read_string(l.out_pin)) { error = "bad fragment"; return false; }
+        expect('"');
+        if (!expect(',') || !read_key("to")) { error = "bad fragment"; return false; }
+        if (!read_uint(l.to)) { error = "bad fragment"; return false; }
+        if (!expect(',') || !read_key("in")) { error = "bad fragment"; return false; }
+        if (!read_string(l.in_pin)) { error = "bad fragment"; return false; }
+        expect('"');
+        if (!expect('}')) { error = "bad fragment"; return false; }
+        frag_links.push_back(std::move(l));
+      } while (expect(','));
+    }
+    expect(']');
+    expect('}');
+  }
+
+  // Compute the transplant plan BEFORE mutating: fresh ids in the fragment's
+  // node order, and a check that every type is registered here.
+  struct PlanEntry {
+    std::uint64_t frag_id;
+    std::string type;
+    std::map<std::string, NodeValue> params;
+  };
+  std::vector<PlanEntry> plan;
+  std::map<std::uint64_t, std::uint64_t> remap;
+  for (const auto& n : frag_nodes) {
+    if (find_type(n.type) == nullptr) {
+      error = "unknown node type \"" + n.type + "\"";
+      return false;
+    }
+    const std::uint64_t fresh =
+        peek_next_id() + static_cast<std::uint64_t>(plan.size());
+    plan.push_back(PlanEntry{n.id, n.type, n.params});
+    remap[n.id] = fresh;
+  }
+
+  // Apply: nodes first, then links. Nodes cannot fail (type checked, ids
+  // fresh); a link can (pin mismatch/cycle). Roll back on the first failure.
+  for (const auto& entry : plan) {
+    if (!add_node_with_id(remap[entry.frag_id], entry.type, entry.params)) {
+      error = "paste: node id collision";
+      for (const auto& entry2 : plan) {
+        if (remap[entry2.frag_id] < peek_next_id() &&
+            find(remap[entry2.frag_id]) != nullptr &&
+            remap[entry2.frag_id] != remap[entry.frag_id]) {
+          (void)remove_node(remap[entry2.frag_id]);
+        }
+      }
+      return false;
+    }
+    out_new_ids.push_back(remap[entry.frag_id]);
+  }
+  for (const auto& l : frag_links) {
+    const auto fi = remap.find(l.from);
+    const auto ti = remap.find(l.to);
+    if (fi == remap.end() || ti == remap.end()) continue;
+    std::string link_error;
+    if (!add_link(fi->second, l.out_pin, ti->second, l.in_pin, link_error)) {
+      error = "paste: link " + std::to_string(fi->second) + "." +
+              std::string(l.out_pin) + " -> " + std::to_string(ti->second) +
+              "." + std::string(l.in_pin) + " is invalid";
+      // Roll back the whole paste: links first (cheap), then nodes.
+      for (const auto& li : frag_links) {
+        const auto f2 = remap.find(li.from);
+        const auto t2 = remap.find(li.to);
+        if (f2 != remap.end() && t2 != remap.end()) {
+          (void)remove_link(t2->second, li.in_pin);
+        }
+      }
+      for (const auto& entry : plan) {
+        (void)remove_node(remap[entry.frag_id]);
+      }
+      out_new_ids.clear();
+      return false;
+    }
+  }
+  return true;
 }
 
 bool NodeGraph::from_json(std::string_view text, NodeGraph& out,

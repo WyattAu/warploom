@@ -170,6 +170,22 @@ class NodeGraph final {
 
   //! Byte-deterministic serialization (nodes by id, params by key order).
   [[nodiscard]] std::string to_json() const;
+
+  //! G2 subgraph copy/paste. copy_subgraph serializes the given nodes plus
+  //! every link BETWEEN them (links to outside nodes are dropped) as a
+  //! machine-written JSON fragment in the same shape as to_json, but ids are
+  //! RENORMALIZED: the smallest selected id maps to 1 and the rest follow in
+  //! ascending order, so the fragment is byte-identical for structurally
+  //! identical subgraphs regardless of where they came from. paste_subgraph
+  //! parses that fragment and adds every node with a FRESH id (internal links
+  //! remapped to the new ids); unknown types or pin mismatches fail without
+  //! mutating the graph (paste is computed before any mutation). Returns the
+  //! new node ids in the fragment's (renormalized) node order.
+  [[nodiscard]] std::string copy_subgraph(
+      const std::vector<std::uint64_t>& node_ids) const;
+  [[nodiscard]] bool paste_subgraph(std::string_view fragment,
+                                    std::vector<std::uint64_t>& out_new_ids,
+                                    std::string& error);
   //! Strict parse; on failure returns false with `error` set, `out` untouched.
   //! Types must be registered in the callee's graph.
   [[nodiscard]] static bool from_json(std::string_view text, NodeGraph& out,

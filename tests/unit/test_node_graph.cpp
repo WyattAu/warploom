@@ -141,6 +141,73 @@ TEST(NodeGraph, UnknownTypeRejectedAtAddNode) {
   (void)crashed;
 }
 
+
+// G2 subgraph copy/paste: renormalized fragments, fresh ids on paste,
+// internal links preserved, external links dropped, cycle/pin failures roll
+// back without mutating the graph.
+TEST(NodeGraph, SubgraphCopyPasteRoundTrip) {
+  NodeGraph g;
+  register_builtin_node_types(g);
+  const auto c1 = g.add_node("const_number", {{"value", NodeValue::make_number(3)}});
+  const auto c2 = g.add_node("const_number", {{"value", NodeValue::make_number(4)}});
+  const auto add = g.add_node("add", {});
+  { std::string le; ASSERT_TRUE(g.add_link(c1, "value", add, "a", le)); }
+  { std::string le; ASSERT_TRUE(g.add_link(c2, "value", add, "b", le)); }
+  const auto outside = g.add_node("const_number", {{"value", NodeValue::make_number(9)}});
+  (void)outside;
+
+  // Copy ONLY the pair + add: the outside node's link (none) is dropped and
+  // ids renormalize to 1,2,3 regardless of the source ids.
+  const std::string frag = g.copy_subgraph({c1, add, c2});
+  EXPECT_NE(frag.find("\"id\":1"), std::string::npos);
+  EXPECT_NE(frag.find("\"id\":3"), std::string::npos);
+  EXPECT_EQ(frag.find("9"), std::string::npos) << frag;
+
+  // Copy the SAME structure in a differently-ordered selection: identical
+  // fragment (renormalization makes it structure-pure).
+  EXPECT_EQ(g.copy_subgraph({add, c2, c1}), frag);
+
+  // Paste into a fresh graph: three new nodes, internal link remapped.
+  NodeGraph g2;
+  register_builtin_node_types(g2);
+  std::vector<std::uint64_t> new_ids;
+  std::string error;
+  ASSERT_TRUE(g2.paste_subgraph(frag, new_ids, error)) << "err=[" << error << "] frag=" << frag;
+  ASSERT_EQ(new_ids.size(), 3U);
+  EXPECT_EQ(g2.node_count(), 3U);
+  EXPECT_EQ(g2.link_count(), 2U);
+  // Round-trip: copying the pasted subgraph yields the same fragment again.
+  EXPECT_EQ(g2.copy_subgraph(new_ids), frag);
+}
+
+TEST(NodeGraph, PasteRollsBackOnFailure) {
+  NodeGraph g;
+  register_builtin_node_types(g);
+  const auto c = g.add_node("const_number", {{"value", NodeValue::make_number(1)}});
+  const auto add = g.add_node("add", {});
+  (void)c;
+  (void)add;
+
+  // A fragment referencing an unregistered type fails without mutating.
+  const std::string bad_type =
+      "{\"nodes\":[{\"id\":1,\"type\":\"no_such_type\",\"params\":{}}],\"links\":[]}";
+  std::vector<std::uint64_t> ids;
+  std::string error;
+  EXPECT_FALSE(g.paste_subgraph(bad_type, ids, error));
+  EXPECT_NE(error.find("unknown node type"), std::string::npos) << error;
+  EXPECT_EQ(g.node_count(), 2U) << "failed paste mutated the graph";
+
+  // A fragment whose internal link creates a cycle fails and rolls back the
+  // nodes it had already added. add's output pin is "sum"; a self-link
+  // sum->a is a 1-node cycle.
+  const std::string cycle =
+      "{\"nodes\":[{\"id\":1,\"type\":\"add\",\"params\":{}},"
+      "{\"id\":2,\"type\":\"const_number\",\"params\":{\"value\":5}}],"
+      "\"links\":[{\"from\":1,\"out\":\"sum\",\"to\":1,\"in\":\"a\"}]}";
+  EXPECT_FALSE(g.paste_subgraph(cycle, ids, error)) << error;
+  EXPECT_EQ(g.node_count(), 2U) << "failed paste mutated the graph";
+}
+
 }  // namespace
 
 // ============================================================================
