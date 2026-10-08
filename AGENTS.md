@@ -228,6 +228,11 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   VulkanPipeline needs explicit cleanup, the destructor is deliberately inert --
   is handled by following the file's existing cleanup convention.
 
+  Viewport configuration matrix, re-run after the frame-loop and compose-chain
+  changes (hdr, bloom, no-hdr, rt, node editor): all five run on the RTX 2060
+  with 0 validation diagnostics, 0 errors, until killed by timeout -- which is
+  the pass condition, since a render loop exits only on ESC.
+
   The two swapchain tests were dead for the same reason, and are now alive:
   `VK_USE_PLATFORM_XCB_KHR` is defined for the unit-test target and the target
   links xcb (test-only; no engine target touches a window system). On a runner
