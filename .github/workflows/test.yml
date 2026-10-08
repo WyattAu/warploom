@@ -17,7 +17,7 @@ jobs:
   format-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install clang-format
         run: sudo apt-get update && sudo apt-get install -y clang-format
@@ -35,7 +35,7 @@ jobs:
     name: "Headless Debug"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # CPM's source cache is shared across binary directories, so this also
       # makes switching preset free locally. Keyed on the manifests that can
@@ -74,7 +74,7 @@ jobs:
     name: "Headless Debug (Clang)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # CPM's source cache is shared across binary directories, so this also
       # makes switching preset free locally. Keyed on the manifests that can
@@ -107,7 +107,7 @@ jobs:
     name: "Headless Release"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # CPM's source cache is shared across binary directories, so this also
       # makes switching preset free locally. Keyed on the manifests that can
@@ -140,7 +140,7 @@ jobs:
     name: "ThreadSanitizer"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # CPM's source cache is shared across binary directories, so this also
       # makes switching preset free locally. Keyed on the manifests that can
@@ -175,7 +175,7 @@ jobs:
     name: "ASan + UBSan"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # CPM's source cache is shared across binary directories, so this also
       # makes switching preset free locally. Keyed on the manifests that can
@@ -208,7 +208,7 @@ jobs:
     name: "Vulkan Validation (lavapipe)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # CPM's source cache is shared across binary directories, so this also
       # makes switching preset free locally. Keyed on the manifests that can
@@ -250,7 +250,7 @@ jobs:
     name: "Live Protocol Proofs (headless)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # CPM's source cache is shared across binary directories, so this also
       # makes switching preset free locally. Keyed on the manifests that can
@@ -294,7 +294,7 @@ jobs:
     name: "Documentation"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # CPM's source cache is shared across binary directories, so this also
       # makes switching preset free locally. Keyed on the manifests that can
@@ -325,7 +325,7 @@ jobs:
     name: "Viewport builds"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Cache third-party sources
         uses: actions/cache@v4
@@ -372,7 +372,7 @@ jobs:
     name: "Presets are usable"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install toolchain
         run: |
