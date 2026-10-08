@@ -546,7 +546,11 @@ declares a slot 3.
       and the sanitizer presets already build with
       `WARPLOOM_WARNINGS_AS_ERRORS=ON`. Paying the debt found real bugs, not
       style: see AGENTS.md's inventory.
-- [ ] **E5 formatting** — apply `.clang-format`, then `format-check` gates.
+- [x] **E5 formatting** — DONE. The tree already conforms: clang-format
+      `--dry-run --Werror` reports 0 warnings across all 213 sources under
+      modules/examples/tests/tools (checked in a throwaway worktree, not on
+      the working tree). The missing half was the gate: a `format-check` job
+      now runs that exact command in CI.
 - [ ] **E6 P1–P4** — WASM leg, native Wayland surface, adoption
       (FetchContent/vcpkg), docs rebrand, GitHub repo rename.
 
