@@ -28,6 +28,7 @@ using CK = ::warploom::core::ControlCommand::Kind;
     // (same class as SetCamera/SetSun).
     case CK::SetRenderMode:
     case CK::GetRenderMode:
+    case CK::SetExposure:
       return false;
     case CK::SpawnCube:
     case CK::SetProperty:

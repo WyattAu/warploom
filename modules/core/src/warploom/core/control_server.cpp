@@ -72,6 +72,7 @@ const std::vector<ControlCommand::KindName>& ControlCommand::kind_names() {
       // v1.9 render mode (E1).
       {Kind::SetRenderMode, "set_render_mode"},
       {Kind::GetRenderMode, "get_render_mode"},
+      {Kind::SetExposure, "set_exposure"},
   };
   return kTable;
 }
@@ -353,6 +354,9 @@ namespace {
       break;
     case ControlCommand::Kind::SetRenderMode:
       take_text("mode", command.text);
+      break;
+    case ControlCommand::Kind::SetExposure:
+      take("exposure");
       break;
     default:
       break;

@@ -21,6 +21,7 @@
 #include "warploom/render/vulkan_scene.hpp"
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <utility>
 #include <string>
@@ -227,6 +228,19 @@ public:
   //! True when initialized without a swapchain. Present is a no-op and the
   //! frame always uses image index 0.
   [[nodiscard]] bool is_headless() const noexcept { return headless_; }
+
+  //! Live exposure (E2/R4). Forwarded to the compose chain; a no-op when
+  //! compose is off (the forward path has no tonemap to scale). Returns the
+  //! value in effect either way.
+  float set_exposure(float exposure) noexcept {
+    if (compose_ != nullptr) compose_->set_exposure(exposure);
+    return exposure;
+  }
+  //! Exposure the compose chain will apply on the next recorded frame; -1
+  //! when compose is off (there is no tonemap to ask).
+  [[nodiscard]] float compose_exposure() const noexcept {
+    return compose_ != nullptr ? compose_->exposure() : -1.0f;
+  }
 
   // --- HDR compose introspection ---------------------------------------
   // An application whose pipelines are built against a render pass must

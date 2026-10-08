@@ -350,6 +350,8 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
                   .is_ok());
   renderer.set_pipeline(pipeline.pipeline());
 
+  // E2/R4 probe: two exposures must produce different tonemapped frames.
+  renderer.set_exposure(2.0f);
   auto image = renderer.begin_frame();
   ASSERT_TRUE(image.is_ok());
   ASSERT_TRUE(renderer
@@ -358,13 +360,67 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
                   .is_ok());
   ASSERT_TRUE(renderer.submit_frame().is_ok());
   renderer.wait_idle();
+  const auto readback_hi = readback_swapchain_image(
+      context.physical_device(), context.device(), context.graphics_queue(),
+      static_cast<std::uint32_t>(context.queue_families().graphics_family),
+      ldr.image(), VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize,
+      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, true);
+  ASSERT_GT(readback_hi.non_clear_pixels, 0U);
+  renderer.set_exposure(0.25f);
+  auto image2 = renderer.begin_frame();
+  ASSERT_TRUE(image2.is_ok());
+  ASSERT_TRUE(renderer
+                  .record_commands(image2.value(),
+                                   present_pass.framebuffer(0U), kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(renderer.submit_frame().is_ok());
+  renderer.wait_idle();
 
   const auto readback = readback_swapchain_image(
       context.physical_device(), context.device(), context.graphics_queue(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family),
-      ldr.image(), VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize);
+      ldr.image(), VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize,
+      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, true);
   ASSERT_GT(readback.non_clear_pixels, 0U)
       << "composed frame came back empty";
+  // E2/R4: exposures 2.0 and 0.25 must tonemap differently.
+  EXPECT_NE(readback_hi.hash, readback.hash)
+      << "exposure had no effect on the composed frame (hi hash="
+      << readback_hi.hash << " mean="
+      << [&] {
+           double t = 0;
+           for (auto px : readback_hi.pixels) t += static_cast<double>(px);
+           return readback_hi.pixels.empty()
+                        ? 0.0
+                        : t / static_cast<double>(readback_hi.pixels.size());
+         }()
+      << "; lo hash=" << readback.hash << " mean="
+      << [&] {
+           double t = 0;
+           for (auto px : readback.pixels) t += static_cast<double>(px);
+           return readback.pixels.empty()
+                        ? 0.0
+                        : t / static_cast<double>(readback.pixels.size());
+         }()
+      << ")";
+  // Restore the pinned exposure and record the frame the hash below pins:
+  // the probe leaves 0.25 in the chain, and ensure() deliberately preserves
+  // the live value instead of resetting it.
+  renderer.set_exposure(1.0f);
+  auto image3 = renderer.begin_frame();
+  ASSERT_TRUE(image3.is_ok());
+  ASSERT_TRUE(renderer
+                  .record_commands(image3.value(),
+                                   present_pass.framebuffer(0U), kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(renderer.submit_frame().is_ok());
+  renderer.wait_idle();
+  const auto readback_pinned = readback_swapchain_image(
+      context.physical_device(), context.device(), context.graphics_queue(),
+      static_cast<std::uint32_t>(context.queue_families().graphics_family),
+      ldr.image(), VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize);
+  ASSERT_GT(readback_pinned.non_clear_pixels, 0U);
+
 
   renderer.cleanup(context.device());
   pipeline.cleanup(context.device());
@@ -373,13 +429,13 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
   allocator.cleanup();
   // Composed output: tonemapped through ACES, so NOT the LDR golden values.
   // The hash is driver-specific like the LDR one; each value is pinned here.
-  switch (readback.canonical_hash) {
+  switch (readback_pinned.canonical_hash) {
     case 16601212335261142594ULL:  // NVIDIA (RTX 2060)
       SUCCEED();
       break;
     default:
       ADD_FAILURE() << "unexpected composed canonical_hash="
-                    << readback.canonical_hash;
+                    << readback_pinned.canonical_hash;
       break;
   }
 #else

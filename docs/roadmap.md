@@ -537,7 +537,16 @@ declares a slot 3.
       validation diagnostics. R1/R2 are now unblocked: a mode toggle plus its
       pipeline work is all each one needs.
 - [ ] **E2 R1–R4** — viewport path tracing, RT reflections/AO toggles,
-      GPU-driven skinned scenes, exposure/bloom controls.
+      GPU-driven skinned scenes, exposure/bloom controls. Exposure is DONE:
+      `set_exposure` (protocol v1.9) is live end-to-end — validated by
+      `HeadlessComposeFrameGoldenHash`'s two-exposure probe (2.0 vs 0.25 must
+      produce different tonemapped frames; it originally did not, which caught
+      ensure() resetting the live exposure from the frozen renderer config
+      every frame — the preserve is now explicit in the chain), plus a live
+      socket check that the chain reports the applied value back. The capture
+      chain is synced in the same handler, so captured frames cannot silently
+      disagree with the live frame. Remaining: bloom toggle (needs compose
+      resource rebuild), path tracing, RT reflections/AO, skinned gd scenes.
 - [ ] **E3 hardware CI runner** — every RT test skips on lavapipe, so the
       best subsystem has the least regression protection.
 - [x] **E4 warning debt, then `-Werror`** — DONE. All four presets build

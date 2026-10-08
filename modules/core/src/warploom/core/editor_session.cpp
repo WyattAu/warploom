@@ -1226,6 +1226,15 @@ bool EditorSession::handle_query(
       reply.ok = true;
       reply.detail = "capture acknowledged (host executes)";
       break;
+    // v1.9 host-owned visuals: acknowledged here so visual-less hosts stay
+    // protocol-complete; the real effect lives in the viewport host.
+    case CK::SetRenderMode:
+    case CK::GetRenderMode:
+      reply.detail = "render mode acknowledged (host executes)";
+      break;
+    case CK::SetExposure:
+      reply.detail = "exposure acknowledged (host executes)";
+      break;
     default:
       reply.ok = false;
       reply.error = "unhandled command";

@@ -66,6 +66,11 @@ class VulkanComposeChain final {
 
   void destroy() noexcept;
 
+  //! Live exposure for the tonemap push; read at record time, so this takes
+  //! effect on the next recorded frame without rebuilding anything.
+  void set_exposure(float exposure) noexcept { config_.exposure = exposure; }
+  [[nodiscard]] float exposure() const noexcept { return config_.exposure; }
+
   [[nodiscard]] bool ready() const noexcept { return compose_ready_; }
   //! True when ensure() refused permanently; do not retry every frame.
   [[nodiscard]] bool failed() const noexcept { return compose_failed_; }

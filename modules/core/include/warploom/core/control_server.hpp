@@ -151,6 +151,10 @@ struct ControlCommand final {
     //   GetRenderMode: no payload; detail = JSON {"mode": "..."}
     SetRenderMode,
     GetRenderMode,
+    // v1.9: exposure (E2/R4) — host-owned tonemap control, live.
+    //   SetExposure: numbers[0] = exposure multiplier ("exposure", required,
+    //                clamped by the host to [0.01, 100])
+    SetExposure,
   };
 
   //! One entry of the public command-name table: every `Kind` maps to

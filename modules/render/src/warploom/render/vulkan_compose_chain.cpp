@@ -9,6 +9,7 @@
 #include <warploom/render/vulkan_compose_chain.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <array>
 #include <utility>
 
@@ -47,7 +48,15 @@ namespace warploom::render {
   device_ = device;
   physical_device_ = physical_device;
   graphics_queue_ = graphics_queue;
+  // Exposure is a LIVE control (E2/R4: set_exposure writes it between
+  // frames), but record_commands calls ensure() every frame and this copy
+  // would silently reset it to the start-up value before each record -- which
+  // is exactly what the two-exposure probe caught: setter applied, frames
+  // unchanged, both records logged 1.0. Every other field is legitimately
+  // owned by the renderer's frozen config; exposure is not.
+  const float live_exposure = config_.exposure;
   config_ = config;
+  config_.exposure = live_exposure;
   present_pass_ = present_pass;
   present_format_ = present_format;
   if (compose_failed_) {
@@ -486,6 +495,7 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
     float pad[3];
   } push{};
   push.exposure = config_.exposure;
+
 
   // --- Declare the stages. ---
   std::vector<ComposeStage> stages;

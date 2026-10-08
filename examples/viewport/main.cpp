@@ -897,6 +897,26 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
             std::string("{\"mode\":\"") + (app_.rt_mode ? "rt" : "forward") +
             "\"}";
         break;
+      case CK::SetExposure: {
+        // R4 live: the chain reads exposure at record time, so this lands on
+        // the next frame. Clamped: a zero or negative multiplier is always a
+        // mistake, and huge values are just white.
+        if (command.number_count < 1U || !std::isfinite(command.numbers[0])) {
+          reply.ok = false;
+          reply.error = "set_exposure needs finite exposure";
+          break;
+        }
+        const float e = std::clamp(static_cast<float>(command.numbers[0]),
+                                   0.01F, 100.0F);
+        app_.renderer.set_exposure(e);
+        // The capture path composes through its OWN chain instance (B3b), so
+        // exposure must reach both or captured frames silently disagree with
+        // the live frame -- which is exactly what the first A/B measured.
+        if (app_.capture_chain != nullptr) app_.capture_chain->set_exposure(e);
+        reply.detail = "exposure " + std::to_string(e) + " (chain now " +
+                       std::to_string(app_.renderer.compose_exposure()) + ")";
+        break;
+      }
       // W1: scrub commands ride the session (single mutation authority);
       // the host mirrors the resulting state change so the frame loop
       // rebuilds the scene + node view.
