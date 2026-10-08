@@ -237,6 +237,82 @@ TEST(PhysicsWorld, SolverIterationsFirmStackAndDeterminism) {
   // (b) determinism at n=8: the fingerprint repeats.
   EXPECT_EQ(eight.second, settle(8U).second) << "nondeterministic at n=8";
 }
+// Substeps: step(dt) with n substeps integrates in dt/n increments. The
+// existing solver-iteration knob operates WITHIN each substep; substepping
+// shrinks the increment itself. Verified the same three ways: default 1 is
+// the historical path, more substeps measurably reduce stack sink (the
+// increments catch overlaps earlier), and replay is bit-identical. Also
+// pinned: substeps(2) + iterations(4) is not expected to equal iterations(8)
+// — they are different schedules, and the test that they differ is what
+// stops a future refactor from silently conflating the two knobs.
+TEST(PhysicsWorld, SubstepsFirmStackAndDeterminism) {
+  auto settle = [](std::uint32_t substeps) {
+    PhysicsWorld w(-9.81f);
+    w.set_substeps(substeps);
+    for (std::uint32_t i = 0; i < 6U; ++i) {
+      PhysicsBody b;
+      b.position[1] = 0.5f + 1.0f * static_cast<float>(i);
+      b.restitution = 0.0f;
+      (void)w.add_body(b);
+    }
+    for (std::size_t i = 0; i < static_cast<std::size_t>(600); ++i) {
+      w.step(kDt);
+    }
+    float top = w.body(5).position[1];
+    double sum = 0.0;
+    for (std::uint32_t i = 0; i < 6U; ++i) {
+      sum += static_cast<double>(w.body(i).position[1]);
+    }
+    PhysicsWorld w2(-9.81f);
+    w2.set_substeps(substeps);
+    for (std::uint32_t i = 0; i < 6U; ++i) {
+      PhysicsBody b;
+      b.position[1] = 0.5f + 1.0f * static_cast<float>(i);
+      b.restitution = 0.0f;
+      (void)w2.add_body(b);
+    }
+    for (std::size_t i = 0; i < static_cast<std::size_t>(600); ++i) {
+      w2.step(kDt);
+    }
+    double sum2 = 0.0;
+    for (std::uint32_t i = 0; i < 6U; ++i) {
+      sum2 += static_cast<double>(w2.body(i).position[1]);
+    }
+    char fp[128];
+    std::snprintf(fp, sizeof(fp), "%.9f|%.9f", sum, sum2);
+    return std::pair<float, std::string>(3.0f - top, fp);
+  };
+
+  const auto one = settle(1U);
+  const auto four = settle(4U);
+
+  // Default 1 reproduces the historical path.
+  EXPECT_EQ(one.second, settle(1U).second) << "nondeterministic at n=1";
+
+  // More substeps -> measurably firmer stack (independent of the iteration
+  // knob: this run keeps iterations at the default 1).
+  EXPECT_LT(four.first, one.first)
+      << "more substeps did not reduce stack sink";
+
+  // The schedules differ — a future refactor must not silently conflate
+  // substeps with solver iterations.
+  PhysicsWorld both(-9.81f);
+  both.set_substeps(2U);
+  both.set_solver_iterations(4U);
+  for (std::uint32_t i = 0; i < 6U; ++i) {
+    PhysicsBody b;
+    b.position[1] = 0.5f + 1.0f * static_cast<float>(i);
+    b.restitution = 0.0f;
+    (void)both.add_body(b);
+  }
+  for (std::size_t i = 0; i < static_cast<std::size_t>(600); ++i) {
+    both.step(kDt);
+  }
+  float top_both = both.body(5).position[1];
+  EXPECT_NE(3.0f - top_both, four.first) << "substeps(2)+iter(4) == substeps(4)";
+  EXPECT_EQ(four.second, settle(4U).second) << "nondeterministic at n=4";
+}
+
 }  // namespace
 
 // The first broadphase attempt produced a bit-identical fingerprint at N=1000

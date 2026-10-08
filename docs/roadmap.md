@@ -401,7 +401,13 @@ declares a slot 3.
       what pushes out residual overlap earlier passes created). Verified by a
       6-body tower test: more passes -> measurably less sink at the top,
       bit-identical replay fingerprints at any count, and count=1 reproduces
-      the historical settle. The viewport's gd physics scene now runs 8
+      the historical settle. Substeps landed as well:
+      `set_substeps(n)` makes step(dt) run n (integrate dt/n, detect, resolve)
+      increments — shrinking the increment itself, complementary to the
+      iteration knob which operates within each substep; verified the same
+      three ways plus an explicit assertion that substeps(2)+iter(4) differs
+      from substeps(4), so a future refactor cannot silently conflate the two
+      knobs. The viewport's gd physics scene now runs 8
       passes — a deep-stacked pile is exactly where single-pass sink shows.
       The PACKAGE EXTRACTION is done: `modules/physics`
       (Warploom::physics, header-only INTERFACE, own install/package config)

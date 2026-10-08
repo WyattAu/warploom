@@ -78,7 +78,25 @@ class PhysicsWorld final {
   //!   2. resolve sphere-plane contacts (ground at y = 0, restitution),
   //!   3. resolve sphere-sphere contacts (equal-mass elastic-ish impulse,
   //!      positional correction, index-order pairs, single iteration).
+  //! Simulation substeps per step: `step(dt)` runs `substeps_` passes of
+  //! (integrate dt/n, detect, resolve). Smaller increments improve stacking
+  //! stability independently of the solver-iteration count (which operates
+  //! WITHIN each substep). Default 1 = the historical single increment.
+  void set_substeps(std::uint32_t n) noexcept { substeps_ = n > 0U ? n : 1U; }
+  [[nodiscard]] std::uint32_t substeps() const noexcept { return substeps_; }
+
   void step(float dt) noexcept {
+    const std::uint32_t n = substeps_;
+    const float sub_dt = dt / static_cast<float>(n);
+    for (std::uint32_t sub = 0; sub < n; ++sub) {
+      step_single(sub_dt);
+    }
+  }
+
+  //! One full solve at the given increment (integration + detect + resolve).
+  //! Engine detail: step() drives it; kept in the public section only because
+  //! the class's private block starts at its data members.
+  void step_single(float dt) noexcept {
     contacts_.clear();
     const float g = gravity_;
 
@@ -423,6 +441,7 @@ class PhysicsWorld final {
   std::vector<ContactEvent> contacts_;
   float gravity_;
   std::uint32_t solver_iterations_{1};  //!< Positional-correction passes.
+  std::uint32_t substeps_{1};           //!< Integration+solve substeps per step.
 };
 
 }  // namespace warploom::physics
