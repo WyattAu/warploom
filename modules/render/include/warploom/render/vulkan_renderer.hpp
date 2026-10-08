@@ -241,6 +241,12 @@ public:
   [[nodiscard]] float compose_exposure() const noexcept {
     return compose_ != nullptr ? compose_->exposure() : -1.0f;
   }
+  //! Live bloom toggle (E2/R4). Forwarded to the compose chain; a no-op when
+  //! compose is off. Returns the state in effect.
+  bool set_bloom(bool on) noexcept {
+    if (compose_ != nullptr) compose_->set_bloom(on);
+    return on;
+  }
 
   // --- HDR compose introspection ---------------------------------------
   // An application whose pipelines are built against a render pass must

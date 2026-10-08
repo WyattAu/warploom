@@ -55,8 +55,10 @@ namespace warploom::render {
   // unchanged, both records logged 1.0. Every other field is legitimately
   // owned by the renderer's frozen config; exposure is not.
   const float live_exposure = config_.exposure;
+  const bool live_bloom = config_.enable_bloom;
   config_ = config;
   config_.exposure = live_exposure;
+  config_.enable_bloom = live_bloom;
   present_pass_ = present_pass;
   present_format_ = present_format;
   if (compose_failed_) {
@@ -313,9 +315,11 @@ namespace warploom::render {
   };
 
   // ---- size-dependent resources ---------------------------------------
-  if (compose_ready_ && compose_width_ == width && compose_height_ == height) {
+  if (compose_ready_ && compose_width_ == width && compose_height_ == height &&
+      !bloom_dirty_) {
     return ::warploom::core::Result<void>::ok();
   }
+  bloom_dirty_ = false;
 
   // Pipelines bake in the render pass and format, so they are rebuilt with
   // the targets rather than reused across a resize.

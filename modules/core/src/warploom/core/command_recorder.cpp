@@ -29,6 +29,7 @@ using CK = ::warploom::core::ControlCommand::Kind;
     case CK::SetRenderMode:
     case CK::GetRenderMode:
     case CK::SetExposure:
+    case CK::SetBloom:
       return false;
     case CK::SpawnCube:
     case CK::SetProperty:

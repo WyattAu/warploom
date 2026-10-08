@@ -1235,6 +1235,9 @@ bool EditorSession::handle_query(
     case CK::SetExposure:
       reply.detail = "exposure acknowledged (host executes)";
       break;
+    case CK::SetBloom:
+      reply.detail = "bloom acknowledged (host executes)";
+      break;
     default:
       reply.ok = false;
       reply.error = "unhandled command";

@@ -154,7 +154,9 @@ struct ControlCommand final {
     // v1.9: exposure (E2/R4) — host-owned tonemap control, live.
     //   SetExposure: numbers[0] = exposure multiplier ("exposure", required,
     //                clamped by the host to [0.01, 100])
+    //   SetBloom:    numbers[0] = 1 enable / 0 disable ("enable", required)
     SetExposure,
+    SetBloom,
   };
 
   //! One entry of the public command-name table: every `Kind` maps to

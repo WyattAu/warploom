@@ -71,6 +71,16 @@ class VulkanComposeChain final {
   void set_exposure(float exposure) noexcept { config_.exposure = exposure; }
   [[nodiscard]] float exposure() const noexcept { return config_.exposure; }
 
+  //! Live bloom toggle. Going ON needs the bloom pipelines, target and
+  //! descriptor rewrite, so this flags the next ensure() to take the full
+  //! (re)creation path; going OFF rewrites the tonemap's bloom binding back
+  //! to the black fallback the same way.
+  void set_bloom(bool on) noexcept {
+    config_.enable_bloom = on;
+    bloom_dirty_ = true;
+  }
+  [[nodiscard]] bool bloom() const noexcept { return config_.enable_bloom; }
+
   [[nodiscard]] bool ready() const noexcept { return compose_ready_; }
   //! True when ensure() refused permanently; do not retry every frame.
   [[nodiscard]] bool failed() const noexcept { return compose_failed_; }
@@ -152,6 +162,9 @@ class VulkanComposeChain final {
   std::uint32_t compose_generation_{0};
   bool compose_ready_{false};
   bool compose_failed_{false};
+  //! Set by set_bloom; makes the next ensure() take the full path so the
+  //! stage set and the tonemap's bloom binding follow the toggle.
+  bool bloom_dirty_{false};
 };
 
 }  // namespace warploom::render
