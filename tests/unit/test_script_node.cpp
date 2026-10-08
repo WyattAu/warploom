@@ -112,5 +112,40 @@ TEST_F(ScriptNode, DtFollowsTheTickSequence) {
                    node->outputs["out0"].number);
 }
 
+
+// G4 .so path: the same node-type registration bound to a REAL dlopen'd
+// module (the fixture .so built for the script-module tests). This is the
+// path a gameplay module takes; the builtin path above proves the graph
+// plumbing, this one proves the loader hand-off.
+TEST_F(ScriptNode, SharedObjectModuleDrivesTheNode) {
+#ifdef WARPLOOM_TEST_MODULE_OK
+  std::string so_error;
+  auto shared = ScriptModule::load_shared(WARPLOOM_TEST_MODULE_OK, so_error);
+  ASSERT_NE(shared, nullptr) << so_error;
+  EXPECT_STREQ(shared->module_name().data(), "fixture_ok");
+
+  ::warploom::editor::NodeGraph g;
+  register_script_node_type(
+      g, std::shared_ptr<::warploom::core::ScriptModule>(shared.release()), 2U,
+      2U);
+  const auto id = g.add_node("script:fixture_ok", {});
+  auto* node = g.find_mut(id);
+  ASSERT_NE(node, nullptr);
+  node->inputs["in0"] = ::warploom::editor::NodeValue::make_number(1.0);
+  node->inputs["in1"] = ::warploom::editor::NodeValue::make_number(-2.0);
+
+  ::warploom::editor::GraphContext ctx;
+  std::string error;
+  ctx.time = 0.1;
+  ctx.tick = 1;
+  ASSERT_TRUE(g.evaluate_with(ctx, error)) << error;
+  // fixture_ok: outputs[i] = inputs[i] * 2 + dt; dt is 0 on first evaluation.
+  EXPECT_DOUBLE_EQ(node->outputs["out0"].number, 2.0);
+  EXPECT_DOUBLE_EQ(node->outputs["out1"].number, -4.0);
+#else
+  GTEST_SKIP() << "module fixtures unavailable";
+#endif
+}
+
 }  // namespace
 }  // namespace warploom::core

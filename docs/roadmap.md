@@ -556,8 +556,10 @@ declares a slot 3.
       without any .so via ScriptModule's builtin path (three tests,
       ScriptNode.*). Missing inputs evaluate as 0; a module error return
       leaves outputs 0 — the same failure shape as a math node given garbage.
-      Remaining: editor UI (a row per out-pin) and viewport wiring, plus the
-      .so path through the module fixtures.
+      The .so path is verified too: SharedObjectModuleDrivesTheNode binds the
+      node type to the REAL dlopen'd fixture module and checks the tick
+      outputs through the graph — the full path a gameplay module takes.
+      Remaining: editor UI (a row per out-pin) and viewport wiring.
 
 ## Phase E — release
 
