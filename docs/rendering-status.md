@@ -61,7 +61,7 @@ Two verification milestones worth knowing when reading the Proof column:
 | Per-object static/rigged pipeline switch in one pass | yes | yes | `test_pbr_frame_variants` |
 | Mesh simplification (decimation / LOD mesh generation) | no | no | selection exists; nothing generates lower-LOD meshes |
 | H-Z depth pyramid (built every frame) | yes | yes — `RendererConfig::enable_hiz`; contract checked on real frames by `HiZGraph.ContractHoldsOnARealFrame` (headless) and the swapchain golden test | tested |
-| H-Z occlusion CULLING (a consumer) | no | no | the pyramid is built and thrown away; B5b scopes the missing shader wiring (`cull_and_draw_lod_occlude.comp` needs a packed-buffer pyramid + a cull-only descriptor layout) |
+| H-Z occlusion culling (consumer) | yes | yes — gd mode (`WARPLOOM_GPU_DRIVEN=1`, cubes scene via `WARPLOOM_NO_MANNEQUIN=1`); `WARPLOOM_OCCLUSION=0` disables at the push | `HiZGraph.PackedPyramidMatchesAbi` (packed ABI), `test_gpu_driven_occlusion_frame` (occluder-present/occludee-culled shader proof); live wiring proven by a forced-depth_min probe (74.7% of pixels change). The shipped demo scene is occlusion-sparse — identical frames on/off are correct there |
 | GPU-driven draw: mesh table, vertex pull, compute cull → indirect | yes | yes | `test_lod_integration`, `test_gpu_driven_cull`; app A/B 921,600/921,600 pixels byte-identical |
 | GPU skinning (bone SSBO) | yes | yes | `test_gpu_skinning`, `test_gpu_mannequin` |
 | GPU timestamps / frame latency percentiles | yes | yes | `GpuTiming`; telemetry `gpu_ns` |
