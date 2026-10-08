@@ -13,7 +13,7 @@
 #include <set>
 #include <vector>
 
-#include "warploom/core/physics_world.hpp"
+#include "warploom/physics/physics_world.hpp"
 
 namespace {
 

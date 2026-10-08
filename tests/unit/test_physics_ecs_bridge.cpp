@@ -19,7 +19,7 @@
 #include "warploom/core/document_projection.hpp"
 #include "warploom/core/editor_session.hpp"
 #include "warploom/core/ecs.hpp"
-#include "warploom/core/physics_world.hpp"
+#include "warploom/physics/physics_world.hpp"
 
 namespace {
 

@@ -151,6 +151,9 @@ if(WARPLOOM_BUILD_ENGINE)
     add_subdirectory(modules/ui)
     # S2: the determinism substrate is a real module (Warploom::core).
     add_subdirectory(modules/core)
+    # D1: deterministic physics is a real header-only module
+    # (Warploom::physics); core consumes it for the session tick.
+    add_subdirectory(modules/physics)
     # S4: the editor widget/view layer is a real module (Warploom::editor).
     add_subdirectory(modules/editor)
     # S3: Vulkan rendering + scene projection is a real module

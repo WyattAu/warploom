@@ -44,7 +44,7 @@
 #include "warploom/core/input_state.hpp"
 #include "warploom/core/input_translators.hpp"
 #include "warploom/core/animation_state_machine.hpp"
-#include "warploom/core/physics_world.hpp"
+#include "warploom/physics/physics_world.hpp"
 #include "warploom/editor/node_editor.hpp"
 #include "warploom/render/vulkan_context.hpp"
 #include "warploom/render/vulkan_frame_upload.hpp"

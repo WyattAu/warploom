@@ -24,7 +24,7 @@
 #include "warploom/core/control_server.hpp"
 #include "warploom/core/document.hpp"
 #include "warploom/core/document_projection.hpp"
-#include "warploom/core/physics_world.hpp"
+#include "warploom/physics/physics_world.hpp"
 #include "warploom/core/property_registry.hpp"
 #include "warploom/core/replay_scrubber.hpp"
 

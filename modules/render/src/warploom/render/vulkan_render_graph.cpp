@@ -527,7 +527,8 @@ void execute_graph(
           post.srcAccessMask = use.access;
           post.dstAccessMask =
               use.final_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-                  ? VK_ACCESS_SHADER_READ_BIT : use.access;
+                  ? VkAccessFlags{VK_ACCESS_SHADER_READ_BIT}
+                  : use.access;
           post.oldLayout = use.used_layout;
           post.newLayout = use.final_layout;
           post.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;

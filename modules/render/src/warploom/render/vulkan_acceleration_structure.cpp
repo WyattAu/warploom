@@ -394,10 +394,19 @@ core::Result<void> VulkanAccelerationStructureBuilder::cmd_build_tlas(
     VkAccelerationStructureInstanceKHR& dst = out[i];
     std::memcpy(dst.transform.matrix, in.transform,
                 sizeof(dst.transform.matrix));
+    // VkAccelerationStructureInstanceKHR's fields are bitfield-packed
+    // (instanceCustomIndex:24, mask:8, sbtOffset:24, flags:8). The engine's
+    // usage guarantees the values fit (custom index is a slot number well
+    // under 2^24, mask defaults to 0xFF), so this is a value-preserving
+    // narrowing by contract — GCC still warns because the LANGUAGE cannot
+    // see the contract. Local suppression, scoped to the four assignments.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
     dst.instanceCustomIndex = in.instance_custom_index;
     dst.mask = in.mask;
     dst.instanceShaderBindingTableRecordOffset = in.sbt_offset;
     dst.flags = in.flags;
+#pragma GCC diagnostic pop
     dst.accelerationStructureReference =
         static_cast<VkDeviceAddress>(in.blas_device_address);
   }

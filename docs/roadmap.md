@@ -403,9 +403,10 @@ declares a slot 3.
       bit-identical replay fingerprints at any count, and count=1 reproduces
       the historical settle. The viewport's gd physics scene now runs 8
       passes — a deep-stacked pile is exactly where single-pass sink shows.
-      Remaining: spheres-only, no joints or shapes, and
-      `warploom::physics` is still header-only inside core rather than its own
-      package.
+      The PACKAGE EXTRACTION is done: `modules/physics`
+      (Warploom::physics, header-only INTERFACE, own install/package config)
+      owns physics_world.hpp; core links it and the include path travels to
+      every core consumer. Remaining: spheres-only, no joints or shapes.
 - [x] **D2a interpolated, eased track evaluation** — `TimelineClip::evaluate_at`
       takes a fractional frame and an `Easing`, and interpolates Number and
       Vec3 between the bracketing samples. Bool and String hold the earlier

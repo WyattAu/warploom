@@ -58,7 +58,9 @@ target_include_directories(warploom_core
 )
 
 find_package(Threads REQUIRED)
-target_link_libraries(warploom_core PUBLIC Threads::Threads)
+# Physics is its own package (D1); core's session tick consumes it, so the
+# include path travels to every core consumer.
+target_link_libraries(warploom_core PUBLIC Threads::Threads Warploom::physics)
 
 # ---------------------------------------------------------------------------
 # Public header allowlist (the module's entire frozen surface)
