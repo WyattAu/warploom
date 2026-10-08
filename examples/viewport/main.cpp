@@ -421,6 +421,15 @@ struct ViewportApp {
   omnicpp::editor::DocumentProjection projection;
   omnicpp::render::VulkanPipeline gd_cull_pipeline;
   omnicpp::render::VulkanPipeline gd_draw_pipeline;
+  // --- B5b occlusion cull (cull_and_draw_lod_occlude.comp) ---------------
+  // Separate cull-only set layout: binding 0 is the header counters buffer,
+  // NOT the shared vertex-pull buffer, and binding 4 is the packed H-Z
+  // pyramid. Non-empty only when H-Z is on and its packed pyramid exists.
+  VkDescriptorSetLayout gd_occl_set0_layout{VK_NULL_HANDLE};
+  std::vector<VkDescriptorSet> gd_occl_cull_sets;
+  omnicpp::render::VulkanPipeline gd_occl_pipeline;
+  omnicpp::render::Allocation gd_occl_counters{};
+  std::array<std::byte, 168> gd_occl_push_staging{};
   // --- Node editor overlay (OMNICPP_NODE_EDITOR=1) --------------------------
   // UI paint path over the scene: graph cards, pins, bezier wires, value
   // readouts; mouse selects/drags node cards. UI failures fail the frame.
@@ -1912,7 +1921,14 @@ bool setup_scene(ViewportApp& app) {
   auto bone_layout = app.descriptors.create_layout(bone_bindings, 8U);
   if (!bone_layout.is_ok()) return false;
   app.bone_layout = bone_layout.value();
-  if (!setup_mannequin(app)) return false;
+  // WARPLOOM_NO_MANNEQUIN=1 selects the cubes scene: the GPU-driven cull
+  // path (WARPLOOM_GPU_DRIVEN=1) is defined as cubes-only -- the driven
+  // fragment shader statically binds the shadow + IBL sets and cannot draw
+  // the skinned mannequin -- but the bundled asset always loads, so without
+  // this selector the gate never opened on a machine that has the asset.
+  const bool no_mannequin =
+      warploom_env("WARPLOOM_NO_MANNEQUIN", "OMNICPP_NO_MANNEQUIN") != nullptr;
+  if (!no_mannequin && !setup_mannequin(app)) return false;
   if (app.city_scene && !setup_city_scene(app)) {
     std::fprintf(stderr,
                  "viewport: city scene setup failed; single-actor scene\n");
@@ -2094,6 +2110,111 @@ bool setup_gpu_driven(ViewportApp& app) {
     app.gd_cull_pipeline.cleanup(dev);
     return false;
   }
+  // --- B5b: occlusion-cull variant (cull_and_draw_lod_occlude.comp) ------
+  // The pyramid the shader consumes is the renderer's packed copy; without H-Z
+  // (or without the packed buffer) the variant is not created and the frame
+  // keeps using cull_and_draw_lod.comp. The 168-byte push is the base cull
+  // push plus the six occlusion words (enable, tile grid, pyramid offset,
+  // near/far as packed floats matching the gd projection: 0.1 / 100).
+  const auto& packed_hiz = app.renderer.hiz_packed_pyramid();
+  if (packed_hiz.buffer.is_valid() && !packed_hiz.level_dims.empty()) {
+    const std::vector<omnicpp::render::ReflectedBinding> occl_bindings = {
+        {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+         VK_SHADER_STAGE_COMPUTE_BIT},  // header counters (NOT vertex-pull)
+        {0U, 1U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+         VK_SHADER_STAGE_COMPUTE_BIT},
+        {0U, 2U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+         VK_SHADER_STAGE_COMPUTE_BIT},
+        {0U, 3U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+         VK_SHADER_STAGE_COMPUTE_BIT},
+        {0U, 4U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+         VK_SHADER_STAGE_COMPUTE_BIT},  // packed pyramid
+    };
+    auto occl_layout = app.descriptors.create_layout(occl_bindings, 16U);
+    if (!occl_layout.is_ok()) {
+      std::fprintf(stderr, "viewport: occl layout failed\n");
+      return false;
+    }
+    app.gd_occl_set0_layout = occl_layout.value();
+
+    // Header counters: [0] draw word, [1] visible-counter word. Constants of
+    // this layout, written once; the shader reads them from binding 0.
+    auto counters = app.allocator.create_buffer(
+        8U, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (!counters.is_ok()) {
+      std::fprintf(stderr, "viewport: occl counters buffer failed\n");
+      return false;
+    }
+    app.gd_occl_counters = counters.value();
+    if (app.gd_occl_counters.mapped != nullptr) {
+      auto* words = static_cast<std::uint32_t*>(app.gd_occl_counters.mapped);
+      words[0] = 0U;                   // draw-command word 0
+      words[1] = 5U * kGdObjectCount;  // visible-counter word
+    }
+
+    app.gd_occl_cull_sets.resize(kViewportMaxFramesInFlight);
+    for (std::uint32_t i = 0; i < kViewportMaxFramesInFlight; ++i) {
+      auto cs = app.descriptors.allocate_set(app.gd_occl_set0_layout);
+      if (!cs.is_ok()) {
+        std::fprintf(stderr, "viewport: occl set allocation failed\n");
+        return false;
+      }
+      app.gd_occl_cull_sets[i] = cs.value();
+      if (!app.descriptors
+                   .write_buffer(app.gd_occl_cull_sets[i], 0U,
+                                 VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                 app.gd_occl_counters.buffer, 0U, VK_WHOLE_SIZE)
+                   .is_ok() ||
+          !app.descriptors
+                   .write_buffer(app.gd_occl_cull_sets[i], 1U,
+                                 VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                 app.gd_payload_buffers[i], 0U, VK_WHOLE_SIZE)
+                   .is_ok() ||
+          !app.descriptors
+                   .write_buffer(app.gd_occl_cull_sets[i], 2U,
+                                 VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                 app.gd_table_buffer, 0U, VK_WHOLE_SIZE)
+                   .is_ok() ||
+          !app.descriptors
+                   .write_buffer(app.gd_occl_cull_sets[i], 3U,
+                                 VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                 app.gd_indirect_buffer, 0U, VK_WHOLE_SIZE)
+                   .is_ok() ||
+          !app.descriptors
+                   .write_buffer(app.gd_occl_cull_sets[i], 4U,
+                                 VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                 packed_hiz.buffer.buffer, 0U, VK_WHOLE_SIZE)
+                   .is_ok()) {
+        std::fprintf(stderr, "viewport: occl set writes failed\n");
+        return false;
+      }
+    }
+
+    const VkPushConstantRange kGdOcclPush{VK_SHADER_STAGE_COMPUTE_BIT, 0U, 168U};
+    if (!app.gd_occl_pipeline
+             .load_shader_stage_file(
+                 dev, shader_dir + "/cull_and_draw_lod_occlude.comp.spv",
+                 "compute")
+             .is_ok() ||
+        !app.gd_occl_pipeline
+             .create_pipeline_layout(dev, &app.gd_occl_set0_layout, 1U,
+                                     &kGdOcclPush)
+             .is_ok() ||
+        !app.gd_occl_pipeline
+             .create_compute_pipeline(dev,
+                                      app.gd_occl_pipeline.pipeline_layout())
+             .is_ok()) {
+      std::fprintf(stderr, "viewport: occl pipeline failed\n");
+      app.gd_occl_pipeline.cleanup(dev);
+      return false;
+    }
+    std::printf("viewport: occlusion cull active (%ux%u tile pyramid)\n",
+                packed_hiz.level_dims[0].first,
+                packed_hiz.level_dims[0].second);
+  }
+
   // The driven fragment shader statically uses the shadow (set 4) and IBL
   // (set 5) slots, so the draw layout declares all six sets (set 3 bones is
   // unused by the driven path but must occupy its array position). gd mode is
@@ -3977,13 +4098,53 @@ bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
     // still written here because it is per-frame application state, and the
     // buffer barrier to the indirect draw comes with the call.
     omnicpp::render::VulkanRenderer::GpuDrivenFrame frame{};
-    frame.cull_pipeline = app.gd_cull_pipeline.pipeline();
-    frame.cull_pipeline_layout = app.gd_cull_pipeline.pipeline_layout();
-    frame.cull_set = app.gd_cull_sets[gd_slot];
     frame.object_count = app.gd_instance_count;
-    frame.cull_push.data = app.gd_cull_push_staging.data();
-    frame.cull_push.size = app.gd_cull_push_staging.size();
     frame.indirect_buffer = app.gd_indirect_buffer;
+    if (app.gd_occl_pipeline.pipeline() != VK_NULL_HANDLE &&
+        gd_slot < app.gd_occl_cull_sets.size()) {
+      // B5b: occlusion cull against the previous frame's packed pyramid.
+      // Staging is the 144-byte cull push plus the six occlusion words.
+      std::memcpy(app.gd_occl_push_staging.data(),
+                  app.gd_cull_push_staging.data(), 144U);
+      auto* pushu =
+          reinterpret_cast<std::uint32_t*>(app.gd_occl_push_staging.data());
+      const auto& packed = app.renderer.hiz_packed_pyramid();
+      // Runtime disable, mostly for A/B: occlusion legitimately removes
+      // hidden geometry, so on/off is not a pixel equality test but a
+      // this-frame-shrinks test.
+      const char* occl_env =
+          warploom_env("WARPLOOM_OCCLUSION", "OMNICPP_OCCLUSION");
+      pushu[32] = occl_env != nullptr && occl_env[0] == '0' ? 0U : 1U;
+      if (!packed.level_dims.empty()) {
+        pushu[33] = packed.level_dims[0].first;   // tile_count_x
+        pushu[34] = packed.level_dims[0].second;  // tile_count_y
+        pushu[35] = packed.level_offsets.empty() ? 0U : packed.level_offsets[0];
+      } else {
+        pushu[33] = 0U;
+        pushu[34] = 0U;
+        pushu[35] = 0U;
+      }
+      float near_z = 0.1f;
+      float far_z = 100.0f;
+      std::uint32_t near_bits = 0U;
+      std::uint32_t far_bits = 0U;
+      static_assert(sizeof(near_bits) == sizeof(near_z));
+      std::memcpy(&near_bits, &near_z, sizeof(near_bits));
+      std::memcpy(&far_bits, &far_z, sizeof(far_bits));
+      pushu[36] = near_bits;
+      pushu[37] = far_bits;
+      frame.cull_pipeline = app.gd_occl_pipeline.pipeline();
+      frame.cull_pipeline_layout = app.gd_occl_pipeline.pipeline_layout();
+      frame.cull_set = app.gd_occl_cull_sets[gd_slot];
+      frame.cull_push.data = app.gd_occl_push_staging.data();
+      frame.cull_push.size = app.gd_occl_push_staging.size();
+    } else {
+      frame.cull_pipeline = app.gd_cull_pipeline.pipeline();
+      frame.cull_pipeline_layout = app.gd_cull_pipeline.pipeline_layout();
+      frame.cull_set = app.gd_cull_sets[gd_slot];
+      frame.cull_push.data = app.gd_cull_push_staging.data();
+      frame.cull_push.size = app.gd_cull_push_staging.size();
+    }
     if (!omnicpp::render::VulkanRenderer{}
              .record_gpu_driven_cull(command_buffer, frame)
              .is_ok()) {
@@ -4862,6 +5023,12 @@ bool ViewportApp::initialize() {
   omnicpp::render::RendererConfig renderer_config;
   // GPU timestamp queries: per-frame device-side duration in telemetry.
   renderer_config.enable_gpu_timing = true;
+  // H-Z pyramid: built every frame from the scene depth; the GPU-driven path
+  // occlusion-culls against its packed copy (B5b). The reduction shader ships
+  // with the test/compose shaders.
+  renderer_config.enable_hiz = true;
+  renderer_config.hiz_reduction_shader_path =
+      std::string(warploom_shader_dir()) + "/depth_reduce_image.comp.spv";
   // HDR compose: render into a float intermediate, then tonemap + FXAA into
   // the swapchain. Without it the scene is written straight to 8 bits and
   // anything above 1.0 clips, so the only response to a bright key light is

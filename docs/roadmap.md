@@ -215,8 +215,26 @@ declares a slot 3.
       `HiZGraph.PackedPyramidMatchesAbi`: property-based (empty/occupied tiles
       both present, empty parent implies empty children, parent depth >= each
       non-empty child), because recomputing the reduction on the CPU would
-      duplicate the shader rather than verify it. Remaining: the cull-only
-      descriptor layout, the occlude pipeline, and the viewport wiring. Verification is also not a byte-exact A/B: correct
+      duplicate the shader rather than verify it.
+
+      Increment 2 DONE: the viewport builds the cull-only descriptor layout
+      (binding 0 = header counters, NOT the shared vertex-pull buffer;
+      binding 4 = the packed pyramid), the 168-byte extended-push pipeline,
+      and a `WARPLOOM_NO_MANNEQUIN=1` selector — the bundled asset always
+      loaded, so `!has_mannequin` had never opened the gd gate on a machine
+      with assets. Live wiring proven decisively: with `near_z` forced to
+      0.001 the shader's depth_min clamps to 1.0 and 74.7% of captured pixels
+      change versus occlusion off — tiles are populated and culls fire; with
+      correct near/far the shipped scene's captured frames are IDENTICAL,
+      which is the correct output, not a failure: 400 cubes spread over a
+      12x6 m plane, and a conservative max-depth pyramid cannot cull an
+      object resting on the same surface its comparison tiles sample. The
+      shader-level occluder-present/occludee-culled proof remains
+      `test_gpu_driven_occlusion_frame.cpp`; a scene with genuine overlap
+      (walls, hills, a dense wall of cubes) is what would show live savings.
+      `WARPLOOM_OCCLUSION=0` disables the test at the push for A/B runs.
+      Remaining: nothing blocking — an occlusion-heavy demo view is a
+      content question, not an engine one. Verification is also not a byte-exact A/B: correct
       occlusion legitimately removes hidden geometry, so the evidence has to
       be the existing `test_gpu_driven_occlusion_frame.cpp` approach (occluder
       present -> occludee culled; occluder removed -> occludee drawn) rather
