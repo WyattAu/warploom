@@ -387,7 +387,7 @@ struct ViewportApp {
   //! visibility, LOD, or per-draw submission inside the frame.
   //! Physics-driven scene state (OMNICPP_PHYSICS=1): bodies stepped on the
   //! CPU each frame; instanceCount includes them + the ground slab.
-  omnicpp::physics::PhysicsWorld physics_world;
+  omnicpp::physics::PhysicsWorld physics_world;  // 8 solver passes, set in initialize()
   std::vector<omnicpp::physics::PhysicsBody> physics_bodies;
   std::uint32_t gd_instance_count{kGdObjectCount};
 
@@ -5162,6 +5162,9 @@ bool ViewportApp::initialize() {
       // (deterministic PhysicsWorld), streamed into the payload, drawn by
       // the same one-indirect-draw path. instanceCount = bodies + ground.
       if (warploom_env("WARPLOOM_PHYSICS", "OMNICPP_PHYSICS") != nullptr) {
+        // D1: 8 positional-correction passes — the gd pile is deep-stacked
+        // bodies, exactly where single-pass sink shows.
+        physics_world.set_solver_iterations(8);
         const std::uint32_t body_count =
             gd_instance_count > 1U ? gd_instance_count - 1U : 3U;
         physics_bodies.reserve(body_count);

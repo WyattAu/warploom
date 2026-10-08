@@ -401,7 +401,9 @@ declares a slot 3.
       what pushes out residual overlap earlier passes created). Verified by a
       6-body tower test: more passes -> measurably less sink at the top,
       bit-identical replay fingerprints at any count, and count=1 reproduces
-      the historical settle. Remaining: spheres-only, no joints or shapes, and
+      the historical settle. The viewport's gd physics scene now runs 8
+      passes — a deep-stacked pile is exactly where single-pass sink shows.
+      Remaining: spheres-only, no joints or shapes, and
       `warploom::physics` is still header-only inside core rather than its own
       package.
 - [x] **D2a interpolated, eased track evaluation** — `TimelineClip::evaluate_at`
