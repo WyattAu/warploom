@@ -536,8 +536,9 @@ declares a slot 3.
       mode is rejected with a named error, and the whole exchange runs with 0
       validation diagnostics. R1/R2 are now unblocked: a mode toggle plus its
       pipeline work is all each one needs.
-- [ ] **E2 R1–R4** — viewport path tracing, RT reflections/AO toggles,
-      GPU-driven skinned scenes, exposure/bloom controls. Exposure is DONE:
+- [ ] **E2 R1–R4 — exposure/bloom controls DONE (see below); remaining:
+      path tracing (R1), RT reflections/AO toggles (R2), GPU-driven skinned
+      scenes (R3).** Exposure is DONE:
       `set_exposure` (protocol v1.9) is live end-to-end — validated by
       `HeadlessComposeFrameGoldenHash`'s two-exposure probe (2.0 vs 0.25 must
       produce different tonemapped frames; it originally did not, which caught
