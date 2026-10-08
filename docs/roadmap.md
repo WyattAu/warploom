@@ -205,7 +205,18 @@ declares a slot 3.
 
       So B5b is roughly: a second cull descriptor layout, binding the previous
       frame's pyramid at binding 4, `enable_hiz` on, and the pyramid build
-      wired into the frame. Verification is also not a byte-exact A/B: correct
+      wired into the frame.
+
+      Increment 1 DONE: the pyramid is packed after every H-Z build
+      (`VulkanRenderer::hiz_packed_pyramid()`), image -> buffer per mip with
+      self-contained transitions after the graph, level 0 first at
+      monotonically increasing word offsets — exactly the ABI
+      `cull_and_draw_lod_occlude.comp` reads. Verified by
+      `HiZGraph.PackedPyramidMatchesAbi`: property-based (empty/occupied tiles
+      both present, empty parent implies empty children, parent depth >= each
+      non-empty child), because recomputing the reduction on the CPU would
+      duplicate the shader rather than verify it. Remaining: the cull-only
+      descriptor layout, the occlude pipeline, and the viewport wiring. Verification is also not a byte-exact A/B: correct
       occlusion legitimately removes hidden geometry, so the evidence has to
       be the existing `test_gpu_driven_occlusion_frame.cpp` approach (occluder
       present -> occludee culled; occluder removed -> occludee drawn) rather

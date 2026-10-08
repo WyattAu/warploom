@@ -75,6 +75,7 @@ struct HiZCallbackState {
 
 // Image-readback helpers live in the shared test header.
 #include "vulkan_test_readback.hpp"
+#include "vulkan_test_buffer_readback.hpp"
 
 using namespace omnicpp_test;
 
@@ -381,6 +382,179 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
                     << readback.canonical_hash;
       break;
   }
+#else
+  GTEST_SKIP() << "Vulkan types or test shaders unavailable";
+#endif
+}
+
+//! B5b increment 1: the packed pyramid holds the built pyramid's data.
+//!
+//! Property-based rather than byte-exact (recomputing the reduction on the CPU
+//! would duplicate depth_reduce_image.comp, and a copy of the shader is not an
+//! independent check). Three properties, all from the documented ABI:
+//!   1. A word of 0u means "no geometry ever rendered into that tile"; the
+//!      triangle covers part of the frame, so both kinds must exist.
+//!   2. Monotone across levels: a parent tile holds the MAX of its children's
+//!      depths, so every non-empty parent is >= each non-empty child it spans.
+//!   3. Every built generation is stamped, and the copy is fresh: after a
+//!      frame whose H-Z build completed, built_generation equals the state's
+//!      generation.
+TEST(HiZGraph, PackedPyramidMatchesAbi) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  constexpr std::uint32_t kWidth = 256U;
+  constexpr std::uint32_t kHeight = 256U;
+  omnicpp::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("OmniCppPackedHiZ", true).is_ok());
+  omnicpp::render::VulkanMemoryAllocator allocator;
+  ASSERT_TRUE(
+      allocator.initialize(context.device(), context.physical_device()).is_ok());
+
+  omnicpp::render::VulkanOffscreenTarget color;
+  ASSERT_TRUE(color
+                  .create(context.device(), context.physical_device(),
+                          VK_FORMAT_B8G8R8A8_UNORM, kWidth, kHeight, &allocator)
+                  .is_ok());
+  const VkFormat depth_format =
+      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+          context.physical_device());
+  omnicpp::render::VulkanRenderPass render_pass;
+  ASSERT_TRUE(render_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
+                                 depth_format)
+                  .is_ok());
+  ASSERT_TRUE(render_pass
+                  .create_depth_resources(context.device(),
+                                          context.physical_device(),
+                                          depth_format, kWidth, kHeight)
+                  .is_ok());
+  if (!render_pass.depth_is_sampleable()) {
+    GTEST_SKIP() << "depth not sampleable; H-Z needs it";
+  }
+  ASSERT_TRUE(render_pass
+                  .create_framebuffers(context.device(), {color.image_view()},
+                                       kWidth, kHeight)
+                  .is_ok());
+
+  omnicpp::render::RendererConfig config;
+  config.enable_hiz = true;
+  config.enable_hdr_compose = false;
+  config.hiz_reduction_shader_path =
+      std::string(WARPLOOM_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
+
+  omnicpp::render::VulkanRenderer renderer;
+  const auto init =
+      renderer.initialize_headless(context, render_pass, kWidth, kHeight,
+                                   config, VK_FORMAT_B8G8R8A8_UNORM);
+  ASSERT_TRUE(init.is_ok()) << static_cast<std::uint32_t>(init.error());
+  ASSERT_TRUE(renderer.hiz_direct_enabled());
+
+  omnicpp::render::VulkanPipeline pipeline;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  ASSERT_TRUE(
+      pipeline.load_shader_file(context.device(),
+                                shader_dir + "/triangle.vert.spv").is_ok());
+  ASSERT_TRUE(
+      pipeline.load_shader_file(context.device(),
+                                shader_dir + "/triangle.frag.spv").is_ok());
+  ASSERT_TRUE(pipeline
+                  .create_graphics_pipeline(
+                      context.device(), render_pass.render_pass(),
+                      VK_FORMAT_B8G8R8A8_UNORM, VK_NULL_HANDLE, true, true,
+                      false)
+                  .is_ok());
+  renderer.set_pipeline(pipeline.pipeline());
+
+  const auto generation_before = renderer.hiz_packed_pyramid().built_generation;
+  for (std::uint32_t frame = 0; frame < 2U; ++frame) {
+    auto image = renderer.begin_frame();
+    ASSERT_TRUE(image.is_ok());
+    ASSERT_TRUE(renderer
+                    .record_commands(image.value(),
+                                     render_pass.framebuffer(0U), kWidth,
+                                     kHeight)
+                    .is_ok());
+    ASSERT_TRUE(renderer.submit_frame().is_ok());
+    ASSERT_TRUE(renderer.present_frame().is_ok());
+  }
+  renderer.wait_idle();
+
+  const auto& packed = renderer.hiz_packed_pyramid();
+  EXPECT_NE(packed.built_generation, 0U) << "packed copy never ran";
+  EXPECT_NE(packed.built_generation, generation_before)
+      << "packed copy is stale";
+  ASSERT_TRUE(packed.buffer.is_valid());
+  ASSERT_EQ(packed.level_dims.size(), packed.level_offsets.size());
+
+  const std::uint32_t total_words =
+      packed.level_offsets.back() +
+      packed.level_dims.back().first * packed.level_dims.back().second;
+  const auto rb = omnicpp_test::readback_buffer(
+      context.physical_device(), context.device(), context.graphics_queue(),
+      static_cast<std::uint32_t>(context.queue_families().graphics_family),
+      packed.buffer.buffer,
+      static_cast<VkDeviceSize>(total_words) * 4U);
+  ASSERT_EQ(rb.words.size(), total_words) << "packed buffer readback failed";
+
+  // -- Property 1: both empty and occupied tiles exist at level 0. --------
+  const auto [lw0, lh0] = packed.level_dims[0];
+  const std::uint32_t level0_words = lw0 * lh0;
+  std::uint64_t empty_tiles = 0U;
+  std::uint64_t occupied_tiles = 0U;
+  for (std::uint32_t i = 0; i < level0_words; ++i) {
+    if (rb.words[i] == 0U) {
+      ++empty_tiles;
+    } else {
+      ++occupied_tiles;
+    }
+  }
+  EXPECT_GT(occupied_tiles, 0U) << "the triangle occluded nothing at all";
+  EXPECT_GT(empty_tiles, 0U) << "clear-depth tiles must pack as 0u";
+
+  // -- Property 2: every parent >= each non-empty child it spans. ---------
+  auto as_depth = [](std::uint32_t word) {
+    float f = 0.0f;
+    static_assert(sizeof(f) == sizeof(word));
+    std::memcpy(&f, &word, sizeof(f));
+    return f;
+  };
+  for (std::uint32_t level = 1; level < packed.level_dims.size(); ++level) {
+    const auto [pw, ph] = packed.level_dims[level];
+    const auto [cw, ch] = packed.level_dims[level - 1];
+    const std::uint32_t parent_off = packed.level_offsets[level];
+    const std::uint32_t child_off = packed.level_offsets[level - 1];
+    for (std::uint32_t py = 0; py < ph; ++py) {
+      for (std::uint32_t px = 0; px < pw; ++px) {
+        const std::uint32_t parent =
+            rb.words[parent_off + py * pw + px];
+        if (parent == 0U) continue;  // empty parent: children may hold data? No:
+        // A parent MAX including a non-empty child cannot be 0, so an empty
+        // parent implies ALL its children are empty. Check that too.
+        for (std::uint32_t cy = py * 2U; cy < std::min((py + 1U) * 2U, ch); ++cy) {
+          for (std::uint32_t cx = px * 2U; cx < std::min((px + 1U) * 2U, cw); ++cx) {
+            const std::uint32_t child = rb.words[child_off + cy * cw + cx];
+            if (parent == 0U) {
+              EXPECT_EQ(child, 0U)
+                  << "empty parent at level " << level << " (" << px << ","
+                  << py << ") spans non-empty child (" << cx << "," << cy
+                  << ")";
+            } else if (child != 0U) {
+              EXPECT_GE(as_depth(parent), as_depth(child))
+                  << "parent depth violated at level " << level << " (" << px
+                  << "," << py << ") child (" << cx << "," << cy << ")";
+            }
+          }
+        }
+      }
+    }
+  }
+
+  renderer.cleanup(context.device());
+  pipeline.cleanup(context.device());
+  render_pass.cleanup(context.device());
+  color.cleanup();
+  allocator.cleanup();
 #else
   GTEST_SKIP() << "Vulkan types or test shaders unavailable";
 #endif

@@ -22,6 +22,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -531,6 +532,18 @@ public:
   void discard_hiz_frame(const HiZFrameToken& token) noexcept;
   void invalidate_hiz(HiZInvalidation reason) noexcept { hiz_state_.invalidate(reason); }
   [[nodiscard]] const VulkanHiZPyramid* hiz_pyramid(std::uint32_t index) const noexcept;
+  struct PackedPyramid;  //!< Defined with the H-Z members below.
+  struct PackedPyramid {
+    Allocation buffer{};  //!< valid() once created; device-local, no mapping
+    std::vector<std::uint32_t> level_offsets;  //!< words, per level
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> level_dims;
+    std::uint64_t built_generation{0};  //!< hiz_state_ generation copied last
+  };
+
+  //! Packed pyramid for the occlusion cull (B5b). Valid after a frame whose
+  //! H-Z build completed; built_generation distinguishes fresh from stale.
+  //! Out-of-line accessor: the type is incomplete here.
+  [[nodiscard]] const PackedPyramid& hiz_packed_pyramid() const noexcept;
   [[nodiscard]] VulkanHiZPyramid* hiz_pyramid(std::uint32_t index) noexcept;
 
   [[nodiscard]] ::warploom::core::Result<void> recreate_hiz_resources(
@@ -577,6 +590,17 @@ private:
   VulkanHiZFrameState hiz_state_{};
   std::unique_ptr<VulkanMemoryAllocator> hiz_allocator_;
   std::unique_ptr<VulkanHiZPyramid> hiz_pyramids_[2];
+
+  // --- Packed pyramid (B5b) ---------------------------------------------
+  //! The occlude cull shader (cull_and_draw_lod_occlude.comp) reads the
+  //! pyramid as packed float-bit words from a BUFFER, not an image. After each
+  //! H-Z build the mips are copied here (image -> buffer, per level, at
+  //! monotonically increasing word offsets) so the NEXT frame's cull can bind
+  //! the whole pyramid as one storage buffer with 1-frame latency. Word
+  //! layout: level 0 tiles first (row-major, 0u = tile never written), then
+  //! each halved level. Level dims derive from hiz_tile_size, matching the
+  //! shader's walk.
+  PackedPyramid hiz_packed_;
   std::unique_ptr<VulkanDescriptorManager> hiz_descriptor_manager_;
   std::unique_ptr<VulkanPipeline> hiz_reduction_pipeline_;
   VkDescriptorSetLayout hiz_reduction_layout_{VK_NULL_HANDLE};

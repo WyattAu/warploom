@@ -43,7 +43,11 @@ VulkanHiZPyramid::~VulkanHiZPyramid() { cleanup(device_); }
   image_info.format = VK_FORMAT_R32_SFLOAT;
   image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
   image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  image_info.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  // TRANSFER_SRC: after each H-Z build the mips are copied into the packed
+  // buffer the occlusion cull reads (B5b). Validation caught the omission as
+  // 41 VUIDs on the first frame with the copy pass enabled.
+  image_info.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
   image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
 

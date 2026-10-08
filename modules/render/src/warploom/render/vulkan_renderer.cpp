@@ -1716,6 +1716,11 @@ void VulkanRenderer::discard_hiz_frame(const HiZFrameToken& token) noexcept {
   hiz_state_.discard_frame(token);
 }
 
+const VulkanRenderer::PackedPyramid&
+VulkanRenderer::hiz_packed_pyramid() const noexcept {
+  return hiz_packed_;
+}
+
 const VulkanHiZPyramid* VulkanRenderer::hiz_pyramid(std::uint32_t index) const noexcept {
   return index < 2U ? hiz_pyramids_[index].get() : nullptr;
 }
@@ -1812,7 +1817,60 @@ bool VulkanRenderer::record_hiz_reduction(
   execute_graph(command_buffer, nodes, compiled, nullptr,
                 &VulkanRenderer::record_hiz_graph_pass);
   active_hiz_record_ = nullptr;
-  return hiz_dispatch_count_ == record.levels;
+  const bool complete = hiz_dispatch_count_ == record.levels;
+  if (complete) {
+    // B5b: pack the pyramid for the occlusion cull. The graph leaves each mip
+    // in SHADER_READ_ONLY_OPTIMAL; transition each to TRANSFER_SRC, copy, and
+    // restore. The buffer therefore holds THIS frame's pyramid, and the cull
+    // of the NEXT frame binds it -- the 1-frame latency the occlude shader's
+    // contract states. Self-contained transitions: the graph recomputes its
+    // own per frame from declared states, and these run after it.
+    const VulkanHiZPyramid* pyramid = record.destination_pyramid;
+    if (hiz_packed_.buffer.is_valid() &&
+        hiz_packed_.level_offsets.size() >= record.levels) {
+      for (std::uint32_t level = 0;
+           level < record.levels && level < hiz_packed_.level_dims.size();
+           ++level) {
+        const auto [lw, lh] = hiz_packed_.level_dims[level];
+        if (lw == 0U || lh == 0U) continue;
+        VkImageMemoryBarrier to_src{};
+        to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        to_src.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        to_src.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        to_src.image = pyramid->image();
+        to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, level, 1U, 0U, 1U};
+        vkCmdPipelineBarrier(command_buffer,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, nullptr,
+                             0U, nullptr, 1U, &to_src);
+
+        VkBufferImageCopy region{};
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0U, 1U};
+        region.imageExtent = {lw, lh, 1U};
+        // Level 0 first, then each halved level contiguously.
+        region.bufferOffset =
+            static_cast<VkDeviceSize>(hiz_packed_.level_offsets[level]) * 4U;
+        vkCmdCopyImageToBuffer(command_buffer, pyramid->image(),
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               hiz_packed_.buffer.buffer, 1U, &region);
+
+        VkImageMemoryBarrier back = to_src;
+        back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        back.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0U, 0U,
+                             nullptr, 0U, nullptr, 1U, &back);
+      }
+      hiz_packed_.built_generation = hiz_state_.generation();
+    }
+  }
+  return complete;
 }
 #endif
 
@@ -1843,6 +1901,8 @@ bool VulkanRenderer::record_hiz_reduction(
   auto state_result = hiz_state_.configure(render_width, render_height,
                                            config_.hiz_tile_size,
                                            config_.hiz_levels);
+
+
   if (!state_result.is_ok()) return state_result;
 
   const std::uint32_t width = hiz_state_.pyramid_width();
@@ -1866,6 +1926,32 @@ bool VulkanRenderer::record_hiz_reduction(
   hiz_allocator_ = std::move(allocator);
   hiz_pyramids_[0] = std::move(first);
   hiz_pyramids_[1] = std::move(second);
+  // Packed pyramid for the occlusion cull (B5b): one buffer holding every
+  // mip as packed float-bit words, level 0 first. Rebuilt with the pyramids
+  // because the tile grid and level count both derive from the same extent.
+  {
+    // Pyramid width/height/levels come from the enclosing function scope.
+    hiz_packed_.level_offsets.clear();
+    hiz_packed_.level_dims.clear();
+    std::uint64_t words = 0U;
+    std::uint32_t lw = width, lh = height;
+    for (std::uint32_t level = 0; level < levels; ++level) {
+      hiz_packed_.level_offsets.push_back(static_cast<std::uint32_t>(words));
+      hiz_packed_.level_dims.emplace_back(lw, lh);
+      words += static_cast<std::uint64_t>(lw) * lh;
+      lw = lw > 1U ? lw >> 1U : 1U;
+      lh = lh > 1U ? lh >> 1U : 1U;
+    }
+    auto packed = hiz_allocator_->create_buffer(
+        words * 4U,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    hiz_packed_.buffer =
+        packed.is_ok() ? packed.value() : Allocation{};
+    hiz_packed_.built_generation = 0U;  // no data copied yet
+  }
+
 
   if (!config_.hiz_reduction_shader_path.empty()) {
     hiz_descriptor_manager_ = std::make_unique<VulkanDescriptorManager>();
