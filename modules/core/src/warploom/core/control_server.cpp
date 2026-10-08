@@ -69,6 +69,9 @@ const std::vector<ControlCommand::KindName>& ControlCommand::kind_names() {
       {Kind::ClipPlay, "clip_play"},
       {Kind::ClipStop, "clip_stop"},
       {Kind::ClipsInfo, "clips_info"},
+      // v1.9 render mode (E1).
+      {Kind::SetRenderMode, "set_render_mode"},
+      {Kind::GetRenderMode, "get_render_mode"},
   };
   return kTable;
 }
@@ -347,6 +350,9 @@ namespace {
     case ControlCommand::Kind::SaveDocument:
     case ControlCommand::Kind::LoadDocument:
       take_text("path", command.text);
+      break;
+    case ControlCommand::Kind::SetRenderMode:
+      take_text("mode", command.text);
       break;
     default:
       break;

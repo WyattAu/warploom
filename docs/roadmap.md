@@ -524,8 +524,18 @@ declares a slot 3.
 
 ## Phase E — release
 
-- [ ] **E1 render modes as protocol commands** — `WARPLOOM_RT_MODE` is read
-      once at start-up, which is the whole reason R1/R2 are unstarted.
+- [x] **E1 render modes as protocol commands** — DONE (protocol v1.9).
+      `set_render_mode` (`text` = "forward" | "rt") and `get_render_mode`
+      (`detail` = {"mode": ...}); the welcome snapshot carries `render_mode`.
+      Modes are host-owned visuals, so the session stores nothing and the
+      recorder deliberately does not record them (same class as
+      set_camera/set_sun). The host builds the RT stack on FIRST switch and
+      caches it, so neither switch direction can leave a half-built stack.
+      Verified over a real socket on the RTX 2060: forward -> rt builds the
+      TLAS stack live and switches, rt -> forward switches back, an unknown
+      mode is rejected with a named error, and the whole exchange runs with 0
+      validation diagnostics. R1/R2 are now unblocked: a mode toggle plus its
+      pipeline work is all each one needs.
 - [ ] **E2 R1–R4** — viewport path tracing, RT reflections/AO toggles,
       GPU-driven skinned scenes, exposure/bloom controls.
 - [ ] **E3 hardware CI runner** — every RT test skips on lavapipe, so the

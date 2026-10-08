@@ -24,6 +24,11 @@ using CK = ::warploom::core::ControlCommand::Kind;
 //! are excluded (docs/replay-format.md, "Recorded kinds").
 [[nodiscard]] bool is_recorded(CK kind) noexcept {
   switch (kind) {
+    // v1.9: host-owned visual stack selection, deliberately not recorded
+    // (same class as SetCamera/SetSun).
+    case CK::SetRenderMode:
+    case CK::GetRenderMode:
+      return false;
     case CK::SpawnCube:
     case CK::SetProperty:
     case CK::DestroyObject:

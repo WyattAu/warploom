@@ -144,6 +144,13 @@ struct ControlCommand final {
     ClipPlay,
     ClipStop,
     ClipsInfo,
+    // v1.9: render mode (E1) — host-owned visual stack selection. The
+    // session stores nothing; the host builds/uses its stacks on demand and
+    // reports the mode in its welcome snapshot.
+    //   SetRenderMode: text = mode name ("forward" | "rt"), required.
+    //   GetRenderMode: no payload; detail = JSON {"mode": "..."}
+    SetRenderMode,
+    GetRenderMode,
   };
 
   //! One entry of the public command-name table: every `Kind` maps to

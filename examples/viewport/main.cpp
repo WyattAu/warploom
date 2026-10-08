@@ -183,6 +183,7 @@ constexpr std::uint32_t kGdObjectCount = 3U;
 constexpr std::uint32_t kGdMaxInstances = 4096U;
 
 struct ViewportApp;
+bool setup_rt_shadows(ViewportApp& app);
 //! ControlHost over the viewport (defined after ViewportApp).
 class ViewportControlHost;
 
@@ -617,6 +618,9 @@ struct ViewportApp {
   //! skinned mannequin approximates its walk at instance granularity).
   bool city_scene{false};
   bool rt_mode{false};
+  //! E1: the RT stack is built on first use and cached, so runtime mode
+  //! switches cannot leave a half-built stack behind.
+  bool rt_stack_built{false};
   omnicpp::render::VulkanAccelerationStructureBuilder rt_builder;
   omnicpp::render::VulkanScratchPool rt_scratch;
   struct RtBlas {
@@ -859,6 +863,40 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
         app_.control_capture_requested_ = true;
         reply.detail = "capture scheduled";
         break;
+      case CK::SetRenderMode: {
+        // E1: render modes are host-owned visual stacks. Build-on-demand and
+        // cache: switching forward->rt builds the RT stack the first time and
+        // reuses it afterwards; rt->forward just flips the branch the frame
+        // loop reads. Nothing is torn down, so neither direction can leave the
+        // app with a half-built stack.
+        const std::string& mode = command.text;
+        if (mode != "forward" && mode != "rt") {
+          reply.ok = false;
+          reply.error = "set_render_mode needs mode=\"forward\"|\"rt\"";
+          break;
+        }
+        if (mode == "rt") {
+          if (!app_.rt_stack_built) {
+            if (!setup_rt_shadows(app_)) {
+              reply.ok = false;
+              reply.error = "rt stack unavailable on this device";
+              break;
+            }
+            app_.rt_stack_built = true;
+          }
+          app_.rt_mode = true;
+          reply.detail = "render mode rt";
+        } else {
+          app_.rt_mode = false;
+          reply.detail = "render mode forward";
+        }
+        break;
+      }
+      case CK::GetRenderMode:
+        reply.detail =
+            std::string("{\"mode\":\"") + (app_.rt_mode ? "rt" : "forward") +
+            "\"}";
+        break;
       // W1: scrub commands ride the session (single mutation authority);
       // the host mirrors the resulting state change so the frame loop
       // rebuilds the scene + node view.
@@ -928,7 +966,9 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
     for (const auto& object : app_.scene.objects) {
       if (object.mesh != nullptr && object.mesh->is_drawable()) ++drawn;
     }
-    std::string json = "{\"scene\":\"";
+    std::string json = "{\"render_mode\":\"";
+  json += app_.rt_mode ? "rt" : "forward";
+  json += "\",\"scene\":\"";
     json += app_.sponza_enabled ? "city+sponza" : (app_.city_scene ? "city" : "cubes");
     json += "\",\"paused\":";
     json += app_.control_paused_ ? "true" : "false";
