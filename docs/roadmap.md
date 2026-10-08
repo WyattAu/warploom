@@ -343,9 +343,11 @@ declares a slot 3.
 
 ## Phase D — the three thin products
 
-- [ ] **D1 real physics** — extract `warploom-physics`; broadphase, shapes,
-      joints, XPBD substepping, speculative contacts; deterministic by
-      construction. Today: 204 lines, spheres, O(n²).
+- [ ] **D1 real physics** — extract `warploom-physics`; more shapes, joints,
+      XPBD substepping, speculative contacts; deterministic by construction.
+      Today: ~420 lines in core (deterministic uniform-grid broadphase with
+      frozen-snapshot detection, spheres, sequential positional correction,
+      single pass).
 
       **Measured blocker for the broadphase.** A conservative uniform grid was
       written, verified result-preserving at N=1000 (fingerprint identical,
@@ -393,8 +395,13 @@ declares a slot 3.
       `kBroadphaseMaxCandidates` falls back to the complete pair list rather
       than dropping pairs, which was the old version's failure mode.
 
-      Remaining in D1: the solver is still spheres-only with single-iteration
-      contact resolution, there are no joints or shapes, and
+      Iterated positional correction landed: `set_solver_iterations(n)` runs
+      n Gauss-Seidel passes over the FROZEN contact list (the set stays a pure
+      function of the snapshot; later passes re-read live positions, which is
+      what pushes out residual overlap earlier passes created). Verified by a
+      6-body tower test: more passes -> measurably less sink at the top,
+      bit-identical replay fingerprints at any count, and count=1 reproduces
+      the historical settle. Remaining: spheres-only, no joints or shapes, and
       `warploom::physics` is still header-only inside core rather than its own
       package.
 - [x] **D2a interpolated, eased track evaluation** — `TimelineClip::evaluate_at`

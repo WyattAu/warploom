@@ -5,6 +5,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdio>
+#include <string>
+
 #include <cmath>
 #include <cstdint>
 #include <set>
@@ -165,6 +168,75 @@ TEST(PhysicsWorld, StackedBodiesSettleWithoutExplosion) {
   EXPECT_LT(std::fabs(w.body(1).velocity[1]), 0.1f);
 }
 
+// Iterated positional correction: more passes over the SAME frozen contact
+// list must (a) leave a settled stack FIRMER (upper sphere closer to rest
+// height), (b) stay deterministic run-to-run, and (c) not change the
+// single-pass result when the count is 1 (bit-compatibility with the
+// historical solver, which the broadphase equivalence test depends on).
+TEST(PhysicsWorld, SolverIterationsFirmStackAndDeterminism) {
+  auto settle = [](std::uint32_t iterations) {
+    PhysicsWorld w(-9.81f);
+    w.set_solver_iterations(iterations);
+    // 6-body tower: sink accumulates with stack depth, which is where the
+    // iteration count actually shows. Radius 0.5, rest heights 0.5..3.0.
+    for (std::uint32_t i = 0; i < 6U; ++i) {
+      PhysicsBody b;
+      b.position[1] = 0.5f + 1.0f * static_cast<float>(i);
+      b.restitution = 0.0f;
+      (void)w.add_body(b);
+    }
+    for (std::size_t i = 0; i < static_cast<std::size_t>(600); ++i) {
+      w.step(kDt);
+    }
+    // Sink = how far the TOP sphere sits below its rest height (3.0). Less
+    // sink = firmer stack. Also capture the mean height as the fingerprint
+    // payload.
+    float top = w.body(5).position[1];
+    double sum = 0.0;
+    for (std::uint32_t i = 0; i < 6U; ++i) {
+      sum += static_cast<double>(w.body(i).position[1]);
+    }
+    // Determinism: replay the whole settle and require bit-identical state.
+    PhysicsWorld w2(-9.81f);
+    w2.set_solver_iterations(iterations);
+    for (std::uint32_t i = 0; i < 6U; ++i) {
+      PhysicsBody b;
+      b.position[1] = 0.5f + 1.0f * static_cast<float>(i);
+      b.restitution = 0.0f;
+      (void)w2.add_body(b);
+    }
+    for (std::size_t i = 0; i < static_cast<std::size_t>(600); ++i) {
+      w2.step(kDt);
+    }
+    double sum2 = 0.0;
+    for (std::uint32_t i = 0; i < 6U; ++i) {
+      sum2 += static_cast<double>(w2.body(i).position[1]);
+    }
+    char fp[128];
+    std::snprintf(fp, sizeof(fp), "%.9f|%.9f", sum, sum2);
+    return std::pair<float, std::string>(3.0f - top, fp);
+  };
+
+  const auto one = settle(1U);
+  const auto eight = settle(8U);
+
+  // (c) count 1 reproduces the historical single-pass settle.
+  PhysicsWorld w1(-9.81f);
+  PhysicsBody l1; l1.position[1] = 0.5f; l1.restitution = 0.0f;
+  PhysicsBody u1; u1.position[1] = 1.5f; u1.restitution = 0.0f;
+  (void)w1.add_body(l1);
+  (void)w1.add_body(u1);
+  for (std::size_t i = 0; i < static_cast<std::size_t>(600); ++i) w1.step(kDt);
+  EXPECT_EQ(one.second, settle(1U).second) << "nondeterministic at n=1";
+  EXPECT_NEAR(w1.body(1).position[1], 1.5f, 0.1f);
+
+  // (a) more passes -> firmer stack (upper sphere nearer its rest height
+  // 1.5 = lower radius + upper radius above the lower sphere's rest center).
+  EXPECT_LT(eight.first, one.first)
+      << "more iterations did not reduce stack sink";
+  // (b) determinism at n=8: the fingerprint repeats.
+  EXPECT_EQ(eight.second, settle(8U).second) << "nondeterministic at n=8";
+}
 }  // namespace
 
 // The first broadphase attempt produced a bit-identical fingerprint at N=1000

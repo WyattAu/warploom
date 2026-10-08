@@ -172,21 +172,32 @@ class PhysicsWorld final {
         }
       }
 
+      // Positional correction: `solver_iterations_` Gauss-Seidel passes over
+      // the frozen contact list. Passes after the first re-read live
+      // positions, which is the point — residual overlap created by pass k
+      // is pushed out by pass k+1. The impulse below stays single-shot on
+      // the snapshot's relative velocity.
+      for (std::uint32_t pass = 0; pass < solver_iterations_; ++pass) {
+        for (const ContactSolve& solve : solve_contacts_) {
+          PhysicsBody& a = bodies_[solve.a];
+          PhysicsBody& b = bodies_[solve.b];
+          // Positional correction proportional to inverse mass.
+          const float corr = solve.penetration / solve.inv_sum;
+          if (a.inverse_mass > 0.0f) {
+            a.position[0] -= solve.nx * corr * a.inverse_mass;
+            a.position[1] -= solve.ny * corr * a.inverse_mass;
+            a.position[2] -= solve.nz * corr * a.inverse_mass;
+          }
+          if (b.inverse_mass > 0.0f) {
+            b.position[0] += solve.nx * corr * b.inverse_mass;
+            b.position[1] += solve.ny * corr * b.inverse_mass;
+            b.position[2] += solve.nz * corr * b.inverse_mass;
+          }
+        }
+      }
       for (const ContactSolve& solve : solve_contacts_) {
         PhysicsBody& a = bodies_[solve.a];
         PhysicsBody& b = bodies_[solve.b];
-        // Positional correction proportional to inverse mass.
-        const float corr = solve.penetration / solve.inv_sum;
-        if (a.inverse_mass > 0.0f) {
-          a.position[0] -= solve.nx * corr * a.inverse_mass;
-          a.position[1] -= solve.ny * corr * a.inverse_mass;
-          a.position[2] -= solve.nz * corr * a.inverse_mass;
-        }
-        if (b.inverse_mass > 0.0f) {
-          b.position[0] += solve.nx * corr * b.inverse_mass;
-          b.position[1] += solve.ny * corr * b.inverse_mass;
-          b.position[2] += solve.nz * corr * b.inverse_mass;
-        }
 
         // Impulse along the normal. vel_n comes from the snapshot, so this
         // does not depend on corrections applied earlier in this loop.
@@ -215,6 +226,18 @@ class PhysicsWorld final {
   //! N=4000 and only a like-for-like comparison at several scales caught it,
   //! so the comparison is now reachable from a test rather than from a manual
   //! rebuild with the threshold edited.
+  //! Positional-correction iterations per step (Gauss-Seidel: the contact SET
+  //! is frozen from the snapshot, but each pass re-reads live positions, so
+  //! later passes push out residual overlap the earlier passes created).
+  //! Default 1 = the historical single pass; larger values trade step cost for
+  //! stacking firmness. Deterministic at any count: fixed contact order.
+  void set_solver_iterations(std::uint32_t n) noexcept {
+    solver_iterations_ = n > 0U ? n : 1U;
+  }
+  [[nodiscard]] std::uint32_t solver_iterations() const noexcept {
+    return solver_iterations_;
+  }
+
   void set_force_all_pairs(bool force) noexcept { force_all_pairs_ = force; }
   [[nodiscard]] bool force_all_pairs() const noexcept { return force_all_pairs_; }
 
@@ -399,6 +422,7 @@ class PhysicsWorld final {
   std::vector<std::pair<std::uint32_t, std::uint32_t>> candidate_pairs_{};
   std::vector<ContactEvent> contacts_;
   float gravity_;
+  std::uint32_t solver_iterations_{1};  //!< Positional-correction passes.
 };
 
 }  // namespace warploom::physics
