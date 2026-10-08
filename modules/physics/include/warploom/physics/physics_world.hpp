@@ -82,6 +82,12 @@ class PhysicsWorld final {
   //! (integrate dt/n, detect, resolve). Smaller increments improve stacking
   //! stability independently of the solver-iteration count (which operates
   //! WITHIN each substep). Default 1 = the historical single increment.
+  //!
+  //! Interaction note: callers may ALSO substep at their level (EditorSession
+  //! does, derived from fixed_dt) — the counts compound (session substeps ×
+  //! world substeps total increments). That is semantically coherent but must
+  //! be chosen deliberately; the default here is 1 so session-driven hosts
+  //! see no change unless they opt in.
   void set_substeps(std::uint32_t n) noexcept { substeps_ = n > 0U ? n : 1U; }
   [[nodiscard]] std::uint32_t substeps() const noexcept { return substeps_; }
 
