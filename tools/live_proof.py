@@ -311,20 +311,61 @@ def proof_g3(c):
           r.get("detail") == "playback was not armed", str(r))
 
 
+def proof_e1(c):
+    """E1/E2 live protocol proofs: render mode + exposure + bloom.
+
+    These commands are HOST-OWNED visuals, so the reply contract differs by
+    host class: the viewport builds its stacks and reports the applied value
+    ("render mode rt", "exposure 2"), a headless host acknowledges without
+    visuals ("render mode acknowledged (host executes)"). What BOTH hosts
+    guarantee is what this proof checks: ok=true on valid payloads, ok=false
+    with a named error on invalid ones, and never a parse failure ("unknown
+    command") -- a missing wire-table entry fails exactly there.
+    """
+    print("E1: render mode + exposure + bloom over the wire")
+    r = c.cmd(cmd="get_render_mode", id=601)
+    check("get_render_mode ok", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="set_render_mode", id=602, mode="forward")
+    check("set_render_mode forward ok", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="set_render_mode", id=603, mode="nonsense")
+    check("bad mode rejected", r.get("ok") is False, str(r))
+    check("bad mode named error",
+          "set_render_mode" in r.get("error", ""), str(r))
+
+    r = c.cmd(cmd="set_exposure", id=604, exposure=2.0)
+    check("set_exposure ok", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="set_exposure", id=605)
+    check("exposure without arg rejected", r.get("ok") is False, str(r))
+
+    r = c.cmd(cmd="set_bloom", id=606, enable=1)
+    check("set_bloom on ok", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="set_bloom", id=607, enable=0)
+    check("set_bloom off ok", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="set_bloom", id=608)
+    check("bloom without arg rejected", r.get("ok") is False, str(r))
+
+    # Session health after the visual churn: the sim still steps.
+    r = c.cmd(cmd="step", id=609, ticks=1)
+    check("sim steps after mode churn", r.get("ok") is True, str(r))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("proof", choices=["w1", "g1", "w2", "g3", "all"])
+    parser.add_argument(
+        "proof", choices=["w1", "g1", "w2", "g3", "e1", "all"])
     parser.add_argument("--sock", default="/tmp/omnicpp_hw.sock")
     parser.add_argument("--sock-a", default="/tmp/omnicpp_w2a.sock")
     parser.add_argument("--sock-b", default="/tmp/omnicpp_w2b.sock")
     args = parser.parse_args()
 
-    if args.proof in ("w1", "g1", "all"):
+    if args.proof in ("w1", "g1", "e1", "all"):
         c = Client(args.sock)
         if args.proof in ("w1", "all"):
             proof_w1(c)
         if args.proof in ("g1", "all"):
             proof_g1(c)
+        if args.proof in ("e1", "all"):
+            proof_e1(c)
     if args.proof in ("w2", "all"):
         proof_w2(Client(args.sock_a), Client(args.sock_b))
     if args.proof in ("g3", "all"):

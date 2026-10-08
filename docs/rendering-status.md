@@ -108,7 +108,7 @@ The one subsystem that needs no caveat.
 | Document save/load, atomic write, undo boundaries | yes | yes | protocol-path test + 16-assertion proof |
 | Protocol record/replay (`warploom-replay-v1`) | yes | yes | `test_command_recorder`, 19-assertion two-instance proof |
 | Timeline clips as document entities | yes | no | 8 tests + 27-assertion proof; the widget has no app caller |
-| Live socket proof harness | — | — | `tools/live_proof.py all` → **64/64 assertions** |
+| Live socket proof harness  + `e1` (render mode/exposure/bloom wire contract)| — | — | `tools/live_proof.py all` → **64/64 assertions** |
 
 **The determinism story stops at physics.** The viewport steps physics in
 the wall-clock frame loop rather than the fixed tick, the headless host
