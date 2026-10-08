@@ -522,6 +522,20 @@ declares a slot 3.
 - [ ] **D3 game depth** — ECS as the app's data model, scene management,
       **G4 script node**, G2 subgraph copy/paste, G5 asset browser.
 
+      G4 sizing (the next step): the engine half is a `script` node type whose
+      node holds a module path; at graph tick it calls the module's
+      `warploom_module_tick(dt, in, n_in, out, n_out)` and maps outputs to the
+      node's out-pins, exactly like the existing math nodes feed bindings
+      (M10). `ScriptModule` already loads dlopen'd modules AND a builtin
+      in-process module (built for headless tests), so the engine half is
+      verifiable without any .so: register the type against the builtin, tick
+      it, assert the out-pin value. The module-fixture ABI header
+      (tests/module_fixture/module_abi.h) documents the tick contract. Editor
+      UI (a row per out-pin) and the viewport wiring follow the math-node
+      pattern. Determinism: module ticks must be pure functions of (dt,
+      inputs) — the ABI header already states it — and they slot into the
+      graph's existing tick order, so replay determinism inherits.
+
 ## Phase E — release
 
 - [x] **E1 render modes as protocol commands** — DONE (protocol v1.9).
@@ -582,7 +596,10 @@ declares a slot 3.
 3. **Demo story works** — record, replay, scrub, save/load, proven over the
    live protocol. **Met** for everything except physics (C3).
 4. **Signature render feature** — R1 path tracing, toggleable in the
-   viewport. **Not met** (E1, E2).
+   viewport. **Not met (R1)**. The E1/E2 unblocks landed: render mode is a
+   protocol command with a build-once RT stack, the live-proof harness covers
+   the mode/exposure/bloom wire contract, and the RT pipeline + PT shaders are
+   test-proven — R1 is now a viewport integration, not an engine gap.
 
 It commits to a scope, not a date.
 
