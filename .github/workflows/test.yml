@@ -355,7 +355,7 @@ jobs:
           test "$n" -ge 70
 
       - name: Upload the viewport binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: warploom-viewport
           path: build/default/bin/warploom_viewport
