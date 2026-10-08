@@ -39,6 +39,26 @@ assessment, fit/cost, and what was adopted vs deliberately not.
 - Cross-platform float determinism build flag — no cross-platform product
   requirement yet; tests pin same-binary determinism.
 
+## Loops 2–10 notes
+
+- [loop2-rigid-rotation.md](loop2-rigid-rotation.md) — rotation in PBD
+  (Müller tutorial 22; Tobin/Rucker Lie theory arXiv:2608.23606; PBD-R
+  arXiv:2603.14634; PBRBD survey arXiv:2311.09327). Sequenced adoption arc.
+- [loop3-joints-broadphase.md](loop3-joints-broadphase.md) — XPBD joints
+  (Müller tutorial 25), Morton BVH / SAP / spatial-hash comparison. Distance
+  joint adopted-after-rotation; Morton BVH recorded with a numeric trigger.
+- [loop4-6-transient-determinism-pt.md](loop4-6-transient-determinism-pt.md)
+  — transient allocation from the graph, the per-step determinism validator
+  (Jolt's record-rewind-replay check), PT accumulation as a product feature.
+  The cross-loop conclusion: pre-allocation beats create-when-enabled, and
+  the determinism contract is a FILTER that picks techniques whose state is
+  derivable from the snapshot.
+- [loop7-10-scripting-ecs-determinism-pt.md](loop7-10-scripting-ecs-determinism-pt.md)
+  — dataflow vs exec-wire scripting (our pull model is the replay-correct
+  one), ECS scheduling (sparse-set fits; archetype only on measured need),
+  -ffp-contract=off (ADOPTED — the most dangerous cross-build
+  nondeterminism source), SVGF denoising (v1 PT ships pause-to-converge).
+
 ## Follow-up searches for the next loop
 
 - Visual-scripting execution models (dataflow pull vs imperative push, and

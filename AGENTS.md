@@ -85,7 +85,14 @@ involved, say so and skip the research section rather than padding it.
   `#if OMNICPP_HAS_VULKAN` — that macro is defined with no value, so `#if`
   silently evaluates false and the Vulkan include vanishes. This has cost real
   build cycles.
-- **Determinism is a product feature.** Anything reachable from a tick must not
+- **Floating-point determinism contract.** `-ffp-contract=off` is set on every
+compiler that supports it: FMA contraction under -O2 is the most dangerous
+cross-build nondeterminism source (two compiles of the same source can produce
+different physics fingerprints). Do not add `-march=native`-style flags or
+platform libm calls (sin/cos/tan) reachable from a tick — the replay contract
+depends on the op sequence being a pure function of source + flags.
+
+**Determinism is a product feature.** Anything reachable from a tick must not
   read wall-clock time, iterate an unordered container, or depend on thread
   scheduling. If a change makes a recorded run unreproducible, that is a
   regression even when every test passes.

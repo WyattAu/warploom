@@ -85,7 +85,18 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     include(CheckCXXCompilerFlag)
 
     # Always available on both.
-    set(_warploom_always_warnings
+    # Floating-point determinism contract (research loop 9, docs/research/
+# loop7-10): FMA contraction under -O2 is the single most dangerous
+# cross-build nondeterminism source — two compiles of the same source can
+# produce different physics fingerprints. Off on every compiler that supports
+# the flag; the ~1% codegen cost is the price of the replay product.
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-ffp-contract=off" HAVE_FP_CONTRACT_OFF)
+if(HAVE_FP_CONTRACT_OFF)
+    add_compile_options(-ffp-contract=off)
+endif()
+
+set(_warploom_always_warnings
         -Wall
         -Wextra
         -Wpedantic
