@@ -182,8 +182,8 @@ declares a slot 3.
       the stale one. Covered by `SelectsTheDepthTheSceneWrote`, which fails if
       the fallback comes back.
 
-- [ ] **B5b an occlusion consumer** — the pyramid is still built and thrown
-      away. There is no occlusion shader that matches the viewport's *split*
+- [x] **B5b an occlusion consumer** — DONE (increments 1+2 below). Was: the
+      pyramid is built and thrown away. There is no occlusion shader that matches the viewport's *split*
       cull ABI: `cull_and_draw_lod.comp` (what the app uses, via
       `record_gpu_driven_cull`) has no pyramid binding, and the two shaders
       that do read occlusion do not fit —
@@ -509,15 +509,16 @@ declares a slot 3.
       Compose is now the largest segment, which is the first real perf signal
       this engine has produced and was not available before this fix.
 
-- [ ] **Intermittent segfault in the threaded scheduler test** — observed once
-      in roughly five full-suite runs:
-      `SystemScheduler.ParallelExecutionRunsIndependentSystemsConcurrently`,
-      which drives a 4-thread `ThreadPool` through `run_parallel`. Three
-      consecutive full runs after that were clean, and the test passes 5/5 in
-      isolation, so it is a rare race rather than a deterministic failure. It
-      predates this work (nothing in the session touches `ThreadPool`,
-      `SystemScheduler`, or that test). Not fixed: a threading race needs its
-      own investigation and a stress harness, not a drive-by patch.
+- [x] **Intermittent segfault in the threaded scheduler test** — FIXED.
+      ThreadSanitizer (runnable once the tsan preset built) reproduced it with
+      full stacks: `run_parallel` incremented its completion counter outside
+      the mutex and locked only to `notify_one`, so the main thread could wake
+      and destroy the mutex/condvar while a worker was inside `notify_one`.
+      Replaced with C++20 atomic `wait`/`notify_one`, where the notify is part
+      of the atomic operation. Honest evidence note in AGENTS.md: the A/B is
+      not statistically conclusive on this loaded machine; the fix is certain
+      structurally — the old ordering was undefined by the standard, the new
+      one has no window.
 - [ ] **D3 game depth** — ECS as the app's data model, scene management,
       **G4 script node**, G2 subgraph copy/paste, G5 asset browser.
 
@@ -529,8 +530,12 @@ declares a slot 3.
       GPU-driven skinned scenes, exposure/bloom controls.
 - [ ] **E3 hardware CI runner** — every RT test skips on lavapipe, so the
       best subsystem has the least regression protection.
-- [ ] **E4 warning debt, then `-Werror`** — ~270 warnings, then
-      `WARPLOOM_WARNINGS_AS_ERRORS=ON` in CI.
+- [x] **E4 warning debt, then `-Werror`** — DONE. All four presets build
+      warning-free on BOTH clang and GCC (the GCC gap held the only
+      memory-safety findings: dangling-pointer and null-dereference classes),
+      and the sanitizer presets already build with
+      `WARPLOOM_WARNINGS_AS_ERRORS=ON`. Paying the debt found real bugs, not
+      style: see AGENTS.md's inventory.
 - [ ] **E5 formatting** — apply `.clang-format`, then `format-check` gates.
 - [ ] **E6 P1–P4** — WASM leg, native Wayland surface, adoption
       (FetchContent/vcpkg), docs rebrand, GitHub repo rename.
