@@ -43,6 +43,7 @@ add_executable(warploom_unit_tests
     unit/test_replay_scrubber.cpp
     unit/test_command_recorder.cpp
     unit/test_node_graph.cpp
+    unit/test_script_node.cpp
     unit/test_node_persistence.cpp
     unit/test_script_module.cpp
     unit/test_input_state.cpp

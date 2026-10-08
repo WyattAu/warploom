@@ -522,19 +522,21 @@ declares a slot 3.
 - [ ] **D3 game depth** — ECS as the app's data model, scene management,
       **G4 script node**, G2 subgraph copy/paste, G5 asset browser.
 
-      G4 sizing (the next step): the engine half is a `script` node type whose
-      node holds a module path; at graph tick it calls the module's
-      `warploom_module_tick(dt, in, n_in, out, n_out)` and maps outputs to the
-      node's out-pins, exactly like the existing math nodes feed bindings
-      (M10). `ScriptModule` already loads dlopen'd modules AND a builtin
-      in-process module (built for headless tests), so the engine half is
-      verifiable without any .so: register the type against the builtin, tick
-      it, assert the out-pin value. The module-fixture ABI header
-      (tests/module_fixture/module_abi.h) documents the tick contract. Editor
-      UI (a row per out-pin) and the viewport wiring follow the math-node
-      pattern. Determinism: module ticks must be pure functions of (dt,
-      inputs) — the ABI header already states it — and they slot into the
-      graph's existing tick order, so replay determinism inherits.
+      G4 ENGINE HALF DONE: `register_script_node_type`
+      (modules/core/include/warploom/core/script_node.hpp) binds a script
+      module to a node type named "script:<module>" — Number in/out pins sized
+      by the caller, `context_evaluate` calls the module's
+      `warploom_module_tick(dt, inputs, n_in, outputs, n_out)` and maps the
+      returned count onto the out-pins. dt is derived from the graph context's
+      time minus the node's previous evaluation time (0 on first call), never
+      a wall clock, so replay re-simulation reproduces the sequence exactly —
+      verified by DtFollowsTheTickSequence, which also replays the same
+      sequence in a fresh graph and requires byte-identical outputs. Verified
+      without any .so via ScriptModule's builtin path (three tests,
+      ScriptNode.*). Missing inputs evaluate as 0; a module error return
+      leaves outputs 0 — the same failure shape as a math node given garbage.
+      Remaining: editor UI (a row per out-pin) and viewport wiring, plus the
+      .so path through the module fixtures.
 
 ## Phase E — release
 
