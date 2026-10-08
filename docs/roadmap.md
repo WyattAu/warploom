@@ -412,7 +412,19 @@ declares a slot 3.
       The PACKAGE EXTRACTION is done: `modules/physics`
       (Warploom::physics, header-only INTERFACE, own install/package config)
       owns physics_world.hpp; core links it and the include path travels to
-      every core consumer. Remaining: spheres-only, no joints or shapes.
+      every core consumer. Research pass done
+      (docs/research/physics-solver.md — Small Steps SIGGRAPH 2021, MGPBD
+      SIGGRAPH 2025, Jolt architecture + determinism contract, Fiedler
+      timestep canon). Adopted, in order: contact-compliance opt-in (XPBD
+      alpha) + velocity-from-position update (both behind a knob that
+      defaults to the current replay output); island sleeping (union-find
+      over the frozen contact graph — Jolt's per-step rebuild pattern);
+      `WARPLOOM_PHYSICS_DETERMINISM_CHECK` (Jolt's record-rewind-replay
+      double-step validator as a debug flag); capsule shape. Deliberately NOT
+      adopted: warm-start caches (stored solver state breaks snapshot
+      replay), ReSTIR (reservoir stream state), MGPBD (no deformables).
+      Remaining: rotation, joints — each a design arc, sized in
+      docs/research/physics-solver.md.
 - [x] **D2a interpolated, eased track evaluation** — `TimelineClip::evaluate_at`
       takes a fractional frame and an `Easing`, and interpolates Number and
       Vec3 between the bracketing samples. Bool and String hold the earlier
@@ -592,8 +604,19 @@ declares a slot 3.
       every frame — the preserve is now explicit in the chain), plus a live
       socket check that the chain reports the applied value back. The capture
       chain is synced in the same handler, so captured frames cannot silently
-      disagree with the live frame. Remaining: path tracing, RT
-      reflections/AO, skinned gd scenes.
+      disagree with the live frame. Remaining: path tracing (R1), RT
+      reflections/AO (R2), skinned gd scenes (R3) — spec rewritten from the
+      research pass (docs/research/rendering-and-graphs.md): the compose
+      chain pre-allocates ALL resources at initialize (idTech's
+      persistent-feature pattern) so runtime toggles only change which
+      passes record — that inverts the bloom-toggle revert's root cause by
+      design; fullscreen passes move to dynamic rendering (Blade direction,
+      stage 1) so passes stop baking; R1 itself is "offline-quality stepped
+      PT" — pause, accumulate K frames into the rgba32f accum image via the
+      existing deterministic PCG contract, tonemap from accum — deterministic
+      by construction through the record/replay machinery, a capability other
+      PT pipelines do not have. ReSTIR explicitly deferred: reservoir stream
+      state breaks snapshot replay.
 
       (SetBloom was briefly added and REVERTED: see below.)
 
@@ -637,10 +660,15 @@ declares a slot 3.
 3. **Demo story works** — record, replay, scrub, save/load, proven over the
    live protocol. **Met** for everything except physics (C3).
 4. **Signature render feature** — R1 path tracing, toggleable in the
-   viewport. **Not met (R1)**. The E1/E2 unblocks landed: render mode is a
-   protocol command with a build-once RT stack, the live-proof harness covers
-   the mode/exposure/bloom wire contract, and the RT pipeline + PT shaders are
-   test-proven — R1 is now a viewport integration, not an engine gap.
+   viewport. **Not met (R1)** — but the R1 spec now exists
+   (docs/research/rendering-and-graphs.md): "offline-quality stepped PT"
+   through the deterministic record/replay machinery, which turns the
+   accumulation phase into a product capability (pause, converge, read back
+   the converged mean) rather than a per-frame cost. The E1/E2 unblocks
+   landed: render mode is a protocol command with a build-once RT stack, the
+   live-proof harness covers the mode wire contract, and the RT pipeline +
+   PT shaders are test-proven — R1 is a viewport integration with a written
+   design, not an engine gap.
 
 It commits to a scope, not a date.
 

@@ -1,59 +1,48 @@
-# Research notes
+# Research index
 
-One file per technique actually adopted. A file here means the technique is in
-the tree; an idea that was evaluated and rejected belongs in the commit that
-rejected it, not here.
+Status: research notes produced by the 2026-10-08 research loop (10 domains,
+sources verified via arXiv API / vendor docs / engine architecture pages /
+frame-study articles). Per AGENTS.md each note carries source, claim, novelty
+assessment, fit/cost, and what was adopted vs deliberately not.
 
-The point of these notes is not credit, it is falsifiability. A future reader
-should be able to check the claim, check whether it is novel, and check whether
-the numbers came from this codebase or from a paper.
+## Notes
 
-## Required sections
+- [physics-solver.md](physics-solver.md) — XPBD + substepping (Small Steps,
+  SIGGRAPH 2021; MGPBD, SIGGRAPH 2025; Orientation-in-XPBD, arXiv:2608.23606),
+  speculative contacts, island sleeping, Jolt's determinism contract
+  (record-rewind-replay check), Fiedler's fixed-timestep canon.
+- [rendering-and-graphs.md](rendering-and-graphs.md) — Blade tracking-free
+  RHI + global pass barriers (arXiv:2607.26506), idTech 6 frame structure
+  (previous-frame reuse, persistent feature resources), real-time path
+  tracing (ReSTIR lineage, RTXDI), frame-graph transient allocation.
 
-Each note has five parts, in this order:
+## Adopted into the spec
 
-1. **Source** — full citation: authors, title, venue, year, and a stable
-   identifier (DOI, ACM DL, IEEE Xplore, USENIX). Vendor documentation is
-   acceptable for API behaviour and must be labelled as such.
-2. **The claim** — the specific assertion being borrowed, phrased so it can be
-   checked rather than paraphrased into vagueness.
-3. **Novelty assessment** — see below.
-4. **Fit and cost** — why it suits this engine, what it costs in dependencies,
-   determinism consequences, and platform assumptions.
-5. **What was measured here** — numbers from this codebase. A paper's speedup
-   is not this engine's speedup, and the difference is usually the interesting
-   part.
+| Finding | Spec change |
+|---|---|
+| Substepping > iteration for stiffness (Small Steps) | D1: compliance-scaled correction + velocity-from-position behind an opt-in that preserves old replays |
+| Island sleeping via per-step rebuild | D1: union-find over the frozen contact graph, island-granular rest, wake-on-contact |
+| Jolt's per-step determinism validator | D1: `WARPLOOM_PHYSICS_DETERMINISM_CHECK` debug flag (step twice, compare fingerprint) |
+| Persistent feature resources, no lazy creation (idTech) | E2: compose chain pre-allocates ALL resources at init; toggles change pass recording, never rebuild |
+| Dynamic rendering to un-bake passes (Blade direction, stage 1) | R5: fullscreen passes move to dynamic rendering before any GENERAL-layout work |
+| Transient allocation from the graph (frame-graph canon) | R6: compile_graph owns resource declarations/lifetimes; ensure() derives |
+| Stepped deterministic path tracing (replay machinery as the denoiser) | R1 spec rewrite: pause-accumulate-K-frames tonemap mode, ReSTIR deferred |
 
-## On novelty
+## Explicitly not adopted (with reasons)
 
-The honest default is that a technique is **not** novel. Say plainly which of
-these applies:
+- MGPBD multigrid solver — solves high-resolution deformable stiffness; we
+  have no deformables.
+- ReSTIR — reservoir stream state breaks the deterministic replay contract
+  unless serialized into checkpoints; revisit when scene lights exceed ~64.
+- Warm-started sequential impulse + contact caches — stored solver state
+  conflicts with the snapshot-only replay contract at current scene sizes.
+- Cross-platform float determinism build flag — no cross-platform product
+  requirement yet; tests pin same-binary determinism.
 
-- **Standard.** Published, in production use elsewhere. Say where.
-- **A combination.** Two or more published techniques applied together in a way
-  that does not appear in the literature. A combination is a combination; do not
-  upgrade it to "novel".
-- **Actually new.** Requires a specific argument for why the result is new,
-  plus a description of what would falsify it. Be suspicious of this category.
+## Follow-up searches for the next loop
 
-"Does not appear in the literature" means a search was run and is described.
-Not searching and finding nothing is not evidence of absence.
-
-## Source preference
-
-Prefer, in order: ACM Digital Library and SIGGRAPH proceedings; IEEE journals
-and conferences; ACM TOMS and TOG; USENIX ATC and OSDI; peer-reviewed
-dissertations; NVIDIA and AMD developer documentation (for API behaviour only);
-arXiv last.
-
-arXiv is neither peer-reviewed nor archival. A preprint is cited as a preprint
-and never as the settled position on a question.
-
-## Index
-
-| Technique | Source | Status |
-|---|---|---|
-| _(none yet)_ | | |
-
-This index is kept empty rather than aspirational. It fills in when a technique
-lands, not before.
+- Visual-scripting execution models (dataflow vs imperative stacks) for the
+  G4 script node's editor wiring.
+- Asset streaming/browser patterns (G5).
+- ECS scheduling — archetype vs sparse-set vs our bitmap masks, against the
+  SystemScheduler's wave partitioning.
