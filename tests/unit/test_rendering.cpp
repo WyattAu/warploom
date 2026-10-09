@@ -403,6 +403,107 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
                         : t / static_cast<double>(readback.pixels.size());
          }()
       << ")";
+  // E2/R4 bloom probe: the toggle must change the image, must NOT change
+  // compose_generation() (which is what "no rebuild" means observably), and
+  // must work in both directions. It lives here rather than in its own test
+  // because every piece of scaffolding it needs -- a real compose chain, a
+  // present-format stand-in, readback -- is this test's scaffolding already,
+  // and duplicating ~90 lines of it would be worse than one longer test.
+  //
+  // What this replaces: the reverted bloom-toggle attempt. That one created the
+  // bloom side at toggle time and came back BLACK with a device leak. The
+  // difference is structural, not a fix to the same code path -- the resources
+  // now exist from initialize(), so there is no toggle-time creation to order.
+  //
+  // It uses bloom_probe.frag rather than triangle.frag because bloom is a
+  // bright-pass: on a scene peaking at 0.29 luma, on and off are identical by
+  // construction and the assertion would be vacuous.
+  {
+    // The probe scene replaces the pinned one for the duration.
+    omnicpp::render::VulkanPipeline probe_pipeline;
+    ASSERT_TRUE(probe_pipeline
+                    .load_shader_file(context.device(),
+                                      shader_dir + "/triangle.vert.spv")
+                    .is_ok());
+    ASSERT_TRUE(probe_pipeline
+                    .load_shader_file(context.device(),
+                                      shader_dir + "/bloom_probe.frag.spv")
+                    .is_ok());
+    ASSERT_TRUE(probe_pipeline
+                    .create_graphics_pipeline(
+                        context.device(), renderer.hdr_render_pass(),
+                        renderer.hdr_format(), VK_NULL_HANDLE, true, true, false)
+                    .is_ok());
+    renderer.set_pipeline(probe_pipeline.pipeline());
+
+    ASSERT_TRUE(renderer.compose_bloom_available())
+        << "compose shaders loaded but bloom was reported unavailable";
+    const std::uint32_t generation_before = renderer.compose_generation();
+    EXPECT_FALSE(renderer.compose_bloom_enabled())
+        << "config.enable_bloom was false; the chain should start off";
+
+    const auto capture = [&](const char* label) {
+      auto f = renderer.begin_frame();
+      EXPECT_TRUE(f.is_ok()) << label;
+      EXPECT_TRUE(renderer
+                      .record_commands(f.value(),
+                                       present_pass.framebuffer(0U), kSize, kSize)
+                      .is_ok())
+          << label;
+      EXPECT_TRUE(renderer.submit_frame().is_ok()) << label;
+      renderer.wait_idle();
+      return readback_swapchain_image(
+          context.physical_device(), context.device(), context.graphics_queue(),
+          static_cast<std::uint32_t>(context.queue_families().graphics_family),
+          ldr.image(), VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize,
+          VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+          true);
+    };
+
+    const auto off_frame = capture("bloom off frame");
+    ASSERT_GT(off_frame.non_clear_pixels, 0U)
+        << "bloom-OFF frame came back empty -- this is the black-frame "
+           "regression the reverted attempt produced";
+
+    ASSERT_TRUE(renderer.set_bloom_enabled(true));
+    EXPECT_TRUE(renderer.compose_bloom_enabled());
+    EXPECT_EQ(renderer.compose_generation(), generation_before)
+        << "turning bloom on rebuilt the compose chain; the toggle must only "
+           "change which passes record";
+    const auto on_frame = capture("bloom on frame");
+    EXPECT_GT(on_frame.non_clear_pixels, 0U)
+        << "bloom-ON frame came back empty (the reverted attempt's failure)";
+    EXPECT_NE(on_frame.hash, off_frame.hash)
+        << "bloom toggle did not change the composed frame";
+    // The bloom-ON frame is PINNED, not merely "different": a sabotage that
+    // re-introduced a corrupted bright-pass (rendering the down stage into the
+    // HDR pass, the original clear-the-scene bug's shape) still produced a
+    // non-black frame that DIFFERED from bloom-off, so EXPECT_NE alone passed
+    // it. Difference is a weak property; the hash is the strong one.
+    switch (on_frame.canonical_hash) {
+      case 5278270949640476686ULL:  // NVIDIA (RTX 2060)
+        SUCCEED();
+        break;
+      default:
+        ADD_FAILURE() << "unexpected bloom-ON canonical_hash="
+                      << on_frame.canonical_hash;
+        break;
+    }
+
+    ASSERT_TRUE(renderer.set_bloom_enabled(false));
+    EXPECT_FALSE(renderer.compose_bloom_enabled());
+    EXPECT_EQ(renderer.compose_generation(), generation_before)
+        << "turning bloom off rebuilt the compose chain";
+    const auto off_again = capture("bloom off again");
+    EXPECT_EQ(off_again.hash, off_frame.hash)
+        << "bloom off -> on -> off did not return to the original frame; the "
+           "toggle is leaving state behind";
+
+    // Back to the pinned scene for the hash below.
+    renderer.set_pipeline(pipeline.pipeline());
+    probe_pipeline.cleanup(context.device());
+  }
+
   // Restore the pinned exposure and record the frame the hash below pins:
   // the probe leaves 0.25 in the chain, and ensure() deliberately preserves
   // the live value instead of resetting it.

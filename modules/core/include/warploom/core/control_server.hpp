@@ -155,6 +155,14 @@ struct ControlCommand final {
     //   SetExposure: numbers[0] = exposure multiplier ("exposure", required,
     //                clamped by the host to [0.01, 100])
     SetExposure,
+    // v1.10: bloom (E2/R4) — host-owned post-process toggle, live. All bloom
+    // resources exist from initialize(), so this changes which passes record,
+    // never what is built (docs/research/rendering-and-graphs.md, R7).
+    //   SetBloom: numbers[0] = 0/1 ("enabled", required)
+    //   GetBloom: no payload; detail = JSON {"enabled": true|false,
+    //                                        "available": true|false}
+    SetBloom,
+    GetBloom,
   };
 
   //! One entry of the public command-name table: every `Kind` maps to

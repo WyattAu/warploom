@@ -344,8 +344,37 @@ def proof_e1(c):
         r = c.cmd(cmd="set_exposure", id=605)
         check("exposure without arg rejected", r.get("ok") is False, str(r))
 
+    # E2/R4 bloom. Same host-owned class as above; the interesting part is
+    # that toggling it must NOT rebuild anything, which the viewport's
+    # available/enabled report is the observable half of.
+    r = c.cmd(cmd="get_bloom", id=607)
+    check("get_bloom ok", r.get("ok") is True, str(r))
+    if is_visual_host:
+        check("get_bloom reports both fields",
+              '"enabled"' in r.get("detail", "")
+              and '"available"' in r.get("detail", ""), str(r))
+        check("get_bloom reports available",
+              '"available":true' in r.get("detail", "").replace(" ", ""),
+              str(r))
+    r = c.cmd(cmd="set_bloom", id=608, enabled=1)
+    check("set_bloom on ok", r.get("ok") is True, str(r))
+    if is_visual_host:
+        check("bloom reads back on",
+              '"enabled":true' in c.cmd(cmd="get_bloom", id=609)
+              .get("detail", "").replace(" ", ""),
+              str(c.cmd(cmd="get_bloom", id=610)))
+    r = c.cmd(cmd="set_bloom", id=611, enabled=0)
+    check("set_bloom off ok", r.get("ok") is True, str(r))
+    if is_visual_host:
+        check("bloom reads back off",
+              '"enabled":false' in c.cmd(cmd="get_bloom", id=612)
+              .get("detail", "").replace(" ", ""),
+              str(c.cmd(cmd="get_bloom", id=613)))
+        r = c.cmd(cmd="set_bloom", id=614)
+        check("bloom without arg rejected", r.get("ok") is False, str(r))
+
     # Session health after the visual churn: the sim still steps.
-    r = c.cmd(cmd="step", id=606, ticks=1)
+    r = c.cmd(cmd="step", id=615, ticks=1)
     check("sim steps after mode churn", r.get("ok") is True, str(r))
 
 

@@ -126,10 +126,10 @@ small enough to live here, and moving it is a natural early split.
 
 Nothing is claimed without these, on the `default` preset:
 
-- fresh `git clone` → `cmake --preset default` → build → 73 shaders compile
+- fresh `git clone` → `cmake --preset default` → build → 74 shaders compile
 - `ctest` 6/6
 - full unit suite under `VK_LAYER_KHRONOS_validation`: 0 diagnostics, 0 leaks
-- `tools/live_proof.py all` over real sockets: 68/68 (E1 added eight: render mode and exposure wire contract -- valid payloads ok on both host classes, never a parse failure, which is where a missing wire-table entry shows; the viewport's payload-validation and applied-value assertions run when the harness detects a visual host)
+- `tools/live_proof.py all` over real sockets: 71/71 headless (E1 added eight: render mode and exposure wire contract; E2/R4 added three: set_bloom/get_bloom round-trip on the headless host. The bloom payload-validation and read-back assertions are the visual-host half of the E1 proof -- they run when the harness detects a viewport, where the toggle was exercised live on the RTX 2060: on, reads back on, off, reads back off, missing-arg rejected)
 - viewport configurations (hdr, bloom, rt+bloom, no-hdr, node editor): clean
 - pixel A/B against the previous commit where behaviour should be unchanged
 

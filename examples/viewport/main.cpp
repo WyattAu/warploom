@@ -917,6 +917,47 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
                        std::to_string(app_.renderer.compose_exposure()) + ")";
         break;
       }
+      case CK::SetBloom: {
+        // R4 live: bloom's resources all exist from initialize(), so this only
+        // changes which compose stages the next recorded frame runs. The first
+        // attempt created them here and came back black; the pre-allocation is
+        // what makes this a re-record (docs/research/rendering-and-graphs.md,
+        // R7).
+        if (command.number_count < 1U) {
+          reply.ok = false;
+          reply.error = "set_bloom needs enabled=0|1";
+          break;
+        }
+        const bool want = command.numbers[0] != 0.0;
+        const bool applied = app_.renderer.set_bloom_enabled(want);
+        if (!applied && want) {
+          // Distinguished from "compose is off" on purpose: the caller asked
+          // for a feature this chain cannot do, and saying so beats a silent
+          // no-op that looks like a renderer bug.
+          reply.ok = false;
+          reply.error = app_.renderer.hdr_compose_active()
+                            ? "bloom unavailable (compose shaders missing)"
+                            : "set_bloom needs the HDR compose chain enabled";
+          break;
+        }
+        // The capture chain is a SECOND instance (B3b); leaving it alone would
+        // let a captured frame disagree with the live frame, which is the same
+        // defect the exposure handler above exists to prevent.
+        if (app_.capture_chain != nullptr) {
+          app_.capture_chain->set_bloom_enabled(want);
+        }
+        reply.detail =
+            std::string("bloom ") + (want ? "on" : "off") + " (available=" +
+            (app_.renderer.compose_bloom_available() ? "true" : "false") + ")";
+        break;
+      }
+      case CK::GetBloom:
+        reply.detail =
+            std::string("{\"enabled\":") +
+            (app_.renderer.compose_bloom_enabled() ? "true" : "false") +
+            ",\"available\":" +
+            (app_.renderer.compose_bloom_available() ? "true" : "false") + "}";
+        break;
       // W1: scrub commands ride the session (single mutation authority);
       // the host mirrors the resulting state change so the frame loop
       // rebuilds the scene + node view.

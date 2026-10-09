@@ -2,8 +2,12 @@
 
 Status: research notes produced by the 2026-10-08 research loop (10 domains,
 sources verified via arXiv API / vendor docs / engine architecture pages /
-frame-study articles). Per AGENTS.md each note carries source, claim, novelty
-assessment, fit/cost, and what was adopted vs deliberately not.
+frame-study articles) and the 2026-10-09 second pass
+(loop11-frontier-audit.md), which re-ran the survey through ACM DL /
+Eurographics DL / WSCG / peer-reviewed workshops after the first pass was
+correctly judged too arXiv-heavy. Per AGENTS.md each note carries source,
+claim, novelty assessment, fit/cost, and what was adopted vs deliberately
+not.
 
 ## Notes
 
@@ -59,6 +63,21 @@ assessment, fit/cost, and what was adopted vs deliberately not.
   -ffp-contract=off (ADOPTED — the most dangerous cross-build
   nondeterminism source), SVGF denoising (v1 PT ships pause-to-converge).
 
+## Loop 11 — the non-arXiv second pass
+
+- [loop11-frontier-audit.md](loop11-frontier-audit.md) — the first pass was
+  arXiv-heavy and abstract-level; this one re-ran the survey through ACM
+  (PACMCGIT/HPG 2026, DOIs), Eurographics DL (HPG 2025), WSCG journal, a
+  peer-reviewed ECS workshop study, and vendor documentation (NRD, FSR 4 /
+  Redstone, RTXPT — labelled as vendor docs throughout). Outcomes: R6 gains
+  the history-resources-never-alias invariant (Sandu & Shcherbakov, WSCG
+  2023, measured ~10% memory at Dagor/Enlisted scale); the ECS storage
+  question is CLOSED with a measured ~10k-entity crossover (Cox et al., CGVC
+  2025); the ReSTIR/denoiser deferrals survive 2026 literature with sharper
+  reasons; R3's eventual RT-skinned design has a named technique
+  (tetrahedral cage, HPG 2026). Also records a DOI collision in the HPG 2026
+  diglib export, worked around by title+authors citation.
+
 ## Follow-up searches for the next loop
 
 - Visual-scripting execution models (dataflow pull vs imperative push, and
@@ -68,8 +87,14 @@ assessment, fit/cost, and what was adopted vs deliberately not.
   buffer (render pass reports which tiles are needed) is the closest shipped
   analogue to a browser that reflects runtime state.
 - ECS scheduling — archetype (Bevy/Unity DOTS) vs sparse-set (EnTT) vs our
-  bitmap masks, against the SystemScheduler's wave partitioning; the question
-  to research is whether component-mask waves lose to archetype iteration at
-  our entity counts.
+  bitmap masks, against the SystemScheduler's wave partitioning. CLOSED by
+  loop11 (Cox et al., CGVC 2025): the implementations are statistically
+  indistinguishable at 100/1,000 entities and archetype only wins from
+  ~10,000 (2x at 50k), while sparse-set wins add/remove by ~6.6x. Our scale
+  is three orders below the crossover; revisit only above a measured 10k
+  entities with hot structural churn.
 - ReSTIR DI/GI with serialized reservoirs — revisit if the replay format
-  gains a generic blob-payload section for solver state.
+  gains a generic blob-payload section for solver state. (Loop 11
+  sharpened this: the HPG 2026 spatial-reuse improvement changes reuse
+  quality, not the reservoir STATE that breaks replay, so the deferral is
+  about state, and stays.)

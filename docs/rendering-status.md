@@ -31,7 +31,11 @@ Two verification milestones worth knowing when reading the Proof column:
   compose on (the old capture refused under compose). Equivalence across
   the extraction is pinned: the LDR capture is byte-identical old-vs-new,
   and `VulkanHardware.HeadlessComposeFrameGoldenHash` pins the composed
-  frame's canonical hash (16601212335261142594, RTX 2060).
+  frame's canonical hash (16601212335261142594, RTX 2060) — plus, since the
+  bloom re-land, the bloom-ON frame's hash (5278270949640476686) and the
+  toggle's no-rebuild contract (`compose_generation()` identical across
+  on/off; off→on→off returns bit-identically). All bloom resources are
+  pre-allocated at initialize; a toggle only changes which stages record.
 
 ## Legend
 
@@ -52,7 +56,7 @@ Two verification milestones worth knowing when reading the Proof column:
 | `record_pbr_frame_gpu_driven` (one-submission GPU-driven frame) | yes | partial — the app drives the two halves separately (`record_gpu_driven_cull`, `record_gpu_driven_draw`) because it renders a shadow pass between them | `test_gpu_driven_frame`, `test_gpu_driven_occlusion_frame`; app A/B is 100% byte-identical |
 | `VulkanOffscreenTarget` | yes | **test-only** | 28 test files |
 | Post: fullscreen pass, ACES tonemap, FXAA | yes | yes — `RendererConfig::enable_hdr_compose`; the app renders into a float intermediate and tonemaps into the swapchain | `test_postprocessing`; app verified under validation in 8 configurations |
-| Bloom (Karis downsample + tent upsample) | yes | yes — opt-in via `RendererConfig::enable_bloom` (`WARPLOOM_BLOOM=1`) | `test_postprocessing` |
+| Bloom (Karis bright-pass downsample; the tonemap's binding-1 add IS the upsample) | yes | yes — opt-in via `RendererConfig::enable_bloom` (`WARPLOOM_BLOOM=1`), runtime-togglable via `set_bloom` (v1.10) | `test_postprocessing`; the chain's bloom-on frame pinned by hash, toggle round-trip bit-identical, live wire proof on the RTX 2060 |
 | PBR (Cook-Torrance, metallic-roughness, bindless, tangent-space normals, emissive) | yes | yes | `test_pbr_scene`; the app's own fragment path |
 | IBL: prefiltered env + irradiance + BRDF LUT bake | yes | yes | `test_pbr_ibl`; `VulkanIblBaker` is called by the app |
 | Analytic sky (Rayleigh + Mie, sun disc) | yes | partial | `test_sky_integration`; the app only uses it *baked into* IBL |
@@ -108,7 +112,7 @@ The one subsystem that needs no caveat.
 | Document save/load, atomic write, undo boundaries | yes | yes | protocol-path test + 16-assertion proof |
 | Protocol record/replay (`warploom-replay-v1`) | yes | yes | `test_command_recorder`, 19-assertion two-instance proof |
 | Timeline clips as document entities | yes | no | 8 tests + 27-assertion proof; the widget has no app caller |
-| Live socket proof harness  + `e1` (render mode/exposure/bloom wire contract)| — | — | `tools/live_proof.py all` → **64/64 assertions** |
+| Live socket proof harness  + `e1` (render mode/exposure/bloom wire contract)| — | — | `tools/live_proof.py all` → **71/71 assertions** headless; the visual-host half (payload validation + bloom read-back) passed on the RTX 2060 viewport |
 
 **The determinism story stops at physics.** The viewport steps physics in
 the wall-clock frame loop rather than the fixed tick, the headless host

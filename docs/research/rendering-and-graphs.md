@@ -126,6 +126,21 @@ exact sizes). Adopted as R6: compile_graph gains `resources` declarations and
 `ensure_compose_resources` becomes derived, eliminating the manual
 width/height plumbing that the capture chain duplicated.
 
+**R6 invariant, set before any allocator code exists (loop 11).** Sandu &
+Shcherbakov, "A Resource Allocation Algorithm for a History-Aware Frame
+Graph" (Journal of WSCG 31(1-2):63-70, 2023 — peer-reviewed, implementation-
+backed in Gaijin's Dagor Engine, Enlisted: 81 nodes, 27 resources, 14 with
+history reads): nearly half a shipped engine's graph resources are read
+across the frame boundary, and the naive "never alias history resources"
+rule costs ~10% memory (6 MB) at their scale, which is why they built a
+cyclic-time allocator. The invariant we take from it costs almost nothing at
+ours: resources with cross-frame reads (our H-Z packed pyramid already is
+one; exposure/compose history will join it) are NEVER candidates for
+transient aliasing — only pure-in-frame lifetimes participate. Writing this
+down now forecloses the exact bug class (a transient aliased over pyramid
+history) the paper exists to prevent, and it is the difference between R6's
+allocator being correct-by-construction or correct-by-luck.
+
 ## R10. What the idTech study says about our gd/renderer split
 
 The velocity map produced during DOOM's depth pre-pass (dynamic objects write

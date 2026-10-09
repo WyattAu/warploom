@@ -161,6 +161,10 @@ struct RendererConfig {
   float exposure{1.0f};
   //! Two-stage bloom: one half-resolution downsample, then one tent upsample
   //! added back by the tonemap shader. Ignored when enable_hdr_compose is off.
+  //!
+  //! This is the INITIAL state only. Every bloom resource is allocated
+  //! regardless of this value, so set_bloom_enabled() switches it at runtime
+  //! without rebuilding anything (docs/research/rendering-and-graphs.md, R7).
   bool enable_bloom{false};
   //! Half-resolution bloom buffer edge, in pixels.
   std::uint32_t bloom_downscale{2};
@@ -240,6 +244,21 @@ public:
   //! when compose is off (there is no tonemap to ask).
   [[nodiscard]] float compose_exposure() const noexcept {
     return compose_ != nullptr ? compose_->exposure() : -1.0f;
+  }
+
+  //! Live bloom toggle (E2/R4). Forwarded to the compose chain; a no-op when
+  //! compose is off. Returns the state in effect: false means the request was
+  //! refused because the chain was built without the bloom shaders, which is
+  //! reported rather than silently ignored.
+  bool set_bloom_enabled(bool enabled) noexcept {
+    return compose_ != nullptr && compose_->set_bloom_enabled(enabled);
+  }
+  [[nodiscard]] bool compose_bloom_enabled() const noexcept {
+    return compose_ != nullptr && compose_->bloom_enabled();
+  }
+  //! True when the chain has bloom pipelines, i.e. toggling ON is possible.
+  [[nodiscard]] bool compose_bloom_available() const noexcept {
+    return compose_ != nullptr && compose_->bloom_available();
   }
 
   // --- HDR compose introspection ---------------------------------------

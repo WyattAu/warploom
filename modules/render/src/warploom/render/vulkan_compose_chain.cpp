@@ -52,11 +52,18 @@ namespace warploom::render {
   // frames), but record_commands calls ensure() every frame and this copy
   // would silently reset it to the start-up value before each record -- which
   // is exactly what the two-exposure probe caught: setter applied, frames
-  // unchanged, both records logged 1.0. Every other field is legitimately
-  // owned by the renderer's frozen config; exposure is not.
+  // unchanged, both records logged 1.0. Bloom's live toggle is the same class
+  // of control and gets the same treatment: config_.enable_bloom seeds
+  // bloom_enabled_ ONCE (below, guarded by "first ensure"), and the live
+  // value survives every later ensure().
   const float live_exposure = config_.exposure;
+  const bool live_bloom = bloom_enabled_;
+  const bool first_ensure = !allocator_;
   config_ = config;
   config_.exposure = live_exposure;
+  if (!first_ensure) {
+    config_.enable_bloom = live_bloom;
+  }
   present_pass_ = present_pass;
   present_format_ = present_format;
   if (compose_failed_) {
@@ -119,34 +126,31 @@ namespace warploom::render {
         {0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
          VK_SHADER_STAGE_FRAGMENT_BIT},
         {0, 1, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-         VK_SHADER_STAGE_FRAGMENT_BIT}}, 1U);
+         VK_SHADER_STAGE_FRAGMENT_BIT}}, 2U);
     if (!layout.is_ok()) return refuse("compose descriptor layout failed");
     compose_layout_ = layout.value();
     auto set = descriptor_manager_->allocate_set(compose_layout_);
     if (!set.is_ok()) return refuse("compose descriptor set failed");
     compose_set_ = set.value();
+    // Two tonemap sets, not one: the bloom toggle binds whichever is already
+    // written, so switching costs nothing at runtime. Capacity 2 matches.
+    auto nobloom_set = descriptor_manager_->allocate_set(compose_layout_);
+    if (!nobloom_set.is_ok()) return refuse("compose (no-bloom) set failed");
+    compose_set_nobloom_ = nobloom_set.value();
 
-    // Only when bloom is on: these sets are otherwise dead weight, and
-    // allocating them unconditionally exhausted the pool and silently
-    // disabled compose altogether.
-    if (config_.enable_bloom) {
-      // Capacity 2: one set per bloom stage, sharing this single-binding
-      // layout. create_layout sizes the pool from sets_to_reserve, so
-      // allocating two sets from a layout reserved for one fails.
-      auto stage_layout = descriptor_manager_->create_layout({
-          {0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-           VK_SHADER_STAGE_FRAGMENT_BIT}}, 2U);
-      if (!stage_layout.is_ok()) return refuse("bloom stage layout failed");
-      bloom_stage_layout_ = stage_layout.value();
-      auto down_set =
-          descriptor_manager_->allocate_set(bloom_stage_layout_);
-      if (!down_set.is_ok()) return refuse("bloom downsample set failed");
-      bloom_down_set_ = down_set.value();
-      auto up_set =
-          descriptor_manager_->allocate_set(bloom_stage_layout_);
-      if (!up_set.is_ok()) return refuse("bloom upsample set failed");
-      bloom_up_set_ = up_set.value();
-    }
+    // The bloom stage set is allocated UNCONDITIONALLY. The original code
+    // allocated it only when bloom was on, "because otherwise they are dead
+    // weight" -- which is precisely the lazy-create anti-pattern that made the
+    // runtime toggle a rebuild. One extra combined-image-sampler descriptor is
+    // not a memory concern; a toggle that has to build pipelines at runtime is.
+    auto stage_layout = descriptor_manager_->create_layout({
+        {0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+         VK_SHADER_STAGE_FRAGMENT_BIT}}, 1U);
+    if (!stage_layout.is_ok()) return refuse("bloom stage layout failed");
+    bloom_stage_layout_ = stage_layout.value();
+    auto down_set = descriptor_manager_->allocate_set(bloom_stage_layout_);
+    if (!down_set.is_ok()) return refuse("bloom downsample set failed");
+    bloom_down_set_ = down_set.value();
   }
 
   if (hdr_sampler_ == VK_NULL_HANDLE) {
@@ -273,7 +277,6 @@ namespace warploom::render {
   // module, which fails its argument check with no diagnostic.
   const auto build_pipelines = [&]() -> bool {
     VkDescriptorSetLayout layouts[1] = {compose_layout_};
-    VkDescriptorSetLayout stage_layouts[1] = {bloom_stage_layout_};
     VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT, 0U, 16U};
     if (compose_pipeline_ == nullptr) compose_pipeline_ = std::make_unique<VulkanPipeline>();
     compose_pipeline_->cleanup();
@@ -286,8 +289,17 @@ namespace warploom::render {
     if (!compose_pipeline_->create_pipeline_layout(device_, layouts, 1U, &push).is_ok()) {
       return false;
     }
-    if (!config_.enable_bloom) return true;
+    return true;
+  };
 
+  // Bloom pipelines are built too, so the toggle stays a re-record rather than
+  // a rebuild. Failure here is NOT fatal: a compose_shader_dir without the
+  // bloom shaders still yields a working tonemap, and set_bloom_enabled(true)
+  // is refused rather than silently ignored. That distinction matters -- the
+  // original code returned false from a single combined lambda, so a missing
+  // bloom shader took the whole HDR compose chain down with it.
+  const auto build_bloom_pipelines = [&]() -> bool {
+    VkDescriptorSetLayout stage_layouts[1] = {bloom_stage_layout_};
     if (bloom_down_pipeline_ == nullptr) {
       bloom_down_pipeline_ = std::make_unique<VulkanPipeline>();
     }
@@ -298,18 +310,9 @@ namespace warploom::render {
              ->load_shader_stage_file(device_, dir + "/bloom_downsample.frag.spv", "fragment").is_ok()) {
       return false;
     }
-    if (!bloom_down_pipeline_->create_pipeline_layout(device_, stage_layouts, 1U, nullptr).is_ok()) {
-      return false;
-    }
-    if (bloom_up_pipeline_ == nullptr) bloom_up_pipeline_ = std::make_unique<VulkanPipeline>();
-    bloom_up_pipeline_->cleanup();
-    if (!bloom_up_pipeline_
-             ->load_shader_stage_file(device_, dir + "/fullscreen.vert.spv", "vertex").is_ok() ||
-        !bloom_up_pipeline_
-             ->load_shader_stage_file(device_, dir + "/bloom_upsample.frag.spv", "fragment").is_ok()) {
-      return false;
-    }
-    return bloom_up_pipeline_->create_pipeline_layout(device_, stage_layouts, 1U, nullptr).is_ok();
+    return bloom_down_pipeline_
+        ->create_pipeline_layout(device_, stage_layouts, 1U, nullptr)
+        .is_ok();
   };
 
   // ---- size-dependent resources ---------------------------------------
@@ -377,66 +380,88 @@ namespace warploom::render {
     return refuse("compose pipeline creation failed");
   }
 
-  if (config_.enable_bloom) {
-    if (!bloom_target_->create(device_, physical_device_, hdr_format_, bw, bh,
-                               allocator_.get(), VK_IMAGE_USAGE_SAMPLED_BIT)
-             .is_ok() ||
-        !bloom_target_->create_render_pass(
-             device_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-             .is_ok() ||
-        !bloom_target_->create_framebuffer(device_).is_ok()) {
-      return refuse("bloom target creation failed");
-    }
-    if (!bloom_down_pipeline_
-             ->create_graphics_pipeline(device_, bloom_target_->render_pass(),
-                                        hdr_format_,
-                                        bloom_down_pipeline_->pipeline_layout(),
-                                        false, false, false)
-             .is_ok() ||
-        !bloom_up_pipeline_
-             ->create_graphics_pipeline(device_, hdr_target_->render_pass(),
-                                        hdr_format_,
-                                        bloom_up_pipeline_->pipeline_layout(),
-                                        false, false, false)
-             .is_ok()) {
-      return refuse("bloom pipeline creation failed");
-    }
+  // Bloom target + pipelines, allocated regardless of the live toggle state.
+  // Quarter-resolution RGBA16F: the whole point is that this is cheap enough to
+  // always exist (docs/research/rendering-and-graphs.md, R7 -- the idTech 6
+  // lesson that a disabled feature's resources are still there, and only its
+  // COST is skipped). So the target is built first, then the pipelines; if the
+  // bloom shaders are missing, bloom_available_ stays false, the target is
+  // released again, and the chain runs with bloom permanently off.
+  bloom_available_ = false;
+  if (!bloom_target_->create(device_, physical_device_, hdr_format_, bw, bh,
+                             allocator_.get(), VK_IMAGE_USAGE_SAMPLED_BIT)
+           .is_ok() ||
+      !bloom_target_->create_render_pass(
+           device_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+           .is_ok() ||
+      !bloom_target_->create_framebuffer(device_).is_ok()) {
+    // Not fatal. Bloom is an enhancement; losing it must not take the HDR
+    // tonemap with it.
+    WARPLOOM_WARN("render",
+                  "bloom target creation failed; bloom unavailable this "
+                  "session (tonemap unaffected)\n");
+    bloom_target_->cleanup();
+  } else if (!build_bloom_pipelines() ||
+             !bloom_down_pipeline_
+                  ->create_graphics_pipeline(device_, bloom_target_->render_pass(),
+                                             hdr_format_,
+                                             bloom_down_pipeline_->pipeline_layout(),
+                                             false, false, false)
+                  .is_ok()) {
+    WARPLOOM_WARN("render",
+                  "bloom pipeline creation failed; bloom unavailable this "
+                  "session (tonemap unaffected)\n");
+    bloom_target_->cleanup();
+  } else {
+    bloom_available_ = true;
   }
+  bloom_enabled_ = bloom_enabled_ && bloom_available_;
 
-
-  // Bind the two sampler slots: HDR input and the bloom input (the black
-  // texture when bloom is off).
+  // Bind the two sampler slots of BOTH tonemap sets: HDR input at 0, and at 1
+  // either the bloom target or the 1x1 black texture. Writing both up front is
+  // what lets the toggle be a bind-time choice instead of a descriptor write.
   if (!descriptor_manager_
            ->write_image(compose_set_, 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                          hdr_sampler_, hdr_target_->image_view(),
                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
+           .is_ok() ||
+      !descriptor_manager_
+           ->write_image(compose_set_nobloom_, 0U,
+                         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, hdr_sampler_,
+                         hdr_target_->image_view(),
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
            .is_ok()) {
     return refuse("HDR descriptor write failed");
   }
-  const VkImageView bloom_view =
-      config_.enable_bloom ? bloom_target_->image_view() : black_texture_.view;
+  // With no bloom target, the bloom-bound set must also point at black: it is
+  // never selected (bloom_enabled_ is false and set_bloom_enabled(true) is
+  // refused), but an unwritten binding 1 would be a dangling descriptor.
+  const VkImageView bloom_slot_view =
+      bloom_available_ ? bloom_target_->image_view() : black_texture_.view;
   if (!descriptor_manager_
            ->write_image(compose_set_, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                         linear_sampler_, bloom_view,
+                         linear_sampler_, bloom_slot_view,
                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
            .is_ok()) {
     return refuse("bloom descriptor write failed");
   }
-  // Each bloom stage reads its own input at binding 0. Only when bloom is on:
-  // the sets do not exist otherwise, and writing to a null set fails.
-  if (config_.enable_bloom &&
-      (!descriptor_manager_
+  if (!descriptor_manager_
+           ->write_image(compose_set_nobloom_, 1U,
+                         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                         linear_sampler_, black_texture_.view,
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
+           .is_ok()) {
+    return refuse("no-bloom descriptor write failed");
+  }
+  // The bright-pass reads the HDR scene. Only when bloom exists: with no target
+  // there is no pipeline to bind this to, and writing a null view fails.
+  if (bloom_available_ &&
+      !descriptor_manager_
            ->write_image(bloom_down_set_, 0U,
                          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, hdr_sampler_,
                          hdr_target_->image_view(),
                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
-           .is_ok() ||
-       !descriptor_manager_
-           ->write_image(bloom_up_set_, 0U,
-                         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                         linear_sampler_, bloom_view,
-                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
-           .is_ok())) {
+           .is_ok()) {
     return refuse("bloom stage descriptor write failed");
   }
 
@@ -495,8 +520,35 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
 
 
   // --- Declare the stages. ---
+  //
+  // The live toggle decides ONLY what records here. Every pipeline, target and
+  // descriptor set involved was created by ensure() before the first frame, so
+  // a toggle cannot invalidate anything the application baked against -- which
+  // is exactly what the reverted first attempt got wrong.
   std::vector<ComposeStage> stages;
-  if (config_.enable_bloom && bloom_down_pipeline_ && bloom_up_pipeline_) {
+  const bool bloom_on =
+      bloom_enabled_ && bloom_available_ && bloom_down_pipeline_ != nullptr &&
+      bloom_target_->image() != VK_NULL_HANDLE;
+  // One bloom stage, not two: the half-resolution bright-pass, whose result the
+  // tonemap samples directly (its binding 1) and adds AFTER the curve.
+  //
+  // There used to be a second "upsample" stage writing into hdr_target_. It was
+  // dead weight AND wrong twice over:
+  //   - it rendered into hdr_target_'s render pass, whose color attachment is
+  //     LOAD_OP_CLEAR, so it ERASED the scene it was supposed to be adding to;
+  //   - the pipeline has blending disabled (VulkanPipeline hardcodes
+  //     blendEnable = VK_FALSE), so even without the clear it would have
+  //     replaced rather than added.
+  // With both, bloom-on produced a black frame. Nothing caught it because
+  // every prior check was "does it run without VUIDs" (the viewport matrix) or
+  // "is the toggle accepted" -- never "are the pixels right". Bloom is now
+  // verified by the same probe that verifies exposure, in
+  // VulkanHardware.HeadlessComposeFrameGoldenHash.
+  //
+  // The shader stays in assets/shaders (bloom_upsample.frag) and
+  // test_postprocessing.cpp still exercises it directly: it is a legitimate
+  // standalone pass, just not part of this chain.
+  if (bloom_on) {
     ComposeStage down{};
     down.pipeline = bloom_down_pipeline_.get();
     down.target = bloom_target_.get();
@@ -512,27 +564,15 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
     down.samples[0].initial_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     down.sample_count = 1;
     stages.push_back(down);
-
-    ComposeStage up{};
-    up.pipeline = bloom_up_pipeline_.get();
-    up.target = hdr_target_.get();
-    up.pass = hdr_target_->render_pass();
-    up.framebuffer = hdr_target_->framebuffer();
-    up.width = width;
-    up.height = height;
-    up.set = bloom_up_set_;
-    up.samples[0].image = bloom_target_->image();
-    up.samples[0].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    up.samples[0].initial_layout = bloom_target_->color_final_layout();
-    up.samples[0].initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    up.samples[0].initial_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    up.sample_count = 1;
-    stages.push_back(up);
   }
 
-  // The tonemap always runs: it samples the HDR scene and the bloom buffer
-  // (slot 1 is the 1x1 black texture when bloom is off) and writes the
-  // presentation target.
+  // The tonemap always runs: it samples the HDR scene and, when bloom is on,
+  // the bloom buffer; it writes the presentation target.
+  //
+  // Which of the TWO pre-written descriptor sets it binds is the whole runtime
+  // cost of the toggle. The off-set's slot 1 is the 1x1 black texture, so the
+  // shader is unchanged between configurations and the set is chosen, not
+  // rewritten.
   ComposeStage tonemap{};
   tonemap.pipeline = compose_pipeline_.get();
   tonemap.target = nullptr;  // presentation target
@@ -542,7 +582,7 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
   tonemap.height = height;
   tonemap.push = &push;
   tonemap.push_size = sizeof(push);
-  tonemap.set = compose_set_;
+  tonemap.set = bloom_on ? compose_set_ : compose_set_nobloom_;
   tonemap.samples[0].image = hdr_target_->image();
   tonemap.samples[0].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   // With no bloom stage, the scene pass is this stage's only producer. With
@@ -550,15 +590,16 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
   tonemap.samples[0].initial_layout = hdr_from_scene;
   tonemap.samples[0].initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
   tonemap.samples[0].initial_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-  tonemap.samples[1].image = bloom_target_->image();
-  tonemap.samples[1].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  if (bloom_target_->image() != VK_NULL_HANDLE) {
+  tonemap.sample_count = 1U;
+  if (bloom_on) {
+    tonemap.samples[1].image = bloom_target_->image();
+    tonemap.samples[1].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     tonemap.samples[1].initial_layout = bloom_target_->color_final_layout();
     tonemap.samples[1].initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     tonemap.samples[1].initial_stage =
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    tonemap.sample_count = 2U;
   }
-  tonemap.sample_count = config_.enable_bloom ? 2U : 1U;
   stages.push_back(tonemap);
 
   // --- Build graph nodes. Each stage writes its target as a real attachment,
@@ -639,7 +680,10 @@ void VulkanComposeChain::destroy() noexcept {
   compose_width_ = 0U;
   compose_height_ = 0U;
   compose_set_ = VK_NULL_HANDLE;
+  compose_set_nobloom_ = VK_NULL_HANDLE;
   compose_layout_ = VK_NULL_HANDLE;
+  bloom_enabled_ = false;
+  bloom_available_ = false;
   // Explicit, with the recorded device. VulkanPipeline's destructor is a
   // deliberate no-op (cleanup(nullptr) ignored by cleanup()), because a
   // pipeline that outlives its VulkanContext would otherwise call
@@ -653,13 +697,12 @@ void VulkanComposeChain::destroy() noexcept {
     bloom_down_pipeline_->cleanup();
     bloom_down_pipeline_.reset();
   }
-  if (bloom_up_pipeline_ != nullptr) {
-    bloom_up_pipeline_->cleanup();
-    bloom_up_pipeline_.reset();
-  }
-  // Targets before the allocator that owns their memory.
-  bloom_target_->cleanup();
-  hdr_target_->cleanup();
+  // Targets before the allocator that owns their memory. Both may be null when
+  // ensure() refused before reaching them (a Vulkan-off build never
+  // constructs them), which is why the pipelines above are null-checked and
+  // these were not -- an unguarded unique_ptr deref on the refuse path.
+  if (bloom_target_ != nullptr) bloom_target_->cleanup();
+  if (hdr_target_ != nullptr) hdr_target_->cleanup();
   if (black_texture_.view != VK_NULL_HANDLE) {
     vkDestroyImageView(device_, black_texture_.view, nullptr);
     black_texture_.view = VK_NULL_HANDLE;

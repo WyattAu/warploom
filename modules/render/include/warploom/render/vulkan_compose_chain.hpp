@@ -29,6 +29,10 @@ class VulkanPipeline;
 class VulkanDescriptorManager;
 
 struct ComposeChainConfig {
+  //! Initial bloom state. The chain PRE-ALLOCATES every bloom resource
+  //! regardless of this value (docs/research/rendering-and-graphs.md, R7), so
+  //! this only decides what the first recorded frame does; afterwards
+  //! set_bloom_enabled() is a re-record, never a rebuild.
   bool enable_bloom{false};
   std::uint32_t bloom_downscale{2};
   //! Directory holding tonemap_fxaa.frag.spv and, when bloom is enabled,
@@ -70,6 +74,23 @@ class VulkanComposeChain final {
   //! effect on the next recorded frame without rebuilding anything.
   void set_exposure(float exposure) noexcept { config_.exposure = exposure; }
   [[nodiscard]] float exposure() const noexcept { return config_.exposure; }
+
+  //! Live bloom state (E2/R4). Read at record time: it only decides whether
+  //! the down/up stages are recorded, never whether a resource exists. Every
+  //! bloom resource is created by ensure() up front, so a toggle cannot
+  //! invalidate a pipeline, a render pass, or a descriptor layout -- the
+  //! failure mode that made the first bloom-toggle attempt render black.
+  //! Refused (returns false, leaving the state unchanged) when the bloom
+  //! shaders were absent at initialize(), so a chain built without them
+  //! cannot be asked for a feature it has no pipeline for.
+  bool set_bloom_enabled(bool enabled) noexcept {
+    if (enabled && !bloom_available_) return false;
+    bloom_enabled_ = enabled;
+    return true;
+  }
+  [[nodiscard]] bool bloom_enabled() const noexcept { return bloom_enabled_; }
+  //! True when the bloom pipelines were built, i.e. a toggle to ON is legal.
+  [[nodiscard]] bool bloom_available() const noexcept { return bloom_available_; }
 
 
   [[nodiscard]] bool ready() const noexcept { return compose_ready_; }
@@ -125,7 +146,6 @@ class VulkanComposeChain final {
   std::unique_ptr<VulkanDescriptorManager> descriptor_manager_;
   std::unique_ptr<VulkanPipeline> compose_pipeline_;
   std::unique_ptr<VulkanPipeline> bloom_down_pipeline_;
-  std::unique_ptr<VulkanPipeline> bloom_up_pipeline_;
   std::unique_ptr<VulkanOffscreenTarget> hdr_target_;
   std::unique_ptr<VulkanOffscreenTarget> bloom_target_;
   VkDescriptorSetLayout compose_layout_{VK_NULL_HANDLE};
@@ -139,20 +159,34 @@ class VulkanComposeChain final {
     VkDeviceMemory memory{VK_NULL_HANDLE};
   } black_texture_{};
   VkDescriptorSet compose_set_{VK_NULL_HANDLE};
-  //! Single-sampler layouts/sets for the two bloom stages. Both bloom shaders
-  //! declare their input at set 0 binding 0, which in the two-binding compose
-  //! layout is the HDR scene -- so the upsample would sample the very image it
-  //! is writing. Each bloom stage therefore gets its own one-binding set
-  //! pointed at its actual input.
+  //! Second tonemap set, identical except binding 1 points at the 1x1 black
+  //! texture instead of the bloom target. The bloom toggle picks between two
+  //! PRE-WRITTEN sets rather than rewriting a descriptor at runtime: the two
+  //! images are both already in SHADER_READ_ONLY_OPTIMAL for the whole frame,
+  //! so neither transition needs a barrier and neither write can race a frame
+  //! still in flight. That is what makes the toggle a pure re-record.
+  VkDescriptorSet compose_set_nobloom_{VK_NULL_HANDLE};
+  //! One-sampler layout/set for the bloom bright-pass. It reads the HDR scene,
+  //! which in the two-binding compose layout is binding 0 -- where binding 1
+  //! (the bloom input the tonemap samples) would instead be. So it needs its
+  //! own one-binding set, pointed at the scene.
   VkDescriptorSetLayout bloom_stage_layout_{VK_NULL_HANDLE};
   VkDescriptorSet bloom_down_set_{VK_NULL_HANDLE};
-  VkDescriptorSet bloom_up_set_{VK_NULL_HANDLE};
   VkFormat hdr_format_{VK_FORMAT_UNDEFINED};
   std::uint32_t compose_width_{0};
   std::uint32_t compose_height_{0};
   std::uint32_t compose_generation_{0};
   bool compose_ready_{false};
   bool compose_failed_{false};
+  //! Live toggle state, distinct from config_.enable_bloom (the value
+  //! initialize() started from). The two can only diverge via
+  //! set_bloom_enabled(), and ensure() must NOT copy the config value back in
+  //! -- that is the same live-control trap exposure hit.
+  bool bloom_enabled_{false};
+  //! True once the bloom pipelines exist. Set in ensure() regardless of
+  //! config_.enable_bloom, so a chain built with bloom off can still be
+  //! toggled on at runtime; false only when the bloom shaders were missing.
+  bool bloom_available_{false};
 };
 
 }  // namespace warploom::render

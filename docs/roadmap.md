@@ -594,7 +594,7 @@ declares a slot 3.
       mode is rejected with a named error, and the whole exchange runs with 0
       validation diagnostics. R1/R2 are now unblocked: a mode toggle plus its
       pipeline work is all each one needs.
-- [ ] **E2 R1–R4 — exposure/bloom controls DONE (see below); remaining:
+- [ ] **E2 R1–R4 — exposure/bloom controls DONE; remaining:
       path tracing (R1), RT reflections/AO toggles (R2), GPU-driven skinned
       scenes (R3).** Exposure is DONE:
       `set_exposure` (protocol v1.9) is live end-to-end — validated by
@@ -604,35 +604,64 @@ declares a slot 3.
       every frame — the preserve is now explicit in the chain), plus a live
       socket check that the chain reports the applied value back. The capture
       chain is synced in the same handler, so captured frames cannot silently
-      disagree with the live frame. Remaining: path tracing (R1), RT
-      reflections/AO (R2), skinned gd scenes (R3) — spec rewritten from the
-      research pass (docs/research/rendering-and-graphs.md): the compose
-      chain pre-allocates ALL resources at initialize (idTech's
-      persistent-feature pattern) so runtime toggles only change which
-      passes record — that inverts the bloom-toggle revert's root cause by
-      design; fullscreen passes move to dynamic rendering (Blade direction,
-      stage 1) so passes stop baking; R1 itself is "offline-quality stepped
-      PT" — pause, accumulate K frames into the rgba32f accum image via the
-      existing deterministic PCG contract, tonemap from accum — deterministic
-      by construction through the record/replay machinery, a capability other
-      PT pipelines do not have. ReSTIR explicitly deferred: reservoir stream
-      state breaks snapshot replay.
+      disagree with the live frame. Bloom is DONE (v1.10, below). Remaining:
+      path tracing (R1), RT reflections/AO (R2), skinned gd scenes (R3) —
+      spec rewritten from the research pass
+      (docs/research/rendering-and-graphs.md): the compose chain pre-allocates
+      ALL resources at initialize (idTech's persistent-feature pattern) so
+      runtime toggles only change which passes record — landed, and it is
+      what made the bloom toggle landable; fullscreen passes move to dynamic
+      rendering (Blade direction, stage 1) so passes stop baking; R1 itself is
+      "offline-quality stepped PT" — pause, accumulate K frames into the
+      rgba32f accum image via the existing deterministic PCG contract,
+      tonemap from accum — deterministic by construction through the
+      record/replay machinery, a capability other PT pipelines do not have.
+      ReSTIR explicitly deferred: reservoir stream state breaks snapshot
+      replay.
 
-      (SetBloom was briefly added and REVERTED: see below.)
+      (SetBloom was briefly added and REVERTED: see below. It has since
+      RE-LANDED on the pre-allocated design — see the DONE note.)
 
       REVERTED attempt — runtime bloom toggle. The full-recreate path
       invalidates the HDR render pass that app scene pipelines bake (12 VUIDs
       and a stale pass in the golden test), so a light path was written:
       create the bloom side in place, rewrite the tonemap's binding-1
       descriptor. Result measured, not assumed: the bloom-ON frame came back
-      BLACK with a device leak — the light path's rebuild sequence does not
-      yet interleave correctly with the graph's cross-frame layout tracking
-      for the down/up stages (the up stage writes the HDR image the tonemap
-      is about to sample; ordering that against the scene pass at toggle time
-      is the actual problem, and it is the same shape as the original B3b
-      revert). Reverted rather than shipped black. The static config remains
-      correct: bloom at start-up works (the viewport matrix runs bloom clean),
-      and the toggle needs a design pass on its ordering contract first.
+      BLACK with a device leak. Reverted rather than shipped black.
+
+      BLOOM TOGGLE: DONE (protocol v1.10) — and landing it properly exposed
+      the real bug under the revert. The light path above was blamed on
+      toggle-time ordering, but the same BLACK frame reproduces with bloom
+      enabled at START-UP: the chain's "upsample" stage rendered into the HDR
+      target's render pass, whose color attachment is LOAD_OP_CLEAR, so it
+      erased the scene it was supposed to be adding to (and the pipeline has
+      blending disabled, so even without the clear it would have replaced
+      rather than added). Bloom-on has looked like this since it shipped;
+      nothing caught it because every check was "does it run without VUIDs"
+      (the viewport matrix) — never "are the pixels right". The stage is gone:
+      the tonemap already samples the half-res bright-pass at binding 1 and
+      adds it after the curve, which is the upsample (the sampler is the tent
+      filter); `bloom_upsample.frag` survives as a standalone pass exercised
+      by test_postprocessing.cpp, just not as part of this chain.
+
+      The re-landed toggle is the pre-allocation the research pass prescribed
+      (docs/research/rendering-and-graphs.md, R7): every bloom resource —
+      target, pipelines, descriptor sets — exists from the first ensure(),
+      and `set_bloom_enabled()` only decides which stages record. The
+      tonemap binds one of TWO pre-written descriptor sets (bloom target vs
+      1x1 black), so a toggle writes no descriptors, creates nothing, and
+      cannot invalidate a pipeline that an app baked against the HDR pass.
+      Measured: `compose_generation()` is identical across on and off (the
+      observable meaning of "no rebuild"), the bloom-off frame is
+      bit-identical before and after a round trip, and the bloom-ON frame is
+      PINNED by canonical hash (5278270949640476686, RTX 2060) next to the
+      bloom-off pin — because a sabotage that re-corrupted the bright pass
+      produced a non-black frame that merely DIFFERED, which the
+      difference-only assertion passed. Live: on, reads back on, off, reads
+      back off, missing-arg rejected, all with 0 validation diagnostics on
+      the RTX 2060. Missing bloom shaders now degrade the chain to bloom-off
+      instead of refusing the tonemap; `set_bloom_enabled(true)` is refused
+      with a named error rather than silently ignored.
 - [ ] **E3 hardware CI runner** — every RT test skips on lavapipe, so the
       best subsystem has the least regression protection.
 - [x] **E4 warning debt, then `-Werror`** — DONE. All four presets build
