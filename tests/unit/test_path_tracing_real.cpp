@@ -39,10 +39,9 @@
 
 #include "warploom/render/vulkan_acceleration_structure.hpp"
 #include "warploom/render/vulkan_context.hpp"
-#include "warploom/render/vulkan_descriptors.hpp"
 #include "warploom/render/vulkan_memory_allocator.hpp"
+#include "warploom/render/vulkan_path_tracer.hpp"
 #include "warploom/render/vulkan_renderer.hpp"
-#include "warploom/render/vulkan_rt_pipeline.hpp"
 #include "vulkan_test_readback.hpp"
 
 #ifdef WARPLOOM_HAS_VULKAN
@@ -53,16 +52,13 @@ namespace {
 inline double dbl(float v) noexcept { return static_cast<double>(v); }
 
 using omnicpp::render::Allocation;
-using omnicpp::render::BlasBuildInput;
-using omnicpp::render::BottomLevelAS;
-using omnicpp::render::TopLevelAS;
-using omnicpp::render::TlasInstance;
-using omnicpp::render::VulkanAccelerationStructureBuilder;
+using omnicpp::render::PathTracerCamera;
+using omnicpp::render::PathTracerConfig;
+using omnicpp::render::PathTracerInstance;
+using omnicpp::render::PathTracerMesh;
 using omnicpp::render::VulkanContext;
-using omnicpp::render::VulkanDescriptorManager;
 using omnicpp::render::VulkanMemoryAllocator;
-using omnicpp::render::VulkanRtPipeline;
-using omnicpp::render::VulkanScratchPool;
+using omnicpp::render::VulkanPathTracer;
 
 constexpr std::uint32_t kImg = 64;
 constexpr std::uint32_t kFrames = 64;   // accumulation samples per pass
@@ -100,11 +96,6 @@ std::vector<float> make_box_triangles(float hx, float hy, float hz) {
     }
   }
   return out;
-}
-
-std::array<float, 12> translated_instance(float tx, float ty, float tz) {
-  return {1.0f, 0.0f, 0.0f, tx, 0.0f, 1.0f, 0.0f, ty,
-          0.0f, 0.0f, 1.0f, tz};
 }
 
 // ---- CPU reference integrator (fp64, independent RNG) -----------------------
@@ -416,8 +407,6 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   }
   VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
-  VulkanDescriptorManager desc;
-  ASSERT_TRUE(desc.initialize(ctx.device()).is_ok());
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
 
@@ -465,119 +454,15 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   ASSERT_GE(wx_px, 1); ASSERT_LT(wx_px, static_cast<int>(kImg) - 1);
   ASSERT_GE(wx_py, 1); ASSERT_LT(wx_py, static_cast<int>(kImg) - 1);
 
-  // ---- GPU data: instances (binding 3), params (binding 1) -------------------
-  struct GpuParams {
-    float cam_pos_frame[4];
-    float cam_basis_r[4];
-    float cam_basis_u[4];
-    float cam_basis_f[4];
-    std::uint32_t dims[4];
-  };
-  // Instance words: [center.xyz, 0], [albedo.xyz, 0]. Box order matches the
-  // CPU room list: floor, wall -z, wall +z, wall -x, wall +x (indices 0..4).
-  std::vector<std::array<float, 4>> inst_words;
-  const auto push_instance = [&](float cx, float cy, float cz) {
-    inst_words.push_back({cx, cy, cz, 0.0f});
-    inst_words.push_back({kAlbedo, kAlbedo, kAlbedo, 0.0f});
-  };
-  push_instance(0.0f, -2 * kRoomHy, 0.0f);   // 0: floor slab
-  push_instance(0.0f, -kRoomHy, -kRoomHx);   // 1: wall -z
-  push_instance(0.0f, -kRoomHy, kRoomHx);    // 2: wall +z
-  push_instance(-kRoomHx, -kRoomHy, 0.0f);   // 3: wall -x
-  push_instance(kRoomHx, -kRoomHy, 0.0f);    // 4: wall +x
-
-  auto instance_buf = alloc.create_buffer(
-      inst_words.size() * sizeof(std::array<float, 4>),
-      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-  ASSERT_TRUE(instance_buf.is_ok());
-  Allocation inst_alloc = instance_buf.value();
-  std::memcpy(inst_alloc.mapped, inst_words.data(),
-              inst_words.size() * sizeof(std::array<float, 4>));
-
-  auto params_buf = alloc.create_buffer(
-      sizeof(GpuParams), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-  ASSERT_TRUE(params_buf.is_ok());
-  Allocation params_alloc = params_buf.value();
-  auto* gpu_params = static_cast<GpuParams*>(params_alloc.mapped);
-  *gpu_params = GpuParams{};
-  std::memcpy(gpu_params->cam_pos_frame, kCamEye.data(), 3 * sizeof(float));
-  std::memcpy(gpu_params->cam_basis_r, right.data(), 3 * sizeof(float));
-  std::memcpy(gpu_params->cam_basis_u, up.data(), 3 * sizeof(float));
-  std::memcpy(gpu_params->cam_basis_f, kCamFwd.data(), 3 * sizeof(float));
-  gpu_params->dims[0] = kImg;
-  gpu_params->dims[1] = kImg;
-  gpu_params->dims[2] = kBounces;
-  gpu_params->dims[3] = 0u;
-
-  // ---- Accumulation image -----------------------------------------------------
-  VkImageCreateInfo ai{};
-  ai.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-  ai.imageType = VK_IMAGE_TYPE_2D;
-  ai.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-  ai.extent = {kImg, kImg, 1};
-  ai.mipLevels = 1;
-  ai.arrayLayers = 1;
-  ai.samples = VK_SAMPLE_COUNT_1_BIT;
-  ai.tiling = VK_IMAGE_TILING_OPTIMAL;
-  ai.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-             VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-  ai.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  VkImage accum_image = VK_NULL_HANDLE;
-  ASSERT_EQ(vkCreateImage(ctx.device(), &ai, nullptr, &accum_image),
-            VK_SUCCESS);
-  auto accum_mem =
-      alloc.bind_image(accum_image, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-  ASSERT_TRUE(accum_mem.is_ok());
-  Allocation accum_allocation = accum_mem.value();
-  VkImageViewCreateInfo avi{};
-  avi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-  avi.image = accum_image;
-  avi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-  avi.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-  avi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-  VkImageView accum_view = VK_NULL_HANDLE;
-  ASSERT_EQ(vkCreateImageView(ctx.device(), &avi, nullptr, &accum_view),
-            VK_SUCCESS);
-
-  // ---- Descriptors: 0 accum, 1 params, 2 TLAS, 3 instances -------------------
-  auto layout = desc.create_layout(
-      {{0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
-       {0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
-       {0, 2, 1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
-        VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
-       {0, 3, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}},
-      1);
-  ASSERT_TRUE(layout.is_ok());
-  VkDescriptorSetLayout pt_layout = layout.value();
-  auto set = desc.allocate_set(pt_layout);
-  ASSERT_TRUE(set.is_ok());
-  VkDescriptorSet pt_set = set.value();
-  ASSERT_TRUE(desc
-                  .write_image(pt_set, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                               VK_NULL_HANDLE, accum_view,
-                               VK_IMAGE_LAYOUT_GENERAL, 0)
-                  .is_ok());
-  ASSERT_TRUE(desc
-                  .write_buffer(pt_set, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                params_alloc.buffer, 0, VK_WHOLE_SIZE)
-                  .is_ok());
-  ASSERT_TRUE(desc
-                  .write_buffer(pt_set, 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                inst_alloc.buffer, 0, VK_WHOLE_SIZE)
-                  .is_ok());
-
-  // ---- Acceleration structures: 5 box BLASes + TLAS --------------------------
+  // ---- Geometry: caller-owned vertex buffers -> meshes -----------------------
+  // The path tracer owns the acceleration structures and the accumulation, not
+  // the geometry buffers: device addresses in, BLASes out. This split is what
+  // lets the same object serve a 5-box CPU-mirrored test room and, later, a
+  // viewport scene whose meshes the app already uploads.
+  const std::string sd = WARPLOOM_TEST_SHADER_DIR;
   std::vector<std::vector<float>> tri_data;
-  std::vector<BlasBuildInput> inputs;
   auto add_box = [&](float hx, float hy, float hz) {
     tri_data.push_back(make_box_triangles(hx, hy, hz));
-    BlasBuildInput in{};
-    inputs.push_back(in);
   };
   add_box(kRoomHx, kRoomHy, kRoomHx);  // floor
   add_box(kRoomHx, kRoomHy, 0.01f);    // wall -z
@@ -606,144 +491,59 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
     info.buffer = b;
     return vkGetBufferDeviceAddress(ctx.device(), &info);
   };
-  for (std::size_t i = 0; i < inputs.size(); ++i) {
-    inputs[i].vertex_buffer_address = addr_of(geom_buffers[i]);
-    inputs[i].triangle_count = 12U;
-    inputs[i].max_vertex = 35U;
+  std::vector<PathTracerMesh> meshes;
+  for (std::size_t i = 0; i < tri_data.size(); ++i) {
+    PathTracerMesh m{};
+    m.vertex_buffer_address = addr_of(geom_buffers[i]);
+    m.triangle_count = 12U;
+    m.max_vertex = 35U;
+    meshes.push_back(m);
   }
 
-  VulkanAccelerationStructureBuilder builder;
-  std::vector<BottomLevelAS> blas_list;
-  for (const auto& in : inputs) {
-    auto r = builder.create_blas(ctx.device(), alloc, in);
-    ASSERT_TRUE(r.is_ok());
-    blas_list.push_back(std::move(r.value()));
-  }
-  auto tlas_r = builder.create_tlas(ctx.device(), alloc, 5U);
-  ASSERT_TRUE(tlas_r.is_ok());
-  TopLevelAS tlas = tlas_r.value();
-
-  VulkanScratchPool scratch_pool;
-  auto scratch1 = scratch_pool.acquire(alloc, ctx.device(), 1U << 20U);
-  ASSERT_TRUE(scratch1.is_ok());
-
-  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
-      ctx.device(), qf);
-  ASSERT_TRUE(pool_r.is_ok());
-  VkCommandPool cmd_pool = pool_r.value();
-  auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
-      ctx.device(), cmd_pool);
-  ASSERT_TRUE(cb_r.is_ok());
-  VkCommandBuffer build_cb = cb_r.value();
-  VkCommandBufferBeginInfo bi{};
-  bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  ASSERT_EQ(vkBeginCommandBuffer(build_cb, &bi), VK_SUCCESS);
   const std::array<std::array<float, 3>, 5> centers = {
       std::array<float, 3>{0.0f, -2 * kRoomHy, 0.0f},
       std::array<float, 3>{0.0f, -kRoomHy, -kRoomHx},
       std::array<float, 3>{0.0f, -kRoomHy, kRoomHx},
       std::array<float, 3>{-kRoomHx, -kRoomHy, 0.0f},
       std::array<float, 3>{kRoomHx, -kRoomHy, 0.0f}};
-  VkMemoryBarrier asbar{};
-  asbar.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-  asbar.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-  asbar.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-  for (std::size_t i = 0; i < blas_list.size(); ++i) {
-    ASSERT_TRUE(builder
-                    .cmd_build_blas(build_cb, ctx.device(), blas_list[i],
-                                    inputs[i], scratch1.value())
-                    .is_ok());
-    vkCmdPipelineBarrier(
-        build_cb, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-        VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 1, &asbar,
-        0, nullptr, 0, nullptr);
+  std::vector<PathTracerInstance> instances;
+  for (std::size_t i = 0; i < centers.size(); ++i) {
+    PathTracerInstance inst = PathTracerInstance::translated(centers[i], kAlbedo);
+    inst.custom_index = static_cast<std::uint32_t>(i);
+    instances.push_back(inst);
   }
-  std::array<TlasInstance, 5> instances{};
-  for (std::size_t i = 0; i < 5; ++i) {
-    const auto xf = translated_instance(centers[i][0], centers[i][1],
-                                        centers[i][2]);
-    std::memcpy(instances[i].transform, xf.data(), sizeof(xf));
-    instances[i].instance_custom_index = static_cast<std::uint32_t>(i);
-    instances[i].blas_device_address = blas_list[i].device_address;
-  }
-  ASSERT_TRUE(builder
-                  .cmd_build_tlas(build_cb, ctx.device(), tlas,
-                                  instances.data(), 5U, scratch1.value())
+
+  PathTracerConfig pt_cfg{};
+  pt_cfg.shader_dir = sd;
+  pt_cfg.width = kImg;
+  pt_cfg.height = kImg;
+  pt_cfg.max_bounces = kBounces;
+  pt_cfg.meshes = meshes;
+  pt_cfg.instances = instances;
+
+  VulkanPathTracer tracer;
+  ASSERT_TRUE(tracer
+                  .create(ctx.physical_device(), ctx.device(),
+                          ctx.graphics_queue(), qf, alloc, pt_cfg)
                   .is_ok());
-  ASSERT_EQ(vkEndCommandBuffer(build_cb), VK_SUCCESS);
-  ASSERT_TRUE(submit_and_wait(ctx.device(), ctx.graphics_queue(), build_cb));
-  ASSERT_TRUE(desc
-                  .write_acceleration_structure(
-                      pt_set, 2, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
-                      tlas.handle, 0)
-                  .is_ok());
+  ASSERT_TRUE(tracer.ready()) << "path tracer refused on this device";
 
-  // ---- RT pipeline + SBT (recursion depth 1: loop-driven paths) --------------
-  const std::string sd = WARPLOOM_TEST_SHADER_DIR;
-  VkShaderModule mods[3] = {};
-  const char* files[3] = {"/pt_real.rgen.spv", "/pt_real.rmiss.spv",
-                          "/pt_real.rchit.spv"};
-  for (std::size_t i = 0; i < static_cast<std::size_t>(3); ++i) {
-    std::string path = sd + files[i];
-    FILE* f = std::fopen(path.c_str(), "rb");
-    ASSERT_NE(f, nullptr) << path;
-    std::fseek(f, 0, SEEK_END);
-    long size = std::ftell(f);
-    std::fseek(f, 0, SEEK_SET);
-    std::vector<char> code(static_cast<std::size_t>(size));
-    ASSERT_EQ(std::fread(code.data(), 1, code.size(), f), code.size());
-    std::fclose(f);
-    VkShaderModuleCreateInfo mi{};
-    mi.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    mi.codeSize = code.size();
-    mi.pCode = reinterpret_cast<const std::uint32_t*>(code.data());
-    ASSERT_EQ(vkCreateShaderModule(ctx.device(), &mi, nullptr, &mods[i]),
-              VK_SUCCESS);
-  }
-  std::array<VkPipelineShaderStageCreateInfo, 3> stages{};
-  const VkShaderStageFlagBits stage_bits[3] = {
-      VK_SHADER_STAGE_RAYGEN_BIT_KHR, VK_SHADER_STAGE_MISS_BIT_KHR,
-      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
-  for (std::size_t i = 0; i < static_cast<std::size_t>(3); ++i) {
-    stages[i].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stages[i].stage = stage_bits[i];
-    stages[i].module = mods[i];
-    stages[i].pName = "main";
-  }
-  VkPipelineLayoutCreateInfo pli{};
-  pli.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  pli.setLayoutCount = 1;
-  pli.pSetLayouts = &pt_layout;
-  VkPipelineLayout pipe_layout_handle = VK_NULL_HANDLE;
-  ASSERT_EQ(vkCreatePipelineLayout(ctx.device(), &pli, nullptr,
-                                   &pipe_layout_handle),
-            VK_SUCCESS);
+  PathTracerCamera cam{};
+  cam.position = kCamEye;
+  cam.right = right;
+  cam.up = up;
+  cam.forward = kCamFwd;
+  tracer.set_camera(cam);
 
-  VulkanRtPipeline rt;
-  const std::vector<VkPipelineShaderStageCreateInfo> stage_list(
-      stages.begin(), stages.end());
-  auto created = rt.create(ctx.physical_device(), ctx.device(),
-                           pipe_layout_handle, stage_list,
-                           /*miss_count=*/1U, /*hit_group_count=*/1U,
-                           /*max_recursion_depth=*/1U);
-  ASSERT_TRUE(created.is_ok());
-  auto handles = rt.fetch_handles(ctx.device());
-  ASSERT_TRUE(handles.is_ok());
-  EXPECT_EQ(handles.value().size(), 32U * 3U)
-      << "SBT handles: 1 raygen + 1 miss + 1 hit group";
-  auto sbt_buf = alloc.create_buffer(
-      VulkanRtPipeline::required_sbt_bytes(ctx.physical_device(), 1U, 1U),
-      VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
-      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-  ASSERT_TRUE(sbt_buf.is_ok());
-  Allocation sbt = sbt_buf.value();
-  ASSERT_TRUE(rt.write_sbt(ctx.device(), handles.value(), sbt).is_ok());
+  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
+      ctx.device(), qf);
+  ASSERT_TRUE(pool_r.is_ok());
+  VkCommandPool cmd_pool = pool_r.value();
 
-  // ---- Per-frame recording (E3 pattern) --------------------------------------
-  auto record_round = [&](std::uint32_t /*frame*/, bool clear_first) {
+  // One accumulation sequence: clear on the first round, add the rest. The
+  // tracer owns the image, the clear barrier and the cross-round visibility
+  // barrier -- this lambda is now just "record and submit".
+  auto record_round = [&](std::uint32_t frame, bool clear_first) {
     auto r_cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), cmd_pool);
     EXPECT_TRUE(r_cb_r.is_ok());
@@ -752,125 +552,20 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
     rbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     rbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     ASSERT_EQ(vkBeginCommandBuffer(cb, &rbi), VK_SUCCESS);
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                      rt.pipeline());
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                            pipe_layout_handle, 0, 1, &pt_set, 0, nullptr);
-    if (clear_first) {
-      VkImageMemoryBarrier to_general{};
-      to_general.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-      to_general.srcAccessMask = 0;
-      to_general.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-      to_general.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-      to_general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-      to_general.image = accum_image;
-      to_general.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-      vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                           nullptr, 1, &to_general);
-      VkClearColorValue black{};
-      VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-      vkCmdClearColorImage(cb, accum_image, VK_IMAGE_LAYOUT_GENERAL, &black,
-                           1, &range);
-      VkImageMemoryBarrier general_rw = to_general;
-      general_rw.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-      general_rw.dstAccessMask = VK_ACCESS_SHADER_READ_BIT |
-                                 VK_ACCESS_SHADER_WRITE_BIT;
-      vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0,
-                           nullptr, 0, nullptr, 1, &general_rw);
-    } else {
-      VkImageMemoryBarrier vis{};
-      vis.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-      vis.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-      vis.dstAccessMask = VK_ACCESS_SHADER_READ_BIT |
-                          VK_ACCESS_SHADER_WRITE_BIT;
-      vis.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-      vis.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-      vis.image = accum_image;
-      vis.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-      vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                           VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0,
-                           nullptr, 0, nullptr, 1, &vis);
-    }
-    rt.trace_rays(cb, kImg, kImg, 1U);
-    VkImageMemoryBarrier done{};
-    done.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    done.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    done.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    done.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    done.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    done.image = accum_image;
-    done.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &done);
+    tracer.record_round(cb, frame, clear_first);
     ASSERT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
     EXPECT_TRUE(submit_and_wait(ctx.device(), ctx.graphics_queue(), cb));
   };
 
-  auto read_accum = [&]() -> std::vector<float> {
-    auto rb_buf = alloc.create_buffer(
-        kImg * kImg * 16, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    EXPECT_TRUE(rb_buf.is_ok());
-    Allocation rb = rb_buf.value();
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
-        ctx.device(), cmd_pool);
-    EXPECT_TRUE(cbr.is_ok());
-    VkCommandBuffer cb = cbr.value();
-    VkCommandBufferBeginInfo rbi{};
-    rbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    rbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    EXPECT_EQ(vkBeginCommandBuffer(cb, &rbi), VK_SUCCESS);
-    VkImageMemoryBarrier to_src{};
-    to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    to_src.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    to_src.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    to_src.image = accum_image;
-    to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &to_src);
-    VkBufferImageCopy copy{};
-    copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    copy.imageExtent = {kImg, kImg, 1};
-    vkCmdCopyImageToBuffer(cb, accum_image,
-                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, rb.buffer, 1,
-                           &copy);
-    VkImageMemoryBarrier back = to_src;
-    back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT |
-                         VK_ACCESS_SHADER_WRITE_BIT;
-    back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    back.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0,
-                         nullptr, 0, nullptr, 1, &back);
-    EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
-    EXPECT_TRUE(submit_and_wait(ctx.device(), ctx.graphics_queue(), cb));
-    std::vector<float> out(static_cast<std::size_t>(kImg) * kImg * 4);
-    std::memcpy(out.data(), rb.mapped, out.size() * sizeof(float));
-    alloc.destroy_allocation(rb);
-    return out;
-  };
-
   auto run_pass = [&]() -> std::vector<float> {
-    gpu_params->cam_pos_frame[3] = 0.0f;
     record_round(0, true);
     for (std::uint32_t f = 1; f < kFrames; ++f) {
-      gpu_params->cam_pos_frame[3] = static_cast<float>(f);
       record_round(f, false);
     }
-    gpu_params->cam_pos_frame[3] = 0.0f;
-    const std::vector<float> sum = read_accum();
-    std::vector<float> mean(sum.size());
-    const float inv_k = 1.0f / static_cast<float>(kFrames);
-    for (std::size_t i = 0; i < sum.size(); ++i) mean[i] = sum[i] * inv_k;
-    return mean;
+    EXPECT_EQ(tracer.sample_count(), kFrames);
+    auto mean = tracer.read_mean();
+    EXPECT_TRUE(mean.is_ok());
+    return mean.is_ok() ? mean.value() : std::vector<float>{};
   };
 
   auto pixel = [](const std::vector<float>& img, int px, int py,
@@ -1008,20 +703,142 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   EXPECT_EQ(std::memcmp(img2.data(), img.data(), img.size() * sizeof(float)),
             0) << "PT accumulation must be byte-identical across repeats";
 
-  vkDestroyImageView(ctx.device(), accum_view, nullptr);
-  vkDestroyImage(ctx.device(), accum_image, nullptr);
-  for (auto& b : blas_list) builder.destroy_blas(ctx.device(), alloc, b);
-  builder.destroy_tlas(ctx.device(), alloc, tlas);
-  for (auto& ga : geom_allocs) alloc.destroy_allocation(ga);
-  alloc.destroy_allocation(sbt);
-  alloc.destroy_allocation(inst_alloc);
-  alloc.destroy_allocation(params_alloc);
-  alloc.destroy_allocation(accum_allocation);
-  for (std::size_t i = 0; i < static_cast<std::size_t>(3); ++i) vkDestroyShaderModule(ctx.device(), mods[i], nullptr);
-  rt.cleanup(ctx.device());
-  vkDestroyPipelineLayout(ctx.device(), pipe_layout_handle, nullptr);
+  // Teardown order matters and is asserted by the leak check in the suite
+  // teardown: the tracer releases AS storage and buffers BEFORE the allocator
+  // that sub-allocated them, and the caller-owned geometry buffers outlive the
+  // BLASes that reference their addresses.
   vkDestroyCommandPool(ctx.device(), cmd_pool, nullptr);
-  desc.cleanup();
+  tracer.destroy();
+  for (auto& ga : geom_allocs) alloc.destroy_allocation(ga);
+  alloc.cleanup();
+  ctx.cleanup();
+}
+
+//! R1a: the engine-owned tracer survives a resize, and its sample counter is
+//! the accumulation depth read_mean divides by.
+//!
+//! Two contracts the big determinism test cannot see, because it creates once
+//! and never resizes:
+//!   1. create() is re-entrant. A viewport resize calls it again on a live
+//!      tracer; if it allocated a second accumulation image and a second
+//!      descriptor manager, the leak check at suite teardown would catch it
+//!      and nothing else would. This test makes the SECOND create() happen
+//!      inside an ordinary test run, so the leak check is doing its job.
+//!   2. sample_count() tracks rounds: 1 after a clear, +1 per add, reset by
+//!      reset_accumulation(). read_mean divides by it, so a wrong counter is a
+//!      wrong image brightness rather than a crash.
+TEST(path_tracing_real, tracer_resize_and_sample_count) {
+  VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("path_tracing_resize", true).is_ok());
+  if (!ctx.has_ray_tracing() || !ctx.has_ray_tracing_pipeline()) {
+    ctx.cleanup();
+    GTEST_SKIP() << "ray tracing pipeline not available on this device";
+  }
+  VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+
+  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
+      ctx.device(), qf);
+  ASSERT_TRUE(pool_r.is_ok());
+  VkCommandPool cmd_pool = pool_r.value();
+  const auto submit_and_wait_local = [&](VkCommandBuffer cb) {
+    VkFence fence{};
+    VkFenceCreateInfo fi{};
+    fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    vkCreateFence(ctx.device(), &fi, nullptr, &fence);
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1U;
+    si.pCommandBuffers = &cb;
+    const VkResult r = vkQueueSubmit(ctx.graphics_queue(), 1, &si, fence);
+    if (r == VK_SUCCESS) {
+      vkWaitForFences(ctx.device(), 1, &fence, VK_TRUE, UINT64_MAX);
+    }
+    vkDestroyFence(ctx.device(), fence, nullptr);
+    return r == VK_SUCCESS;
+  };
+
+  // One box of geometry, reused across both sizes.
+  auto tri = make_box_triangles(1.0f, 1.0f, 1.0f);
+  auto geo = alloc.create_buffer(
+      tri.size() * sizeof(float),
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  Allocation geo_alloc = geo.value();
+  std::memcpy(geo_alloc.mapped, tri.data(), tri.size() * sizeof(float));
+  VkBufferDeviceAddressInfo addr_info{};
+  addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  addr_info.buffer = geo_alloc.buffer;
+
+  PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.max_bounces = 2U;
+  PathTracerMesh mesh{};
+  mesh.vertex_buffer_address = vkGetBufferDeviceAddress(ctx.device(), &addr_info);
+  mesh.triangle_count = 12U;
+  mesh.max_vertex = 35U;
+  cfg.meshes = {mesh};
+  cfg.instances = {PathTracerInstance::translated({0.0F, 0.0F, -3.0F}, 0.8F)};
+  PathTracerCamera cam{};
+  cam.position = {0.0F, 0.0F, 0.0F};
+  cam.forward = {0.0F, 0.0F, 1.0F};
+
+  VulkanPathTracer tracer;
+  const auto make_at = [&](std::uint32_t size) {
+    PathTracerConfig c = cfg;
+    c.width = size;
+    c.height = size;
+    EXPECT_TRUE(tracer
+                    .create(ctx.physical_device(), ctx.device(),
+                            ctx.graphics_queue(), qf, alloc, c)
+                    .is_ok());
+    EXPECT_TRUE(tracer.ready());
+    EXPECT_EQ(tracer.width(), size);
+    tracer.set_camera(cam);
+  };
+  const auto accumulate = [&](std::uint32_t frames) {
+    for (std::uint32_t i = 0; i < frames; ++i) {
+      auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+          ctx.device(), cmd_pool);
+      EXPECT_TRUE(cb_r.is_ok());
+      VkCommandBuffer cb = cb_r.value();
+      VkCommandBufferBeginInfo bi{};
+      bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      ASSERT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+      tracer.record_round(cb, i, /*clear_first=*/i == 0U);
+      ASSERT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+      EXPECT_TRUE(submit_and_wait_local(cb));
+    }
+  };
+
+  make_at(32U);
+  accumulate(4U);
+  EXPECT_EQ(tracer.sample_count(), 4U);
+  auto mean = tracer.read_mean();
+  ASSERT_TRUE(mean.is_ok());
+  EXPECT_EQ(mean.value().size(), 32U * 32U * 4U);
+
+  // The resize: create() again on the live tracer. Everything before this
+  // point was allocated; if re-entry leaks, the suite's leak check fires.
+  make_at(16U);
+  EXPECT_EQ(tracer.sample_count(), 0U) << "a re-create must forget the count";
+  accumulate(2U);
+  EXPECT_EQ(tracer.sample_count(), 2U);
+  auto mean2 = tracer.read_mean();
+  ASSERT_TRUE(mean2.is_ok());
+  EXPECT_EQ(mean2.value().size(), 16U * 16U * 4U);
+
+  tracer.reset_accumulation();
+  EXPECT_EQ(tracer.sample_count(), 0U);
+
+  vkDestroyCommandPool(ctx.device(), cmd_pool, nullptr);
+  tracer.destroy();
+  alloc.destroy_allocation(geo_alloc);
   alloc.cleanup();
   ctx.cleanup();
 }

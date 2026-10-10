@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <cmath>
 #include <cstring>
 #include <vector>
 
@@ -78,8 +79,17 @@ inline ReadbackResult readback_swapchain_image(VkPhysicalDevice physical_device,
   // Texel size depends on the format: the 4-byte path handles BGRA8/RGBA8;
   // RGBA16F (HDR bloom/scene targets) packs 8 bytes per pixel and is
   // converted to 8-bit BGRA on readback so callers see the same stats.
+  // R32G32B32A32_SFLOAT (the path tracer's accumulation image) packs 16.
+  //
+  // That last one was a landmine: rgba32f used to fall through to the 4-byte
+  // path, which reads bytes [0..3] of each 16-byte texel -- the low bytes of
+  // an IEEE float, not an RGBA byte quadruple -- and reports confident
+  // nonsense hashes. Both path-tracing tests bypassed this helper with private
+  // float-exact readers, which is why it was never caught. The branch is here
+  // so the next caller cannot hit it.
   const bool is_rgba16f = image_format == VK_FORMAT_R16G16B16A16_SFLOAT;
-  const std::uint32_t bytes_per_texel = is_rgba16f ? 8U : 4U;
+  const bool is_rgba32f = image_format == VK_FORMAT_R32G32B32A32_SFLOAT;
+  const std::uint32_t bytes_per_texel = is_rgba32f ? 16U : (is_rgba16f ? 8U : 4U);
   const VkDeviceSize byte_size =
       static_cast<VkDeviceSize>(width) * height * bytes_per_texel;
 
@@ -225,6 +235,23 @@ inline ReadbackResult readback_swapchain_image(VkPhysicalDevice physical_device,
       const auto texel_at = [&](std::uint32_t x, std::uint32_t y) {
         const std::size_t offset =
             (static_cast<std::size_t>(y) * width + x) * bytes_per_texel;
+        if (is_rgba32f) {
+          // Float -> the same 8-bit clamp the half path produces, so the
+          // statistics (peak luma, non-clear count, hashes) mean the same
+          // thing across formats. A NaN/Inf (a path tracer can accumulate
+          // one) clamps to white rather than becoming a nonsense small int.
+          const auto f32_to_u8 = [](float v) -> std::uint32_t {
+            if (std::isnan(v)) return 255U;  // NaN
+            const float scaled = v * 255.0F;
+            if (!(scaled > 0.0F)) return 0U;   // negative or -Inf
+            if (scaled > 255.0F) return 255U;  // +Inf or over-range
+            return static_cast<std::uint32_t>(scaled);
+          };
+          float c[4];
+          std::memcpy(c, bytes + offset, 16U);
+          return f32_to_u8(c[0]) | (f32_to_u8(c[1]) << 8U) |
+                 (f32_to_u8(c[2]) << 16U) | (f32_to_u8(c[3]) << 24U);
+        }
         if (is_rgba16f) {
           std::uint16_t c[4];
           std::memcpy(c, bytes + offset, 8U);

@@ -85,6 +85,7 @@ Genuinely implemented, and the strongest part of the repository.
 |---|---|---|---|
 | BLAS build + per-frame TLAS on caller command buffers | yes | yes | `test_ray_query_first_contact` |
 | RT pipeline: SBT, `vkCmdTraceRaysKHR`, device-adaptive alignment | yes | no | `test_path_tracing` vs a bit-exact CPU simulator |
+| `VulkanPathTracer` (R1a): rgba32f accumulation, BLAS/TLAS, SBT, clear-once/add-per-frame, `read_mean` | yes | no — no viewport mode yet | `path_tracing_real` — CPU-mirrored `EXPECT_FLOAT_EQ` probes + byte-identical repeat through the engine object; resize + sample-count test |
 | Loop path tracer (N-bounce, per-pixel PCG streams, temporal accumulation) | yes | no | `test_path_tracing_real`, validated against an independent fp64 MC integrator (262k samples) |
 | Ray-query shadows vs PCF, A/B | yes | yes | `test_rt_shadows`; app needs `WARPLOOM_RT_MODE=1` |
 | Ray-query reflections | yes | no | `test_rt_reflections` |
@@ -96,11 +97,16 @@ Two honest caveats on the ray tracing:
   lavapipe, which has no RT extensions. There is no hardware runner, so the
   subsystem with the most capability has the least automated regression
   protection.
-- **The RT mode is an environment variable read once at start-up**
-  (`WARPLOOM_RT_MODE`). It cannot be toggled after launch, there is no
-  keyboard shortcut, and the control protocol has no render-mode command.
-  This is why roadmap items R1 (viewport path tracing) and R2 (RT
-  reflections/AO toggles) are genuinely unstarted rather than nearly done.
+- **RT *shadows* are an environment variable read once at start-up**
+  (`WARPLOOM_RT_MODE`)**, but that is no longer the whole story: the
+  render-mode SWITCH is a protocol command (`set_render_mode`, v1.9), so an
+  RT stack is built on first request and cached, and the viewport can be
+  driven into RT and back over a live socket. What still cannot be toggled
+  is *within* the RT stack: there are no RT reflection / AO / path-tracing
+  sub-toggles, which is what R2 (reflections/AO) is about. R1 (path tracing)
+  is started rather than unstarted as of R1a: the tracer is an engine object
+  with a determinism proof, and what is missing is the viewport wiring and
+  the compose-from-accumulation stage.
 
 ## Determinism
 

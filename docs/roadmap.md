@@ -619,6 +619,41 @@ declares a slot 3.
       ReSTIR explicitly deferred: reservoir stream state breaks snapshot
       replay.
 
+      **R1a DONE — the path tracer is an engine object.** Until now the whole
+      tracer lived inside `tests/unit/test_path_tracing_real.cpp`: an rgba32f
+      accumulation image, params/instance buffers, BLASes, a TLAS, an SBT, a
+      descriptor set and the clear-once/add-per-frame round, ~300 lines of a
+      rendering feature in a test fixture. That is the same defect class as the
+      compose chain living inside VulkanRenderer (B3b), and it is why R1 had no
+      engine API at all. `VulkanPathTracer` (modules/render) now owns all of
+      it: `create()` (geometry in as device addresses, AS storage, image,
+      buffers, SBT, pipeline), `set_camera`, `record_round(frame, clear_first)`,
+      `read_mean()`, `sample_count()`, `reset_accumulation()`. The proof that
+      the extraction preserved behaviour is the strongest available one: the
+      existing determinism test now drives the engine object and still passes
+      its `EXPECT_FLOAT_EQ` probes against the independent fp64 reference plus
+      its byte-identical repeat — the test shrank 1035 -> ~730 lines and the
+      assertions did not move. `create()` is re-entrant for a resize (validated
+      by sabotage: removing the guard makes the validation layer report 5
+      leaked objects). Geometry buffers stay caller-owned, which is what lets
+      the same object serve a test room and, next, a viewport scene.
+
+      Two honest limits. (1) Only the `pt_real` shader variant is engine-owned;
+      the nested-recursion `pt_pathtrace` variant (2 misses, recursion depth 2,
+      different binding order) is still exercised test-only through
+      `VulkanRtPipeline` directly — generalising the object to it is a
+      follow-up, not a claim. (2) `read_mean()` divides host-side; the
+      in-shader normalization for the tonemap stage is part of R1b. Also fixed
+      along the way: the shared test readback helper silently mis-decoded
+      rgba32f (it read 4 bytes of each 16-byte texel — the low bytes of an
+      IEEE float — and reported confident nonsense); both PT tests had
+      bypassed it with private readers, which is why it was never caught.
+
+      **R1b (next):** viewport PT mode — build the tracer from the app's scene
+      meshes on first `set_render_mode("pt")`, record one accumulation round
+      per paused frame, and add a tonemap-from-accumulation stage so the
+      converged mean is what reaches the swapchain.
+
       (SetBloom was briefly added and REVERTED: see below. It has since
       RE-LANDED on the pre-allocated design — see the DONE note.)
 
