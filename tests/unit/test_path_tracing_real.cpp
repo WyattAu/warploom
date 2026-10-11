@@ -843,6 +843,141 @@ TEST(path_tracing_real, tracer_resize_and_sample_count) {
   ctx.cleanup();
 }
 
+//! R1b: the viewport's PT stack builds from ITS geometry, and it must build.
+//!
+//! The viewport could not be trusted as the only evidence for this: when the
+//! stack was first wired, `set_render_mode pt` came back as
+//! "pt stack unavailable on this device" because the acceleration-structure
+//! build inside create() returned VK_ERROR_DEVICE_LOST -- with no validation
+//! error at all, and reproducibly. That is a GPU fault, not a validation
+//! complaint, so it needed isolating: this builds the SAME cube the viewport
+//! uses (the canonical kRtCube expansion) headlessly, with no swapchain, no
+//! frame loop and no concurrent allocations.
+//!
+//! If it passes here, the fault is contextual to the app; if it fails, the
+//! geometry or the build itself is wrong and this is the test that says so.
+TEST(path_tracing_real, viewport_cube_geometry_builds) {
+  VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("path_tracing_viewport_geom", true).is_ok());
+  if (!ctx.has_ray_tracing() || !ctx.has_ray_tracing_pipeline()) {
+    ctx.cleanup();
+    GTEST_SKIP() << "ray tracing pipeline not available on this device";
+  }
+  VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+
+  // Byte-identical to the viewport's kRtCubePositions / kRtCubeIndices.
+  constexpr std::array<float, 24> positions = {
+      -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1,        // +z face
+      -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1, -1};  // -z face
+  constexpr std::array<std::uint32_t, 36> indices = {
+      0, 1, 2, 0, 2, 3,     4, 5, 6, 4, 6, 7,
+      1, 7, 6, 1, 6, 2,     4, 0, 3, 4, 3, 5,
+      3, 2, 6, 3, 6, 5,     4, 7, 1, 4, 1, 0};
+  std::vector<float> cube_tris;
+  cube_tris.reserve(12U * 9U);
+  for (const std::uint32_t idx : indices) {
+    for (std::size_t c = 0; c < 3U; ++c) cube_tris.push_back(positions[idx * 3U + c]);
+  }
+  // Ground slab: the same cube, y-squashed and dropped (the viewport's slab).
+  std::vector<float> slab_tris = cube_tris;
+  for (std::size_t v = 0; v < slab_tris.size(); v += 3U) {
+    slab_tris[v + 1U] = slab_tris[v + 1U] * 0.1F - 2.0F;
+  }
+
+  // ONE BUFFER PER MESH. The single-buffer-with-offsets variant faults this
+  // GPU during the build (see setup_path_tracing); separate buffers is also
+  // what the RT-shadow stack does.
+  auto make_geo = [&](const std::vector<float>& tris, Allocation& out) -> std::uint64_t {
+    auto r = alloc.create_buffer(
+        static_cast<VkDeviceSize>(tris.size() * sizeof(float)),
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    EXPECT_TRUE(r.is_ok());
+    out = r.value();
+    std::memcpy(out.mapped, tris.data(), tris.size() * sizeof(float));
+    VkBufferDeviceAddressInfo i2{};
+    i2.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    i2.buffer = out.buffer;
+    return vkGetBufferDeviceAddress(ctx.device(), &i2);
+  };
+  Allocation geo_alloc{};
+  Allocation slab_alloc{};
+  const std::uint64_t base = make_geo(cube_tris, geo_alloc);
+  ASSERT_NE(base, 0U);
+  const std::uint64_t slab_base = make_geo(slab_tris, slab_alloc);
+
+  PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.width = 32U;
+  cfg.height = 32U;
+  cfg.max_bounces = 4U;
+  PathTracerMesh cube{};
+  cube.vertex_buffer_address = base;
+  cube.triangle_count = 12U;
+  cube.max_vertex = 35U;
+  PathTracerMesh slab{};
+  slab.vertex_buffer_address = slab_base;
+  slab.triangle_count = 12U;
+  slab.max_vertex = 35U;
+  cfg.meshes = {cube, slab};
+  cfg.instances = {PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F),
+                   PathTracerInstance::translated({0.0F, -2.0F, 0.0F}, 0.75F)};
+
+  VulkanPathTracer tracer;
+  const auto created = tracer.create(ctx.physical_device(), ctx.device(),
+                                     ctx.graphics_queue(), qf, alloc, cfg);
+  ASSERT_TRUE(created.is_ok());
+  ASSERT_TRUE(tracer.ready())
+      << "the viewport's own PT geometry must build on this device";
+
+  // And it must trace, not merely build: one round, then read the mean.
+  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(ctx.device(), qf);
+  ASSERT_TRUE(pool_r.is_ok());
+  VkCommandPool pool = pool_r.value();
+  auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      ctx.device(), pool);
+  ASSERT_TRUE(cb_r.is_ok());
+  VkCommandBuffer cb = cb_r.value();
+  VkCommandBufferBeginInfo bi{};
+  bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  ASSERT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+  tracer.record_round(cb, 0U, true);
+  ASSERT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+  VkFence fence{};
+  VkFenceCreateInfo fi{};
+  fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  vkCreateFence(ctx.device(), &fi, nullptr, &fence);
+  VkSubmitInfo si{};
+  si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  si.commandBufferCount = 1U;
+  si.pCommandBuffers = &cb;
+  ASSERT_EQ(vkQueueSubmit(ctx.graphics_queue(), 1, &si, fence), VK_SUCCESS);
+  ASSERT_EQ(vkWaitForFences(ctx.device(), 1, &fence, VK_TRUE, UINT64_MAX), VK_SUCCESS);
+  vkDestroyFence(ctx.device(), fence, nullptr);
+  vkDestroyCommandPool(ctx.device(), pool, nullptr);
+
+  auto mean = tracer.read_mean();
+  ASSERT_TRUE(mean.is_ok());
+  ASSERT_EQ(mean.value().size(), 32U * 32U * 4U);
+  // The cube is unit-sized at the origin and the camera looks down -z, so the
+  // frame must not be uniformly black: sky alone gives 1.0 radiance on rays
+  // that miss everything, and the tracer adds it per bounce.
+  double total = 0.0;
+  for (const float v : mean.value()) total += static_cast<double>(v);
+  EXPECT_GT(total, 0.0) << "viewport geometry traced to an all-black frame";
+
+  tracer.destroy();
+  alloc.destroy_allocation(geo_alloc);
+  if (slab_alloc.is_valid()) alloc.destroy_allocation(slab_alloc);
+  alloc.cleanup();
+  ctx.cleanup();
+}
+
 #else  // !WARPLOOM_HAS_VULKAN
 
 TEST(path_tracing_real, disabled_without_vulkan) {

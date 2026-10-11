@@ -126,7 +126,7 @@ namespace warploom::render {
         {0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
          VK_SHADER_STAGE_FRAGMENT_BIT},
         {0, 1, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-         VK_SHADER_STAGE_FRAGMENT_BIT}}, 2U);
+         VK_SHADER_STAGE_FRAGMENT_BIT}}, 3U);
     if (!layout.is_ok()) return refuse("compose descriptor layout failed");
     compose_layout_ = layout.value();
     auto set = descriptor_manager_->allocate_set(compose_layout_);
@@ -137,6 +137,12 @@ namespace warploom::render {
     auto nobloom_set = descriptor_manager_->allocate_set(compose_layout_);
     if (!nobloom_set.is_ok()) return refuse("compose (no-bloom) set failed");
     compose_set_nobloom_ = nobloom_set.value();
+    // Third tonemap set: same shape, binding 0 later rewritten to the external
+    // source (see set_external_source). All three are written before the first
+    // frame so a mode switch binds rather than writes.
+    auto external_set = descriptor_manager_->allocate_set(compose_layout_);
+    if (!external_set.is_ok()) return refuse("compose (external) set failed");
+    compose_set_external_ = external_set.value();
 
     // The bloom stage set is allocated UNCONDITIONALLY. The original code
     // allocated it only when bloom was on, "because otherwise they are dead
@@ -453,6 +459,32 @@ namespace warploom::render {
            .is_ok()) {
     return refuse("no-bloom descriptor write failed");
   }
+  // External-source set: until set_external_source() says otherwise it mirrors
+  // the plain path (own intermediate, black bloom slot), so selecting it
+  // without a source is harmless rather than a dangling view.
+  {
+    const bool have_external = external_image_ != VK_NULL_HANDLE &&
+                               external_view_ != VK_NULL_HANDLE;
+    if (!descriptor_manager_
+             ->write_image(compose_set_external_, 0U,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                           hdr_sampler_,
+                           have_external ? external_view_
+                                         : hdr_target_->image_view(),
+                           have_external
+                               ? VK_IMAGE_LAYOUT_GENERAL
+                               : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           0U)
+             .is_ok() ||
+        !descriptor_manager_
+             ->write_image(compose_set_external_, 1U,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                           linear_sampler_, black_texture_.view,
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
+             .is_ok()) {
+      return refuse("external-source descriptor write failed");
+    }
+  }
   // The bright-pass reads the HDR scene. Only when bloom exists: with no target
   // there is no pipeline to bind this to, and writing a null view fails.
   if (bloom_available_ &&
@@ -496,6 +528,28 @@ struct ComposeStage {
 
 }  // namespace
 
+void VulkanComposeChain::set_external_source(VkImage image,
+                                             VkImageView view) noexcept {
+  external_image_ = image;
+  external_view_ = view;
+  // Written HERE rather than only in ensure(): ensure() has normally already
+  // run by the time an application knows its source, and a set still holding
+  // the fallback view keeps tonemapping the chain's own unused HDR image -- a
+  // failure that looks fine on screen (stable, non-black) while ignoring the
+  // source entirely.
+  if (!compose_ready_ || descriptor_manager_ == nullptr ||
+      compose_set_external_ == VK_NULL_HANDLE) {
+    return;
+  }
+  const bool have = image != VK_NULL_HANDLE && view != VK_NULL_HANDLE;
+  (void)descriptor_manager_->write_image(
+      compose_set_external_, 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      hdr_sampler_, have ? view : hdr_target_->image_view(),
+      have ? VK_IMAGE_LAYOUT_GENERAL
+           : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      0U);
+}
+
 void VulkanComposeChain::record(VkCommandBuffer command_buffer,
                                           VkRenderPass target_pass,
                                           VkFramebuffer target_framebuffer,
@@ -514,9 +568,13 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
 
   struct ComposePush {
     float exposure;
-    float pad[3];
+    float inverse_samples;
+    float pad[2];
   } push{};
   push.exposure = config_.exposure;
+  push.inverse_samples = inverse_samples_;
+  push.pad[0] = 0.0F;
+  push.pad[1] = 0.0F;
 
 
   // --- Declare the stages. ---
@@ -582,16 +640,36 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
   tonemap.height = height;
   tonemap.push = &push;
   tonemap.push_size = sizeof(push);
-  tonemap.set = bloom_on ? compose_set_ : compose_set_nobloom_;
-  tonemap.samples[0].image = hdr_target_->image();
+  // Three pre-written sets, selected by what this frame actually contains:
+  // external source (path tracing) > bloom > plain raster.
+  const bool external = external_image_ != VK_NULL_HANDLE;
+  tonemap.set = external ? compose_set_external_
+                         : (bloom_on ? compose_set_ : compose_set_nobloom_);
+  tonemap.samples[0].image = external ? external_image_ : hdr_target_->image();
   tonemap.samples[0].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   // With no bloom stage, the scene pass is this stage's only producer. With
   // bloom, the upsample rewrote hdr and the compiler already tracked it.
-  tonemap.samples[0].initial_layout = hdr_from_scene;
-  tonemap.samples[0].initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-  tonemap.samples[0].initial_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  if (external) {
+    // The source is a storage image that stays in GENERAL for its whole life
+    // (see set_external_source), so there is no producer transition to compute:
+    // same layout in and out. Transitioning it to SHADER_READ_ONLY here would
+    // make the layout depend on WHICH consumer ran last, and the capture chain
+    // -- a second instance recording after the live frame -- would then declare
+    // a layout the image is not in. The write it received this frame is ordered
+    // by the tracer's own barrier and the submission's dependency, not by
+    // layout.
+    tonemap.samples[0].used_layout = VK_IMAGE_LAYOUT_GENERAL;
+    tonemap.samples[0].initial_layout = VK_IMAGE_LAYOUT_GENERAL;
+    tonemap.samples[0].initial_access = 0U;
+    tonemap.samples[0].initial_stage = 0U;
+  } else {
+    tonemap.samples[0].initial_layout = hdr_from_scene;
+    tonemap.samples[0].initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    tonemap.samples[0].initial_stage =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  }
   tonemap.sample_count = 1U;
-  if (bloom_on) {
+  if (!external && bloom_on) {
     tonemap.samples[1].image = bloom_target_->image();
     tonemap.samples[1].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     tonemap.samples[1].initial_layout = bloom_target_->color_final_layout();
@@ -681,6 +759,10 @@ void VulkanComposeChain::destroy() noexcept {
   compose_height_ = 0U;
   compose_set_ = VK_NULL_HANDLE;
   compose_set_nobloom_ = VK_NULL_HANDLE;
+  compose_set_external_ = VK_NULL_HANDLE;
+  external_image_ = VK_NULL_HANDLE;
+  external_view_ = VK_NULL_HANDLE;
+  inverse_samples_ = 1.0F;
   compose_layout_ = VK_NULL_HANDLE;
   bloom_enabled_ = false;
   bloom_available_ = false;

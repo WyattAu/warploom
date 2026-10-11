@@ -537,10 +537,14 @@ struct PostProcessHarness {
     tm.samples[0] = {hdr_image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                      VK_IMAGE_ASPECT_COLOR_BIT};
     tm.sample_count = 1;
-    // Exposure push constant (shader reads pc.exposure).
-    const float exposure = 1.0f;
-    tm.push_data = &exposure;
-    tm.push_size = sizeof(float);
+    // Compose push block: exposure + inverse_samples + 2 pad. Pushing a bare
+    // float "worked" while the block was one field; the moment the shader grew
+    // a second field (R1b's 1/n accumulation divide) the rest of the range was
+    // uninitialized stack, which showed up as a black frame rather than as a
+    // validation error. Push the whole struct.
+    const std::array<float, 4> compose_push{1.0f, 1.0f, 0.0f, 0.0f};
+    tm.push_data = compose_push.data();
+    tm.push_size = sizeof(compose_push);
     tm.push_stage_flags = VK_SHADER_STAGE_FRAGMENT_BIT;
     tm_ctx.pass = &tm;
 

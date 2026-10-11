@@ -85,7 +85,8 @@ Genuinely implemented, and the strongest part of the repository.
 |---|---|---|---|
 | BLAS build + per-frame TLAS on caller command buffers | yes | yes | `test_ray_query_first_contact` |
 | RT pipeline: SBT, `vkCmdTraceRaysKHR`, device-adaptive alignment | yes | no | `test_path_tracing` vs a bit-exact CPU simulator |
-| `VulkanPathTracer` (R1a): rgba32f accumulation, BLAS/TLAS, SBT, clear-once/add-per-frame, `read_mean` | yes | no — no viewport mode yet | `path_tracing_real` — CPU-mirrored `EXPECT_FLOAT_EQ` probes + byte-identical repeat through the engine object; resize + sample-count test |
+| `VulkanPathTracer` (R1a/R1b): rgba32f accumulation, BLAS/TLAS, SBT, clear-once/add-per-frame, `read_mean` | yes | yes — `set_render_mode("pt")` / `WARPLOOM_PT=1`, renders the cube + ground slab scene | `path_tracing_real` — CPU-mirrored `EXPECT_FLOAT_EQ` probes + byte-identical repeat through the engine object, viewport-geometry build, resize + sample count; `VulkanHardware.PathTracedFrameConvergesThroughCompose` proves the noise floor falls from 1 to 8 samples |
+| Compose chain tonemap from an external source (PT accumulation, sampled in GENERAL) | yes | yes | `PathTracedFrameConvergesThroughCompose`; two sabotage directions (missing 1/n, stuck frame index) both caught |
 | Loop path tracer (N-bounce, per-pixel PCG streams, temporal accumulation) | yes | no | `test_path_tracing_real`, validated against an independent fp64 MC integrator (262k samples) |
 | Ray-query shadows vs PCF, A/B | yes | yes | `test_rt_shadows`; app needs `WARPLOOM_RT_MODE=1` |
 | Ray-query reflections | yes | no | `test_rt_reflections` |
@@ -101,12 +102,15 @@ Two honest caveats on the ray tracing:
   (`WARPLOOM_RT_MODE`)**, but that is no longer the whole story: the
   render-mode SWITCH is a protocol command (`set_render_mode`, v1.9), so an
   RT stack is built on first request and cached, and the viewport can be
-  driven into RT and back over a live socket. What still cannot be toggled
-  is *within* the RT stack: there are no RT reflection / AO / path-tracing
-  sub-toggles, which is what R2 (reflections/AO) is about. R1 (path tracing)
-  is started rather than unstarted as of R1a: the tracer is an engine object
-  with a determinism proof, and what is missing is the viewport wiring and
-  the compose-from-accumulation stage.
+  driven into RT and back over a live socket. Path tracing joined it as a
+  third mode (`"pt"`). What still cannot be toggled is *within* the RT stack:
+  there are no RT reflection / AO sub-toggles, which is what R2 is about.
+
+- **Path tracing is a third render mode, and it is narrow.** It traces the
+  cubes-scene cube + ground slab at the swapchain extent captured when the
+  stack was built, accumulates one sample per rendered frame, and tonemaps the
+  accumulation image directly. No resize handling, no app-scene integration,
+  and bloom does not layer on it (the source is already divided by n).
 
 ## Determinism
 

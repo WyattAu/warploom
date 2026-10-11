@@ -52,6 +52,7 @@
 #include "warploom/render/vulkan_descriptors.hpp"
 #include "warploom/render/vulkan_ibl_baker.hpp"
 #include "warploom/render/vulkan_memory_allocator.hpp"
+#include "warploom/render/vulkan_path_tracer.hpp"
 #include "warploom/render/vulkan_render_pass.hpp"
 #include "warploom/render/vulkan_renderer.hpp"
 #include "warploom/render/vulkan_scene.hpp"
@@ -184,6 +185,11 @@ constexpr std::uint32_t kGdMaxInstances = 4096U;
 
 struct ViewportApp;
 bool setup_rt_shadows(ViewportApp& app);
+bool setup_path_tracing(ViewportApp& app);
+void destroy_path_tracing(ViewportApp& app);
+void destroy_pt_geometry(ViewportApp& app);
+bool record_pt_round_cb(VkCommandBuffer command_buffer, std::uint32_t width,
+                        std::uint32_t height, void* user_data);
 //! ControlHost over the viewport (defined after ViewportApp).
 class ViewportControlHost;
 
@@ -621,6 +627,42 @@ struct ViewportApp {
   //! E1: the RT stack is built on first use and cached, so runtime mode
   //! switches cannot leave a half-built stack behind.
   bool rt_stack_built{false};
+  // --- R1b: path tracing -------------------------------------------------
+  //! Path-tracing mode ("pt"). Same build-once/cache discipline as the RT
+  //! stack, for the same reason: a mode switch must never leave a half-built
+  //! stack behind.
+  bool pt_mode{false};
+  bool pt_stack_built{false};
+  //! PT mode transitions are REQUESTED here and APPLIED on the render thread.
+  //! 1 = enter PT, -1 = leave. The reason is not tidiness: VulkanMemoryAllocator
+  //! has no lock, and the render thread allocates every frame, so building the
+  //! PT stack from the control thread corrupts its free lists -- which showed
+  //! up as VK_ERROR_DEVICE_LOST inside the acceleration-structure build, with
+  //! no validation error at all. Same discipline as control_capture_requested_.
+  std::atomic<int> pt_request_{0};
+  std::unique_ptr<omnicpp::render::VulkanPathTracer> pt_tracer;
+  //! Triangle soup for the PT scene: one device-address buffer holding every
+  //! mesh's triangles back-to-back, with each mesh's address offset into it
+  //! (a BLAS build reads from the device address, so one buffer can feed
+  //! many BLASes without a copy).
+  std::vector<omnicpp::render::Allocation> pt_geometry{};
+  //! Accumulation frame index. It is part of the sample seed, so it is a
+  //! counter and never a clock.
+  std::uint32_t pt_frame{0};
+  //! Cap on accumulated samples: past this the seed repeats and the mean
+  //! stops improving, so the tracer is reset instead of drifting forever.
+  static constexpr std::uint32_t kPtMaxSamples = 4096U;
+  //! Latest camera (set by the scene update, consumed by the PT pre-pass).
+  //! Framebuffer extent the PT accumulation image is sized to. Captured from
+  //! the swapchain when the stack is first built; a window resize does not
+  //! rebuild the stack (there is no resize handler for the PT path yet), so
+  //! the tracer renders at the extent it was built with and the tonemap
+  //! samples it 1:1. Recorded so the mismatch is visible rather than silent.
+  std::uint32_t pt_extent_width{0};
+  std::uint32_t pt_extent_height{0};
+  std::array<float, 3> pt_eye{{0.0F, 2.0F, 5.0F}};
+  std::array<float, 3> pt_target{{0.0F, 0.0F, 0.0F}};
+  std::array<float, 3> pt_up{{0.0F, 1.0F, 0.0F}};
   omnicpp::render::VulkanAccelerationStructureBuilder rt_builder;
   omnicpp::render::VulkanScratchPool rt_scratch;
   struct RtBlas {
@@ -870,9 +912,19 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
         // loop reads. Nothing is torn down, so neither direction can leave the
         // app with a half-built stack.
         const std::string& mode = command.text;
-        if (mode != "forward" && mode != "rt") {
+        if (mode != "forward" && mode != "rt" && mode != "pt") {
           reply.ok = false;
-          reply.error = "set_render_mode needs mode=\"forward\"|\"rt\"";
+          reply.error = "set_render_mode needs mode=\"forward\"|\"rt\"|\"pt\"";
+          break;
+        }
+        if (mode == "pt") {
+          // R1b: path tracing. The stack is built on the RENDER thread (see
+          // pt_request_), so the reply is "scheduled" rather than "done":
+          // a mode switch lands on the next recorded frame. A client that
+          // needs to know reads get_render_mode until it answers "pt" -- the
+          // same contract a real frame-driven app has.
+          app_.pt_request_.store(1);
+          reply.detail = "render mode pt scheduled";
           break;
         }
         if (mode == "rt") {
@@ -885,18 +937,20 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
             app_.rt_stack_built = true;
           }
           app_.rt_mode = true;
-          reply.detail = "render mode rt";
+          app_.pt_request_.store(-1);
+          reply.detail = "render mode rt scheduled";
         } else {
           app_.rt_mode = false;
-          reply.detail = "render mode forward";
+          app_.pt_request_.store(-1);
+          reply.detail = "render mode forward scheduled";
         }
         break;
       }
-      case CK::GetRenderMode:
-        reply.detail =
-            std::string("{\"mode\":\"") + (app_.rt_mode ? "rt" : "forward") +
-            "\"}";
+      case CK::GetRenderMode: {
+        const char* name = app_.pt_mode ? "pt" : (app_.rt_mode ? "rt" : "forward");
+        reply.detail = std::string("{\"mode\":\"") + name + "\"}";
         break;
+      }
       case CK::SetExposure: {
         // R4 live: the chain reads exposure at record time, so this lands on
         // the next frame. Clamped: a zero or negative multiplier is always a
@@ -1028,7 +1082,7 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
       if (object.mesh != nullptr && object.mesh->is_drawable()) ++drawn;
     }
     std::string json = "{\"render_mode\":\"";
-  json += app_.rt_mode ? "rt" : "forward";
+  json += app_.pt_mode ? "pt" : (app_.rt_mode ? "rt" : "forward");
   json += "\",\"scene\":\"";
     json += app_.sponza_enabled ? "city+sponza" : (app_.city_scene ? "city" : "cubes");
     json += "\",\"paused\":";
@@ -3060,6 +3114,199 @@ void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
                        nullptr, 0, nullptr);
 }
 
+//! R1b: build the path-tracing stack from the cubes scene's own geometry.
+//!
+//! The scene is deliberately the simplest one that exercises the tracer: a
+//! unit cube at the origin and a ground slab, built from the SAME canonical
+//! cube the RT-shadow stack uses (kRtCubePositions/Indices), so there is one
+//! definition of "a cube" in this file rather than two. The path tracer owns
+//! the accumulation, the BLASes and the SBT; this function owns only the
+//! geometry buffer it feeds them from, which is the ownership split the
+//! engine object was designed around.
+bool setup_path_tracing(ViewportApp& app) {
+  VkDevice dev = app.context.device();
+  if (!app.context.has_ray_tracing() ||
+      !app.context.has_ray_tracing_pipeline()) {
+    std::fprintf(stderr, "viewport: PT requested but device lacks "
+                         "VK_KHR_acceleration_structure/ray_tracing_pipeline\n");
+    return false;
+  }
+  const std::string shader_dir = warploom_shader_dir();
+
+  // Unit cube, world-space, centred at the origin.
+  std::vector<float> cube_tris;
+  cube_tris.reserve(12U * 9U);
+  for (const std::uint32_t idx : kRtCubeIndices) {
+    for (std::size_t c = 0; c < 3U; ++c) {
+      cube_tris.push_back(kRtCubePositions[idx * 3U + c]);
+    }
+  }
+  // Ground slab: the same cube, y-squashed to 0.1 and dropped below the
+  // origin, so the tracer sees a floor instead of a floating box.
+  std::vector<float> slab_tris = cube_tris;
+  for (std::size_t v = 0; v < slab_tris.size(); v += 3U) {
+    slab_tris[v + 1U] = slab_tris[v + 1U] * 0.1F - 2.0F;
+  }
+
+  // ONE BUFFER PER MESH. The obvious optimisation -- concatenate both meshes
+  // and hand each BLAS an offset into it -- faults the GPU on this driver: two
+  // meshes in one buffer reproducibly lost the device inside the AS build with
+  // no validation error, while two buffers build and trace cleanly (the
+  // isolation test path_tracing_real.viewport_cube_geometry_builds pins
+  // exactly this pair of geometries). One small upload per mesh is not worth
+  // that, so the "optimisation" is the thing that was removed.
+  std::vector<omnicpp::render::Allocation> geometry;
+  std::vector<std::uint64_t> addresses;
+  for (const std::vector<float>* tris : {&cube_tris, &slab_tris}) {
+    auto geo = app.allocator.create_buffer(
+        static_cast<VkDeviceSize>(tris->size() * sizeof(float)),
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (!geo.is_ok()) {
+      std::fprintf(stderr, "viewport: PT: geometry buffer failed\n");
+      for (auto& g : geometry) app.allocator.destroy_allocation(g);
+      return false;
+    }
+    geometry.push_back(geo.value());
+    std::memcpy(geometry.back().mapped, tris->data(),
+                tris->size() * sizeof(float));
+    VkBufferDeviceAddressInfo addr_info{};
+    addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    addr_info.buffer = geometry.back().buffer;
+    addresses.push_back(vkGetBufferDeviceAddress(dev, &addr_info));
+  }
+  app.pt_geometry.assign(geometry.begin(), geometry.end());
+
+  omnicpp::render::PathTracerConfig cfg{};
+  cfg.shader_dir = shader_dir;
+  cfg.width = std::max(1U, app.pt_extent_width);
+  cfg.height = std::max(1U, app.pt_extent_height);
+  cfg.max_bounces = 4U;
+  omnicpp::render::PathTracerMesh cube{};
+  cube.vertex_buffer_address = addresses[0];
+  cube.triangle_count = 12U;
+  cube.max_vertex = 35U;
+  omnicpp::render::PathTracerMesh slab{};
+  slab.vertex_buffer_address = addresses[1];
+  slab.triangle_count = 12U;
+  slab.max_vertex = 35U;
+  cfg.meshes = {cube, slab};
+  cfg.instances = {
+      // pt_real.rchit reads the instance's centre for its dominant-axis
+      // normal and its albedo for the return radiance.
+      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F),
+      omnicpp::render::PathTracerInstance::translated({0.0F, -2.0F, 0.0F}, 0.75F)};
+
+  app.pt_tracer = std::make_unique<omnicpp::render::VulkanPathTracer>();
+  const auto created = app.pt_tracer->create(
+      app.context.physical_device(), dev, app.context.graphics_queue(),
+      static_cast<std::uint32_t>(app.context.queue_families().graphics_family),
+      app.allocator, cfg);
+  if (!created.is_ok() || !app.pt_tracer->ready()) {
+    std::fprintf(stderr, "viewport: PT: tracer unavailable\n");
+    app.pt_tracer.reset();
+    destroy_pt_geometry(app);
+    return false;
+  }
+  app.pt_frame = 0U;
+  return true;
+}
+
+//! Release the PT geometry buffers (one per mesh; see setup_path_tracing for
+//! why it is not one shared buffer).
+void destroy_pt_geometry(ViewportApp& app) {
+  for (auto& g : app.pt_geometry) {
+    if (g.is_valid()) app.allocator.destroy_allocation(g);
+  }
+  app.pt_geometry.clear();
+}
+
+void destroy_path_tracing(ViewportApp& app) {
+  app.renderer.set_external_tonemap_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
+  app.renderer.set_compose_inverse_samples(1.0F);
+  if (app.pt_tracer != nullptr) {
+    app.pt_tracer->destroy();
+    app.pt_tracer.reset();
+  }
+  destroy_pt_geometry(app);
+  app.pt_frame = 0U;
+  app.pt_stack_built = false;
+  app.pt_mode = false;
+}
+
+//! Frame pre-pass hook: one accumulation round per rendered frame. Runs
+//! before the main render pass, so the accumulation is finished by the time
+//! the compose chain's tonemap samples it in the same submission.
+bool record_pt_round_cb(VkCommandBuffer command_buffer, std::uint32_t,
+                        std::uint32_t, void* user_data) {
+  auto& app = *static_cast<ViewportApp*>(user_data);
+  if (!app.pt_mode || app.pt_tracer == nullptr || !app.pt_tracer->ready()) {
+    return true;
+  }
+  // Camera basis, orthonormalized exactly as the raster path does: forward
+  // from eye->target, right = normalize(cross(forward, up)), then
+  // up' = cross(right, forward).
+  std::array<float, 3> forward{app.pt_target[0] - app.pt_eye[0],
+                               app.pt_target[1] - app.pt_eye[1],
+                               app.pt_target[2] - app.pt_eye[2]};
+  const float fwd_len = std::sqrt(forward[0] * forward[0] +
+                                  forward[1] * forward[1] +
+                                  forward[2] * forward[2]);
+  if (fwd_len > 0.0F) {
+    for (float& v : forward) v /= fwd_len;
+  } else {
+    forward = {0.0F, 0.0F, 1.0F};
+  }
+  std::array<float, 3> right{
+      forward[1] * app.pt_up[2] - forward[2] * app.pt_up[1],
+      forward[2] * app.pt_up[0] - forward[0] * app.pt_up[2],
+      forward[0] * app.pt_up[1] - forward[1] * app.pt_up[0]};
+  const float right_len = std::sqrt(right[0] * right[0] + right[1] * right[1] +
+                                     right[2] * right[2]);
+  if (right_len > 0.0F) {
+    for (float& v : right) v /= right_len;
+  } else {
+    right = {1.0F, 0.0F, 0.0F};
+  }
+  const std::array<float, 3> true_up{right[1] * forward[2] - right[2] * forward[1],
+                                      right[2] * forward[0] - right[0] * forward[2],
+                                      right[0] * forward[1] - right[1] * forward[0]};
+
+  omnicpp::render::PathTracerCamera cam{};
+  cam.position = app.pt_eye;
+  cam.right = right;
+  cam.up = true_up;
+  cam.forward = forward;
+  app.pt_tracer->set_camera(cam);
+
+  // The seed is f(pixel, frame), so the counter must advance on EVERY frame --
+  // including the clearing one. Leaving it at 0 on the clear frame (the obvious
+  // "only increment when adding" reading) means every subsequent frame also
+  // sees 0, clears again, and traces the identical sample: a converged image
+  // that never actually accumulated anything. The symptom is subtle because
+  // it looks correct -- a stable, non-black picture.
+  //
+  // Past the cap the counter wraps and the next round clears, so the mean
+  // tracks a bounded sample window instead of drifting forever.
+  if (app.pt_frame >= ViewportApp::kPtMaxSamples) {
+    app.pt_frame = 0U;
+  }
+  const bool clear = app.pt_frame == 0U;
+  app.pt_tracer->record_round(command_buffer, app.pt_frame, clear);
+  ++app.pt_frame;
+  // read_mean divides by the sample count; the tonemap needs the same 1/n, on
+  // BOTH compose instances (the live chain and the capture chain), or a
+  // captured frame would show the raw growing sum.
+  const float inv =
+      1.0F / static_cast<float>(std::max(1U, app.pt_tracer->sample_count()));
+  app.renderer.set_compose_inverse_samples(inv);
+  if (app.capture_chain != nullptr && app.capture_chain->ready()) {
+    app.capture_chain->set_inverse_samples(inv);
+  }
+  return true;
+}
+
 void destroy_rt_shadows(ViewportApp& app) {
   VkDevice dev = app.context.device();
   if (dev == VK_NULL_HANDLE) return;
@@ -4333,6 +4580,12 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
       static_cast<float>(width) / static_cast<float>(height), 0.1f, 100.0f);
   // Camera position in view conventions: the look_at eye.
   app.scene.camera_position = {eye[0], eye[1], eye[2], 1.0f};
+  // Published for the path tracer's pre-pass, which runs on a different
+  // thread's data and must not re-derive the orbit camera (a second
+  // derivation would be a second source of truth for "where is the camera").
+  app.pt_eye = {eye[0], eye[1], eye[2]};
+  app.pt_target = {target[0], target[1], target[2]};
+  app.pt_up = {up[0], up[1], up[2]};
 
   // Light VP for the shadow pre-pass (the hook records with the same matrix
   // stashed here) and for the fragment stage's shadow lookup. Ortho box
@@ -4991,6 +5244,10 @@ bool node_editor_pre_pass_cb(VkCommandBuffer command_buffer,
 bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
                      std::uint32_t height, void* user_data) {
   auto& app = *static_cast<ViewportApp*>(user_data);
+  // In PT mode the image on screen comes from the tracer's accumulation, not
+  // from the raster scene: recording one would fill the HDR intermediate with
+  // a scene the tonemap never samples, burning the scene pass for nothing.
+  if (app.pt_mode) return true;
   const float recorded_time = app.time;
   const float recorded_walk = app.walk_time;
   const auto record_start = std::chrono::steady_clock::now();
@@ -5121,6 +5378,12 @@ bool ViewportApp::initialize() {
     return false;
   }
 
+  // The PT accumulation image is sized to the swapchain extent; capture it
+  // here where the swapchain is in scope (setup_path_tracing runs later, from
+  // the command thread, with no access to it).
+  pt_extent_width = swapchain.extent_width();
+  pt_extent_height = swapchain.extent_height();
+
   omnicpp::render::RendererConfig renderer_config;
   // GPU timestamp queries: per-frame device-side duration in telemetry.
   renderer_config.enable_gpu_timing = true;
@@ -5168,6 +5431,23 @@ bool ViewportApp::initialize() {
   // Composed full lighting (IBL + shadow map + composed PBR). Non-fatal:
   // failure falls back to the basic pbr_scene path.
   lighting_ready = setup_lighting(*this);
+  // R1b: path tracing from the first frame when WARPLOOM_PT=1. Also the
+  // isolation switch: building the stack here (before the frame loop) versus
+  // on a live set_render_mode is what distinguishes "the build is wrong" from
+  // "the build is fine but something about the running loop kills it".
+  if (warploom_env("WARPLOOM_PT", "OMNICPP_PT") != nullptr) {
+    if (setup_path_tracing(*this)) {
+      pt_stack_built = true;
+      pt_mode = true;
+      renderer.set_external_tonemap_source(pt_tracer->accum_image(),
+                                          pt_tracer->accum_view());
+      renderer.set_frame_pre_pass_callback(record_pt_round_cb, this);
+      std::fprintf(stderr, "viewport: PT from start-up (%ux%u accum)\n",
+                   pt_extent_width, pt_extent_height);
+    } else {
+      std::fprintf(stderr, "viewport: PT unavailable at start-up\n");
+    }
+  }
   if (lighting_ready && rt_mode) {
     // RT shadows replace the shadow map: same composed pipeline family,
     // set 4 becomes the TLAS, the PCF fragment swaps for pbr_rt_full.
@@ -5489,7 +5769,60 @@ void ViewportApp::run() {
     // Pause/step gate: paused with no pending steps skips the whole frame
     // (no render, no clock advance); each requested step releases exactly
     // one frame so fixed-dt semantics stay intact.
-    if (control_paused()) {
+    // Apply any PT mode transition the control thread requested. This runs
+    // BEFORE the pause gate on purpose: the stack build is work that must
+    // happen even when the simulation is stopped (a paused viewport is
+    // exactly where you want to switch to path tracing), and it must happen
+    // on this thread because the allocator is not thread-safe.
+    {
+      const int want = pt_request_.exchange(0);
+      if (want == 1) {
+        if (!pt_stack_built) {
+          if (setup_path_tracing(*this)) {
+            pt_stack_built = true;
+          } else {
+            std::fprintf(stderr, "viewport: PT stack build failed; staying on "
+                                 "the previous mode\n");
+            pt_request_.store(-1);  // fall back, once
+          }
+        }
+        if (pt_stack_built && pt_tracer != nullptr && pt_tracer->ready()) {
+          pt_mode = true;
+          rt_mode = false;
+          renderer.set_external_tonemap_source(pt_tracer->accum_image(),
+                                              pt_tracer->accum_view());
+          // The capture chain is a SECOND compose instance (B3b): it would
+          // otherwise tonemap its own (unused, black) HDR intermediate and
+          // report a blank frame for a viewport that is visibly path traced.
+          // Pointing it at the same accumulation image is read-only sharing,
+          // which is exactly what the live chain does.
+          if (capture_chain != nullptr && capture_chain->ready()) {
+            capture_chain->set_external_source(pt_tracer->accum_image(),
+                                               pt_tracer->accum_view());
+          }
+          renderer.set_frame_pre_pass_callback(record_pt_round_cb, this);
+        }
+      } else if (want == -1) {
+        if (pt_mode) {
+          pt_mode = false;
+          renderer.set_external_tonemap_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
+          renderer.set_compose_inverse_samples(1.0F);
+          if (capture_chain != nullptr && capture_chain->ready()) {
+            capture_chain->set_external_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
+            capture_chain->set_inverse_samples(1.0F);
+          }
+          renderer.set_frame_pre_pass_callback(nullptr, nullptr);
+        }
+        pt_frame = 0U;
+      }
+    }
+
+    // PT mode deliberately keeps rendering while the SIM is paused: each
+    // extra frame is one more sample of an unchanged scene, which is the
+    // whole point of "pause to converge". The simulation tick below stays
+    // gated, so no replay semantics change -- only more frames of the same
+    // image.
+    if (control_paused() && !pt_mode) {
       if (control_steps_requested_ == 0U) {
         continue;
       }
@@ -5817,6 +6150,7 @@ void ViewportApp::shutdown() {
   }
   // RT-shadow resources (AS buffers/instances/scratch) before teardown.
   destroy_rt_shadows(*this);
+  destroy_path_tracing(*this);
   renderer.cleanup(context.device());
   gd_cull_pipeline.cleanup(context.device());
   gd_draw_pipeline.cleanup(context.device());

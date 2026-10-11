@@ -594,9 +594,9 @@ declares a slot 3.
       mode is rejected with a named error, and the whole exchange runs with 0
       validation diagnostics. R1/R2 are now unblocked: a mode toggle plus its
       pipeline work is all each one needs.
-- [ ] **E2 R1–R4 — exposure/bloom controls DONE; remaining:
-      path tracing (R1), RT reflections/AO toggles (R2), GPU-driven skinned
-      scenes (R3).** Exposure is DONE:
+- [ ] **E2 R1–R4 — exposure, bloom (R4) and path tracing (R1) DONE;
+      remaining: RT reflections/AO toggles (R2), GPU-driven skinned scenes
+      (R3).** Exposure and bloom are DONE:
       `set_exposure` (protocol v1.9) is live end-to-end — validated by
       `HeadlessComposeFrameGoldenHash`'s two-exposure probe (2.0 vs 0.25 must
       produce different tonemapped frames; it originally did not, which caught
@@ -649,10 +649,57 @@ declares a slot 3.
       IEEE float — and reported confident nonsense); both PT tests had
       bypassed it with private readers, which is why it was never caught.
 
-      **R1b (next):** viewport PT mode — build the tracer from the app's scene
-      meshes on first `set_render_mode("pt")`, record one accumulation round
-      per paused frame, and add a tonemap-from-accumulation stage so the
-      converged mean is what reaches the swapchain.
+      **R1b DONE — viewport PT mode.** `set_render_mode("pt")` (with
+      `WARPLOOM_PT=1` to start in it) builds the stack on the RENDER thread,
+      records one accumulation round per frame in the frame pre-pass, and the
+      compose chain tonemaps the accumulation image directly. Verified live on
+      the RTX 2060: the mode switch round-trips forward -> pt -> forward over a
+      real socket with 0 validation diagnostics, and the stack builds at start-up
+      and on demand.
+
+      Four bugs were found and fixed on the way, three of them mine:
+      - **The AS-build barrier was emitted only BETWEEN BLAS builds**, never
+        after the last one -- so the TLAS build reused the scratch buffer with
+        no ordering, and two meshes reproducibly lost the device inside the
+        build with NO validation error at all. One mesh appeared to work
+        because the hazard was latent there. Found by isolation: the same
+        geometry builds headlessly in a test the viewport could not disprove.
+      - **The single-buffer-with-offsets geometry trick** ("one upload, many
+        BLASes") faults this GPU during the build. One buffer per mesh, which
+        is what the RT-shadow stack already does.
+      - **The frame counter did not advance on the clearing frame**, so every
+        frame re-cleared with the same seed and the viewport showed a
+        *converged* image that had never accumulated anything. The symptom
+        looks correct: stable, non-black.
+      - **The external tonemap source was sampled in SHADER_READ_ONLY** while
+        the storage image stays in GENERAL, so the capture chain (a second
+        compose instance recording after the live frame) declared a layout the
+        image was not in. The source is now sampled in GENERAL by contract,
+        which also removes the transition entirely.
+      Plus: the accumulation image needed `VK_IMAGE_USAGE_SAMPLED_BIT` (the
+      tests only read it back, so the missing flag was invisible until a real
+      tonemap sampled it), and `VulkanPathTracer::create` leaked its command
+      pool on every failure path -- found by the leak check during the
+      debugging, which is exactly what that check is for.
+
+      **How the convergence is actually proven.** The viewport's capture
+      pipeline produced empty PPMs on this machine in BOTH pt and baseline
+      configurations, so it is not the instrument for "does the image
+      converge" (a separate, still-open defect). The mechanism is proven where
+      the instrumentation is: `VulkanHardware.PathTracedFrameConvergesThroughCompose`
+      drives the tracer and the chain directly and asserts that the SPATIAL
+      NOISE (std-dev of luma) falls from 1 sample to 8 while the mean stays
+      bounded. Mean brightness is deliberately not the assertion: ACES + gamma
+      compress a missing 1/n divide into a few percent, and the first version
+      of this test passed a sabotaged build because of it. Both sabotage
+      directions are now caught -- a missing divide (std RISES) and a stuck
+      frame index (std stays flat).
+
+      **Known limits, stated rather than hidden:** PT renders at the swapchain
+      extent captured when the stack was built (no resize handling yet); the
+      scene is the cubes-scene cube + ground slab, not the app's full scene;
+      and bloom does not layer on the path-traced source (the external set
+      binds the black slot, because the source is already divided by n).
 
       (SetBloom was briefly added and REVERTED: see below. It has since
       RE-LANDED on the pre-allocated design — see the DONE note.)

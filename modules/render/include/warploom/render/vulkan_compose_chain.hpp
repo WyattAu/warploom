@@ -92,6 +92,37 @@ class VulkanComposeChain final {
   //! True when the bloom pipelines were built, i.e. a toggle to ON is legal.
   [[nodiscard]] bool bloom_available() const noexcept { return bloom_available_; }
 
+  //! Tonemap from an EXTERNAL HDR source instead of this chain's own
+  //! intermediate (R1b: the path tracer's accumulation image). The source is
+  //! a storage image in GENERAL layout produced by an earlier pass in the same
+  //! frame; the chain declares that layout as the first-use producer state
+  //! and transitions it to SHADER_READ_ONLY itself. Passing VK_NULL_HANDLE
+  //! restores the normal path (the chain's own intermediate).
+  //!
+  //! Like the bloom toggle this is a SELECTION between a pre-written descriptor
+  //! set and the chain's own, not a rebuild: switching costs no pipeline, no
+  //! render pass and no allocation. Note the source must outlive the chain
+  //! (the path tracer owns it); a resize goes through ensure(), which re-writes
+  //! every set from the CURRENT source.
+  //!
+  //! The descriptor write happens HERE, at set time, not at ensure() time --
+  //! ensure() has usually already run by the time an application learns what
+  //! its external source is, and a set written with the fallback view keeps
+  //! tonemapping the chain's own (unused) HDR image forever. That failure is
+  //! invisible: the frame is stable, non-black, and completely unaffected by
+  //! the source it was pointed at.
+  void set_external_source(VkImage image, VkImageView view) noexcept;
+  [[nodiscard]] bool using_external_source() const noexcept {
+    return external_image_ != VK_NULL_HANDLE;
+  }
+  //! 1 / accumulated sample count, multiplied into the tonemap. 1.0f for the
+  //! raster path, and applied as its own multiply so the raster output is
+  //! bit-identical to before this existed.
+  void set_inverse_samples(float inverse) noexcept {
+    inverse_samples_ = inverse;
+  }
+  [[nodiscard]] float inverse_samples() const noexcept { return inverse_samples_; }
+
 
   [[nodiscard]] bool ready() const noexcept { return compose_ready_; }
   //! True when ensure() refused permanently; do not retry every frame.
@@ -166,6 +197,14 @@ class VulkanComposeChain final {
   //! so neither transition needs a barrier and neither write can race a frame
   //! still in flight. That is what makes the toggle a pure re-record.
   VkDescriptorSet compose_set_nobloom_{VK_NULL_HANDLE};
+  //! Tonemap set bound to the external source (see set_external_source), with
+  //! the black bloom slot: 1/n divide by the source's own accumulation, so
+  //! bloom must not be layered on it.
+  VkDescriptorSet compose_set_external_{VK_NULL_HANDLE};
+  //! External HDR source image + view (the path tracer's accumulation image).
+  VkImage external_image_{VK_NULL_HANDLE};
+  VkImageView external_view_{VK_NULL_HANDLE};
+  float inverse_samples_{1.0F};
   //! One-sampler layout/set for the bloom bright-pass. It reads the HDR scene,
   //! which in the two-binding compose layout is binding 0 -- where binding 1
   //! (the bloom input the tonemap samples) would instead be. So it needs its

@@ -17,7 +17,13 @@ layout(set = 0, binding = 1) uniform sampler2D bloom_image;
 
 layout(push_constant) uniform Compose {
   float exposure;
-  float pad[3];
+  // 1 / accumulated sample count. 1.0 for the raster path, which produces
+  // radiance directly. The path tracer accumulates a SUM over frames, so
+  // without this the image brightens every frame instead of converging.
+  // Applied as its own multiply so the raster path is bit-identical
+  // (x * 1.0f is exact in IEEE fp) and the pinned composed-frame hashes hold.
+  float inverse_samples;
+  float pad[2];
 } pc;
 
 // ACES filmic tonemapping (Narkowicz 2015).
@@ -96,6 +102,9 @@ void main() {
 
   // Exposure, applied in linear HDR before the curve.
   hdr *= pc.exposure;
+  // Path-tracing accumulation: divide by the sample count. A separate
+  // multiply so the raster path (inverse_samples == 1.0f) is unchanged.
+  hdr *= pc.inverse_samples;
 
   // ACES filmic tonemapping.
   vec3 mapped = aces_tonemap(hdr);

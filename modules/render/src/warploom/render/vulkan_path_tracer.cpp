@@ -114,7 +114,15 @@ namespace {
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
   image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
   image_info.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                     VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+                     VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                     // SAMPLED is not optional: the accumulation image is what
+                     // the compose chain tonemaps (R1b), and binding a
+                     // storage-only view as a combined image sampler is
+                     // VUID-VkWriteDescriptorSet-descriptorType-00337. The
+                     // tests that only read the accumulation back never
+                     // sampled it, so this was invisible until the image
+                     // reached a real tonemap.
+                     VK_IMAGE_USAGE_SAMPLED_BIT;
   image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   if (vkCreateImage(device_, &image_info, nullptr, &accum_image_) != VK_SUCCESS) {
     return refuse("accumulation image creation failed");
@@ -176,14 +184,26 @@ namespace {
   auto pool = warploom::render::create_command_pool(device_, graphics_family_);
   if (!pool.is_ok()) return refuse("command pool failed");
   auto build_cb_result = warploom::render::allocate_command_buffer(device_, pool.value());
-  if (!build_cb_result.is_ok()) return refuse("command buffer failed");
+  if (!build_cb_result.is_ok()) {
+    vkDestroyCommandPool(device_, pool.value(), nullptr);
+    return refuse("command buffer failed");
+  }
   VkCommandBuffer build_cb = build_cb_result.value();
+  // The pool outlives the build exactly once: every failure path below has to
+  // destroy it, and the refuse() helper cannot (it runs before this handle
+  // exists in the earlier checks). RAII is the honest form of "every path".
+  const auto pool_guard = [&] {
+    vkDestroyCommandPool(device_, pool.value(), nullptr);
+  };
 
   const auto submit_build = [&](VkCommandBuffer cb) -> bool {
     VkCommandBufferBeginInfo bi{};
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (vkBeginCommandBuffer(cb, &bi) != VK_SUCCESS) return false;
+    if (vkBeginCommandBuffer(cb, &bi) != VK_SUCCESS) {
+      WARPLOOM_WARN("render", "path tracer: geometry command buffer begin failed\n");
+      return false;
+    }
     for (std::size_t i = 0; i < config.meshes.size(); ++i) {
       BlasBuildInput in{};
       in.vertex_buffer_address = config.meshes[i].vertex_buffer_address;
@@ -191,18 +211,34 @@ namespace {
       in.max_vertex = config.meshes[i].max_vertex;
       const auto built = as_builder_.cmd_build_blas(cb, device_, blas_list_[i], in,
                                                     scratch_address_);
-      if (!built.is_ok()) return false;
-      // Consecutive BLAS builds write the same scratch buffer: order them.
-      if (i + 1U < config.meshes.size()) {
-        VkMemoryBarrier order{};
-        order.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        order.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-        order.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-        vkCmdPipelineBarrier(
-            cb, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-            VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0U, 1U,
-            &order, 0U, nullptr, 0U, nullptr);
+      if (!built.is_ok()) {
+        // Name the mesh. "acceleration structure build failed" alone is what
+        // made this a guessing game the first time round: BLAS, TLAS and the
+        // submit were three indistinguishable causes.
+        WARPLOOM_WARN("render",
+                      "path tracer: BLAS %zu build failed (addr 0x%llx, %u "
+                      "tris, scratch 0x%llx)\n",
+                      i, static_cast<unsigned long long>(in.vertex_buffer_address),
+                      in.triangle_count,
+                      static_cast<unsigned long long>(scratch_address_));
+        return false;
       }
+      // Order EVERY consecutive build that reuses this scratch buffer --
+      // INCLUDING after the last BLAS, because the TLAS build immediately
+      // reuses the same memory. Omitting that last barrier is why a one-mesh
+      // scene appeared to work (the hazard is latent there) while two meshes
+      // lost the device inside the build with NO validation error at all: a
+      // scratch-reuse race is undefined behaviour, not a spec violation the
+      // validation layer can see. Unconditional for exactly that reason --
+      // the "only between" version is the one that looks correct.
+      VkMemoryBarrier order{};
+      order.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+      order.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+      order.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+      vkCmdPipelineBarrier(
+          cb, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+          VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0U, 1U,
+          &order, 0U, nullptr, 0U, nullptr);
     }
     // TLAS instances: one per mesh, placed from the config.
     std::vector<TlasInstance> instances(config.meshes.size());
@@ -214,20 +250,39 @@ namespace {
       instances[i].sbt_offset = 0U;
       instances[i].flags = 0U;
       instances[i].blas_device_address = blas_list_[i].device_address;
+      if (instances[i].blas_device_address == 0U) {
+        WARPLOOM_WARN("render", "path tracer: BLAS %zu has no device address\n", i);
+        return false;
+      }
     }
     const auto tlas = as_builder_.cmd_build_tlas(
         cb, device_, tlas_, instances.data(),
         static_cast<std::uint32_t>(instances.size()), scratch_address_);
-    if (!tlas.is_ok()) return false;
-    if (vkEndCommandBuffer(cb) != VK_SUCCESS) return false;
+    if (!tlas.is_ok()) {
+      WARPLOOM_WARN("render", "path tracer: TLAS build failed (%zu instances, "
+                             "capacity %u)\n",
+                    instances.size(), tlas_.capacity);
+      return false;
+    }
+    if (vkEndCommandBuffer(cb) != VK_SUCCESS) {
+      WARPLOOM_WARN("render", "path tracer: geometry command buffer end failed\n");
+      return false;
+    }
     VkSubmitInfo si{};
     si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount = 1U;
     si.pCommandBuffers = &cb;
     if (vkQueueSubmit(graphics_queue_, 1U, &si, VK_NULL_HANDLE) != VK_SUCCESS) {
+      WARPLOOM_WARN("render", "path tracer: geometry submit failed\n");
       return false;
     }
-    return vkQueueWaitIdle(graphics_queue_) == VK_SUCCESS;
+    const VkResult waited = vkQueueWaitIdle(graphics_queue_);
+    if (waited != VK_SUCCESS) {
+      WARPLOOM_WARN("render", "path tracer: geometry queue wait failed (%d)\n",
+                    static_cast<int>(waited));
+      return false;
+    }
+    return true;
   };
 
   // Size every BLAS + the TLAS, acquire scratch once for the largest build,
@@ -248,8 +303,15 @@ namespace {
   const auto scratch = scratch_.acquire(allocator, device, 1U << 20U);
   if (!scratch.is_ok()) return refuse("scratch allocation failed");
   scratch_address_ = scratch.value();
-  if (!submit_build(build_cb)) return refuse("acceleration structure build failed");
-  vkDestroyCommandPool(device_, pool.value(), nullptr);
+  if (!submit_build(build_cb)) {
+    // Found by the isolation test's leak report: the failure path returned
+    // without releasing the pool, so every refused create() leaked a command
+    // pool and a command buffer. A GPU fault is the case you least want a
+    // leak on -- it is exactly when you will re-run the build.
+    pool_guard();
+    return refuse("acceleration structure build failed");
+  }
+  pool_guard();
 
   // ---- Descriptor set: 0 accum, 1 params, 2 TLAS, 3 instances --------------
   descriptor_manager_ = std::make_unique<VulkanDescriptorManager>();

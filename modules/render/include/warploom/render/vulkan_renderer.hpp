@@ -261,6 +261,22 @@ public:
     return compose_ != nullptr && compose_->bloom_available();
   }
 
+  //! R1b: tonemap from an external HDR source instead of this renderer's HDR
+  //! intermediate -- the path tracer's accumulation image. The caller owns the
+  //! image and must keep it alive; pass VK_NULL_HANDLE to go back to the
+  //! normal path. No-op when compose is off.
+  void set_external_tonemap_source(VkImage image, VkImageView view) noexcept {
+    if (compose_ != nullptr) compose_->set_external_source(image, view);
+  }
+  //! 1 / accumulated sample count, multiplied into the tonemap. 1.0f is the
+  //! raster default and is an exact no-op there.
+  void set_compose_inverse_samples(float inverse) noexcept {
+    if (compose_ != nullptr) compose_->set_inverse_samples(inverse);
+  }
+  [[nodiscard]] bool compose_uses_external_source() const noexcept {
+    return compose_ != nullptr && compose_->using_external_source();
+  }
+
   // --- HDR compose introspection ---------------------------------------
   // An application whose pipelines are built against a render pass must
   // build them against the HDR intermediate when compose is on. These

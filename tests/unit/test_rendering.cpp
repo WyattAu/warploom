@@ -6,6 +6,8 @@
 #include <iostream>
 #include <thread>
 #include "warploom/core/job_system.hpp"
+#include <cstring>
+#include "warploom/render/vulkan_compose_chain.hpp"
 #include "warploom/render/vulkan_context.hpp"
 #include "warploom/render/vulkan_surface.hpp"
 #include "warploom/render/vulkan_swapchain.hpp"
@@ -14,6 +16,7 @@
 #include "warploom/render/vulkan_renderer.hpp"
 #include "warploom/render/vulkan_offscreen.hpp"
 #include "warploom/render/vulkan_memory_allocator.hpp"
+#include "warploom/render/vulkan_path_tracer.hpp"
 #include "warploom/render/vulkan_descriptors.hpp"
 #include "warploom/render/vulkan_render_graph.hpp"
 #include "warploom/render/vulkan_compute.hpp"
@@ -542,6 +545,253 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
                     << readback_pinned.canonical_hash;
       break;
   }
+#else
+  GTEST_SKIP() << "Vulkan types or test shaders unavailable";
+#endif
+}
+
+
+//! R1b: path-traced pixels reach the screen through the compose chain, and the
+//! image CONVERGES as samples accumulate.
+//!
+//! The viewport wires this up (set_render_mode "pt" builds the stack on the
+//! render thread and points the chain at the accumulation image), and the mode
+//! switch was verified live on the RTX 2060 with 0 validation diagnostics. What
+//! that could NOT show is the part that actually matters: that the accumulation
+//! reaches the tonemap and that more samples mean a less noisy image. The
+//! viewport's capture pipeline is not the instrument for that (it produced
+//! empty PPMs on this machine in both PT and baseline configurations), so this
+//! drives the same two objects directly.
+//!
+//! Properties asserted:
+//!   1. one sample tonemapped through the chain is a real image (not black);
+//!   2. eight samples produce a DIFFERENT image (the mean moved, so samples
+//!      are really being added);
+//!   3. the MEAN brightness is conserved within a tolerance, which is what a
+//!      converging average does and what a broken accumulation (raw growing
+//!      sum, or a stuck frame index) does not;
+//!   4. switching the source back restores the raster path's own intermediate,
+//!      so leaving PT cannot leave the chain pointing at a stale image.
+TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  omnicpp::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("OmniCppPTCompose", true).is_ok());
+  if (!context.has_ray_tracing() || !context.has_ray_tracing_pipeline()) {
+    context.cleanup();
+    GTEST_SKIP() << "ray tracing pipeline not available on this device";
+  }
+  omnicpp::render::VulkanMemoryAllocator allocator;
+  ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device())
+                  .is_ok());
+
+  constexpr std::uint32_t kSize = 64U;
+  // Qualified through the render headers rather than <vulkan/vulkan.h>: this
+  // translation unit compiles in both the Vulkan-on and Vulkan-off (shim)
+  // configurations, and the enumerator reaches scope either way. An earlier
+  // attempt spelled the format by value (37) and the validation layer caught
+  // the result -- R8G8B8A8 where the render pass declared BGRA -- which is
+  // what a magic number buys.
+  constexpr VkFormat kLdrFormat = VK_FORMAT_B8G8R8A8_UNORM;
+  omnicpp::render::VulkanOffscreenTarget ldr;
+  ASSERT_TRUE(ldr
+                  .create(context.device(), context.physical_device(),
+                          kLdrFormat, kSize, kSize, &allocator,
+                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+                  .is_ok());
+  const VkFormat depth_format =
+      omnicpp::render::VulkanRenderPass::find_supported_depth_format(context.physical_device());
+  omnicpp::render::VulkanRenderPass present_pass;
+  ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
+                                  depth_format)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_depth_resources(context.device(),
+                                          context.physical_device(),
+                                          depth_format, kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_framebuffers(context.device(), {ldr.image_view()},
+                                       kSize, kSize)
+                  .is_ok());
+
+  // ---- Geometry: a box, the tracer's own input contract --------------------
+  std::vector<float> tris;
+  tris.reserve(12U * 9U);
+  for (int i = 0; i < 12; ++i) {
+    for (int c = 0; c < 3; ++c) {
+      const float v = static_cast<float>((i + c) % 4);
+      tris.push_back(v < 2.0F ? -1.0F : 1.0F);
+    }
+  }
+  tris.resize(12U * 9U);
+  auto geo = allocator.create_buffer(
+      tris.size() * sizeof(float),
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  omnicpp::render::Allocation geo_alloc = geo.value();
+  std::memcpy(geo_alloc.mapped, tris.data(), tris.size() * sizeof(float));
+  VkBufferDeviceAddressInfo addr{};
+  addr.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  addr.buffer = geo_alloc.buffer;
+
+  omnicpp::render::VulkanPathTracer tracer;
+  omnicpp::render::PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.width = kSize;
+  cfg.height = kSize;
+  cfg.max_bounces = 2U;
+  omnicpp::render::PathTracerMesh mesh{};
+  mesh.vertex_buffer_address =
+      vkGetBufferDeviceAddress(context.device(), &addr);
+  mesh.triangle_count = 12U;
+  mesh.max_vertex = 35U;
+  cfg.meshes = {mesh};
+  cfg.instances = {omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.8F)};
+  ASSERT_TRUE(tracer
+                  .create(context.physical_device(), context.device(),
+                          context.graphics_queue(),
+                          static_cast<std::uint32_t>(
+                              context.queue_families().graphics_family),
+                          allocator, cfg)
+                  .is_ok());
+  ASSERT_TRUE(tracer.ready());
+  omnicpp::render::PathTracerCamera cam{};
+  cam.position = {0.0F, 0.0F, 4.0F};
+  cam.forward = {0.0F, 0.0F, -1.0F};
+  tracer.set_camera(cam);
+
+  omnicpp::render::VulkanComposeChain chain;
+  omnicpp::render::ComposeChainConfig cc{};
+  cc.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  // 0.05, not 1.0: at full exposure the sky fills the frame and ACES clamps
+  // it, so a correct mean and an 8x-bright sum are indistinguishable. That is
+  // not a hypothetical -- the first version of this assertion passed a
+  // sabotaged (no-divide) build for exactly that reason. The assertion has to
+  // live in the linear part of the curve.
+  cc.exposure = 0.05F;
+  ASSERT_TRUE(chain
+                  .ensure(context.device(), context.physical_device(),
+                          context.graphics_queue(), cc, present_pass.render_pass(),
+                          VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(chain.ready());
+  chain.set_external_source(tracer.accum_image(), tracer.accum_view());
+
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+      context.device(),
+      static_cast<std::uint32_t>(context.queue_families().graphics_family));
+  ASSERT_TRUE(pool.is_ok());
+  VkCommandPool cmd_pool = pool.value();
+
+  // Spatial standard deviation of luma: the NOISE measure. A converging
+  // average reduces it frame over frame; a growing sum and a stuck frame index
+  // do not. This is the property that actually distinguishes accumulation
+  // from no-accumulation -- mean brightness does NOT (ACES + gamma compress a
+  // 1/n brightness difference into a few percent, which is why the first
+  // version of this assertion passed a sabotaged build).
+  const auto luma_stats = [](const omnicpp_test::ReadbackResult& r) {
+    std::vector<double> luma(r.pixels.size());
+    double sum = 0.0;
+    for (std::size_t i = 0; i < r.pixels.size(); ++i) {
+      const std::uint32_t px = r.pixels[i];
+      luma[i] = static_cast<double>(px & 0xFFU) +
+                static_cast<double>((px >> 8U) & 0xFFU) +
+                static_cast<double>((px >> 16U) & 0xFFU);
+      sum += luma[i];
+    }
+    if (luma.empty()) return std::pair<double, double>{0.0, 0.0};
+    const double mean = sum / static_cast<double>(luma.size());
+    double var = 0.0;
+    for (const double v : luma) var += (v - mean) * (v - mean);
+    var /= static_cast<double>(luma.size());
+    return std::pair<double, double>{mean, std::sqrt(var)};
+  };
+
+  const auto accumulate = [&](std::uint32_t frames) {
+    for (std::uint32_t f = 0; f < frames; ++f) {
+      const bool clear = (tracer.sample_count() == 0U);
+      auto cb =
+          omnicpp::render::VulkanRenderer::allocate_command_buffer(context.device(),
+                                                                  cmd_pool);
+      EXPECT_TRUE(cb.is_ok());
+      VkCommandBuffer cmd = cb.value();
+      VkCommandBufferBeginInfo bi{};
+      bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      EXPECT_EQ(vkBeginCommandBuffer(cmd, &bi), VK_SUCCESS);
+      tracer.record_round(cmd, f, clear);
+      chain.set_inverse_samples(
+          1.0F / static_cast<float>(tracer.sample_count() > 0U
+                                         ? tracer.sample_count()
+                                         : 1U));
+      chain.record(cmd, present_pass.render_pass(), present_pass.framebuffer(0U),
+                   kSize, kSize);
+      EXPECT_EQ(vkEndCommandBuffer(cmd), VK_SUCCESS);
+      VkFence fence{};
+      VkFenceCreateInfo fi{};
+      fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+      vkCreateFence(context.device(), &fi, nullptr, &fence);
+      VkSubmitInfo si{};
+      si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      si.commandBufferCount = 1U;
+      si.pCommandBuffers = &cmd;
+      EXPECT_EQ(vkQueueSubmit(context.graphics_queue(), 1, &si, fence), VK_SUCCESS);
+      EXPECT_EQ(
+          vkWaitForFences(context.device(), 1, &fence, VK_TRUE, UINT64_MAX),
+          VK_SUCCESS);
+      vkDestroyFence(context.device(), fence, nullptr);
+    }
+  };
+  const auto read_now = [&]() -> omnicpp_test::ReadbackResult {
+    return readback_swapchain_image(
+        context.physical_device(), context.device(), context.graphics_queue(),
+        static_cast<std::uint32_t>(context.queue_families().graphics_family),
+        ldr.image(), kLdrFormat, kSize, kSize, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, true);
+  };
+
+  accumulate(1U);
+  const omnicpp_test::ReadbackResult one = read_now();
+  ASSERT_GT(one.non_clear_pixels, 0U)
+      << "one path-traced sample tonemapped to a black frame";
+  const auto [mean_one, std_one] = luma_stats(one);
+
+  accumulate(7U);  // 7 more -> 8 samples total
+  EXPECT_EQ(tracer.sample_count(), 8U);
+  const omnicpp_test::ReadbackResult eight = read_now();
+  ASSERT_GT(eight.non_clear_pixels, 0U);
+  EXPECT_NE(eight.hash, one.hash)
+      << "eight accumulated samples produced the same image as one: the "
+         "accumulation is not advancing";
+  const auto [mean_eight, std_eight] = luma_stats(eight);
+  // Convergence = less spatial noise. A growing sum (missing 1/n) and a stuck
+  // frame index both leave the noise floor unchanged, so this is the assertion
+  // that fails for exactly the two bugs that matter here.
+  EXPECT_LT(std_eight, std_one)
+      << "eight samples did not reduce the noise floor (std " << std_one
+      << " -> " << std_eight << "): the image is not converging";
+  // And the mean must stay bounded -- a growing sum would compound.
+  EXPECT_NEAR(mean_eight, mean_one, std::max(4.0, mean_one * 0.5))
+      << "mean brightness compounded with sample count (" << mean_one << " -> "
+      << mean_eight << "); the divide by n is missing";
+
+  // Leaving PT must restore the chain's own intermediate.
+  chain.set_external_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
+  EXPECT_FALSE(chain.using_external_source());
+
+  vkDestroyCommandPool(context.device(), cmd_pool, nullptr);
+  chain.destroy();
+  tracer.destroy();
+  allocator.destroy_allocation(geo_alloc);
+  present_pass.cleanup(context.device());
+  ldr.cleanup();
+  allocator.cleanup();
+  context.cleanup();
 #else
   GTEST_SKIP() << "Vulkan types or test shaders unavailable";
 #endif

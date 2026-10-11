@@ -130,7 +130,7 @@ Nothing is claimed without these, on the `default` preset:
 - `ctest` 6/6
 - full unit suite under `VK_LAYER_KHRONOS_validation`: 0 diagnostics, 0 leaks
 - `tools/live_proof.py all` over real sockets: 71/71 headless (E1 added eight: render mode and exposure wire contract; E2/R4 added three: set_bloom/get_bloom round-trip on the headless host. The bloom payload-validation and read-back assertions are the visual-host half of the E1 proof -- they run when the harness detects a viewport, where the toggle was exercised live on the RTX 2060: on, reads back on, off, reads back off, missing-arg rejected)
-- viewport configurations (hdr, bloom, rt+bloom, no-hdr, node editor): clean
+- viewport configurations (hdr, bloom, rt+bloom, no-hdr, node editor, pt): clean
 - pixel A/B against the previous commit where behaviour should be unchanged
 
 All four presets build warning-free on both compilers. `-Wunused-result` is
@@ -249,6 +249,23 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   of only the headless framebuffer. This machine has `DISPLAY=:0`, so they run
   here; on a headless CI runner they skip at runtime for a stated reason
   rather than not existing.
+
+- **Four path-tracing bugs, found by wiring the viewport (R1b).** Three were
+  mine and none of them were visible to a spec: (1) the acceleration-structure
+  build barrier was emitted only BETWEEN BLAS builds, so the TLAS reused the
+  scratch buffer unordered -- one mesh worked, two meshes reproducibly lost
+  the device with NO validation error, because a scratch race is undefined
+  behaviour rather than a spec violation; (2) one shared geometry buffer with
+  per-mesh offsets, an obvious "optimisation", faults this GPU during the
+  build; (3) the frame counter did not advance on the clearing frame, so every
+  frame re-cleared with the same seed and the viewport showed a converged image
+  that had never accumulated anything; (4) the accumulation image lacked
+  `VK_IMAGE_USAGE_SAMPLED_BIT`, invisible until a real tonemap sampled it.
+  The teaching point is the metric: the first convergence assertion compared
+  MEAN brightness, which ACES + gamma compress into a few percent -- so a
+  sabotaged build with no 1/n divide PASSED. It now compares the spatial noise
+  floor, which is what actually distinguishes a converging average, and both
+  sabotage directions are caught.
 
 - ~~A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystems-
   Concurrently`, roughly one full-suite run in five.~~ FIXED. Now that `tsan`
