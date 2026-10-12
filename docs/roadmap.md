@@ -844,12 +844,27 @@ history resources kept. 200 deterministic random configurations: zero
 violations.
 
 **What R6a deliberately does not do.** It does not allocate. No Vulkan image,
-no descriptor, no lifetime wiring — `ensure_compose_resources` still manages
-the compose targets by hand and still duplicates what the compose chain
-restates. R6b wires the planner to allocation, and the honest test of R6b is
+no descriptor, no lifetime wiring. The compose chain still manages its targets
+by hand.
+
+**And R6b is not the obvious "wire it up" step.** The honest test of R6a is
 whether the compose chain's hand-written target list can be *deleted* and
-replaced by declarations. If it cannot be, the planner has not earned its
-place.
+replaced by declarations, and surveying the code says it cannot — yet. The
+compose chain's two targets are fixed-format render passes with framebuffers,
+depth attachments and views, whose lifetimes are NOT expressible as pass
+indices; and the renderer holds ~8 separate offscreen targets (gbuffer, depth,
+shadow, H-Z, HDR) that are structurally independent of the compose sequence.
+Mapping "a target with a framebuffer, depth attachment, and a specific final
+layout" onto "a resource live on passes [i, j]" is not a small adapter; it is
+a second model, and bolting one on now would produce a planner that describes
+the graph in words while the allocation stays by hand.
+
+So R6b is gated on a real prerequisite, not scheduled optimistically: the
+renderer needs to declare its resources against a *graph* (not a fixed pass
+list) first, which is the same unbaking that R3 (GPU-driven) and the
+dynamic-rendering work are pushing toward. The planner is ready when that
+exists; until then a live caller would be worse than none, because it would
+describe an allocation that does not happen.
 
 Process note, kept because it is the third time: the first sabotage of this
 invariant **passed**, because three separate guards enforced it and removing
