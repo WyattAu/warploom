@@ -344,6 +344,36 @@ def proof_e1(c):
         r = c.cmd(cmd="set_exposure", id=605)
         check("exposure without arg rejected", r.get("ok") is False, str(r))
 
+    # R1b path tracing: a third render mode, same host-owned class. The
+    # viewport builds the stack on the RENDER thread (the allocator has no
+    # lock), so the reply is "scheduled" and the mode is polled until it lands.
+    r = c.cmd(cmd="set_render_mode", id=620, mode="pt")
+    check("set_render_mode pt ok", r.get("ok") is True, str(r))
+    if is_visual_host:
+        landed = False
+        for _ in range(40):
+            m = c.cmd(cmd="get_render_mode", id=621)
+            if '"pt"' in m.get("detail", "").replace(" ", ""):
+                landed = True
+                break
+            time.sleep(0.25)
+        check("pt mode applied on the visual host", landed,
+              "pt never became the reported render mode")
+        r = c.cmd(cmd="set_render_mode", id=622, mode="forward")
+        check("leave pt ok", r.get("ok") is True, str(r))
+        back = False
+        for _ in range(40):
+            m = c.cmd(cmd="get_render_mode", id=623)
+            if '"forward"' in m.get("detail", "").replace(" ", ""):
+                back = True
+                break
+            time.sleep(0.25)
+        check("back to forward after pt", back, "did not leave pt")
+        r = c.cmd(cmd="set_render_mode", id=624, mode="pt")
+        check("re-enter pt ok", r.get("ok") is True, str(r))
+        r = c.cmd(cmd="set_render_mode", id=625, mode="forward")
+        check("leave pt again ok", r.get("ok") is True, str(r))
+
     # E2/R4 bloom. Same host-owned class as above; the interesting part is
     # that toggling it must NOT rebuild anything, which the viewport's
     # available/enabled report is the observable half of.

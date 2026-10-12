@@ -682,18 +682,39 @@ declares a slot 3.
       pool on every failure path -- found by the leak check during the
       debugging, which is exactly what that check is for.
 
-      **How the convergence is actually proven.** The viewport's capture
-      pipeline produced empty PPMs on this machine in BOTH pt and baseline
-      configurations, so it is not the instrument for "does the image
-      converge" (a separate, still-open defect). The mechanism is proven where
-      the instrumentation is: `VulkanHardware.PathTracedFrameConvergesThroughCompose`
-      drives the tracer and the chain directly and asserts that the SPATIAL
-      NOISE (std-dev of luma) falls from 1 sample to 8 while the mean stays
-      bounded. Mean brightness is deliberately not the assertion: ACES + gamma
-      compress a missing 1/n divide into a few percent, and the first version
-      of this test passed a sabotaged build because of it. Both sabotage
-      directions are now caught -- a missing divide (std RISES) and a stuck
-      frame index (std stays flat).
+      **How convergence is proven, twice.** Headlessly,
+      `VulkanHardware.PathTracedFrameConvergesThroughCompose` drives the tracer
+      and the chain directly and asserts the SPATIAL NOISE (std-dev of luma)
+      falls from 1 sample to 8 while the mean stays bounded. Mean brightness is
+      deliberately not the assertion: ACES + gamma compress a missing 1/n
+      divide into a few percent, and the first version of this test passed a
+      sabotaged build because of it. Both sabotage directions are caught -- a
+      missing divide (std RISES) and a stuck frame index (std stays flat).
+
+      And in the live viewport, by capture: over 12 samples the noise floor
+      falls monotonically 36.6 -> 17.5 (a 52% reduction) with the mean
+      settling, which is what an accumulating mean looks like from outside the
+      engine.
+
+      **Getting the live path to converge took three fixes the headless test
+      could not have found**, because it drives the objects directly:
+      1. **The camera was orbiting.** "Pause to converge" only means something
+         if the view is still; each round was tracing a different pose and
+         averaging a smear. PT now HOLDS the camera pose from the moment it is
+         entered (the sim clock keeps running; pause does that part).
+      2. **The PT round's pre-pass was silently overwritten.** The renderer
+         has ONE frame-pre-pass hook; the viewport installed the PT round, then
+         20 lines later installed the shadow pass over it. Every signal said
+         PT was running -- the stack built, the mode switched, zero validation
+         diagnostics -- while its callback never fired again. Two owners of one
+         hook is an API gap, not an application bug, so the renderer grew
+         `add_frame_pre_pass_callback` / `remove_frame_pre_pass_callback`
+         (the hook is now primary + a small chain) and PT registers through it.
+      3. **The capture chain composited from its own HDR target**, which in PT
+         mode still held the raster scene, so every captured frame was a
+         perfectly plausible picture of something the viewport was not showing.
+         The tell was that the captured mean matched the baseline capture to
+         three decimals.
 
       **Known limits, stated rather than hidden:** PT renders at the swapchain
       extent captured when the stack was built (no resize handling yet); the

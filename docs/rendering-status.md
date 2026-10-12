@@ -85,7 +85,7 @@ Genuinely implemented, and the strongest part of the repository.
 |---|---|---|---|
 | BLAS build + per-frame TLAS on caller command buffers | yes | yes | `test_ray_query_first_contact` |
 | RT pipeline: SBT, `vkCmdTraceRaysKHR`, device-adaptive alignment | yes | no | `test_path_tracing` vs a bit-exact CPU simulator |
-| `VulkanPathTracer` (R1a/R1b): rgba32f accumulation, BLAS/TLAS, SBT, clear-once/add-per-frame, `read_mean` | yes | yes — `set_render_mode("pt")` / `WARPLOOM_PT=1`, renders the cube + ground slab scene | `path_tracing_real` — CPU-mirrored `EXPECT_FLOAT_EQ` probes + byte-identical repeat through the engine object, viewport-geometry build, resize + sample count; `VulkanHardware.PathTracedFrameConvergesThroughCompose` proves the noise floor falls from 1 to 8 samples |
+| `VulkanPathTracer` (R1a/R1b): rgba32f accumulation, BLAS/TLAS, SBT, clear-once/add-per-frame, `read_mean` | yes | yes — `set_render_mode("pt")` / `WARPLOOM_PT=1`, renders the cube + ground slab scene | `path_tracing_real` — CPU-mirrored `EXPECT_FLOAT_EQ` probes + byte-identical repeat through the engine object, viewport-geometry build, resize + sample count; `VulkanHardware.PathTracedFrameConvergesThroughCompose` proves the noise floor falls from 1 to 8 samples; live capture shows 36.6 → 17.5 std-dev over 12 samples |
 | Compose chain tonemap from an external source (PT accumulation, sampled in GENERAL) | yes | yes | `PathTracedFrameConvergesThroughCompose`; two sabotage directions (missing 1/n, stuck frame index) both caught |
 | Loop path tracer (N-bounce, per-pixel PCG streams, temporal accumulation) | yes | no | `test_path_tracing_real`, validated against an independent fp64 MC integrator (262k samples) |
 | Ray-query shadows vs PCF, A/B | yes | yes | `test_rt_shadows`; app needs `WARPLOOM_RT_MODE=1` |
@@ -109,8 +109,10 @@ Two honest caveats on the ray tracing:
 - **Path tracing is a third render mode, and it is narrow.** It traces the
   cubes-scene cube + ground slab at the swapchain extent captured when the
   stack was built, accumulates one sample per rendered frame, and tonemaps the
-  accumulation image directly. No resize handling, no app-scene integration,
-  and bloom does not layer on it (the source is already divided by n).
+  accumulation image directly. It also **holds the camera** while active (a
+  moving view averages a smear rather than converging). No resize handling, no
+  app-scene integration, and bloom does not layer on it (the source is already
+  divided by n).
 
 ## Determinism
 

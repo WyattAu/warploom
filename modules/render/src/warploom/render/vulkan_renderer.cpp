@@ -1091,6 +1091,22 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
 #endif
 }
 
+std::size_t VulkanRenderer::add_frame_pre_pass_callback(
+    FramePrePassCallback callback, void* user_data) noexcept {
+  if (callback == nullptr || extra_pre_passes_.size() >= kMaxExtraPrePasses) {
+    return static_cast<std::size_t>(-1);
+  }
+  extra_pre_passes_.push_back(ExtraPrePass{callback, user_data});
+  return extra_pre_passes_.size() - 1U;
+}
+
+void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept {
+  if (index < extra_pre_passes_.size()) {
+    extra_pre_passes_.erase(extra_pre_passes_.begin() +
+                            static_cast<std::ptrdiff_t>(index));
+  }
+}
+
 ::warploom::core::Result<std::uint32_t> VulkanRenderer::begin_frame() {
 #ifdef OMNICPP_HAS_VULKAN
   if (!initialized_) {
@@ -1240,6 +1256,17 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
     (void)vkEndCommandBuffer(cb);
     return ::warploom::core::Result<void>::error(
         ::warploom::core::RuntimeError::invalid_config);
+  }
+  // Chained passes (R1b): the path-tracing round and the shadow-map pass are
+  // independent, and one hook silently serving whichever registered last cost a
+  // convergence bug that looked like a rendering problem.
+  for (const ExtraPrePass& extra : extra_pre_passes_) {
+    if (extra.callback != nullptr &&
+        !extra.callback(cb, width, height, extra.user_data)) {
+      (void)vkEndCommandBuffer(cb);
+      return ::warploom::core::Result<void>::error(
+          ::warploom::core::RuntimeError::invalid_config);
+    }
   }
 
   // Boundary stamp: the pre-pass hooks (the shadow depth pass) are recorded, so

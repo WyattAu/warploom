@@ -663,6 +663,22 @@ struct ViewportApp {
   std::array<float, 3> pt_eye{{0.0F, 2.0F, 5.0F}};
   std::array<float, 3> pt_target{{0.0F, 0.0F, 0.0F}};
   std::array<float, 3> pt_up{{0.0F, 1.0F, 0.0F}};
+  //! Camera HELD for path tracing: the pose at the moment PT was entered.
+  //!
+  //! Without this the orbit camera advances every frame, so each accumulation
+  //! round traces a DIFFERENT view and the mean never converges -- the frames
+  //! differ, the noise does not fall, and the image looks plausible while being
+  //! the average of a smear. "Pause to converge" only means something if the
+  //! view is still; the sim clock keeps running (that is what pause does), but
+  //! the camera the rays are cast from does not.
+  bool pt_hold_camera{false};
+  //! Registration index of the PT pre-pass in the renderer's chain, so leaving
+  //! PT can remove exactly that entry instead of clearing the hook (which
+  //! would also drop the shadow pass).
+  std::size_t pt_pre_pass_index{static_cast<std::size_t>(-1)};
+  std::array<float, 3> pt_held_eye{{0.0F, 2.0F, 5.0F}};
+  std::array<float, 3> pt_held_target{{0.0F, 0.0F, 0.0F}};
+  std::array<float, 3> pt_held_up{{0.0F, 1.0F, 0.0F}};
   omnicpp::render::VulkanAccelerationStructureBuilder rt_builder;
   omnicpp::render::VulkanScratchPool rt_scratch;
   struct RtBlas {
@@ -3247,9 +3263,14 @@ bool record_pt_round_cb(VkCommandBuffer command_buffer, std::uint32_t,
   // Camera basis, orthonormalized exactly as the raster path does: forward
   // from eye->target, right = normalize(cross(forward, up)), then
   // up' = cross(right, forward).
-  std::array<float, 3> forward{app.pt_target[0] - app.pt_eye[0],
-                               app.pt_target[1] - app.pt_eye[1],
-                               app.pt_target[2] - app.pt_eye[2]};
+  const std::array<float, 3>& eye =
+      app.pt_hold_camera ? app.pt_held_eye : app.pt_eye;
+  const std::array<float, 3>& target =
+      app.pt_hold_camera ? app.pt_held_target : app.pt_target;
+  const std::array<float, 3>& up_hint =
+      app.pt_hold_camera ? app.pt_held_up : app.pt_up;
+  std::array<float, 3> forward{target[0] - eye[0], target[1] - eye[1],
+                               target[2] - eye[2]};
   const float fwd_len = std::sqrt(forward[0] * forward[0] +
                                   forward[1] * forward[1] +
                                   forward[2] * forward[2]);
@@ -3259,9 +3280,9 @@ bool record_pt_round_cb(VkCommandBuffer command_buffer, std::uint32_t,
     forward = {0.0F, 0.0F, 1.0F};
   }
   std::array<float, 3> right{
-      forward[1] * app.pt_up[2] - forward[2] * app.pt_up[1],
-      forward[2] * app.pt_up[0] - forward[0] * app.pt_up[2],
-      forward[0] * app.pt_up[1] - forward[1] * app.pt_up[0]};
+      forward[1] * up_hint[2] - forward[2] * up_hint[1],
+      forward[2] * up_hint[0] - forward[0] * up_hint[2],
+      forward[0] * up_hint[1] - forward[1] * up_hint[0]};
   const float right_len = std::sqrt(right[0] * right[0] + right[1] * right[1] +
                                      right[2] * right[2]);
   if (right_len > 0.0F) {
@@ -3274,7 +3295,7 @@ bool record_pt_round_cb(VkCommandBuffer command_buffer, std::uint32_t,
                                       right[0] * forward[1] - right[1] * forward[0]};
 
   omnicpp::render::PathTracerCamera cam{};
-  cam.position = app.pt_eye;
+  cam.position = eye;
   cam.right = right;
   cam.up = true_up;
   cam.forward = forward;
@@ -5439,9 +5460,29 @@ bool ViewportApp::initialize() {
     if (setup_path_tracing(*this)) {
       pt_stack_built = true;
       pt_mode = true;
+      // Hold the current pose: the orbit camera advances with the sim clock,
+      // and tracing a different view every round averages a smear rather than
+      // converging one image.
+      pt_hold_camera = true;
+      pt_held_eye = pt_eye;
+      pt_held_target = pt_target;
+      pt_held_up = pt_up;
       renderer.set_external_tonemap_source(pt_tracer->accum_image(),
                                           pt_tracer->accum_view());
-      renderer.set_frame_pre_pass_callback(record_pt_round_cb, this);
+      // The capture chain too, or a captured frame tonemaps its own (raster)
+      // HDR target and reports a perfectly plausible picture of a scene the
+      // viewport is not showing. It cost a real debugging session to notice:
+      // the captured mean matched the baseline capture to three decimals,
+      // which is what "identical image" looked like from the outside.
+      if (capture_chain != nullptr && capture_chain->ready()) {
+        capture_chain->set_external_source(pt_tracer->accum_image(),
+                                           pt_tracer->accum_view());
+      }
+      // CHAINED, not assigned: set_frame_pre_pass_callback below installs the
+      // shadow pre-pass and would silently replace this one -- which is
+      // exactly what happened, and why the captured frames never converged
+      // while every other signal said PT was running.
+      pt_pre_pass_index = renderer.add_frame_pre_pass_callback(record_pt_round_cb, this);
       std::fprintf(stderr, "viewport: PT from start-up (%ux%u accum)\n",
                    pt_extent_width, pt_extent_height);
     } else {
@@ -5789,6 +5830,11 @@ void ViewportApp::run() {
         if (pt_stack_built && pt_tracer != nullptr && pt_tracer->ready()) {
           pt_mode = true;
           rt_mode = false;
+          // Snapshot the live camera at entry; see pt_hold_camera.
+          pt_hold_camera = true;
+          pt_held_eye = pt_eye;
+          pt_held_target = pt_target;
+          pt_held_up = pt_up;
           renderer.set_external_tonemap_source(pt_tracer->accum_image(),
                                               pt_tracer->accum_view());
           // The capture chain is a SECOND compose instance (B3b): it would
@@ -5800,18 +5846,23 @@ void ViewportApp::run() {
             capture_chain->set_external_source(pt_tracer->accum_image(),
                                                pt_tracer->accum_view());
           }
-          renderer.set_frame_pre_pass_callback(record_pt_round_cb, this);
+          pt_pre_pass_index =
+              renderer.add_frame_pre_pass_callback(record_pt_round_cb, this);
         }
       } else if (want == -1) {
         if (pt_mode) {
           pt_mode = false;
+          pt_hold_camera = false;
           renderer.set_external_tonemap_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
           renderer.set_compose_inverse_samples(1.0F);
           if (capture_chain != nullptr && capture_chain->ready()) {
             capture_chain->set_external_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
             capture_chain->set_inverse_samples(1.0F);
           }
-          renderer.set_frame_pre_pass_callback(nullptr, nullptr);
+          if (pt_pre_pass_index != static_cast<std::size_t>(-1)) {
+            renderer.remove_frame_pre_pass_callback(pt_pre_pass_index);
+            pt_pre_pass_index = static_cast<std::size_t>(-1);
+          }
         }
         pt_frame = 0U;
       }

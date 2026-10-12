@@ -517,11 +517,38 @@ public:
   using FramePrePassCallback = bool (*)(VkCommandBuffer command_buffer,
                                         std::uint32_t width,
                                         std::uint32_t height, void* user_data);
+  //! Install (or replace) the PRIMARY pre-pass. Chained passes added with
+  //! add_frame_pre_pass_callback are NOT cleared: two owners of one hook is an
+  //! API gap (R1b), and "last writer wins" was how the path-tracing round was
+  //! silently displaced by the shadow pass -- every signal said PT was running
+  //! while its callback never fired again. Call clear_frame_pre_pass_chain()
+  //! to drop the extras deliberately.
   void set_frame_pre_pass_callback(FramePrePassCallback callback,
                                    void* user_data = nullptr) noexcept {
     frame_pre_pass_callback_ = callback;
     frame_pre_pass_user_data_ = user_data;
   }
+  //! Drop every chained pass added with add_frame_pre_pass_callback.
+  void clear_frame_pre_pass_chain() noexcept { extra_pre_passes_.clear(); }
+
+  //! Register an ADDITIONAL pre-pass pass, chained after the existing one in
+  //! registration order. `set_frame_pre_pass_callback` replaces; this composes.
+  //!
+  //! Why this exists: R1b's path-tracing round and the shadow-map depth pass
+  //! both need the pre-pass, and a single slot meant whichever was installed
+  //! last silently won. In the viewport that was invisible: the PT stack built,
+  //! the mode switch worked, no validation error, and the captured frames never
+  //! converged -- because its callback was overwritten 20 lines later by the
+  //! shadow pass and never ran again. Two owners of one hook is an API gap, not
+  //! an application bug.
+  //! Returns the registration index for remove_frame_pre_pass_callback, or
+  //! SIZE_MAX if the slot list is full.
+  [[nodiscard]] std::size_t add_frame_pre_pass_callback(
+      FramePrePassCallback callback, void* user_data = nullptr) noexcept;
+  //! Remove a pass added by add_frame_pre_pass_callback. `set_...` clears them
+  //! all (it means "the application wants one pass and owns the slot"), so call
+  //! this first if a chain is in use.
+  void remove_frame_pre_pass_callback(std::size_t index) noexcept;
 
   //! Install the application-owned H-Z recorder used after the depth pass.
   void set_hiz_record_callback(HiZRecordCallback callback, void* user_data = nullptr) noexcept {
@@ -627,6 +654,14 @@ private:
   void* scene_record_user_data_{nullptr};
   FramePrePassCallback frame_pre_pass_callback_{nullptr};
   void* frame_pre_pass_user_data_{nullptr};
+  //! Additional chained pre-passes (see add_frame_pre_pass_callback). The
+  //! primary runs first, then these in registration order.
+  struct ExtraPrePass {
+    FramePrePassCallback callback{nullptr};
+    void* user_data{nullptr};
+  };
+  std::vector<ExtraPrePass> extra_pre_passes_{};
+  static constexpr std::size_t kMaxExtraPrePasses = 4U;
   const VulkanSwapchain* swapchain_{nullptr};
   //! No swapchain: recording goes to an offscreen framebuffer (see
   //! initialize_headless). Nothing else in the renderer changes.

@@ -129,7 +129,7 @@ Nothing is claimed without these, on the `default` preset:
 - fresh `git clone` → `cmake --preset default` → build → 74 shaders compile
 - `ctest` 6/6
 - full unit suite under `VK_LAYER_KHRONOS_validation`: 0 diagnostics, 0 leaks
-- `tools/live_proof.py all` over real sockets: 71/71 headless (E1 added eight: render mode and exposure wire contract; E2/R4 added three: set_bloom/get_bloom round-trip on the headless host. The bloom payload-validation and read-back assertions are the visual-host half of the E1 proof -- they run when the harness detects a viewport, where the toggle was exercised live on the RTX 2060: on, reads back on, off, reads back off, missing-arg rejected)
+- `tools/live_proof.py all` over real sockets: 71/71 headless, plus the visual-host half of `e1` (E1 added eight: render mode and exposure wire contract; E2/R4 added three: set_bloom/get_bloom round-trip on the headless host, and R1b added the pt mode round-trip -- applied, back to forward, re-entered, left again -- on the viewport. The bloom payload-validation and read-back assertions are the visual-host half of the E1 proof -- they run when the harness detects a viewport, where the toggle was exercised live on the RTX 2060: on, reads back on, off, reads back off, missing-arg rejected)
 - viewport configurations (hdr, bloom, rt+bloom, no-hdr, node editor, pt): clean
 - pixel A/B against the previous commit where behaviour should be unchanged
 
@@ -250,7 +250,7 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   here; on a headless CI runner they skip at runtime for a stated reason
   rather than not existing.
 
-- **Four path-tracing bugs, found by wiring the viewport (R1b).** Three were
+- **Six path-tracing bugs, found by wiring the viewport (R1b).** Three were
   mine and none of them were visible to a spec: (1) the acceleration-structure
   build barrier was emitted only BETWEEN BLAS builds, so the TLAS reused the
   scratch buffer unordered -- one mesh worked, two meshes reproducibly lost
@@ -266,6 +266,18 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   sabotaged build with no 1/n divide PASSED. It now compares the spatial noise
   floor, which is what actually distinguishes a converging average, and both
   sabotage directions are caught.
+
+  Three more only the LIVE path could find, because the headless test drives
+  the objects directly: (5) the orbit camera kept moving, so every round
+  traced a different pose and averaged a smear -- PT now holds the camera;
+  (6) the renderer had ONE frame pre-pass hook and the viewport installed the
+  PT round and then, 20 lines later, the shadow pass over it, so PT's
+  callback never ran again while every signal said it was. Two owners of one
+  hook is an API gap, so the hook is now primary + a small chain. And the
+  capture chain composed from its own (raster) HDR target, so captured frames
+  showed a plausible picture of something the viewport was not displaying; the
+  tell was that the captured mean matched the baseline capture to three
+  decimals.
 
 - ~~A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystems-
   Concurrently`, roughly one full-suite run in five.~~ FIXED. Now that `tsan`
