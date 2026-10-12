@@ -83,6 +83,7 @@ add_executable(warploom_unit_tests
     unit/test_sky_integration.cpp
     unit/test_lod_integration.cpp
     unit/test_postprocessing.cpp
+    unit/test_frame_allocator.cpp
     unit/test_gpu_skinning.cpp
     unit/test_pbr_frame_variants.cpp
     unit/test_gpu_mannequin.cpp

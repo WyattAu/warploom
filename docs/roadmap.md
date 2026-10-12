@@ -821,3 +821,42 @@ experiments beyond current hardware; mobile; ABI stability promises.
 - Full suite under `VK_LAYER_KHRONOS_validation` must report 0 diagnostics
   and 0 leaked objects. `rendering-status.md` claims table updated in the
   same commit.
+
+### R6: frame-graph transient allocation — in progress
+
+R6a has landed: `modules/render/include/warploom/render/vulkan_frame_allocator.hpp`
+declares resource lifetimes (in pass indices) and derives allocations from them
+with no Vulkan involved. The planner is pure, so the rule it enforces is
+testable without a device.
+
+**The rule, and why it is the hard one.** A history resource — the H-Z packed
+pyramid, and now the path tracer's accumulation image, which the capture chain
+samples *after* the frame boundary — holds the previous frame's contents and
+must survive every instant of this frame. Aliasing a transient onto one
+produces a wrong picture with no validation diagnostic, which is the exact
+failure class this repository keeps meeting. So a history resource spans the
+whole timeline and therefore overlaps everything: it can neither own a shared
+allocation nor be aliased onto one, and that falls out of the same overlap test
+that governs transients rather than being special-cased.
+
+Measured on the compose frame's own shape: 4 of 10 allocations elided, both
+history resources kept. 200 deterministic random configurations: zero
+violations.
+
+**What R6a deliberately does not do.** It does not allocate. No Vulkan image,
+no descriptor, no lifetime wiring — `ensure_compose_resources` still manages
+the compose targets by hand and still duplicates what the compose chain
+restates. R6b wires the planner to allocation, and the honest test of R6b is
+whether the compose chain's hand-written target list can be *deleted* and
+replaced by declarations. If it cannot be, the planner has not earned its
+place.
+
+Process note, kept because it is the third time: the first sabotage of this
+invariant **passed**, because three separate guards enforced it and removing
+one was masked by the other two. Collapsing to a single mechanism exposed that
+the randomized sweep was checking a tautology — it compared a share against a
+resource declared later in the list, while the owner is always earlier, so it
+could never fire. A probe measured 84 history-aliasing violations across 200
+random configurations that the suite passed. Details in
+`docs/research/rendering-and-graphs.md`.
+

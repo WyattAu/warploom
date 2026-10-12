@@ -1,152 +1,82 @@
-# Render-graph and real-time rendering research — barrier placement, mode switching, PT
+# Rendering research
 
-Status: research notes (2026-10-08). Feeds E2 (R1 path tracing) and the
-compose-chain rebuild problem recorded in the bloom-toggle revert.
+Recorded borrowings, in the order they were adopted. Each entry states the
+source, the claim being borrowed, a novelty assessment, why it fits here and
+what it costs, and what was *measured in this codebase* — never the paper's
+numbers.
 
-## R7. The bloom-toggle problem is a *known* problem with a known family of solutions
+## Frame-graph resource allocation (R6)
 
-**Our recorded failure.** Runtime bloom toggle: (a) full recreate invalidates
-the HDR render pass that scene pipelines bake (12 VUIDs, stale pass);
-(b) the light path (create bloom side in place, rewrite binding 1) rendered
-black because the rebuild did not interleave with the graph's cross-frame
-layout tracking — the up stage writes the HDR image the tonemap is about to
-sample.
+**Source.** Sandu & Shcherbakov, "A Resource Allocation Algorithm for a
+History-Aware Frame Graph", *Journal of WSCG* 31(1-2):63–70, 2023. ISSN
+2305-6062. Peer-reviewed workshop proceedings, archival, no DOI; cited by venue,
+volume and pages. Read alongside the survey in `loop11-frontier-audit.md`
+§"WSCG / frame-graph state".
 
-**Source A — Blade / wgpu study.** Malyshau, "Global Pass Barriers Without
-Per-Resource RHI Tracking: A Cross-Vendor Study with Blade"
-(arXiv:2607.26506, 2026). Blade keeps Vulkan images in GENERAL permanently,
-tracks NO per-resource state, and issues global pass-boundary barriers with
-scope derived from the pass kinds around each boundary. Measured: removing 15
-redundant barriers from 16 independent compute passes cut GPU span 29-32% on
-RTX 5070 / RX 7900 XT. The closing direction is "lightweight aggregate
-pass-kind state in a tracking-free RHI: an upstream render graph selects
-global dependency cuts."
+**The claim being borrowed.** A frame-graph resource allocator must decide
+which resources may share memory, and the decision depends on *lifetime across
+the frame boundary*, not just within a frame. A resource read by a later frame
+is history: its previous-frame contents must survive every instant of this
+frame's execution. The paper's cyclic-time allocator recovers the ~10% of GPU
+memory that the safe rule (never alias history) gives up, measured in their
+engine at 81 nodes / 27 resources / 14 with history reads.
 
-**Claim.** Per-resource layout tracking (what our compile_graph does) is one
-point in a design space; the other endpoint — persistent GENERAL + global
-barriers — is measurably *faster* in compute-heavy chains and eliminates the
-entire class of "layout invalidation breaks pipelines that baked the pass"
-failures, because GENERAL is valid for every usage.
+**Novelty assessment.** Nothing here is novel. Declaring resource lifetimes in
+a frame graph is standard; the history-aware distinction is the paper's
+contribution; interval overlap testing is textbook. What is *not* claimed: the
+cyclic-time allocator, the memory recovery, and any speedup. This engine takes
+the conservative branch on purpose.
 
-**Novelty.** Standard technique (Blade is wgpu's production RHI lineage);
-the cross-vendor measurement study is the new contribution.
+**Why it fits here.** R1b made the rule load-bearing rather than theoretical.
+The path tracer's accumulation image is now genuinely history: it is written
+during the live frame and sampled by the *capture chain after the frame
+boundary*, so "previous frame" is not a metaphor. The H-Z packed pyramid is the
+pre-existing case. Aliasing a transient over either would produce a wrong
+picture with **no validation layer diagnostic** — the class of bug this
+repository has been repeatedly bitten by (the BLAS scratch barrier, the shared
+geometry buffer, the accumulation image missing `VK_IMAGE_USAGE_SAMPLED_BIT`).
+Each was invisible to a spec check and only visible by measuring.
 
-**Fit/cost.** The honest cost is pipeline efficiency: GENERAL may disable
-compressed formats on some tilers (the paper measures DCC retention on RDNA
-under their conditions, FMASK loss). For our desktop-only target the wins
-would be: bloom toggle becomes a re-record (no rebuild, no invalidation),
-the capture chain's second instance needs no pass dance, and
-`ensure_compose_resources` stops being a rebuild. BUT: our pipelines bake
-render passes too (fullscreen tonemap bakes present pass), so GENERAL images
-alone do not remove pass-baked state — the full solution is
-dynamic-rendering-style (VkCommandBufferBeginRenderPassless /
-local-draw-rendering), not just GENERAL. Adopted as R5 spec direction with a
-two-stage plan: (1) move fullscreen passes to dynamic rendering so passes stop
-being baked; (2) then evaluate a GENERAL-layout compose chain. Neither stage
-lands without a pixel A/B + VUID gate.
+**What it costs.** Nothing in memory: the safe rule reserves history
+allocations permanently, and at 1280×720 with a handful of compose targets the
+transients being reclaimed are the small ones. What it costs is that callers
+must *declare* lifetimes, which is new API surface and new opportunities to
+declare them wrong. That cost is real and is why R6a ships as a pure, tested
+planner with no Vulkan behind it: the derivation is verifiable without a device,
+so the Vulkan side can be added once the rule is proven rather than after.
 
-**Source B — idTech 6 frame structure.** Courrèges, "DOOM (2016) Graphics
-Study" (adriancourreges.com, 2016) + Sousa/Geffroy SIGGRAPH 2016: the shipped
-frame is a long list of decoupled buffers (depth pre-pass + velocity map,
-clustered forward, SSAO, SSR, probe reflections, particle lighting atlas,
-blur chain, TAA, luminance, bloom) with heavy previous-frame reuse (static
-shadow depth maps cached until their dynamics change). The relevant lesson
-for our compose chain: DOOM does not toggle features by rebuilding the frame —
-each feature is a pass whose COST is skipped when disabled, reading
-conservative defaults from persistent resources (e.g. the blur chain always
-exists; glass picks blur levels from it).
+**What was measured.** A pure planner over declared lifetimes, on the compose
+frame's own shape (10 resources, 5 passes, H-Z pyramid and PT accumulation both
+history): **4 of 10 allocations elided**, with both history resources keeping
+dedicated allocations. Randomized deterministically (LCG, no `<random>`) over
+200 configurations of 3–10 resources: 0 violations of the never-alias-history
+rule, and 0 overlapping shares.
 
-**Fit.** That is the correct shape for our bloom toggle: the bloom target and
-blur chain should ALWAYS exist (they are ¼-res, cheap), and the toggle should
-skip the down/up passes and bind the black fallback persistently — no
-invalidation, no rebuild, because no resource is created or destroyed. Our
-current chain creates bloom resources lazily-when-enabled, which is the
-anti-pattern. Adopted: restructure so ALL compose resources exist from
-initialize (bloom target is ¼-res RGBA16F — trivially small), and runtime
-toggles only change which passes record. This inverts my light-path design
-into a pre-allocated design and removes the interleaving problem by
-construction.
+### The part worth remembering: a sabotage that passed
 
-## R8. Real-time path tracing (R1)
+The first validation attempt **passed**. Three independent guards enforced the
+same invariant — the interval widening, a `history → HistoryReserved` enum
+label, and a `cand.history → continue` skip in the reuse loop — so removing any
+one of them changed nothing. The suite was green and proved nothing.
 
-**Source.** Bitterli et al., "Spatiotemporal reservoir resampling for
-real-time ray tracing with dynamic direct lighting" (ReSTIR, SIGGRAPH 2020)
-and its ReSTIR-GI successors (Lin et al. 2022, Bitterli et al. 2022) —
-SIGGRAPH/TOG, not arXiv; see Bitterli's publication page. Industry state:
-idTech/Radeon/Intel ship ReSTIR-DI/GI variants; the SVGF/denoiser stack
-(Schaidauer et al. 2021) completes the pipeline.
+Collapsing to one mechanism (the interval) exposed a second problem: the
+randomized sweep also passed the sabotage. Not because the sweep's input space
+was too narrow, but because its *helper* was a tautology — it compared
+`plan[i].shares_with` against resources declared **later** in the list, while
+the owner is always declared earlier, so the comparison could never match.
+A standalone probe measured what the planner actually did under sabotage:
+history aliased in **84 of 200** random configurations. 84 opportunities, zero
+detected.
 
-**Claim.** One-bounce PT with reservoir-based spatiotemporal reuse of light
-samples achieves direct lighting at real-time rates; RTXDI packages the
-same for engines. Full PT then needs a denoiser + accumulation, not per-pixel
-convergence.
+So two fixes, both of which are the real lesson: **defence in depth can hide a
+missing test**, and a property test is only as strong as the property it
+actually checks. `invariant_violated()` now resolves the owner by name and
+checks the rule as specified — history is never aliased, *in either
+direction*, which is not implied by interval disjointness at all, since a
+history resource and a disjoint transient genuinely have disjoint intervals.
+With that, the sabotage fails at trial 5 by name.
 
-**Novelty.** Standard in industry now (ReSTIR is four years past
-introduction; NVIDIA RTXDI is a shipped SDK).
-
-**Fit/cost.** Our existing assets: RT pipeline + SBT infrastructure
-(vulkan_rt_pipeline), a TLAS per frame, the pt_pathtrace rgen/chit/miss
-shaders with a deterministic PCG contract, and accumulation semantics
-(clear-once, add-per-frame) already implemented at test level. The gap is a
-PRODUCT gap: the viewport has no PT mode because (a) the compose graph has no
-storage-image stage, (b) no denoiser. The honest R1 spec, informed by the
-above: PT mode = trace into a rgba32f accumulation image with the existing
-deterministic contract → temporal accumulation over paused/stepped frames
-(our protocol already pauses and steps!) → a tonemap pass reading the
-accum image instead of the HDR intermediate (the compose chain's tonemap
-bind is already abstracted; this is one descriptor rewrite at mode switch).
-ReSTIR explicitly NOT adopted: our scene has ≤32 lights and the deterministic
-PCG contract would be broken by reservoir stream state unless serialized into
-the replay — a cost the deterministic-replay product cannot pay yet. The
-spec for R1 is "offline-quality stepped PT": pause, accumulate K frames,
-read back the converged mean — which our existing record/replay machinery
-makes deterministic, and which no other engine offers because they do not
-have our replay contract.
-
-## R9. Frame graph orchestration (what compile_graph should grow into)
-
-**Source.** The DOOM study (above) + the standard frame-graph lineage
-(Thibieroz/Yong primer; AMD FrameGraph sample; BGFX's transient resource
-system).
-
-**Claim.** A frame graph that owns TRANSIENT resource allocation (allocate the
-HDR intermediate, bloom chain, SSAO from the graph description; alias across
-unused passes) removes the manual "create target in ensure()" class of
-resource plumbing that caused the capture-chain and bloom-toggle complexity.
-
-**Novelty.** Standard (every modern engine has one; BGFX's is the cleanest
-public description).
-
-**Fit/cost.** Our compile_graph already computes edges and barriers; the
-missing half is transient-memory allocation (an allocator pass over the
-lifetime intervals of the GraphPass-declared images). Bounded: a lifetime-
-interval allocator over ~10 resources is a small, testable feature (no
-aliasing needed initially — just allocation from the existing allocator with
-exact sizes). Adopted as R6: compile_graph gains `resources` declarations and
-`ensure_compose_resources` becomes derived, eliminating the manual
-width/height plumbing that the capture chain duplicated.
-
-**R6 invariant, set before any allocator code exists (loop 11).** Sandu &
-Shcherbakov, "A Resource Allocation Algorithm for a History-Aware Frame
-Graph" (Journal of WSCG 31(1-2):63-70, 2023 — peer-reviewed, implementation-
-backed in Gaijin's Dagor Engine, Enlisted: 81 nodes, 27 resources, 14 with
-history reads): nearly half a shipped engine's graph resources are read
-across the frame boundary, and the naive "never alias history resources"
-rule costs ~10% memory (6 MB) at their scale, which is why they built a
-cyclic-time allocator. The invariant we take from it costs almost nothing at
-ours: resources with cross-frame reads (our H-Z packed pyramid already is
-one; exposure/compose history will join it) are NEVER candidates for
-transient aliasing — only pure-in-frame lifetimes participate. Writing this
-down now forecloses the exact bug class (a transient aliased over pyramid
-history) the paper exists to prevent, and it is the difference between R6's
-allocator being correct-by-construction or correct-by-luck.
-
-## R10. What the idTech study says about our gd/renderer split
-
-The velocity map produced during DOOM's depth pre-pass (dynamic objects write
-per-pixel velocity; static inferred from depth + camera) is the standard TAA
-input — and our H-Z packed pyramid already sits in exactly the same
-"built-from-scene-depth, consumed-later" slot as their shadow/depth atlas.
-No adoption needed now; recorded because R2 (RT reflections/AO) will want
-the same velocity/depth pre-pass structure, and because it validates our
-pyramid-as-first-class-resource direction from the rendering side.
+`ResourceAllocation` has no `HistoryReserved` member, deliberately. An enum
+value asserting the invariant would be a second, unprovable guard. The
+invariant is a property of the interval arithmetic; the caller that wants to
+assert it checks `kind == Dedicated` for every resource declared as history.
