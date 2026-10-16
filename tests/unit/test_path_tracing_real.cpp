@@ -978,6 +978,173 @@ TEST(path_tracing_real, viewport_cube_geometry_builds) {
   ctx.cleanup();
 }
 
+//! The LINEAR accumulation must converge to a constant. Everything the capture
+//! path showed was ambiguous: the displayed mean fell monotonically (11.8 ->
+//! 2.7 over 2780 samples) while the high-frequency noise fell by the same
+//! factor, leaving mean/noise constant at ~14. A converged image has structure
+//! dominating noise, so that ratio should GROW, and neither it nor the mean
+//! says anything on its own -- both are measured through ACES + gamma, which
+//! biases a noisy estimator hard.
+//!
+//! read_mean() divides the accumulation by the sample count and returns LINEAR
+//! radiance, so it isolates the question. A Monte Carlo mean of a static scene
+//! converges; if this drifts, the accumulator or the sample counter is wrong,
+//! and the whole visible convergence is an artifact.
+TEST(path_tracing_real, linear_mean_converges_to_a_constant) {
+  omnicpp::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("OmniCppPtMeanStability", true).is_ok());
+  if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+  const std::uint32_t side = 32U;
+
+  omnicpp::render::VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+
+  const std::vector<float> box = {
+      -0.5F, -0.5F, -0.5F,  -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,  -0.5F, -0.5F, -0.5F,
+      -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, -0.5F, 0.5F,  -0.5F, -0.5F, -0.5F};
+  auto geo = alloc.create_buffer(box.size() * sizeof(float),
+                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  std::memcpy(geo.value().mapped, box.data(), box.size() * sizeof(float));
+  VkBufferDeviceAddressInfo ai{};
+  ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  ai.buffer = geo.value().buffer;
+
+  omnicpp::render::PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.width = side;
+  cfg.height = side;
+  cfg.max_bounces = 4U;
+  omnicpp::render::PathTracerMesh cube{};
+  cube.vertex_buffer_address = static_cast<std::uint64_t>(
+      vkGetBufferDeviceAddress(ctx.device(), &ai));
+  cube.triangle_count = 12U;
+  cube.max_vertex = 35U;
+  cfg.meshes = {cube};
+  cfg.instances = {
+      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+
+  omnicpp::render::VulkanPathTracer tracer;
+  ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
+                            ctx.graphics_queue(), qf, alloc, cfg)
+                  .is_ok());
+
+  omnicpp::render::PathTracerCamera cam{};
+  cam.position = {0.0F, 0.6F, 2.6F};
+  cam.forward = {0.0F, -0.2F, -1.0F};
+  cam.right = {1.0F, 0.0F, 0.0F};
+  cam.up = {0.0F, 1.0F, 0.0F};
+  tracer.set_camera(cam);
+
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+      ctx.device(), qf);
+  ASSERT_TRUE(pool.is_ok());
+
+  // Accumulate `rounds` samples, then read the LINEAR mean. One command pool
+  // for the whole thing: the previous draft destroyed it inside the loop and
+  // then allocated from it again, which the validation layer caught as an
+  // invalid VkCommandPool -- a bug in the measurement, not the engine.
+  const auto mean_after = [&](std::uint32_t rounds) -> double {
+    for (std::uint32_t r = 0; r < rounds; ++r) {
+      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+          ctx.device(), pool.value());
+      EXPECT_TRUE(cbr.is_ok());
+      VkCommandBuffer cb = cbr.value();
+      VkCommandBufferBeginInfo bi{};
+      bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+      tracer.record_round(cb, r, r == 0U);
+      EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+      VkFence fence{};
+      VkFenceCreateInfo fi{};
+      fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+      vkCreateFence(ctx.device(), &fi, nullptr, &fence);
+      VkSubmitInfo si{};
+      si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      si.commandBufferCount = 1U;
+      si.pCommandBuffers = &cb;
+      EXPECT_EQ(vkQueueSubmit(ctx.graphics_queue(), 1, &si, fence), VK_SUCCESS);
+      EXPECT_EQ(vkWaitForFences(ctx.device(), 1, &fence, VK_TRUE, UINT64_MAX),
+                VK_SUCCESS);
+      vkDestroyFence(ctx.device(), fence, nullptr);
+    }
+    auto m = tracer.read_mean();
+    EXPECT_TRUE(m.is_ok());
+    if (!m.is_ok()) return -1.0;
+    double total = 0.0;
+    for (const float v : m.value()) total += static_cast<double>(v);
+    return total / static_cast<double>(m.value().size());
+  };
+
+  // Three independent accumulations from scratch, at growing depths. Read the
+  // linear mean each time; a Monte Carlo mean of a static scene is stable to
+  // within a few percent well before 256 samples.
+  std::vector<double> means;
+  std::vector<std::uint32_t> sample_counts;
+  for (const std::uint32_t rounds : {32U, 128U, 256U}) {
+    tracer.reset_accumulation();
+    means.push_back(mean_after(rounds));
+    sample_counts.push_back(tracer.sample_count());
+  }
+  tracer.destroy();
+  auto keep_geo = geo.value();
+  alloc.destroy_allocation(keep_geo);
+  alloc.cleanup();
+  ctx.cleanup();
+
+  for (const double m : means) EXPECT_GT(m, 0.0) << "traced to an all-black frame";
+
+  // The drift check below CANNOT see a constant factor, and a sabotage proved
+  // it: over-counting the sample counter makes every reading exactly half as
+  // bright, yet the drift between 32 and 256 samples stays at 1.4% and the
+  // test passes. So the absolute value is pinned too.
+  //
+  // A band rather than an exact value, because a different GPU will not
+  // reproduce these bits -- the seed and the scene are fixed, but float
+  // precision is not. Measured spread across three runs on this device is
+  // zero to five decimals; 5% is far looser than that and far tighter than the
+  // 2x error it has to catch. The scene is self-contained (its own cube, its
+  // own camera), so a band is legitimate rather than a magic number borrowed
+  // from elsewhere: mostly sky at radiance 1.0 with a 0.55-albedo cube, a mean
+  // near 0.75 is what the physics says.
+  const double kExpected = 0.7489;
+  EXPECT_NEAR(means.back(), kExpected, kExpected * 0.05)
+      << "the linear mean is " << means.back() << ", not ~" << kExpected
+      << ": a constant-factor error (a mis-counted accumulation, a stray "
+         "second divide) is invisible to a drift check and has to be caught on "
+         "the absolute value";
+
+  // The counter invariant directly: after `rounds` recorded rounds the tracer
+  // must report exactly that many samples, because read_mean divides by it.
+  // (tracer_resize_and_sample_count covers this across a resize; this pins it
+  // for the plain accumulate path this test drives.)
+  EXPECT_EQ(sample_counts.front(), 32U);
+  EXPECT_EQ(sample_counts.back(), 256U);
+
+  const double first = means.front();
+  const double last = means.back();
+  // 12% band: generous enough that ordinary Monte Carlo variance passes, tight
+  // enough that the visible 4x drift in the capture path cannot.
+  const double drift = std::fabs(last - first) / first;
+  std::printf("linear mean at 32/128/256 samples: %.5f %.5f %.5f (drift %.2f%%)\n",
+              means[0], means[1], means[2], drift * 100.0);
+  EXPECT_LT(drift, 0.12)
+      << "the LINEAR accumulation drifted " << drift * 100.0
+      << "% between 32 and 256 samples: the accumulator or the sample counter "
+         "is wrong, so the apparent convergence in the capture path is an "
+         "artifact of the tonemap";
+
+  tracer.destroy();
+}
+
 #else  // !WARPLOOM_HAS_VULKAN
 
 TEST(path_tracing_real, disabled_without_vulkan) {

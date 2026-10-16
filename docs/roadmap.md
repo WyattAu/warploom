@@ -951,3 +951,56 @@ about one in six.
 The transferable part: an intermittent crash is a symptom, not a diagnosis.
 "It only happens in the full suite" is a clue about *cumulative process state*
 -- and specifically about handle reuse -- not an excuse to blame the test.
+
+## Is the visible path-traced image actually converging?
+
+Worth asking, because the capture path looked wrong: the displayed mean fell
+monotonically from 11.8 to 2.7 across 2780 samples while the high-frequency
+noise fell by the same factor, leaving mean/noise constant at ~14. A converged
+image has structure dominating noise, so that ratio should *grow*.
+
+Three hypotheses were tested rather than argued:
+
+1. **A temporal smear** (the moving-camera bug again). Ruled out: PT holds the
+   camera, and the geometry buffers are uploaded once at setup and never
+   rewritten.
+2. **A badly seeded RNG.** The shader seeds an LCG with a linear
+   `pix.x + size.x*(pix.y + size.y*frame)` and takes one step from it, which is
+   the textbook antipattern. Simulating the shader's exact PCG in Python over
+   4096 frames: mean 0.494–0.506 against an ideal 0.5, standard deviation
+   matching 1/sqrt(12), lag-1 autocorrelation 0.01–0.03, near-uniform deciles.
+   **No bias and no correlation** — the RNG is fine, and the "obvious" bug was
+   not there.
+3. **The accumulator or the sample counter.** `read_mean()` returns *linear*
+   radiance, so it isolates this with no tonemap in the path. Measured at 32,
+   128 and 256 samples: **0.74895, 0.74888, 0.74888 — 0.01% drift**, identical
+   to five decimals across three runs. The accumulator is correct and the
+   Monte Carlo mean converges exactly as it should.
+
+So the engine is right and the *measurement* was the problem, which is the same
+conclusion R1b reached about mean brightness: ACES + gamma biases a noisy
+estimator hard enough to look like a defect.
+
+**One thing the capture path genuinely cannot do.** At 2780 samples the
+measured high-frequency noise is 0.191 in 8-bit units, while the quantization
+noise floor of an 8-bit image is 1/sqrt(12) = 0.289. The capture is
+quantization-limited — it cannot demonstrate convergence past that, which is a
+property of the instrument, not of the tracer.
+
+**Still unexplained, and recorded rather than hidden.** The viewport's
+displayed mean falls 4.4x where the engine-level test says it should
+stabilise, and the constant mean/noise ratio is not something ACES bias alone
+explains. That gap is open. What is *not* open: the accumulator, the counter
+and the RNG are correct, and
+`path_tracing_real.linear_mean_converges_to_a_constant` now pins that so it
+cannot silently regress.
+
+### The test that had to be sabotaged twice to become worth having
+
+The drift check alone was not enough. Over-counting the sample counter halves
+every reading — a constant factor — while the drift between 32 and 256 samples
+stays at 1.4%, so the first version of this test **passed a broken build**. It
+now pins the absolute value as well (~0.7489 +/- 5%) and asserts the counter
+directly, and the same sabotage fails it with the number in the message. The
+seed and scene are fixed, so the reading is bit-identical run to run here; the
+5% band is for other GPUs, whose float precision will not match.
