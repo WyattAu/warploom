@@ -109,7 +109,29 @@ was run, so none is claimed.
 **Generalisation.** Vulkan's own "dispatchable object" model is the source:
 handles are opaque values, not identities. Caches keyed by them -- dispatch
 tables, function pointers, per-object lookup tables -- must be invalidated on
-destruction or keyed by something with a lifetime. The same class of bug
-appeared elsewhere in this codebase in a different shape: `VulkanPathTracer`
-readiness and the H-Z state are per-device, and any global keyed on a handle
-would repeat the fault.
+destruction or keyed by something with a lifetime.
+
+### The audit that followed, and its measured (negative) result
+
+Having found one, the obvious question is whether the class repeats. It does
+not, and that is worth recording so nobody re-runs the search:
+
+- **Every `vkGetDeviceProcAddr` site in `modules/`** (five in the
+  acceleration-structure builder, three in `vulkan_rt_pipeline.cpp`, one in the
+  renderer's sync2 path). Only the acceleration-structure builder cached; the
+  RT pipeline helpers already resolve per call, and the renderer's sync2 lookup
+  is local to one submit.
+- **File-scope mutable state in `modules/render/src`**: the audit script found
+  exactly one hit, a namespace alias. No globals.
+- **Function-local `static` across `modules/render`, `modules/core`,
+  `modules/asset`**: three hits. Two are name-keyed registries holding
+  function pointers, which is the same *shape* as the bug and worth reading
+  rather than pattern-matching. `ScriptModule::load_builtin` sets
+  `handle_ = nullptr`, so a builtin is never `dlclose`d and the registry's
+  function pointers cannot dangle -- verified by reading the call, not assumed
+  from the name.
+- **Test order dependence**: the suite passes 626/626 under `--gtest_shuffle`
+  and under three fixed seeds (12345, 99991, 424242), so there is no hidden
+  ordering contract. This is now part of the verification baseline, because a
+  global registry plus an "already registered" test is exactly the pairing that
+  manufactures order dependence silently.

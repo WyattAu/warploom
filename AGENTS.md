@@ -330,6 +330,23 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   could not. This is the fix that makes live window verification possible
   here at all.
 
+- **The use-after-free class does not repeat, which was checked rather than
+  assumed.** Having found a dispatch table cached by `VkDevice` handle value,
+  the next question is whether the pattern appears elsewhere. It does not: all
+  nine `vkGetDeviceProcAddr` sites audited (only the AS builder cached; the RT
+  pipeline already resolves per call), no file-scope mutable state in
+  `modules/render/src`, and the three function-local `static` registries were
+  each read rather than pattern-matched -- `ScriptModule::load_builtin` sets
+  `handle_ = nullptr`, so a builtin is never `dlclose`d and its registered
+  function pointers cannot dangle. A negative result, recorded so the search is
+  not repeated.
+
+  The suite now also runs under `--gtest_shuffle`: 626/626 under a random order
+  and under three fixed seeds. A process-global registry plus a test that
+  asserts "already registered" is exactly the pairing that manufactures order
+  dependence silently, and shuffling is the cheapest way to know whether one
+  exists.
+
 - **A use-after-free that presented as "a flaky ray-tracing test", and was
   neither flaky nor ray-tracing-specific.** `ray_query_first_contact` segfaulted
   the host about one full-suite run in six. The core dump put frame #0 inside
