@@ -27,30 +27,71 @@ struct RtFuncs {
   PFN_vkDestroyAccelerationStructureKHR destroy_as{nullptr};
   PFN_vkGetAccelerationStructureDeviceAddressKHR as_address{nullptr};
   PFN_vkCmdBuildAccelerationStructuresKHR cmd_build{nullptr};
-  VkDevice device{VK_NULL_HANDLE};
 
-  bool ready() const noexcept { return device != VK_NULL_HANDLE && cmd_build != nullptr; }
+  bool ready() const noexcept { return cmd_build != nullptr; }
 };
 
-RtFuncs g_rt_funcs;
+//! Resolve the entry points for THIS call's device, every time.
+//!
+//! This used to be a process-global cache keyed by VkDevice HANDLE VALUE, and
+//! that was a latent use-after-free: Vulkan reuses handle values once a device
+//! is destroyed, so a new device landing on a freed handle compared equal, the
+//! cache skipped re-resolution, and every later call jumped through entry
+//! points resolved from the DESTROYED device.
+//!
+//! It presented as a SIGSEGV inside libnvidia-gpucomp.so at one fixed offset,
+//! reached from vkGetAccelerationStructureBuildSizesKHR, in roughly one
+//! full-suite run in six and never in isolation. That asymmetry is the
+//! fingerprint: the suite constructs and tears down ~40 VulkanContexts, so
+//! handle reuse is near-certain, while a single test builds one device and
+//! reuses no handle. Two crash sites -- ray_query_first_contact and
+//! VulkanPathTracer::create -- shared an identical top frame, which is what
+//! identified them as ONE defect rather than two flaky tests.
+//!
+//! Re-resolving is five vkGetDeviceProcAddr calls per AS operation. AS builds
+//! happen a handful of times per tracer build, not per frame, so the cache
+//! bought nothing measurable and cost a use-after-free. No measured number is
+//! claimed here: the cost is not asserted to be zero, only to be irrelevant
+//! next to the bug it was hiding.
+RtFuncs rt_for(VkDevice device) noexcept {
+  RtFuncs rt{};
+  if (device == VK_NULL_HANDLE) return rt;
+  rt.build_sizes = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
+      vkGetDeviceProcAddr(device, "vkGetAccelerationStructureBuildSizesKHR"));
+  rt.create_as = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
+      vkGetDeviceProcAddr(device, "vkCreateAccelerationStructureKHR"));
+  rt.destroy_as = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
+      vkGetDeviceProcAddr(device, "vkDestroyAccelerationStructureKHR"));
+  rt.as_address =
+      reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
+          vkGetDeviceProcAddr(device, "vkGetAccelerationStructureDeviceAddressKHR"));
+  rt.cmd_build = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
+      vkGetDeviceProcAddr(device, "vkCmdBuildAccelerationStructuresKHR"));
+  return rt;
+}
 
-const RtFuncs& rt_for(VkDevice device) noexcept {
-  if (g_rt_funcs.device != device) {
-    g_rt_funcs = RtFuncs{};
-    g_rt_funcs.device = device;
-    g_rt_funcs.build_sizes = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
-        vkGetDeviceProcAddr(device, "vkGetAccelerationStructureBuildSizesKHR"));
-    g_rt_funcs.create_as = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
-        vkGetDeviceProcAddr(device, "vkCreateAccelerationStructureKHR"));
-    g_rt_funcs.destroy_as = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
-        vkGetDeviceProcAddr(device, "vkDestroyAccelerationStructureKHR"));
-    g_rt_funcs.as_address =
-        reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
-            vkGetDeviceProcAddr(device, "vkGetAccelerationStructureDeviceAddressKHR"));
-    g_rt_funcs.cmd_build = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
-        vkGetDeviceProcAddr(device, "vkCmdBuildAccelerationStructuresKHR"));
-  }
-  return g_rt_funcs;
+//! Describe one non-indexed triangle mesh, for a BLAS build AND for its size
+//! query.
+//!
+//! One function because these two descriptions have to agree, and once did
+//! not: cmd_build_blas filled in vertexData.deviceAddress and vertexStride,
+//! while query_blas_sizes left both at zero -- so the size query told the
+//! driver "12 triangles, maxVertex 35, vertex data at address 0, stride 0".
+//! A size query may read the vertex data, and reading address 0 is a host
+//! fault inside the driver with no validation error to explain it.
+void fill_blas_geometry(const BlasBuildInput& input,
+                        VkAccelerationStructureGeometryKHR& geometry) noexcept {
+  geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+  geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+  geometry.geometry.triangles.sType =
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+  geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+  geometry.geometry.triangles.maxVertex = input.max_vertex;
+  geometry.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
+  geometry.geometry.triangles.vertexData.deviceAddress =
+      static_cast<VkDeviceAddress>(input.vertex_buffer_address);
+  geometry.geometry.triangles.vertexStride = 3U * sizeof(float);
+  geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
 }
 
 VkAccelerationStructureBuildSizesInfoKHR query_sizes(
@@ -59,7 +100,7 @@ VkAccelerationStructureBuildSizesInfoKHR query_sizes(
     std::uint32_t max_primitive_count) noexcept {
   VkAccelerationStructureBuildSizesInfoKHR sizes{};
   sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-  const RtFuncs& rt = rt_for(device);
+  const RtFuncs rt = rt_for(device);
   if (rt.build_sizes != nullptr) {
     rt.build_sizes(device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                    &build_info, &max_primitive_count, &sizes);
@@ -131,14 +172,7 @@ VkAccelerationStructureBuildSizesInfoKHR
 VulkanAccelerationStructureBuilder::query_blas_sizes(
     VkDevice device, const BlasBuildInput& input) noexcept {
   VkAccelerationStructureGeometryKHR geometry{};
-  geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-  geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-  geometry.geometry.triangles.sType =
-      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-  geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-  geometry.geometry.triangles.maxVertex = input.max_vertex;
-  geometry.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
-  geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+  fill_blas_geometry(input, geometry);
 
   VkAccelerationStructureBuildGeometryInfoKHR build_info{};
   build_info.sType =
@@ -202,7 +236,7 @@ core::Result<BottomLevelAS> VulkanAccelerationStructureBuilder::create_blas(
     return core::Result<BottomLevelAS>::error(
         core::RuntimeError::invalid_config);
   }
-  const RtFuncs& rt = rt_for(device);
+  const RtFuncs rt = rt_for(device);
   if (!rt.ready()) {
     return core::Result<BottomLevelAS>::error(
         core::RuntimeError::vulkan_not_available);
@@ -255,7 +289,7 @@ core::Result<BottomLevelAS> VulkanAccelerationStructureBuilder::create_blas(
 core::Result<void> VulkanAccelerationStructureBuilder::cmd_build_blas(
     VkCommandBuffer cmd, VkDevice device, const BottomLevelAS& blas,
     const BlasBuildInput& input, std::uint64_t scratch_address) const {
-  const RtFuncs& rt = rt_for(device);
+  const RtFuncs rt = rt_for(device);
   if (cmd == VK_NULL_HANDLE || !rt.ready() || blas.handle == VK_NULL_HANDLE ||
       input.vertex_buffer_address == 0U || input.triangle_count == 0U ||
       scratch_address == 0U) {
@@ -263,17 +297,7 @@ core::Result<void> VulkanAccelerationStructureBuilder::cmd_build_blas(
   }
 
   VkAccelerationStructureGeometryKHR geometry{};
-  geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-  geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-  geometry.geometry.triangles.sType =
-      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-  geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-  geometry.geometry.triangles.maxVertex = input.max_vertex;
-  geometry.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
-  geometry.geometry.triangles.vertexData.deviceAddress =
-      static_cast<VkDeviceAddress>(input.vertex_buffer_address);
-  geometry.geometry.triangles.vertexStride = 3U * sizeof(float);
-  geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+  fill_blas_geometry(input, geometry);
 
   VkAccelerationStructureBuildGeometryInfoKHR build_info{};
   build_info.sType =
@@ -306,7 +330,7 @@ core::Result<TopLevelAS> VulkanAccelerationStructureBuilder::create_tlas(
   if (device == VK_NULL_HANDLE || instance_count == 0U) {
     return core::Result<TopLevelAS>::error(core::RuntimeError::invalid_config);
   }
-  const RtFuncs& rt = rt_for(device);
+  const RtFuncs rt = rt_for(device);
   if (!rt.ready()) {
     return core::Result<TopLevelAS>::error(
         core::RuntimeError::vulkan_not_available);
@@ -376,7 +400,7 @@ core::Result<void> VulkanAccelerationStructureBuilder::cmd_build_tlas(
     VkCommandBuffer cmd, VkDevice device, const TopLevelAS& tlas,
     const TlasInstance* instances, std::uint32_t instance_count,
     std::uint64_t scratch_address) const {
-  const RtFuncs& rt = rt_for(device);
+  const RtFuncs rt = rt_for(device);
   if (cmd == VK_NULL_HANDLE || !rt.ready() || tlas.handle == VK_NULL_HANDLE ||
       instances == nullptr || instance_count == 0U ||
       instance_count > tlas.capacity || scratch_address == 0U ||
@@ -448,7 +472,7 @@ core::Result<void> VulkanAccelerationStructureBuilder::cmd_build_tlas(
 void VulkanAccelerationStructureBuilder::destroy_blas(
     VkDevice device, VulkanMemoryAllocator& allocator,
     BottomLevelAS& blas) noexcept {
-  const RtFuncs& rt = rt_for(device);
+  const RtFuncs rt = rt_for(device);
   if (blas.handle != VK_NULL_HANDLE && rt.destroy_as != nullptr) {
     rt.destroy_as(device, blas.handle, nullptr);
     blas.handle = VK_NULL_HANDLE;
@@ -464,7 +488,7 @@ void VulkanAccelerationStructureBuilder::destroy_blas(
 void VulkanAccelerationStructureBuilder::destroy_tlas(
     VkDevice device, VulkanMemoryAllocator& allocator,
     TopLevelAS& tlas) noexcept {
-  const RtFuncs& rt = rt_for(device);
+  const RtFuncs rt = rt_for(device);
   if (tlas.handle != VK_NULL_HANDLE && rt.destroy_as != nullptr) {
     rt.destroy_as(device, tlas.handle, nullptr);
     tlas.handle = VK_NULL_HANDLE;

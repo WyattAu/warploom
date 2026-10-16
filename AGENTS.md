@@ -330,19 +330,46 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   could not. This is the fix that makes live window verification possible
   here at all.
 
-- **A pre-existing, still-open flake: `ray_query_first_contact` segfaults the
-  host about one full-suite run in six, and it is not ours.** The core dump
-  puts frame #0 inside `libnvidia-gpucomp.so.615.71.09`, called from
-  `vkGetAccelerationStructureBuildSizesKHR` via
-  `VulkanAccelerationStructureBuilder::query_blas_sizes`. Verified
-  pre-existing rather than assumed: with this session's work stashed and the
-  tree rebuilt at clean HEAD, the same crash reproduced at the same test
-  (1/8 runs). Isolated runs of the test never crash (0/12), so it is a
-  cross-test interaction -- consistent with many tests each constructing their
-  own `VulkanContext` and the driver objecting after enough of them, but that
-  is a hypothesis, not a finding. The honest status is: located precisely,
-  not yet explained, not caused by the work in this session, and it must not
-  be counted as a pass.
+- **A use-after-free that presented as "a flaky ray-tracing test", and was
+  neither flaky nor ray-tracing-specific.** `ray_query_first_contact` segfaulted
+  the host about one full-suite run in six. The core dump put frame #0 inside
+  `libnvidia-gpucomp.so.615.71.09` at one fixed offset, reached from
+  `vkGetAccelerationStructureBuildSizesKHR` via `query_blas_sizes`. Two things
+  made it look like a test flake and it was not:
+  1. **It was not one test.** Under `--gtest_repeat=3` the crash moved to
+     `VulkanHardware.PathTracedFrameConvergesThroughCompose` via
+     `VulkanPathTracer::create` -- same offset, same frame #1. Two crash sites
+     with an identical top frame are one defect, not two flaky tests. The
+     repeat harness also raised the rate from ~1/6 to ~2/3, which said the
+     trigger was cumulative within the process rather than per-test.
+  2. **The fault was ours, not the driver's.** `rt_for()` cached the RT entry
+     points in a process-global keyed by `VkDevice` **handle value**. Vulkan
+     reuses handle values after destruction, so a new device landing on a
+     freed handle compared equal, the cache skipped re-resolution, and every
+     later call jumped through pointers resolved from the DESTROYED device.
+     That is exactly the observed asymmetry: the suite builds and tears down
+     ~40 `VulkanContext`s so handle reuse is near-certain, while a single test
+     creates one device and reuses no handle -- hence never in isolation
+     (0/12).
+
+  A second, independent defect surfaced on the way: `cmd_build_blas` filled in
+  `vertexData.deviceAddress` and `vertexStride`, and `query_blas_sizes` left
+  both at zero, so the size query described "12 triangles at address 0, stride
+  0". A size query may read the vertex data, and reading address 0 is a host
+  fault in the driver with no validation error to explain it. Both paths now
+  share one `fill_blas_geometry`, because two copies of a struct description
+  that must agree is precisely how they drifted.
+
+  A/B on one harness, three `--gtest_repeat=3` runs each: original 1/3 crashed,
+  fixed 0/3; then 6 runs at `--gtest_repeat=4` (24 suite passes) with zero
+  crashes, and 6 consecutive plain full-suite runs under validation with zero
+  failures where it previously failed ~1 in 6.
+
+  The general lesson is the one worth keeping: **an intermittent crash is a
+  symptom, not a diagnosis, and "it only happens in the full suite" is a
+  clue rather than an excuse.** Two rounds of hypothesis-chasing here were
+  wrong (missing usage bits, leaked AS objects) before the coredump plus a
+  repeat harness turned it from a guess into a location.
 
 - ~~A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystems-
   Concurrently`, roughly one full-suite run in five.~~ FIXED. Now that `tsan`

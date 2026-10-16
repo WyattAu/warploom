@@ -917,9 +917,37 @@ rather than by it being reported:
   could not find out. Two viewports share the window title, so title matching
   is not an alternative.
 
-Still open, and not fixed by any of this: `ray_query_first_contact` segfaults
-the host about one full-suite run in six, inside
-`libnvidia-gpucomp.so` via `vkGetAccelerationStructureBuildSizesKHR`. Verified
-pre-existing (reproduced at clean HEAD with this work stashed, 1/8) and never
-in isolation (0/12), so it is a cross-test interaction. Located, not
-explained.
+## The intermittent crash the coredump turned into a use-after-free
+
+`ray_query_first_contact` segfaulted the host about one full-suite run in six,
+inside `libnvidia-gpucomp.so` via `vkGetAccelerationStructureBuildSizesKHR`.
+Verified pre-existing first (reproduced at clean HEAD with the resize work
+stashed, 1/8) and never in isolation (0/12) -- which is what turned out to be
+the decisive clue rather than a reassurance.
+
+Under `--gtest_repeat=3` the crash rate went to ~2/3 and the crash *moved* to
+`VulkanHardware.PathTracedFrameConvergesThroughCompose`, reaching the same
+driver offset by the same `query_blas_sizes` frame. Two sites with an identical
+top frame are one defect. The cause: `rt_for()` cached the RT entry points in a
+process-global keyed by `VkDevice` **handle value**, and Vulkan reuses handle
+values after destruction -- so a new device on a freed handle compared equal,
+the cache skipped re-resolution, and later calls jumped through pointers
+resolved from the destroyed device. The suite builds and tears down ~40
+`VulkanContext`s, so reuse is near-certain; a single test builds one device and
+reuses no handle, which is exactly why it never reproduced alone.
+
+A second defect surfaced on the way: `cmd_build_blas` set
+`vertexData.deviceAddress` and `vertexStride` while `query_blas_sizes` set
+neither, so the size query described vertex data at address 0 with stride 0.
+A size query may read the vertex data, and reading address 0 is a host fault
+in the driver with no validation error to explain it. Both paths now share one
+`fill_blas_geometry`.
+
+Measured A/B on one harness: original 1/3 crashed at `--gtest_repeat=3`,
+fixed 0/3; then 24 suite passes at `--gtest_repeat=4` and 6 consecutive plain
+full-suite runs under validation with zero crashes, where it previously failed
+about one in six.
+
+The transferable part: an intermittent crash is a symptom, not a diagnosis.
+"It only happens in the full suite" is a clue about *cumulative process state*
+-- and specifically about handle reuse -- not an excuse to blame the test.
