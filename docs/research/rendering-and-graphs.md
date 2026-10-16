@@ -80,3 +80,36 @@ With that, the sabotage fails at trial 5 by name.
 value asserting the invariant would be a second, unprovable guard. The
 invariant is a property of the interval arithmetic; the caller that wants to
 assert it checks `kind == Dedicated` for every resource declared as history.
+
+## Dispatch-table caching by handle (R1b follow-up)
+
+**Technique.** None. This entry records a bug fix, not a borrowing, and is
+here because the tempting "optimisation" is worth naming as a trap rather than
+silently reverting.
+
+**What happened.** Ray-tracing entry points were resolved once and cached in a
+process-global keyed by `VkDevice` handle value. Vulkan guarantees no
+uniqueness for dispatchable handles: an implementation may return a previously
+destroyed handle value for a new object. Keying any cache by handle value is
+therefore unsound in exactly the environment a renderer targets, where devices
+are created and torn down constantly (this suite builds ~40 of them).
+
+**Why caching by value still "works" in a test that runs alone.** A single
+test creates one device, destroys it, and exits. No second device ever lands on
+the recycled handle, so the stale-pointer path is unreachable. That is the
+danger: the bug is invisible in isolation and only appears under churn, which
+is the condition a full test suite and any real application create.
+
+**Cost of the fix.** Five `vkGetDeviceProcAddr` calls per acceleration-structure
+operation. AS builds happen a handful of times per tracer build -- not per
+frame -- so the effect on frame time is below the noise floor. This is stated
+as reasoning about where the calls sit, not as a measured number: no benchmark
+was run, so none is claimed.
+
+**Generalisation.** Vulkan's own "dispatchable object" model is the source:
+handles are opaque values, not identities. Caches keyed by them -- dispatch
+tables, function pointers, per-object lookup tables -- must be invalidated on
+destruction or keyed by something with a lifetime. The same class of bug
+appeared elsewhere in this codebase in a different shape: `VulkanPathTracer`
+readiness and the H-Z state are per-device, and any global keyed on a handle
+would repeat the fault.
