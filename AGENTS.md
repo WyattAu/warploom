@@ -347,6 +347,28 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   dependence silently, and shuffling is the cheapest way to know whether one
   exists.
 
+- **A configured exposure was silently discarded, and it took a 20x change
+  that produced a byte-identical frame to notice.** `ensure()` preserves the
+  live exposure between calls, because `set_exposure` writes it mid-run and
+  `record_commands` calls `ensure()` every frame -- a plain `config_ = config`
+  would reset it before each record, which is what the two-exposure probe
+  caught. But the preservation was also applied on the FIRST `ensure`, where
+  there is no live value to preserve: it overwrote the caller's exposure with
+  the default. `bloom` was already guarded by `if (!first_ensure)`; exposure
+  was not, so the two drifted apart.
+
+  It was invisible to every brightness assertion, because the default (1.0) and
+  the wrong answer produce equally "reasonable" pictures. What exposed it was
+  changing `cc.exposure` from 0.05 to 1.0 during an unrelated experiment and
+  getting a **byte-identical** frame: a 20x exposure change that changes
+  nothing is not something a tolerance-based check will ever flag.
+
+  The regression test then passed a sabotaged build for the same reason -- it
+  configured 1.0, which is exactly the value the bug leaves in place. Neither
+  value it configures may be the default now. A regression test whose chosen
+  value coincides with the buggy value tests nothing, and that is worth
+  remembering independently of the bug it was written for.
+
 - **A use-after-free that presented as "a flaky ray-tracing test", and was
   neither flaky nor ray-tracing-specific.** `ray_query_first_contact` segfaulted
   the host about one full-suite run in six. The core dump put frame #0 inside

@@ -871,4 +871,101 @@ TEST(VulkanHardware, BloomExtractsAndSpreadsBrightEnergy) {
   EXPECT_LT(bloom.peak_luma, 765U) << "bloom not filtered (raw copy)";
 }
 
+//! E2/R4 follow-up: the exposure a caller CONFIGURES must be the exposure the
+//! chain uses.
+//!
+//! ensure() preserves the live exposure between calls, because set_exposure
+//! writes it mid-run and record_commands calls ensure() every frame -- a naive
+//! `config_ = config` would reset it before each record, which is exactly what
+//! the two-exposure probe caught. But the preservation was applied on the
+//! FIRST ensure as well, where there is no live value to preserve: it overwrote
+//! the caller's configured exposure with the default, so the chain silently
+//! ignored whatever it had been handed.
+//!
+//! Found by accident and worth keeping for how it presented: changing
+//! cc.exposure from 0.05 to 1.0 produced a BYTE-IDENTICAL frame. A 20x exposure
+//! change that changes nothing is not something a brightness assertion would
+//! ever catch, because both readings were "reasonable".
+TEST(VulkanHardware, ComposeChainHonoursConfiguredExposure) {
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  omnicpp::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("OmniCppExposureConfig", true).is_ok());
+
+  omnicpp::render::VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+
+  omnicpp::render::VulkanRenderPass present;
+  ASSERT_TRUE(present.create(ctx.device(), VK_FORMAT_B8G8R8A8_UNORM,
+                             VK_FORMAT_D32_SFLOAT)
+                  .is_ok());
+
+  constexpr std::uint32_t kSize = 32U;
+  omnicpp::render::VulkanOffscreenTarget hdr;
+  if (!hdr.create(ctx.device(), ctx.physical_device(), VK_FORMAT_R16G16B16A16_SFLOAT,
+                  kSize, kSize, &alloc).is_ok() ||
+      !hdr.create_render_pass(ctx.device(),
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+           .is_ok() ||
+      !hdr.create_framebuffer(ctx.device()).is_ok()) {
+    ctx.cleanup();
+    GTEST_SKIP() << "offscreen target unavailable";
+  }
+
+  // Build two chains over the same pass with the same everything except the
+  // exposure they were configured with, and require the recorded push value to
+  // differ. Reading the push constant back is the point: comparing two rendered
+  // frames would only prove they differ, not that the CONFIGURED one won.
+  omnicpp::render::ComposeChainConfig cfg{};
+  cfg.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
+
+  // Neither value may be the default (1.0f). The first version of this test
+  // configured 1.0 -- which is exactly what the bug leaves in place -- so it
+  // PASSED a sabotaged build. A regression test whose chosen value coincides
+  // with the buggy value tests nothing.
+  omnicpp::render::VulkanComposeChain dim;
+  cfg.exposure = 0.37F;
+  const bool dim_ok =
+      dim.ensure(ctx.device(), ctx.physical_device(), ctx.graphics_queue(), cfg,
+                 present.render_pass(), VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize)
+          .is_ok() &&
+      dim.ready();
+
+  omnicpp::render::VulkanComposeChain bright;
+  cfg.exposure = 2.75F;
+  const bool bright_ok =
+      bright.ensure(ctx.device(), ctx.physical_device(), ctx.graphics_queue(), cfg,
+                    present.render_pass(), VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize)
+          .is_ok() &&
+      bright.ready();
+
+  if (dim_ok && bright_ok) {
+    // ensure() runs again every frame from record_commands, so re-assert after
+    // a second call: the bug was in the interaction between "preserve the live
+    // value" and "adopt the new config", and only re-entering can catch it.
+    dim.ensure(ctx.device(), ctx.physical_device(), ctx.graphics_queue(), cfg,
+               present.render_pass(), VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize);
+    EXPECT_NEAR(bright.exposure(), 2.75F, 1.0e-4F)
+        << "the chain is running with an exposure of " << bright.exposure()
+        << " after being configured with 2.75: ensure() overwrote the "
+           "configured value with the preserved one";
+    EXPECT_NEAR(dim.exposure(), 0.37F, 1.0e-4F)
+        << "the chain is running with an exposure of " << dim.exposure()
+        << " after being configured with 0.37";
+  } else {
+    // The compose shaders are not present in this configuration; the guard
+    // above is exercised by VulkanHardware.PathTracedFrameConvergesThroughCompose,
+    // which composes at two exposures and pins the resulting brightness.
+    std::printf("compose chain unavailable; exposure guard not exercised here\n");
+  }
+
+  dim.destroy();
+  bright.destroy();
+  hdr.cleanup(ctx.device());
+  present.cleanup(ctx.device());
+  alloc.cleanup();
+  ctx.cleanup();
+}
+
 #endif  // WARPLOOM_HAS_VULKAN

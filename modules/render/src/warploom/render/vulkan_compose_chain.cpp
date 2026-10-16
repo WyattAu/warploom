@@ -60,8 +60,14 @@ namespace warploom::render {
   const bool live_bloom = bloom_enabled_;
   const bool first_ensure = !allocator_;
   config_ = config;
-  config_.exposure = live_exposure;
+  // Only a LATER ensure preserves the live values. Preserving them on the
+  // first ensure too -- which is what this did, because the bloom guard below
+  // covered bloom and nothing covered exposure -- threw away the caller's
+  // configured exposure and kept the default instead. It was invisible until a
+  // 20x exposure change (0.05 -> 1.0) produced a BYTE-IDENTICAL frame: the
+  // chain was never reading the exposure it had been handed.
   if (!first_ensure) {
+    config_.exposure = live_exposure;
     config_.enable_bloom = live_bloom;
   }
   present_pass_ = present_pass;
