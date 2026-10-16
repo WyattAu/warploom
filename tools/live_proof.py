@@ -29,6 +29,7 @@ import json
 import os
 import socket
 import sys
+import time
 
 PASS = []
 FAIL = []
@@ -402,6 +403,40 @@ def proof_e1(c):
               str(c.cmd(cmd="get_bloom", id=613)))
         r = c.cmd(cmd="set_bloom", id=614)
         check("bloom without arg rejected", r.get("ok") is False, str(r))
+
+    # v1.11 viewport resize. The wire contract (both fields required, clamped
+    # to [64, 8192]) is provable on ANY host; the window itself only exists on
+    # a visual host. A resize drives the whole swapchain recreate path, which
+    # is where the capture stack has to be rebuilt too -- that part is only
+    # meaningful with a viewport.
+    # A headless host has no viewport, so it must REFUSE this cleanly rather
+    # than pretend to resize something. The rejections below are the parse
+    # contract and hold on any host; the acceptance is host-owned.
+    if is_visual_host:
+        r = c.cmd(cmd="set_viewport_size", id=630, width=1000, height=600)
+        check("set_viewport_size ok", r.get("ok") is True, str(r))
+    else:
+        r = c.cmd(cmd="set_viewport_size", id=630, width=1000, height=600)
+        check("set_viewport_size refused on a headless host",
+              r.get("ok") is False, str(r))
+    r = c.cmd(cmd="set_viewport_size", id=631, width=1000)
+    check("viewport size missing height rejected", r.get("ok") is False, str(r))
+    r = c.cmd(cmd="set_viewport_size", id=632, width=10, height=10)
+    check("viewport size under-clamp rejected", r.get("ok") is False, str(r))
+    r = c.cmd(cmd="set_viewport_size", id=633, width=99999, height=600)
+    check("viewport size over-clamp rejected", r.get("ok") is False, str(r))
+    if is_visual_host:
+        # A real round trip: resize away and back, letting the render thread
+        # apply each. The snapshot has no size field, so success is "the
+        # command was accepted and the viewport kept rendering" -- checked by
+        # the follow-up sim step below, which fails loudly if the frame loop
+        # died on the recreate.
+        r = c.cmd(cmd="set_viewport_size", id=634, width=960, height=540)
+        check("viewport resized down ok", r.get("ok") is True, str(r))
+        time.sleep(1.0)
+        r = c.cmd(cmd="set_viewport_size", id=635, width=1280, height=720)
+        check("viewport resized back ok", r.get("ok") is True, str(r))
+        time.sleep(1.0)
 
     # Session health after the visual churn: the sim still steps.
     r = c.cmd(cmd="step", id=615, ticks=1)

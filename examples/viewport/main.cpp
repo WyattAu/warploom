@@ -36,6 +36,9 @@
 #include <mutex>
 #include <vector>
 
+#include <sys/types.h>
+#include <unistd.h>
+
 #include <xcb/xcb.h>
 #include <vulkan/vulkan.h>
 
@@ -77,6 +80,9 @@ namespace {
 //! the control socket file stale. Async-signal-safe: only an atomic store.
 std::atomic<bool> g_shutdown_requested{false};
 void handle_shutdown_signal(int) { g_shutdown_requested.store(true); }
+
+//! _NET_WM_PID, the EWMH property that makes a window attributable to a PID.
+constexpr char kNetWmPidName[] = "_NET_WM_PID";
 
 constexpr std::uint32_t kWidth = 1280U;
 constexpr std::uint32_t kHeight = 720U;
@@ -346,6 +352,28 @@ struct ViewportApp {
   omnicpp::render::VulkanSwapchain swapchain;
   omnicpp::render::VulkanRenderPass render_pass;
   omnicpp::render::VulkanRenderer renderer;
+
+  //! LIVE framebuffer extent, seeded from the swapchain and updated by
+  //! handle_resize().
+  //!
+  //! The viewport used to read kWidth/kHeight -- compile-time constants -- for
+  //! everything that is not the window or the swapchain itself: the capture
+  //! compose chain, the capture framebuffer, and the UI layout. That made the
+  //! window resizable but everything downstream of it frozen at 1280x720, and
+  //! nothing anywhere reported a mismatch. Anything that wants "how big is the
+  //! frame right now" reads these, not the constants.
+  std::uint32_t width{kWidth};
+  std::uint32_t height{kHeight};
+  //! Set by handle_resize(); the frame loop applies it OUTSIDE any recorded
+  //! command buffer, because a swapchain recreate invalidates every image,
+  //! view, framebuffer and in-flight fence that touches the old extent.
+  bool resize_pending{false};
+  //! True once the frame-capture target has been successfully initialized, so
+  //! a resize knows whether it must rebuild it. FrameCapture has no
+  //! initialized() accessor, and its size is fixed at initialize().
+  bool capture_ready{false};
+  std::uint32_t pending_width{0};
+  std::uint32_t pending_height{0};
 
   //! Render pass and format the SCENE pipelines must be built against.
   //! Normally the swapchain's; when HDR compose is enabled the scene renders
@@ -641,6 +669,9 @@ struct ViewportApp {
   //! no validation error at all. Same discipline as control_capture_requested_.
   std::atomic<int> pt_request_{0};
   std::unique_ptr<omnicpp::render::VulkanPathTracer> pt_tracer;
+  //! The tracer's config, kept so a resize can rebuild it with a new extent
+  //! and nothing else changed.
+  omnicpp::render::PathTracerConfig pt_config{};
   //! Triangle soup for the PT scene: one device-address buffer holding every
   //! mesh's triangles back-to-back, with each mesh's address offset into it
   //! (a BLAS build reads from the device address, so one buffer can feed
@@ -727,6 +758,9 @@ struct ViewportApp {
   xcb_window_t window{0};
   xcb_atom_t wm_protocols{0};
   xcb_atom_t wm_delete_window{0};
+  //! _NET_WM_PID atom, interned so the window can be attributed to this
+  //! process (see the xcb_change_property at window creation).
+  xcb_atom_t atom_net_wm_pid{0};
   VkSurfaceKHR surface{VK_NULL_HANDLE};
 
   // Animation state.
@@ -811,6 +845,19 @@ struct ViewportApp {
 
   [[nodiscard]] bool initialize();
   void run();
+
+  //! Ask the window server to resize the window, so the next ConfigureNotify
+  //! agrees with the requested extent and the titlebar matches what is
+  //! rendered. A member rather than a bare callback because xcb needs the
+  //! connection and the window id. No-op when there is no window.
+  void request_window_resize(std::uint32_t w, std::uint32_t h) noexcept {
+    if (window == 0 || connection == nullptr) return;
+    const std::uint32_t values[2] = {w, h};
+    xcb_configure_window(connection, window,
+                          XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT,
+                          values);
+    xcb_flush(connection);
+  }
   void shutdown();
 
   //! The app's authoritative editable document (owns the node graph the
@@ -985,6 +1032,36 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
         if (app_.capture_chain != nullptr) app_.capture_chain->set_exposure(e);
         reply.detail = "exposure " + std::to_string(e) + " (chain now " +
                        std::to_string(app_.renderer.compose_exposure()) + ")";
+        break;
+      }
+      case CK::SetViewportSize: {
+        // v1.11: resize on demand. The parse layer already required both
+        // fields and clamped them to [64, 8192], so this only has to hand the
+        // request to the render thread. It CANNOT be applied here: the control
+        // thread must not touch the device, and a swapchain recreate with a
+        // recorded-but-unsubmitted command buffer is undefined. The render
+        // thread applies it at the top of the frame loop, in the same place as
+        // the PT mode transition.
+        if (command.number_count < 2U) {
+          reply.ok = false;
+          reply.error = "set_viewport_size needs width= and height=";
+          break;
+        }
+        const auto w = static_cast<std::uint32_t>(command.numbers[0]);
+        const auto h = static_cast<std::uint32_t>(command.numbers[1]);
+        if (w == app_.width && h == app_.height) {
+          // Already there. Not an error: a client polling towards a target
+          // size should not have to special-case the last step.
+          reply.ok = true;
+          break;
+        }
+        // Ask the window system to resize too, so the next ConfigureNotify
+        // agrees and the titlebar matches what is rendered.
+        app_.request_window_resize(w, h);
+        app_.resize_pending = true;
+        app_.pending_width = w;
+        app_.pending_height = h;
+        reply.ok = true;
         break;
       }
       case CK::SetBloom: {
@@ -1178,8 +1255,21 @@ bool setup_window(ViewportApp& app) {
   xcb_change_property(app.connection, XCB_PROP_MODE_REPLACE, app.window,
                       XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
                       sizeof("OmniCpp Viewport") - 1, "OmniCpp Viewport");
+  // _NET_WM_PID, so the window can be attributed to THIS process. Without it
+  // `xdotool search --pid` finds nothing, which is why this machine's window
+  // manager turns out to list stale viewports whose windows carry no PID: any
+  // tool (a screenshot grab, a resize driver, a compositor rule) that needs to
+  // know which window belongs to which build cannot tell them apart. Two
+  // viewports share the title "OmniCpp Viewport", so title matching is not an
+  // alternative. This is the fix that makes live window verification possible
+  // at all here.
+  {
+    const pid_t pid = getpid();
+    xcb_change_property(app.connection, XCB_PROP_MODE_REPLACE, app.window,
+                        app.atom_net_wm_pid, XCB_ATOM_CARDINAL, 32, 1, &pid);
+  }
   xcb_map_window(app.connection, app.window);
-  xcb_flush(app.connection);
+
   return true;
 }
 
@@ -1201,10 +1291,202 @@ bool setup_wm_delete_protocol(ViewportApp& app) {
   }
   free(protocols_reply);
   free(delete_reply);
-  return app.wm_protocols != 0 && app.wm_delete_window != 0;
+
+  const xcb_intern_atom_cookie_t net_pid_cookie =
+      xcb_intern_atom(app.connection, 0, sizeof(kNetWmPidName) - 1, kNetWmPidName);
+  xcb_intern_atom_reply_t* net_pid_reply =
+      xcb_intern_atom_reply(app.connection, net_pid_cookie, nullptr);
+  if (net_pid_reply) {
+    app.atom_net_wm_pid = net_pid_reply->atom;
+  }
+  free(net_pid_reply);
+  return app.wm_protocols != 0 && app.wm_delete_window != 0 &&
+         app.atom_net_wm_pid != 0;
 }
 
 //! Poll the event queue; returns false when the window should close.
+//! Recreate every extent-sized resource for a new framebuffer size.
+//!
+//! Runs OUTSIDE any recorded command buffer and with the device idle. The
+//! order is load-bearing: the swapchain first (it produces the new image
+//! format and count), then the render pass's depth + framebuffers, then the
+//! renderer's own per-image state (semaphores, H-Z pyramid, frame pacing), and
+//! only then the path tracer's accumulation image -- whose extent was baked
+//! into the ray-generation shader's dispatch.
+//!
+//! PT REBUILDS rather than preserving samples: an accumulation buffer is
+//! sized in pixels, so the new image is a different resolution and the old
+//! samples describe an image that no longer exists. Carrying them across
+//! would composite a blurry low-res average as if it converged.
+//! Build the capture compose chain AND the capture target at a given extent.
+//!
+//! Both are sized objects that the swapchain recreate invalidates: the chain
+//! bakes its pipeline against the (recreated) render pass, and the capture owns
+//! its own colour target, render pass and framebuffer at the extent it was
+//! initialized with. Leaving either at the old extent is what device-lost the
+//! GPU on a resize.
+[[nodiscard]] bool build_capture_stack(ViewportApp& app, std::uint32_t width,
+                                       std::uint32_t height,
+                                       bool want_chain, bool want_target) {
+  auto& context = app.context;
+  if (want_chain) {
+    app.capture_chain = std::make_unique<omnicpp::render::VulkanComposeChain>();
+    const auto ensured = app.capture_chain->ensure(
+        context.device(), context.physical_device(), context.graphics_queue(),
+        app.renderer.compose_config(), app.render_pass.render_pass(),
+        app.swapchain.image_format(), width, height);
+    if (!ensured.is_ok() || !app.capture_chain->ready()) {
+      app.capture_chain.reset();
+      return false;
+    }
+  }
+  if (want_target) {
+    const VkFormat capture_depth_format =
+        omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+            context.physical_device());
+    if (!app.capture.initialize(
+            context.device(), app.allocator, app.render_pass.render_pass(),
+            app.swapchain.image_format(), capture_depth_format, width, height,
+            static_cast<std::uint32_t>(context.queue_families()
+                                           .graphics_family))) {
+      return false;
+    }
+    app.capture_ready = true;
+  }
+  return true;
+}
+
+//! Build (or rebuild) the capture compose chain against the CURRENT render
+//! pass and swapchain.
+//!
+//! Rebuilding matters on resize: the chain bakes the tonemap pipeline against
+//! the render pass AND the present format, and caches the render pass handle
+//! (present_pass_). apply_resize recreates the render pass, so a cached handle
+//! from before the resize dangles. Measured: reusing the old chain across a
+//! resize device-lost the GPU (VK_ERROR_DEVICE_LOST) on the next submit,
+//! and -- the confusing part -- only when frame capture was on, and not under
+//! the validation layer, which slows execution enough to hide the use-after-
+//! free. The fix is to rebuild the chain from scratch against the new pass,
+//! exactly as at start-up.
+[[nodiscard]] bool rebuild_capture_chain(ViewportApp& app, std::uint32_t width,
+                                         std::uint32_t height) {
+  auto& context = app.context;
+  app.capture_chain = std::make_unique<omnicpp::render::VulkanComposeChain>();
+  const auto ensured = app.capture_chain->ensure(
+      context.device(), context.physical_device(), context.graphics_queue(),
+      app.renderer.compose_config(), app.render_pass.render_pass(),
+      app.swapchain.image_format(), width, height);
+  return ensured.is_ok() && app.capture_chain->ready();
+}
+
+[[nodiscard]] bool apply_resize(ViewportApp& app, std::uint32_t width,
+                                std::uint32_t height) {
+  if (width == 0U || height == 0U) {
+    return true;  // minimized: nothing to do, and 0 is not a valid extent
+  }
+  if (width == app.width && height == app.height) {
+    return true;
+  }
+
+  omnicpp::render::VulkanContext& context = app.context;
+  const auto wait = [&]() { app.renderer.wait_idle(); };
+
+  wait();
+  if (!app.swapchain
+           .recreate(context.device(), context.physical_device(),
+                     app.surface, width, height)
+           .is_ok()) {
+    std::fprintf(stderr, "viewport: swapchain recreate failed at %ux%u\n",
+                 width, height);
+    return false;
+  }
+
+  // Rebuild the render pass at the new extent. This mirrors the sequence in
+  // VulkanHardware.SwapchainRecreationStress, which is the test that proves
+  // the whole path (recreate -> rebuild -> resync -> render) at 320x240 with 0
+  // validation errors: cleanup, then create, then the SIZED depth attachment
+  // and framebuffers. Reusing the render pass across an extent change leaves
+  // depth/framebuffer handles sized for the old extent in flight.
+  const VkFormat depth_format =
+      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+          context.physical_device());
+  if (!app.render_pass
+           .create_depth_resources(context.device(), context.physical_device(),
+                                   depth_format, width, height)
+           .is_ok() ||
+      !app.render_pass
+           .create_framebuffers(context.device(), app.swapchain.image_views(),
+                                width, height)
+           .is_ok()) {
+    std::fprintf(stderr, "viewport: render pass resize failed at %ux%u\n",
+                 width, height);
+    return false;
+  }
+
+  // Retire in-flight state against the NEW image set.
+  const auto resync =
+      app.renderer.resync_for_swapchain(app.swapchain,
+                                        app.render_pass.render_pass());
+  if (!resync.is_ok()) {
+    std::fprintf(stderr, "viewport: renderer resync failed at %ux%u\n", width,
+                 height);
+    return false;
+  }
+
+  app.width = width;
+  app.height = height;
+
+  // The capture stack is sized and cached at the old extent: the chain bakes
+  // its pipeline against this render pass, and the capture owns a colour
+  // target + framebuffer of its own. Both are rebuilt here, after
+  // wait_idle() has drained in-flight work, so nothing references them.
+  if (app.capture_chain != nullptr || app.capture_ready) {
+    const bool want_chain = app.capture_chain != nullptr;
+    const bool want_target = app.capture_ready;
+    app.capture_chain.reset();
+    app.capture.cleanup(context.device(), &app.allocator);
+    if (!build_capture_stack(app, width, height, want_chain, want_target)) {
+      std::fprintf(stderr,
+                   "viewport: capture stack failed to rebuild at %ux%u; "
+                   "captures disabled\n",
+                   width, height);
+      app.capture_chain.reset();
+      app.capture.cleanup(context.device(), &app.allocator);
+      app.capture_ready = false;
+    }
+  }
+
+  // PT: the accumulation image and its dispatch are sized in pixels.
+  if (app.pt_tracer != nullptr && app.pt_stack_built) {
+    wait();
+    app.pt_extent_width = width;
+    app.pt_extent_height = height;
+    app.pt_frame = 0U;  // the old samples described the old resolution
+    omnicpp::render::PathTracerConfig cfg = app.pt_config;
+    cfg.width = width;
+    cfg.height = height;
+    const auto rebuilt = app.pt_tracer->create(
+        app.context.physical_device(), context.device(),
+        context.graphics_queue(),
+        static_cast<std::uint32_t>(context.queue_families().graphics_family),
+        app.allocator, cfg);
+    if (!rebuilt.is_ok()) {
+      std::fprintf(stderr,
+                   "viewport: path tracer failed to rebuild at %ux%u; leaving "
+                   "path tracing off\n",
+                   width, height);
+      app.pt_stack_built = false;
+      app.pt_mode = false;
+    }
+  }
+
+  // UI layout is in pixels, so it has to follow the frame.
+  warploom::ui::compute_layout(app.ui_tree, static_cast<float>(width),
+                               static_cast<float>(height));
+  std::fprintf(stderr, "viewport: resized to %ux%u\n", width, height);
+  return true;
+}
+
 bool poll_events(ViewportApp& app) {
   while (xcb_generic_event_t* event =
              xcb_poll_for_event(app.connection)) {
@@ -1216,6 +1498,22 @@ bool poll_events(ViewportApp& app) {
         free(event);
         return false;
       }
+    } else if (type == XCB_CONFIGURE_NOTIFY) {
+      // The window was moved or RESIZED. STRUCTURE_NOTIFY was already
+      // selected, so these have been arriving and being dropped on the floor:
+      // the window was resizable while every extent-sized resource stayed
+      // frozen at kWidth/kHeight, silently. Only the size matters here; a
+      // move produces a ConfigureNotify with an unchanged extent and
+      // apply_resize ignores it.
+      const auto* cfg =
+          reinterpret_cast<const xcb_configure_notify_event_t*>(event);
+      if (cfg->width != app.width || cfg->height != app.height) {
+        app.resize_pending = true;
+        app.pending_width = cfg->width;
+        app.pending_height = cfg->height;
+      }
+      free(event);
+      continue;
     } else if (type == XCB_KEY_PRESS) {
       const auto* key =
           reinterpret_cast<const xcb_key_press_event_t*>(event);
@@ -3213,6 +3511,12 @@ bool setup_path_tracing(ViewportApp& app) {
       // normal and its albedo for the return radiance.
       omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F),
       omnicpp::render::PathTracerInstance::translated({0.0F, -2.0F, 0.0F}, 0.75F)};
+
+  // Kept so a window resize can rebuild the tracer: the config is assembled
+  // here from the scene's buffer addresses, and rebuilding it means changing
+  // ONLY the extent. Rebuilding from a re-derived config would risk silently
+  // changing geometry or bounces along with the resolution.
+  app.pt_config = cfg;
 
   app.pt_tracer = std::make_unique<omnicpp::render::VulkanPathTracer>();
   const auto created = app.pt_tracer->create(
@@ -5744,12 +6048,7 @@ bool ViewportApp::initialize() {
     // capture's own LDR target. Same scene config as the live chain; the
     // tonemap pipeline bakes in the capture target's pass + format, which is
     // exactly the sharing the first attempt got wrong.
-    capture_chain = std::make_unique<omnicpp::render::VulkanComposeChain>();
-    const auto ensured = capture_chain->ensure(
-        context.device(), context.physical_device(),
-        context.graphics_queue(), renderer.compose_config(),
-        render_pass.render_pass(), swapchain.image_format(), kWidth, kHeight);
-    if (!ensured.is_ok() || !capture_chain->ready()) {
+    if (!rebuild_capture_chain(*this, width, height)) {
       std::fprintf(stderr,
                    "viewport: capture compose chain refused; re-run with "
                    "WARPLOOM_NO_HDR=1 to capture without it.\n");
@@ -5763,12 +6062,13 @@ bool ViewportApp::initialize() {
             context.physical_device());
     if (!capture.initialize(
             context.device(), allocator, render_pass.render_pass(),
-            swapchain.image_format(), capture_depth_format, kWidth, kHeight,
+            swapchain.image_format(), capture_depth_format, width, height,
             static_cast<std::uint32_t>(context.queue_families()
                                            .graphics_family))) {
       std::fprintf(stderr, "viewport: frame capture initialization failed\n");
       return false;
     }
+    capture_ready = true;
   }
   return true;
 }
@@ -5801,6 +6101,21 @@ void ViewportApp::run() {
     if (g_shutdown_requested.load(std::memory_order_acquire)) {
       telemetry.log_event("exit", "signal");
       break;
+    }
+    // A pending window resize is applied HERE, before anything is recorded.
+    // Doing it after begin_frame/record would destroy images and framebuffers
+    // that an in-flight command buffer still references, so the recreate has
+    // to sit at the same point as the PT mode transition: outside recording,
+    // device idle.
+    if (resize_pending) {
+      resize_pending = false;
+      const std::uint32_t new_w = pending_width;
+      const std::uint32_t new_h = pending_height;
+      if (!apply_resize(*this, new_w, new_h)) {
+        std::fprintf(stderr, "viewport: resize to %ux%u failed; exiting\n",
+                     new_w, new_h);
+        break;
+      }
     }
     // Control channel first: accept/read/dispatch so pause/step/camera
     // commands apply to THIS frame's simulation and render.
@@ -6028,14 +6343,14 @@ void ViewportApp::run() {
         compose_path.scene_depth = capture_chain->scene_depth_image();
         compose_path.record_compose = [&](VkCommandBuffer cmd) {
           capture_chain->record(cmd, capture.pass_handle(),
-                                capture.framebuffer_handle(), kWidth, kHeight);
+                                capture.framebuffer_handle(), width, height);
         };
         compose_path_ptr = &compose_path;
       }
       const bool captured = capture.capture(
           context.graphics_queue(), [&](VkCommandBuffer cmd) {
             return record_scene_into(cmd, *this, last_recorded_time,
-                                     last_recorded_walk, kWidth, kHeight);
+                                     last_recorded_walk, width, height);
           },
           compose_path_ptr);
       if (captured) {

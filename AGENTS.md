@@ -279,6 +279,71 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   tell was that the captured mean matched the baseline capture to three
   decimals.
 
+- **The viewport had no resize path at all, and a resizable window that
+  silently ignores resizes is worse than a fixed one.** `STRUCTURE_NOTIFY` was
+  already selected on the XCB window, so `ConfigureNotify` events had been
+  arriving and being dropped on the floor; meanwhile everything downstream of
+  the swapchain read the compile-time constants `kWidth`/`kHeight`, not the
+  live extent. Added: the event handler, `apply_resize()` (recreate swapchain ->
+  rebuild the sized depth attachment and framebuffers -> `resync_for_swapchain`
+  -> rebuild the capture stack -> rebuild the PT accumulation -> relayout the
+  UI), and `set_viewport_size` on the control socket (v1.11), so the path is
+  driven on demand and is provable in CI rather than only by a window manager.
+
+  **The root cause of the crash this took four attempts to find is worth the
+  space.** A resize with frame capture enabled device-lost the GPU
+  (`VK_ERROR_DEVICE_LOST` on the next submit) roughly half the time; the same
+  resize with capture OFF was always clean, and under the validation layer it
+  was always clean too. A validation layer that says nothing while the device
+  dies is the signature of undefined behaviour rather than a spec violation --
+  the same shape as the BLAS scratch-barrier bug above, and the tell that
+  stopped me trusting the "it passes under validation" signal. Three wrong
+  hypotheses died on the way, and each is a trap worth naming:
+    1. "the render pass must be recreated" -- it does not have to be, and doing
+       so changes nothing.
+    2. "the capture compose chain caches the old render pass, so rebuild it" --
+       correct, necessary, and NOT sufficient.
+    3. "it is a timing race the fence wait should cover" -- `wait_idle()` is
+       `vkDeviceWaitIdle`, which already drains every queue.
+
+  The actual fault was the one object nobody resized: the capture's own
+  colour target, render pass and framebuffer, which are sized at
+  `FrameCapture::initialize` and were still at 1280x720 while the swapchain
+  and the compose chain had moved. Rebuilding the whole capture stack --
+  target AND chain -- at the new extent is the fix, and after it: five
+  consecutive resizes with capture on, zero device losses, and the captured
+  PPM headers follow the live extent exactly (1280x720 -> 1000x600 -> 1400x820
+  -> 800x480 -> 1200x700 -> 960x540).
+
+  Path tracing rebuilds too, and correctly RE-CONVERGES: an accumulation
+  buffer is sized in pixels, so the old samples describe an image that no
+  longer exists and the counter resets. Measured across a resize, the noise
+  floor falls again from scratch (33.96 -> 18.2 at 1000x600; 33.70 -> 5.16 at
+  1400x820 over 200 frames). Carrying samples across would composite a blurry
+  low-resolution average as though it had converged.
+
+  The viewport also now sets `_NET_WM_PID`. Without it `xdotool search --pid`
+  finds nothing, which is exactly why this machine's window manager turns out
+  to list stale viewports with no PID: two viewports share the title, so title
+  matching is not an alternative. Anything that needs to know which window
+  belongs to which build -- a screenshot grab, a resize driver -- simply
+  could not. This is the fix that makes live window verification possible
+  here at all.
+
+- **A pre-existing, still-open flake: `ray_query_first_contact` segfaults the
+  host about one full-suite run in six, and it is not ours.** The core dump
+  puts frame #0 inside `libnvidia-gpucomp.so.615.71.09`, called from
+  `vkGetAccelerationStructureBuildSizesKHR` via
+  `VulkanAccelerationStructureBuilder::query_blas_sizes`. Verified
+  pre-existing rather than assumed: with this session's work stashed and the
+  tree rebuilt at clean HEAD, the same crash reproduced at the same test
+  (1/8 runs). Isolated runs of the test never crash (0/12), so it is a
+  cross-test interaction -- consistent with many tests each constructing their
+  own `VulkanContext` and the driver objecting after enough of them, but that
+  is a hypothesis, not a finding. The honest status is: located precisely,
+  not yet explained, not caused by the work in this session, and it must not
+  be counted as a pass.
+
 - ~~A rare race in `SystemScheduler.ParallelExecutionRunsIndependentSystems-
   Concurrently`, roughly one full-suite run in five.~~ FIXED. Now that `tsan`
   builds, ThreadSanitizer reproduced it with full stacks: `run_parallel`

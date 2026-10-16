@@ -158,6 +158,13 @@ struct ControlCommand final {
     // v1.10: bloom (E2/R4) — host-owned post-process toggle, live. All bloom
     // resources exist from initialize(), so this changes which passes record,
     // never what is built (docs/research/rendering-and-graphs.md, R7).
+    // v1.11 viewport resize: numbers[0] = width, numbers[1] = height in
+    // pixels ("width"/"height", both required, clamped to [64, 8192] at parse
+    // time). Resizes the window, which exercises the full swapchain recreate
+    // path on demand rather than only when a window manager happens to deliver
+    // a ConfigureNotify -- that is what makes the path verifiable headlessly
+    // instead of only on a desktop.
+    SetViewportSize,
     //   SetBloom: numbers[0] = 0/1 ("enabled", required)
     //   GetBloom: no payload; detail = JSON {"enabled": true|false,
     //                                        "available": true|false}

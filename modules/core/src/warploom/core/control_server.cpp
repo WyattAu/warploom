@@ -76,6 +76,8 @@ const std::vector<ControlCommand::KindName>& ControlCommand::kind_names() {
       // v1.10 bloom toggle (E2/R4).
       {Kind::SetBloom, "set_bloom"},
       {Kind::GetBloom, "get_bloom"},
+      // v1.11 viewport resize: drives the swapchain recreate path on demand.
+      {Kind::SetViewportSize, "set_viewport_size"},
   };
   return kTable;
 }
@@ -361,6 +363,34 @@ namespace {
     case ControlCommand::Kind::SetExposure:
       take("exposure");
       break;
+    case ControlCommand::Kind::SetViewportSize: {
+      // Both fields required: a resize with a missing dimension is a mistake,
+      // not a request to keep the current one silently.
+      std::uint64_t width = 0;
+      std::uint64_t height = 0;
+      if (!find_unsigned_field(line, "width", width)) {
+        error = "missing \"width\" unsigned field";
+        return false;
+      }
+      if (!find_unsigned_field(line, "height", height)) {
+        error = "missing \"height\" unsigned field";
+        return false;
+      }
+      // Clamp at PARSE time rather than letting a hostile client ask for a
+      // 2^63 x 2^63 swapchain: the viewport would pass it to vkCreateSwapchain
+      // and either exhaust memory or trip a VUID. The clamp is part of the
+      // wire contract so every client gets the same behaviour.
+      constexpr std::uint64_t kMinExtent = 64U;
+      constexpr std::uint64_t kMaxExtent = 8192U;
+      if (width < kMinExtent || width > kMaxExtent || height < kMinExtent ||
+          height > kMaxExtent) {
+        error = "width and height must be in [64, 8192]";
+        return false;
+      }
+      numbers[count++] = static_cast<double>(width);
+      numbers[count++] = static_cast<double>(height);
+      break;
+    }
     case ControlCommand::Kind::SetBloom:
       take("enabled");
       break;

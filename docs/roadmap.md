@@ -875,3 +875,51 @@ could never fire. A probe measured 84 history-aliasing violations across 200
 random configurations that the suite passed. Details in
 `docs/research/rendering-and-graphs.md`.
 
+### The viewport resizes now (v1.11 `set_viewport_size`)
+
+The window was resizable but nothing downstream of it was: `ConfigureNotify`
+events had been arriving since `STRUCTURE_NOTIFY` was selected and were being
+dropped, while the capture chain, the capture framebuffer and the UI layout all
+read the compile-time `kWidth`/`kHeight`. `apply_resize()` now recreates the
+swapchain, the sized depth attachment and framebuffers, calls
+`resync_for_swapchain`, rebuilds the capture stack and the path tracer's
+accumulation, and relays out the UI -- in that order, device idle, at the top
+of the frame loop where nothing is recorded.
+
+The crash this took four attempts to find is the part worth carrying forward.
+A resize with capture enabled device-lost the GPU (`VK_ERROR_DEVICE_LOST` on
+the next submit) about half the time; the same resize with capture off was
+clean, and under the validation layer it was clean *too*. That last fact is
+the lesson: a validation layer that says nothing while the device dies means
+undefined behaviour, not a spec violation, and it is the same tell as the BLAS
+scratch-barrier bug in R1b. Three hypotheses died first -- recreate the render
+pass (not required), rebuild the compose chain (necessary, not sufficient),
+and "the fence wait should cover it" (`wait_idle` is `vkDeviceWaitIdle`, which
+drains every queue). The actual fault was the one object nobody resized: the
+capture's own colour target, render pass and framebuffer, sized once at
+`FrameCapture::initialize` and left at 1280x720 while the swapchain moved.
+
+Measured after the fix: five consecutive resizes with capture on, zero device
+losses, zero validation diagnostics, and the captured PPM headers follow the
+live extent exactly. Path tracing rebuilds too and correctly re-converges,
+because an accumulation buffer is sized in pixels -- the noise floor restarts
+at 33.96 and falls to 18.2 at 1000x600, and 33.70 to 5.16 at 1400x820. The
+old samples describe an image that no longer exists.
+
+Two smaller corrections in the same area, both found by looking for the resize
+rather than by it being reported:
+
+- The capture recorded the *scene* at `kWidth, kHeight` while composing at the
+  live extent -- two different sizes in one captured frame, which is a real
+  hazard even before any resize happens.
+- The viewport did not set `_NET_WM_PID`, so `xdotool search --pid` matched
+  nothing and any tool that needed to know which window belongs to which build
+  could not find out. Two viewports share the window title, so title matching
+  is not an alternative.
+
+Still open, and not fixed by any of this: `ray_query_first_contact` segfaults
+the host about one full-suite run in six, inside
+`libnvidia-gpucomp.so` via `vkGetAccelerationStructureBuildSizesKHR`. Verified
+pre-existing (reproduced at clean HEAD with this work stashed, 1/8) and never
+in isolation (0/12), so it is a cross-test interaction. Located, not
+explained.
