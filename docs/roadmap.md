@@ -691,10 +691,12 @@ declares a slot 3.
       sabotaged build because of it. Both sabotage directions are caught -- a
       missing divide (std RISES) and a stuck frame index (std stays flat).
 
-      And in the live viewport, by capture: over 12 samples the noise floor
-      falls monotonically 36.6 -> 17.5 (a 52% reduction) with the mean
-      settling, which is what an accumulating mean looks like from outside the
-      engine.
+      ~~And in the live viewport, by capture: over 12 samples the noise floor
+      falls monotonically 36.6 -> 17.5.~~ **That measurement was of the wrong
+      image.** The capture chain's `using_external_source()` is FALSE in PT
+      mode -- measured directly at the capture site -- so the chain composited
+      its own intermediate rather than the PT accumulation, and the falling mean
+      was the raster scene under a still-orbiting camera.
 
       **Getting the live path to converge took three fixes the headless test
       could not have found**, because it drives the objects directly:
@@ -1004,3 +1006,44 @@ now pins the absolute value as well (~0.7489 +/- 5%) and asserts the counter
 directly, and the same sabotage fails it with the number in the message. The
 seed and scene are fixed, so the reading is bit-identical run to run here; the
 5% band is for other GPUs, whose float precision will not match.
+
+## The live path-traced capture is not showing the path-traced image
+
+Chasing an anomaly in the capture -- the displayed mean falling 4.4x while the
+noise fell by the same factor -- turned up a measurement error in an earlier
+commit, and the error is worth more than the anomaly.
+
+**What is verified.** The tracer is correct. The LINEAR accumulation mean is
+flat in situ, measured inside the running viewport through `read_mean()`:
+0.7336 → 0.7357 across 300 to 1800 samples. Headlessly it is flat to 0.01%,
+bit-identical across runs, at every exposure and at 1632 samples, and robust to
+the scene (two instances, the viewport's camera pose) and to the seed schedule
+(monotonic rather than restarting). The RNG is unbiased and uncorrelated over
+4096 frames, which mattered because seeding an LCG with a linear index and
+taking one step is the textbook antipattern and would have been the obvious
+suspect.
+
+**What is not.** The captured image. `capture_chain->using_external_source()` is
+**false** at the capture site in PT mode -- measured directly, not inferred --
+so the compose chain samples its own intermediate rather than the PT
+accumulation. Everything the capture path was used to "prove" was therefore
+measured on a different image, including this commit's own earlier claim that
+the noise floor falls 36.6 → 17.5 over 12 samples. It did; it was not the
+path-traced picture.
+
+The cause is an ordering one: on the `WARPLOOM_PT=1` path the external source
+is registered while `capture_chain` is still null (the PT stack is built before
+the capture chain), so the registration silently did nothing. The runtime
+`set_render_mode("pt")` path registers it later and is unaffected.
+
+**Fixing it is not done.** Attaching the source turns the capture into a
+*constant* image -- nine consecutive captures at 150-sample spacing were
+byte-identical (mean 100.600, std 58.141) while `read_mean()` in the same
+process showed the accumulation advancing. Two hypotheses were tested and
+refuted by measurement: a missing `SHADER_WRITE -> SHADER_READ` dependency on
+the accumulation (added; no change) and an unordered capture submission (a host
+`wait_idle()` before the capture; no change). The image also changes only when
+the exposure changes, which says the composite is sampling something constant
+rather than the accumulation at all. So the honest state is: two defects
+identified, one of them corrected in this paragraph, neither of them landed,
+and the feature is not claimed to be demonstrable through the capture path.
