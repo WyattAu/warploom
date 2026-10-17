@@ -1068,6 +1068,26 @@ composite would keep sampling whatever the graph captured at compile time.
 That is a concrete, cheap next probe, and it is the reason this is left open
 rather than guessed at.
 
+Two further measurements narrow it. `compose_set_external_` is allocated
+UNCONDITIONALLY at ensure() (so set_external_source's null guard is not the
+early return), and `write_image` calls `vkUpdateDescriptorSets` immediately,
+so the write is not staged. The recorded graph uses `samples[].image` only to
+compute barriers -- sampling comes from the descriptor set -- so the write and
+the binding agree in principle. That leaves the value itself: the frozen
+brightness is plausibly `tonemap(accumulation)`, i.e. a saturated image of the
+raw SUM rather than the mean. With the correct `inverse_samples` the same
+quantity should fall as the noise falls, and it does not move at all -- which
+would mean the capture chain is compositing with the divide missing rather than
+sampling a stale image. Verified NOT to be saturation: at exposure 0.05, where
+nothing can clip, the mean is still bit-identical (100.600 / 58.141) across
+eight captures from 200 to 1600 samples.
+
+So the next two probes, both cheap: assert the push block the capture chain
+actually records, and assert whether `set_external_source`'s write survives to
+the frame (compare `compose_set_external_` binding 0 before and after a
+record). Guessing between "stale image" and "missing divide" without those is
+exactly the kind of unverifiable change this project does not ship.
+
 Honest state: the tracer is proven correct in situ and headlessly; the capture
 path is proven broken; the fix is understood in shape but not landed, and the
 feature is not claimed to be demonstrable through the capture path.
