@@ -1036,14 +1036,38 @@ is registered while `capture_chain` is still null (the PT stack is built before
 the capture chain), so the registration silently did nothing. The runtime
 `set_render_mode("pt")` path registers it later and is unaffected.
 
-**Fixing it is not done.** Attaching the source turns the capture into a
-*constant* image -- nine consecutive captures at 150-sample spacing were
-byte-identical (mean 100.600, std 58.141) while `read_mean()` in the same
-process showed the accumulation advancing. Two hypotheses were tested and
-refuted by measurement: a missing `SHADER_WRITE -> SHADER_READ` dependency on
-the accumulation (added; no change) and an unordered capture submission (a host
-`wait_idle()` before the capture; no change). The image also changes only when
-the exposure changes, which says the composite is sampling something constant
-rather than the accumulation at all. So the honest state is: two defects
-identified, one of them corrected in this paragraph, neither of them landed,
-and the feature is not claimed to be demonstrable through the capture path.
+**Fixing it is not done, and the next probe is named.** Attaching the source
+turns the capture into a *constant* image: with the minimal fix (attach right
+after the chain is built, nothing else changed) six captures from 200 to 1200
+samples are bit-identical -- mean 182.796, std 105.541 -- while `read_mean()`
+in the same process shows the accumulation advancing. 182.796 is plausibly the
+right *brightness* for tonemap(0.734) at exposure 1.0, which is what makes this
+insidious: the level looks right and nothing after it moves.
+
+Hypotheses tested and refuted by measurement, not by argument:
+
+- A missing `SHADER_WRITE -> SHADER_READ` dependency on the accumulation
+  (`record_round` declared only `SHADER_WRITE -> TRANSFER_READ`, and the image
+  stays in `GENERAL`, so nothing forced a dependency for a sampled read from a
+  later submission). Added; no change in the output.
+- An unordered capture submission (the capture waits on its own fence and never
+  against the frame that recorded the dispatch). A host `wait_idle()` before the
+  capture; no change.
+- A descriptor write that is staged rather than applied. Refuted by reading it:
+  `write_image` calls `vkUpdateDescriptorSets` immediately.
+- The chain not being built at all. Refuted by measurement on the unmodified
+  tree: `chain=present ext=0 compose=1` at the capture site.
+
+So the remaining suspect is *which binding the tonemap actually reads*.
+`set_external_source` writes binding 0 of `compose_set_external_`, and
+`record()` selects that set when `external_image_` is set and puts
+`external_image_` in the graph's sampled-image slot -- but if the compiled graph
+builds its own image binding from that slot rather than reading the descriptor
+set, writing `compose_set_external_` is writing the wrong object, and the
+composite would keep sampling whatever the graph captured at compile time.
+That is a concrete, cheap next probe, and it is the reason this is left open
+rather than guessed at.
+
+Honest state: the tracer is proven correct in situ and headlessly; the capture
+path is proven broken; the fix is understood in shape but not landed, and the
+feature is not claimed to be demonstrable through the capture path.
