@@ -98,3 +98,11 @@ not.
   sharpened this: the HPG 2026 spatial-reuse improvement changes reuse
   quality, not the reservoir STATE that breaks replay, so the deferral is
   about state, and stays.)
+
+## Comparison research
+
+- [../comparison-matrix.md](../comparison-matrix.md) - Warploom against Godot,
+  Blender/Cycles, OpenCASCADE, Houdini/Karma, Unreal and Unity. Godot, Blender
+  and OCCT were read from source; Unreal, Unity and Houdini are public-docs-only.
+  Every competitor claim carries a file path or URL, and what could not be
+  verified is listed rather than omitted.
