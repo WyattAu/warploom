@@ -1082,11 +1082,26 @@ sampling a stale image. Verified NOT to be saturation: at exposure 0.05, where
 nothing can clip, the mean is still bit-identical (100.600 / 58.141) across
 eight captures from 200 to 1600 samples.
 
-So the next two probes, both cheap: assert the push block the capture chain
-actually records, and assert whether `set_external_source`'s write survives to
-the frame (compare `compose_set_external_` binding 0 before and after a
-record). Guessing between "stale image" and "missing divide" without those is
-exactly the kind of unverifiable change this project does not ship.
+**Missing divide: refuted, and the experiment that refutes it is worth
+keeping.** At exposure 1.0 and again at 0.05 the image was pinned, but 0.05 was
+still far too bright to rule out saturation. At exposure **0.0005** nothing can
+clip: `tonemap(0.734 x 0.0005)` predicts a mean of 25.37, the measurement is
+25.3685, and the mean is *constant* across 300 to 1500 samples. A missing
+divide would have scaled it 5x with n. So the composite carries the correct
+`inverse_samples`, and the value on screen is `tonemap` of a constant -- which
+means the sampled image really is stale, not mis-scaled.
+
+Also verified on the way: `accum_image` and `accum_view` are both non-null at
+attach time, so `set_external_source`'s "both handles valid" condition holds and
+the descriptor is written to the accumulation view rather than left on the
+fallback.
+
+That leaves one live hypothesis and it is not one I can test without
+instrumentation rather than reasoning: the capture's composite records into its
+own command buffer and may be observing the accumulation before the tracer's
+dispatch within the frame, consistently, even though a later `read_mean()`
+sees the advanced value. Distinguishing that needs a capture of the actual
+sampled value, not an inference from brightness.
 
 Honest state: the tracer is proven correct in situ and headlessly; the capture
 path is proven broken; the fix is understood in shape but not landed, and the
