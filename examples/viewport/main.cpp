@@ -1264,9 +1264,30 @@ bool setup_window(ViewportApp& app) {
   // alternative. This is the fix that makes live window verification possible
   // at all here.
   {
+    // Intern the atom HERE, before the property is written. It used to be
+    // interned in setup_wm_delete_protocol(), which runs LATER, so the
+    // property was written against atom 0 and the server silently discarded
+    // it -- `xprop -id <w> _NET_WM_PID` said "not found" and `xdotool search
+    // --pid` found nothing, which is exactly the attribution problem this
+    // was added to solve. The symptom was blamed on the window manager.
+    const xcb_intern_atom_cookie_t net_pid_cookie =
+        xcb_intern_atom(app.connection, 0, sizeof(kNetWmPidName) - 1,
+                        kNetWmPidName);
+    xcb_intern_atom_reply_t* net_pid_reply =
+        xcb_intern_atom_reply(app.connection, net_pid_cookie, nullptr);
+    if (net_pid_reply) {
+      app.atom_net_wm_pid = net_pid_reply->atom;
+    }
+    free(net_pid_reply);
+    if (app.atom_net_wm_pid == 0) {
+      std::fprintf(stderr,
+                   "viewport: could not intern _NET_WM_PID; this window will "
+                   "not be attributable to a process\n");
+    }
     const pid_t pid = getpid();
     xcb_change_property(app.connection, XCB_PROP_MODE_REPLACE, app.window,
                         app.atom_net_wm_pid, XCB_ATOM_CARDINAL, 32, 1, &pid);
+    xcb_flush(app.connection);
   }
   xcb_map_window(app.connection, app.window);
 
@@ -1292,16 +1313,10 @@ bool setup_wm_delete_protocol(ViewportApp& app) {
   free(protocols_reply);
   free(delete_reply);
 
-  const xcb_intern_atom_cookie_t net_pid_cookie =
-      xcb_intern_atom(app.connection, 0, sizeof(kNetWmPidName) - 1, kNetWmPidName);
-  xcb_intern_atom_reply_t* net_pid_reply =
-      xcb_intern_atom_reply(app.connection, net_pid_cookie, nullptr);
-  if (net_pid_reply) {
-    app.atom_net_wm_pid = net_pid_reply->atom;
-  }
-  free(net_pid_reply);
-  return app.wm_protocols != 0 && app.wm_delete_window != 0 &&
-         app.atom_net_wm_pid != 0;
+  // _NET_WM_PID is interned in setup_window(), where the property that uses
+  // it is written -- it used to be interned here, which is LATER, so the
+  // property went out against atom 0 and was silently dropped.
+  return app.wm_protocols != 0 && app.wm_delete_window != 0;
 }
 
 //! Poll the event queue; returns false when the window should close.
@@ -1340,6 +1355,18 @@ bool setup_wm_delete_protocol(ViewportApp& app) {
       return false;
     }
   }
+  // If path tracing is active, the capture chain must compose the PT
+  // accumulation, not its own (raster) intermediate. This has to be part of
+  // BUILDING the chain: on the WARPLOOM_PT start-up path the PT stack is
+  // built BEFORE the capture chain exists, so the registration that used to
+  // live at PT entry ran while `capture_chain` was still null and silently did
+  // nothing. Measured at the capture site: using_external_source() was FALSE
+  // with a chain present and compose active.
+  if (want_chain && app.pt_mode && app.pt_tracer != nullptr &&
+      app.pt_tracer->ready()) {
+    app.capture_chain->set_external_source(app.pt_tracer->accum_image(),
+                                           app.pt_tracer->accum_view());
+  }
   if (want_target) {
     const VkFormat capture_depth_format =
         omnicpp::render::VulkanRenderPass::find_supported_depth_format(
@@ -1354,29 +1381,6 @@ bool setup_wm_delete_protocol(ViewportApp& app) {
     app.capture_ready = true;
   }
   return true;
-}
-
-//! Build (or rebuild) the capture compose chain against the CURRENT render
-//! pass and swapchain.
-//!
-//! Rebuilding matters on resize: the chain bakes the tonemap pipeline against
-//! the render pass AND the present format, and caches the render pass handle
-//! (present_pass_). apply_resize recreates the render pass, so a cached handle
-//! from before the resize dangles. Measured: reusing the old chain across a
-//! resize device-lost the GPU (VK_ERROR_DEVICE_LOST) on the next submit,
-//! and -- the confusing part -- only when frame capture was on, and not under
-//! the validation layer, which slows execution enough to hide the use-after-
-//! free. The fix is to rebuild the chain from scratch against the new pass,
-//! exactly as at start-up.
-[[nodiscard]] bool rebuild_capture_chain(ViewportApp& app, std::uint32_t width,
-                                         std::uint32_t height) {
-  auto& context = app.context;
-  app.capture_chain = std::make_unique<omnicpp::render::VulkanComposeChain>();
-  const auto ensured = app.capture_chain->ensure(
-      context.device(), context.physical_device(), context.graphics_queue(),
-      app.renderer.compose_config(), app.render_pass.render_pass(),
-      app.swapchain.image_format(), width, height);
-  return ensured.is_ok() && app.capture_chain->ready();
 }
 
 [[nodiscard]] bool apply_resize(ViewportApp& app, std::uint32_t width,
@@ -6048,7 +6052,7 @@ bool ViewportApp::initialize() {
     // capture's own LDR target. Same scene config as the live chain; the
     // tonemap pipeline bakes in the capture target's pass + format, which is
     // exactly the sharing the first attempt got wrong.
-    if (!rebuild_capture_chain(*this, width, height)) {
+    if (!build_capture_stack(*this, width, height, true, false)) {
       std::fprintf(stderr,
                    "viewport: capture compose chain refused; re-run with "
                    "WARPLOOM_NO_HDR=1 to capture without it.\n");

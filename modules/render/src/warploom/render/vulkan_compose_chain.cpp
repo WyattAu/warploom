@@ -666,8 +666,28 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
     // layout.
     tonemap.samples[0].used_layout = VK_IMAGE_LAYOUT_GENERAL;
     tonemap.samples[0].initial_layout = VK_IMAGE_LAYOUT_GENERAL;
-    tonemap.samples[0].initial_access = 0U;
-    tonemap.samples[0].initial_stage = 0U;
+    // The SOURCE SCOPE of the graph's barrier. It was 0U/0U, and a barrier
+    // with an empty source scope orders nothing: the write->read dependency
+    // the tonemap needs was never established, so the sample returned whatever
+    // the image happened to contain.
+    //
+    // The symptom was a path-traced view that FROZE at a plausible value
+    // while the accumulation underneath it advanced -- the tracer's linear mean
+    // moved 75% of its pixels between n=300 and n=1500, and the composed image
+    // changed 0.02% of its pixels, by one LSB. Measured on both the live view
+    // (two window grabs 25 s apart: identical mean and standard deviation) and
+    // the capture (byte-identical across nine consecutive captures). No
+    // validation diagnostic, because a zero-scope barrier is legal; it simply
+    // does nothing.
+    //
+    // The old comment here claimed the write "is ordered by the tracer's own
+    // barrier and the submission's dependency". The tracer's barrier declared
+    // SHADER_WRITE -> TRANSFER_READ, which does not cover a SHADER read at
+    // all, and the graph's barrier -- the one that would have covered it --
+    // had no source scope. So nothing ordered it.
+    tonemap.samples[0].initial_access = VK_ACCESS_SHADER_WRITE_BIT;
+    tonemap.samples[0].initial_stage =
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
   } else {
     tonemap.samples[0].initial_layout = hdr_from_scene;
     tonemap.samples[0].initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;

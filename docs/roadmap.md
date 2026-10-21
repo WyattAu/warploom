@@ -1188,6 +1188,59 @@ Reading the live view back is the obstacle, not the analysis -- the capture
 path cannot read the swapchain, and the window system on this machine lists
 stale viewports whose frames cannot be attributed to a build.
 
+### The measurement, and four fixes
+
+Reading the live view back needed the window to be attributable to a build, and
+it was not: `_NET_WM_PID` was never actually set. The property was written
+against an atom interned **later** in a different function, so it went out
+against atom 0 and the server dropped it -- `xprop -id <w> _NET_WM_PID` said
+"not found" and `xdotool search --pid` found nothing. The earlier conclusion
+("this window manager strips it") was wrong; it was our own ordering bug. With
+the interning moved before the write, `xprop` reports
+`_NET_WM_PID(CARDINAL) = 4135356`, matching the running process.
+
+**That unlocked the measurement, and the live view is frozen too** -- two
+window grabs 25 seconds apart, identical mean (6519.7) and identical standard
+deviation (3766.66). So the fault is in the shared "sample the accumulation"
+mechanism, not capture-specific, and the capture was never the red herring it
+looked like.
+
+**Three real defects, all fixed:**
+
+1. **The startup path never pointed the capture chain at the accumulation.**
+   The PT stack is built before the capture chain exists, so the registration
+   that lived at PT entry ran while `capture_chain` was still null and silently
+   did nothing. Measured at the capture site: `using_external_source()` was
+   FALSE with a chain present and compose active -- so the capture was
+   compositing the RASTER scene, and the "decaying mean" that started this
+   whole investigation was the raster scene under a still-orbiting camera, not
+   a path-traced image at all. The attach now happens where the chain is
+   BUILT.
+2. **The compose chain's external-source barrier had a ZERO source scope.**
+   `initial_access` and `initial_stage` were 0, so the graph emitted a barrier
+   with `srcAccessMask = 0, srcStageMask = 0` -- which orders nothing. The
+   write->read dependency the tonemap needs was never established. No
+   validation diagnostic, because a zero-scope barrier is legal; it simply does
+   nothing.
+3. **The tracer's final barrier declared only `SHADER_WRITE -> TRANSFER_READ`**,
+   which does not make the write visible to a shader read at all.
+
+With all three fixed, the capture now reports `using_external_source() == true`
+at the capture site, and the captured image's statistics match a converged
+path-traced image (mean 182.7959, std 105.5407) instead of the raster scene's
+(mean 10.48 and falling).
+
+**Still not explained, and recorded as such.** The captured image is not a
+faithful tonemap of the accumulation: the Spearman rank correlation between
+the accumulation's per-pixel values and the capture's luma is **+0.31**, where
+a monotone tonemap of the same image would give ~1.0. So the capture is
+compositing something with a similar mean and a different structure. The
+remaining candidates are unchanged in kind -- the compose target framebuffer,
+the two chains sharing one render pass, and the capture's own readback path
+presenting a stale buffer -- and the next step is still to reproduce the
+viewport's exact arrangement headlessly, now that the three real defects are
+out of the way and the measurement is trustworthy.
+
 Honest state: the tracer is proven correct in situ and headlessly; the capture
 path is proven broken; the fix is understood in shape but not landed, and the
 feature is not claimed to be demonstrable through the capture path.

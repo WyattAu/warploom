@@ -483,14 +483,29 @@ void VulkanPathTracer::record_round([[maybe_unused]] VkCommandBuffer command_buf
   }
   rt_pipeline_.trace_rays(command_buffer, width_, height_, 1U);
 
-  // Leave the accumulation readable by a transfer copy (read_mean).
+  // Leave the accumulation readable by a TRANSFER COPY (read_mean) and by a
+  // SHADER READ.
+  //
+  // SHADER_READ was missing. The compose chain samples this image, and the
+  // only barrier between the write and that sample was this one -- a
+  // SHADER_WRITE -> TRANSFER_READ barrier does not make the write visible to
+  // a shader read. The compose chain's own graph barrier cannot cover it
+  // either, because the sample is an EXTERNAL image: the graph emits no
+  // write->read barrier for an image it did not produce in-graph.
+  //
+  // The symptom was a path-traced view frozen at a plausible value while the
+  // accumulation underneath it advanced: 75% of the accumulation's pixels
+  // changed between 300 and 1500 samples, and 0.02% of the composed pixels
+  // changed, by one LSB. No validation diagnostic -- a missing dependency is
+  // not a spec violation, it is a race the driver is free to lose.
   barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-  barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
   barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
   barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
   vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
-                       1, &barrier);
+                       VK_PIPELINE_STAGE_TRANSFER_BIT |
+                           VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                       0, 0, nullptr, 0, nullptr, 1, &barrier);
 
   if (clear_first) {
     samples_ = 1U;

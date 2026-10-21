@@ -322,13 +322,22 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   1400x820 over 200 frames). Carrying samples across would composite a blurry
   low-resolution average as though it had converged.
 
-  The viewport also now sets `_NET_WM_PID`. Without it `xdotool search --pid`
-  finds nothing, which is exactly why this machine's window manager turns out
-  to list stale viewports with no PID: two viewports share the title, so title
-  matching is not an alternative. Anything that needs to know which window
-  belongs to which build -- a screenshot grab, a resize driver -- simply
-  could not. This is the fix that makes live window verification possible
-  here at all.
+  The viewport also now sets `_NET_WM_PID`, which is what makes a window
+  attributable to a build -- two viewports share the title, so title matching
+  is not an alternative, and anything that needs to know which window belongs
+  to which build (a screenshot grab, a resize driver) simply could not.
+
+  **And the first version of that fix did not work, which is the more
+  interesting half.** The property was written against an atom interned
+  *later*, in a different function, so it went out against atom 0 and the
+  server dropped it: `xprop -id <w> _NET_WM_PID` said "not found" and
+  `xdotool search --pid` found nothing. The symptom was blamed on the window
+  manager, and the belief survived several rounds of measurement because
+  "the WM strips it" sounds like an environmental explanation and therefore
+  like a reason to stop looking. Moving the interning before the write fixed it:
+  `xprop` now reports the running PID. The lesson is the one this repository
+  keeps paying for: an environmental explanation is a hypothesis like any
+  other, and it is worth exactly as much as a measurement.
 
 - **The use-after-free class does not repeat, which was checked rather than
   assumed.** Having found a dispatch table cached by `VkDevice` handle value,
