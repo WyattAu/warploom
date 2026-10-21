@@ -1266,6 +1266,47 @@ tracer was never the subject; it was the only thing in the viewport that was
 drawing a lit image, and comparing against it is what made the difference
 visible.
 
+### The real defect: three of the unit cube's six faces were wound backwards
+
+Looking at the pictures led to the actual cause. `build_unit_cube` emits six
+quads with a stored normal each. Computing the right-hand-rule normal of each
+quad's OWN winding and comparing it to the stored normal:
+
+| face | stored normal | winding normal | |
+|---|---|---|---|
+| +Z | (0,0,1) | (0,0,1) | ok |
+| -Z | (0,0,-1) | (0,0,-1) | ok |
+| -Y | (0,-1,0) | (0,-1,0) | ok |
+| **+X** | (1,0,0) | **(-1,0,0)** | **inverted** |
+| **-X** | (-1,0,0) | **(1,0,0)** | **inverted** |
+| **+Y** | (0,1,0) | **(0,-1,0)** | **inverted** |
+
+The pipeline's `frontFace` is `VK_FRONT_FACE_COUNTER_CLOCKWISE` and
+`enable_backface_cull` defaults to **true**, so a backwards-wound face is not
+merely shaded wrongly -- **it is culled and disappears**.
+
+The consequences were silent and large. The ground is the shared unit cube
+scaled (8, 0.1, 8), so its +Y face is its TOP: culled, the ground vanished,
+and the viewport showed a black void with a lit sliver of the ground's edge.
+The path tracer was unaffected -- ray tracing ignores winding -- which is
+exactly why the tracer's picture looked right while the raster one was wrong,
+and why comparing the two is what finally showed it.
+
+Fixed: the three faces' corner orders are corrected, and each face is now
+checked against its own winding's right-hand-rule normal. Verified visually --
+the ground's top face appears (a lit grey wedge in the lower left of the
+frame, absent before) -- and the whole suite is unchanged: 628/628, ctest 6/6,
+ASan 555, clang and GCC 0 warnings.
+
+**What is still dark, and why.** The scene remains mostly black even with the
+ground present, because the cubes scene has **no environment light**: the
+raster path lights it with the sun alone, so only the few faces the sun
+happens to strike are lit, while the path tracer's own constant white sky
+lights everything. That is a scene-authoring gap rather than an engine fault,
+but it is why the two paths disagreed so violently, and it is worth closing --
+a viewer comparing the two renderings would reasonably conclude the tracer
+was the broken one.
+
 Two separate questions now, and they should not be conflated:
 
 1. **Why does the raster path render the ground black and the background

@@ -378,6 +378,27 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   value coincides with the buggy value tests nothing, and that is worth
   remembering independently of the bug it was written for.
 
+- **Three of the unit cube's six faces were wound backwards, and with
+  back-face culling on, a backwards-wound face does not shade wrongly -- it
+  disappears.** `build_unit_cube` emits six quads with a stored normal each;
+  computing the right-hand-rule normal of each quad's OWN winding and
+  comparing it to the stored normal showed +X, -X and +Y all inverted. The
+  pipeline's `frontFace` is CCW and `enable_backface_cull` defaults to true.
+  The ground is that same unit cube scaled (8, 0.1, 8), so its +Y face is its
+  TOP: culled, the ground vanished, and the viewport showed a black void with
+  a lit sliver of the ground's edge. The path tracer was unaffected (ray
+  tracing ignores winding), which is exactly why comparing the tracer's
+  picture against the raster one is what finally showed it -- the tracer
+  looked RIGHT and the raster path looked wrong, and the difference was a
+  winding, not a lighting bug.
+  The lesson is the one this project keeps paying for: a picture that looks
+  right is not evidence, and a difference between two pictures is a question,
+  not a diagnosis. The face normal that is STORED is not the normal that is
+  RENDERED; the winding is a second, independent statement about the same
+  geometry, and nothing checks that the two agree.
+  Verified by looking: the ground's top face now appears, and the suite is
+  unchanged (628/628, ctest 6/6, ASan 555, clang and GCC 0 warnings).
+
 - **A use-after-free that presented as "a flaky ray-tracing test", and was
   neither flaky nor ray-tracing-specific.** `ray_query_first_contact` segfaulted
   the host about one full-suite run in six. The core dump put frame #0 inside

@@ -97,12 +97,27 @@ void build_unit_cube(std::vector<float>& vertices,
     float normal[3];
     float corners[4][3];
   };
+  // The corner order fixes the WINDING, and with enable_backface_cull (the
+  // pipeline default) a backwards-wound face is culled -- it does not merely
+  // shade wrongly, it disappears.
+  //
+  // Three of the six faces were wound backwards: +X, -X and +Y. The
+  // consequences were silent and large. The ground is the shared unit cube
+  // scaled (8, 0.1, 8), so its +Y face is its TOP: culled, the ground
+  // vanished, and the viewport showed a black void with a lit sliver of the
+  // ground's edge. The cubes rendered as a "Y" -- two side faces and no top.
+  // The path tracer was unaffected (ray tracing ignores winding), which is
+  // exactly why the tracer's picture looked right while the raster one was
+  // wrong, and why comparing the two is what finally showed it.
+  //
+  // Every face below is checked against the right-hand-rule normal of its own
+  // winding: cross(c1 - c0, c2 - c0) must equal the stored normal.
   const Face faces[6] = {
       {{0, 0, 1}, {{-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}}},
       {{0, 0, -1}, {{-1, -1, -1}, {-1, 1, -1}, {1, 1, -1}, {1, -1, -1}}},
-      {{1, 0, 0}, {{1, -1, -1}, {1, -1, 1}, {1, 1, 1}, {1, 1, -1}}},
-      {{-1, 0, 0}, {{-1, -1, 1}, {-1, -1, -1}, {-1, 1, -1}, {-1, 1, 1}}},
-      {{0, 1, 0}, {{-1, 1, -1}, {1, 1, -1}, {1, 1, 1}, {-1, 1, 1}}},
+      {{1, 0, 0}, {{1, -1, -1}, {1, 1, -1}, {1, 1, 1}, {1, -1, 1}}},
+      {{-1, 0, 0}, {{-1, -1, 1}, {-1, 1, 1}, {-1, 1, -1}, {-1, -1, -1}}},
+      {{0, 1, 0}, {{-1, 1, 1}, {1, 1, 1}, {1, 1, -1}, {-1, 1, -1}}},
       {{0, -1, 0}, {{-1, -1, 1}, {-1, -1, -1}, {1, -1, -1}, {1, -1, 1}}},
   };
   const float uvs[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
