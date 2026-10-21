@@ -1124,14 +1124,42 @@ the descriptor says. Also ruled out along the way:
   exposure 1.0, 25.37 at 0.0005), and the second matches
   `tonemap(0.734 x 0.0005)`.
 
-**The next probe is bounded and cheap, and it is a readback rather than an
-inference.** Render the external source to the capture target with a trivial
-copy, bypassing the tonemap and its descriptor set entirely. If the capture
-then shows the accumulation, the fault is in the tonemap's descriptor path; if
-it does not, the image or view handed to the chain is not the one the tracer
-writes -- and the two cases are distinguished by a handful of lines, rather
-than by another brightness argument. That probe needs a new test-only copy
-pass, which is why it is written down rather than improvised.
+**The external-source path is inert.** With the source attached, the capture is
+byte-identical across frames -- and pointing it at the *swapchain image*, which
+changes every frame by definition, changes nothing either. Meanwhile the
+capture chain's own code is demonstrably correct: the same class, used the same
+way headlessly, converges (`VulkanHardware.PathTracedFrameConvergesThroughCompose`
+falls the noise floor from 1 to 8 samples through the external source).
+
+So the defect is in how the *viewport* uses the chain, not in the chain. The
+measurements that pin it down, all on the unmodified chain:
+
+- `using_external_source()` is **true** at the capture site with the source
+  attached (`ext=1 chain=present`), so `record()` selects
+  `compose_set_external_`.
+- The composite responds to exposure (182.796 at 1.0, 25.37 at 0.0005, the
+  latter matching `tonemap(0.734 x 0.0005)`), so the tonemap runs and reads
+  *something* whose value is right.
+- The captured image does not change when the source is an image that changes
+  every frame.
+
+That last pair is the contradiction to resolve: the composite reads a
+*correctly-valued but unchanging* image. The one candidate that fits is the
+chain's own `hdr_target_` -- the fallback binding -- which in PT mode is never
+written, because PT records no raster scene into it. In forward mode it IS
+written, which is why the forward capture changes while the PT capture does
+not.
+
+**Next probe, and it bisects the space in one run.** Drive the capture chain
+headlessly with an external source that changes every frame -- a counter
+written into a small image, read back after each composed frame. If the headless
+chain tracks it, the chain is fine and the viewport's arrangement is at fault
+(the framebuffer or the render pass it composes into). If the headless chain
+does not track it either, the fault is in the chain's external path and the
+engine test is not exercising it as believed. Both cases are a few dozen lines
+in a test, and the answer determines whether the fix belongs in the viewport or
+in `vulkan_compose_chain.cpp` -- which is why it is worth doing before any
+more brightness arguments.
 
 Honest state: the tracer is proven correct in situ and headlessly; the capture
 path is proven broken; the fix is understood in shape but not landed, and the
