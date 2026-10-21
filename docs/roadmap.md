@@ -1096,12 +1096,42 @@ attach time, so `set_external_source`'s "both handles valid" condition holds and
 the descriptor is written to the accumulation view rather than left on the
 fallback.
 
-That leaves one live hypothesis and it is not one I can test without
-instrumentation rather than reasoning: the capture's composite records into its
-own command buffer and may be observing the accumulation before the tracer's
-dispatch within the frame, consistently, even though a later `read_mean()`
-sees the advanced value. Distinguishing that needs a capture of the actual
-sampled value, not an inference from brightness.
+**The hypothesis is now REFUTED, and replaced with a proven statement.** The
+capture was NOT observing the accumulation before the dispatch: the capture's
+command buffer is submitted after the frame's, on the same queue, so ordering
+is not the issue. Measured directly:
+
+- The accumulation changes in **75.0% of its pixels** between n=300 and
+  n=1500 (2,764,800 of 3,686,400 floats; max per-pixel delta 0.0266).
+- The captured PPM changes in **0.02% of its pixels** (171 of 921,600) over the
+  same window, by at most 1 LSB.
+
+**So the capture is demonstrably not sampling the accumulation image**, whatever
+the descriptor says. Also ruled out along the way:
+
+- The divide is correct (exposure-0.0005 experiment above).
+- `accum_image` and `accum_view` are both non-null at attach time, so
+  `set_external_source`'s both-handles-valid condition holds.
+- A later `ensure()` clobbering the write: re-attaching the source EVERY frame
+  changes nothing (173 differing pixels, 0.02%).
+- The graph binding its own image: `sampled_images` is consumed only for
+  barrier computation (`vulkan_render_graph.cpp:295`); sampling comes from the
+  descriptor set, and the set, the layout, the shader (`set = 0, binding = 0`)
+  and `set_external_source` all agree.
+- The descriptor write being staged: `write_image` calls
+  `vkUpdateDescriptorSets` immediately.
+- The composite not running: the output responds to exposure (182.796 at
+  exposure 1.0, 25.37 at 0.0005), and the second matches
+  `tonemap(0.734 x 0.0005)`.
+
+**The next probe is bounded and cheap, and it is a readback rather than an
+inference.** Render the external source to the capture target with a trivial
+copy, bypassing the tonemap and its descriptor set entirely. If the capture
+then shows the accumulation, the fault is in the tonemap's descriptor path; if
+it does not, the image or view handed to the chain is not the one the tracer
+writes -- and the two cases are distinguished by a handful of lines, rather
+than by another brightness argument. That probe needs a new test-only copy
+pass, which is why it is written down rather than improvised.
 
 Honest state: the tracer is proven correct in situ and headlessly; the capture
 path is proven broken; the fix is understood in shape but not landed, and the
