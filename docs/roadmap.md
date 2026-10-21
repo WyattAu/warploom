@@ -1150,16 +1150,43 @@ written, because PT records no raster scene into it. In forward mode it IS
 written, which is why the forward capture changes while the PT capture does
 not.
 
-**Next probe, and it bisects the space in one run.** Drive the capture chain
-headlessly with an external source that changes every frame -- a counter
-written into a small image, read back after each composed frame. If the headless
-chain tracks it, the chain is fine and the viewport's arrangement is at fault
-(the framebuffer or the render pass it composes into). If the headless chain
-does not track it either, the fault is in the chain's external path and the
-engine test is not exercising it as believed. Both cases are a few dozen lines
-in a test, and the answer determines whether the fix belongs in the viewport or
-in `vulkan_compose_chain.cpp` -- which is why it is worth doing before any
-more brightness arguments.
+**The bisecting probe has been run, and the chain is exonerated.** Driving the
+compose chain headlessly with a *second*, differently-valued external source
+produces a different composed output (a solid 0.02 source composes to a black
+frame; the accumulation composes to mean 137.21). So the chain **does** track
+its external source. Three further viewport-specific arrangements were
+reproduced headlessly and all of them still work:
+
+| arrangement | result |
+|---|---|
+| compose in a SEPARATE submission from the dispatch (the capture owns its own command buffer and submit) | still converges |
+| a scene pass recorded into the chain's scene target BEFORE the compose (what `FrameCapture` does) | still converges |
+| the compose in the same command buffer as the dispatch (the original harness) | still converges |
+
+So the chain, the descriptor path, the divide, the layouts and the submission
+ordering are all fine. **The one arrangement not yet reproduced headlessly is
+the compose TARGET: the viewport composes into the capture's own framebuffer,
+not the swapchain's.** A first attempt at that probe aborted in the readback
+helper (a GPU sync hazard in the probe, not an engine fault -- the validation
+layer reported only the probe's own leaked objects), so it needs care rather
+than improvisation.
+
+**Where that leaves the bug.** Everything on the engine side is now proven
+correct, and the fault is somewhere in the viewport's arrangement of a correct
+engine. The remaining candidates, in order of how cheaply they can be tested:
+(1) the compose target framebuffer; (2) the two chains sharing one render pass
+(the renderer's live chain also samples the accumulation in PT mode, and the
+capture chain is a second instance of the same class over the same pass); (3)
+the capture's own readback path presenting a stale buffer.
+
+**One measurement that would settle (2) immediately** and has not been taken:
+does the LIVE chain's output change? The live chain samples the same
+accumulation through the same descriptor path. If the live view is also frozen,
+the fault is in the shared "sample the accumulation" mechanism and the capture
+is a red herring; if the live view tracks, the fault is capture-specific.
+Reading the live view back is the obstacle, not the analysis -- the capture
+path cannot read the swapchain, and the window system on this machine lists
+stale viewports whose frames cannot be attributed to a build.
 
 Honest state: the tracer is proven correct in situ and headlessly; the capture
 path is proven broken; the fix is understood in shape but not landed, and the
