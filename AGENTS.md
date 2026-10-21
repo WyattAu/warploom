@@ -396,8 +396,22 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   not a diagnosis. The face normal that is STORED is not the normal that is
   RENDERED; the winding is a second, independent statement about the same
   geometry, and nothing checks that the two agree.
-  Verified by looking: the ground's top face now appears, and the suite is
-  unchanged (628/628, ctest 6/6, ASan 555, clang and GCC 0 warnings).
+  Verified by a controlled A/B at identical frame indices -- the camera is a
+  pure function of the frame's simulated time, so frame N is reproducible
+  across builds. At frame 90 the lit-pixel count goes from 10.2% to 75.0%, and
+  the pictures are unambiguous: before, a black frame with floating grey
+  shapes; after, the ground drawn as a lit plane with a clean horizon edge.
+  The suite is unchanged (628/628, ctest 6/6, ASan 555, clang and GCC 0
+  warnings).
+
+  **A process note, because it nearly cost this finding twice.** Two
+  intermediate conclusions were false because a diagnostic had silently failed
+  to apply -- a `cp` of an older file removed a log statement, and "no log
+  output" was read as "the code path did not run" when the truth was "the log
+  was never in the binary". The cure is mechanical: **verify the marker is in
+  the binary before concluding anything from its absence** --
+  `strings build/default/bin/warploom_viewport | grep -c MARKER`. Absence of
+  evidence is only evidence of absence once the evidence exists.
 
 - **A use-after-free that presented as "a flaky ray-tracing test", and was
   neither flaky nor ray-tracing-specific.** `ray_query_first_contact` segfaulted

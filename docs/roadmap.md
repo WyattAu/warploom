@@ -1293,10 +1293,41 @@ exactly why the tracer's picture looked right while the raster one was wrong,
 and why comparing the two is what finally showed it.
 
 Fixed: the three faces' corner orders are corrected, and each face is now
-checked against its own winding's right-hand-rule normal. Verified visually --
-the ground's top face appears (a lit grey wedge in the lower left of the
-frame, absent before) -- and the whole suite is unchanged: 628/628, ctest 6/6,
-ASan 555, clang and GCC 0 warnings.
+checked against its own winding's right-hand-rule normal.
+
+**Verified by a controlled A/B at identical frame indices.** The camera is a
+pure function of the frame's simulated time, so a capture at frame N is
+reproducible, and comparing the SAME frame index across the two builds is
+controlled without needing to freeze anything:
+
+| frame | before (winding reverted) | after (winding fixed) |
+|---|---|---|
+| 30 | mean 25.71, 15.25% lit | mean 7.64, 4.62% lit |
+| 60 | mean 21.30, 12.65% lit | mean 3.72, 2.31% lit |
+| 90 | mean 17.14, **10.21%** lit | mean 127.75, **75.00%** lit |
+
+And the pictures are unambiguous. Before: a black frame with a few floating
+grey shapes -- the ground's top face culled, so the void shows through where
+the ground should be. After: the ground is drawn, a lit plane with a clean
+diagonal horizon edge against the black beyond it. The lit-pixel count at
+frame 90 goes from 10.2% to 75.0%.
+
+The whole suite is unchanged: 628/628, ctest 6/6, ASan 555, clang and GCC 0
+warnings.
+
+**A note on how this was nearly got wrong.** Two of the intermediate
+conclusions were false because a diagnostic had silently failed to apply: a
+`cp` of an older file removed a log statement, and "no log output" was read as
+"the code path did not run" when the truth was "the log was not in the
+binary". The cure is mechanical and worth keeping: **verify the marker is in
+the binary before concluding anything from its absence**
+(`strings build/default/bin/warploom_viewport | grep -c MARKER`). It also
+surfaced that a *median latency budget* in a unit test is load-sensitive: on a
+shared machine at load 17, `JobSystem.DispatchOverheadIsSubMicrosecond`
+(500 ns budget) fails about two runs in three, and passes when the other
+project's load subsides. That is an environment, not a regression -- but it
+means a perf assertion in the suite should be understood as a
+canary, not a gate.
 
 **What is still dark, and why.** The scene remains mostly black even with the
 ground present, because the cubes scene has **no environment light**: the
