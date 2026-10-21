@@ -1233,13 +1233,52 @@ path-traced image (mean 182.7959, std 105.5407) instead of the raster scene's
 **Still not explained, and recorded as such.** The captured image is not a
 faithful tonemap of the accumulation: the Spearman rank correlation between
 the accumulation's per-pixel values and the capture's luma is **+0.31**, where
-a monotone tonemap of the same image would give ~1.0. So the capture is
-compositing something with a similar mean and a different structure. The
-remaining candidates are unchanged in kind -- the compose target framebuffer,
-the two chains sharing one render pass, and the capture's own readback path
-presenting a stale buffer -- and the next step is still to reproduce the
-viewport's exact arrangement headlessly, now that the three real defects are
-out of the way and the measurement is trustworthy.
+a monotone tonemap of the same image would give ~1.0. Smoothing the
+accumulation first does not help (+0.30), so the capture is not a noisier
+version of the same picture -- it is a different picture with a similar mean.
+
+### What looking at the pictures revealed
+
+The capture and the accumulation were dumped and *looked at*, which is worth
+more than another brightness argument:
+
+- The accumulation is a correct path-traced image: white sky, a light-grey
+  cube, a darker ground slab. (The row-profile statistic that said the bottom
+  row was sky was misleading: the slab is a finite quad in the lower-middle,
+  not a full-width floor, so the very bottom row is sky.)
+- The capture is NOT that image. It is a bright sky at the top with the cube
+  barely visible, and a large BLACK WEDGE with a straight diagonal edge across
+  the lower half.
+- The forward (raster) capture has the same wedge, and so does the **live
+  window**: black, with a small dim object and a couple of bright slivers.
+
+So the wedge is the scene's ground plane -- the shared unit cube scaled
+(8, 0.1, 8) -- rendered black, and the raster path has no sky at all. The PT
+path draws its own sky and lights the same geometry; the raster path does
+neither. Disabling the shadow pass (`OMNICPP_NO_SHADOW=1`) changes nothing, so
+it is not the shadow map.
+
+**That is the actual defect, and it is bigger than the path-tracing capture.**
+Everything measured in this investigation -- the "decaying mean", the frozen
+capture, the low contrast -- is the orbit camera moving over a picture that is
+almost entirely black, with a bright sliver sweeping across it. The path
+tracer was never the subject; it was the only thing in the viewport that was
+drawing a lit image, and comparing against it is what made the difference
+visible.
+
+Two separate questions now, and they should not be conflated:
+
+1. **Why does the raster path render the ground black and the background
+   black?** The PT path renders the same geometry lit. Same scene, two
+   lighting paths, and they disagree. That is a lighting/material defect in
+   the raster path, and it is worth more than the capture.
+2. **Why does the capture show the PT sky AND the raster ground?** The capture
+   composes a bright sky with a black ground wedge, so the two images are
+   being combined somewhere -- the chain's own intermediate (which holds the
+   raster scene) is reaching the output alongside the accumulation. That is
+   the remaining capture defect, and it is now precisely characterised: the
+   capture is a composite of the PT accumulation and the raster scene rather
+   than the accumulation alone.
 
 Honest state: the tracer is proven correct in situ and headlessly; the capture
 path is proven broken; the fix is understood in shape but not landed, and the
