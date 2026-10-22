@@ -744,6 +744,29 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
     passes[i].user_data = &stage_copy[i];
   }
 
+  // The external-source descriptor is written here, every frame, rather than
+  // only in set_external_source() and ensure().
+  //
+  // WHY: the binding is the thing that must be correct at DRAW time, and
+  // there are two other writers -- ensure() (which writes the fallback view
+  // when no source is set) and the bloom/no-bloom set selection. A write made
+  // once, at configuration time, can be undone by a later ensure() on a
+  // resized chain, and the symptom is not an error: the compose still runs,
+  // still produces a plausible image, and the source is simply ignored. The
+  // viewport's capture was measured doing exactly that -- with
+  // using_external_source() true and the captured image being the chain's own
+  // (raster) intermediate rather than the path-traced accumulation.
+  //
+  // One vkUpdateDescriptorSets per frame is not free, but it is a handful of
+  // nanoseconds next to a frame, and the alternative is a binding that is
+  // correct only if nothing else touches it.
+  if (external_image_ != VK_NULL_HANDLE && external_view_ != VK_NULL_HANDLE &&
+      compose_set_external_ != VK_NULL_HANDLE && descriptor_manager_ != nullptr) {
+    (void)descriptor_manager_->write_image(
+        compose_set_external_, 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        hdr_sampler_, external_view_, VK_IMAGE_LAYOUT_GENERAL, 0U);
+  }
+
   std::vector<GraphNode> nodes;
   nodes.reserve(passes.size());
   for (const GraphPass& pass : passes) {

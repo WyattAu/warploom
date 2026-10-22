@@ -1338,6 +1338,50 @@ but it is why the two paths disagreed so violently, and it is worth closing --
 a viewer comparing the two renderings would reasonably conclude the tracer
 was the broken one.
 
+### The capture defect, narrowed to one link -- with every other link verified
+
+The remaining investigation produced the most complete evidence table of the
+session. With temporary instrumentation **verified present in the binary
+before each run** (`strings build/default/lib/libwarploom_render.so | grep -c
+MARKER`), the live path was measured end to end:
+
+| link | evidence | verdict |
+|---|---|---|
+| chain's `record()` called | `CHAIN record this=... external=1` every frame | ok |
+| set selection | `compose_set_external_` bound, distinct from `compose_set_nobloom_` (two different handles logged) | ok |
+| descriptor write | `WRITE ext_img=... set=... ok=1` every frame, at record time | ok |
+| draw callback | `LAMBDA stage=... pipeline=...` non-null, then `DRAW ok=1` | ok |
+| target | a framebuffer distinct from the chain's scene target; capture LDR vs chain scene = two different handles, same render pass | ok |
+| layouts | main pass colour finalLayout is `PRESENT_SRC_KHR`, matching `save()`'s barrier | ok |
+| accumulation | dumped and LOOKED at: white sky, light-grey cube, darker slab; row means 1.0/0.954/1.0 | ok |
+
+And the capture is still a composite: the PT sky with a black wedge whose
+diagonal edge matches the raster scene's ground edge, and the Spearman rank
+correlation against the accumulation is **+0.3113 -- bit-for-bit the same
+number as before any of the fixes**, which says the sampled content has not
+changed at all.
+
+Every link I can observe from the host is now verified correct. The remaining
+gap is between what the descriptor says and what the sampler returns, which
+cannot be seen from host-side logs -- it needs a GPU-side capture (a
+RenderDoc-style frame dump) or a headless test that reproduces the viewport's
+exact arrangement. Two candidates remain, both untestable with logs:
+
+1. **A second writer to the capture's colour image.** The composite shape --
+   PT sky above the raster scene's ground edge -- is exactly what a second
+   draw would leave.
+2. **The sampled view vs the copied image being different subresources** of
+   the same VkImage, so the copy in `save()` reads a different allocation
+   state than the sampler wrote.
+
+What was *not* wasted: the record-time descriptor write is kept, because the
+binding must be correct at draw time and it is now exercised every frame by
+the live path. And the discipline held: the last three diagnostics each
+required verifying the marker was in the library before trusting its absence
+-- one of them (the `DRAW ok=` edit) initially failed to compile because
+`record_fullscreen_draw` returns a `Result<void>`, not a bool, and the build
+error was easy to miss in a pipeline that only grepped for it.
+
 Two separate questions now, and they should not be conflated:
 
 1. **Why does the raster path render the ground black and the background
