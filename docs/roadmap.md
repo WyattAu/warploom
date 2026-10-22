@@ -1338,58 +1338,98 @@ but it is why the two paths disagreed so violently, and it is worth closing --
 a viewer comparing the two renderings would reasonably conclude the tracer
 was the broken one.
 
-### The capture defect, narrowed to one link -- with every other link verified
+### The capture defect: RESOLVED -- the fullscreen triangle covered 75% of the target
 
-The remaining investigation produced the most complete evidence table of the
-session. With temporary instrumentation **verified present in the binary
-before each run** (`strings build/default/lib/libwarploom_render.so | grep -c
-MARKER`), the live path was measured end to end:
+The "composite" was never a composite. It was a fullscreen pass that did not
+cover its target.
 
-| link | evidence | verdict |
+`assets/shaders/fullscreen.vert` generates its triangle from `gl_VertexIndex`:
+
+```
+float x = float((gl_VertexIndex & 1) << 2) - 1.0;   // -1, 3, -1
+float y = float((gl_VertexIndex & 2)) - 1.0;        // -1, -1, 1  <-- wrong
+```
+
+Vertex 2 is `(-1, 1)`, not `(-1, 3)`. The triangle
+`(-1,-1), (3,-1), (-1,1)` covers the screen only where `x + 2y - 1 <= 0`.
+Inside `[-1,1]^2` the uncovered region is a right triangle of area 1 out of 4
+-- **exactly 25% of the target** -- bounded by the line from the top-left
+corner to the middle of the right edge. With `record_fullscreen_draw` setting
+a positive viewport height, Vulkan's y-down framebuffer puts that region in
+the **bottom-right**. The result was a smooth diagonal edge fading to the
+render pass's clear colour, which is why it read as "the raster scene's ground
+against the PT sky" for several rounds.
+
+The fix is one shift: `float y = float((gl_VertexIndex & 2) << 1) - 1.0;`.
+
+Measured on the live viewport, PT capture at 1280x720:
+
+| | before | after |
 |---|---|---|
-| chain's `record()` called | `CHAIN record this=... external=1` every frame | ok |
-| set selection | `compose_set_external_` bound, distinct from `compose_set_nobloom_` (two different handles logged) | ok |
-| descriptor write | `WRITE ext_img=... set=... ok=1` every frame, at record time | ok |
-| draw callback | `LAMBDA stage=... pipeline=...` non-null, then `DRAW ok=1` | ok |
-| target | a framebuffer distinct from the chain's scene target; capture LDR vs chain scene = two different handles, same render pass | ok |
-| layouts | main pass colour finalLayout is `PRESENT_SRC_KHR`, matching `save()`'s barrier | ok |
-| accumulation | dumped and LOOKED at: white sky, light-grey cube, darker slab; row means 1.0/0.954/1.0 | ok |
+| pixels at the clear colour | 25.0% | 0.0% |
+| capture mean | 182.8 | 243.7 |
+| Spearman vs. the accumulation | **0.050** (0.31 in an earlier run) | **0.9994** |
 
-And the capture is still a composite: the PT sky with a black wedge whose
-diagonal edge matches the raster scene's ground edge, and the Spearman rank
-correlation against the accumulation is **+0.3113 -- bit-for-bit the same
-number as before any of the fixes**, which says the sampled content has not
-changed at all.
+The correlation going from ~0 to 0.9994 is the proof: the capture had never
+been sampling the wrong image. It was a faithful tonemap of the accumulation
+with a quarter of the frame left unwritten.
 
-Every link I can observe from the host is now verified correct. The remaining
-gap is between what the descriptor says and what the sampler returns, which
-cannot be seen from host-side logs -- it needs a GPU-side capture (a
-RenderDoc-style frame dump) or a headless test that reproduces the viewport's
-exact arrangement. Two candidates were recorded. **The first is now eliminated**, by a test that
-reproduces the viewport's exact arrangement headlessly
-(`VulkanHardware.CaptureArrangementScenePassBeforeCompose`): accumulate into
-the tracer, render a known black clear into the chain's OWN scene target, then
-compose into a framebuffer that is NOT the one the chain was ensured against.
-If the scene pass leaked into the compose output, the composed image would be
-dark; measured, it is bright (mean 45.7) and the test passes. **The
-arrangement is innocent**, and the test now pins it permanently.
+**This affected every fullscreen pass, not only the capture.** The live
+tonemap was also missing its bottom-right quarter; the visual proofs passed
+because every assertion was a mean, a tolerance, or a pinned hash, and none of
+them asked whether the image was covered. A hash of an image that is 25%
+clear colour is a perfectly stable hash.
 
-That leaves one candidate: **a second writer to the capture's colour image
-that exists only in the live viewport** -- something the headless
-reproduction does not have. The live viewport draws UI quads and a full
-cubes scene; the headless test draws nothing into the scene target. The next
-probe is therefore in the live viewport, not in the engine: suspend the
-suspects one at a time (run with the node editor disabled, with the UI
-hidden) and re-measure the composite. That is cheap -- two environment
-variables -- and it bisects the remaining space in two runs.
+What the investigation established on the way, each verified in the binary
+before its absence was trusted:
 
-What was *not* wasted: the record-time descriptor write is kept, because the
-binding must be correct at draw time and it is now exercised every frame by
-the live path. And the discipline held: the last three diagnostics each
-required verifying the marker was in the library before trusting its absence
--- one of them (the `DRAW ok=` edit) initially failed to compile because
-`record_fullscreen_draw` returns a `Result<void>`, not a bool, and the build
-error was easy to miss in a pipeline that only grepped for it.
+- the compose chain's external source is selected correctly (`external=1`
+  on both the live and the capture chain, distinct `this` pointers);
+- the descriptor is written at record time and the write succeeds;
+- the draw executes with a non-null stage and pipeline;
+- the capture chain composes into the capture's own LDR framebuffer, not the
+  chain's scene target (distinct handles logged);
+- the layouts match `save()`'s barrier assumptions;
+- the accumulation is a correct path-traced image (dumped and looked at);
+- skipping the raster scene pass in the capture changed nothing.
+
+The permanent guards:
+
+- `VulkanHardware.CaptureArrangementScenePassBeforeCompose` now asserts that
+  **no composed pixel keeps the clear colour**. Validated by sabotage: with
+  the old vertex formula restored it fails, reporting unwritten pixels.
+- The two pinned golden hashes were re-pinned, because the old values encoded
+  a frame with a quarter missing
+  (`9622751058503674142` bloom-on, `12508388375569283214` composed, RTX 2060).
+
+**Second defect, found on the way and fixed in the same pass.** On a resize,
+`apply_resize` rebuilds the capture stack BEFORE it rebuilds the path tracer,
+and `build_capture_stack` re-registers the OLD accumulation view with the
+capture chain. The tracer's `create()` is re-entrant and calls
+`destroy_resources()` first, so both compose chains were left holding a
+destroyed `VkImageView`; the live chain from PT entry, the capture chain from
+the early rebuild. Sampling a destroyed view is undefined and produces no
+validation diagnostic once the driver reuses the handle. Both are now
+re-pointed at the new accumulation image after the rebuild, and cleared if
+the rebuild fails. Verified live: PT + `set_viewport_size(1000,600)` +
+capture produced a 1000x600 PPM with 0% clear-colour pixels, minimum luma 234,
+and no device loss.
+
+**Third: the viewport rejected its own advertised clip commands.** The wire
+table parsed `clip_add`/`clip_remove`/`clip_move`/`clip_record`/… but the
+viewport's dispatch switch had no case for any of them, so a socket asked for
+a timeline clip and got `{"ok":false,"error":"unhandled command"}`. The live
+proof passed because `g3` runs against the headless host, which drives the
+session directly; the drift was only visible on the viewport host. All eight
+kinds are now delegated to the embedded `EditorSession`, with the structural
+ones (add/remove/move) flagging a node-view rebuild.
+
+One finding this leaves open rather than papered over: the viewport calls
+`editor.tick()` ONLY inside `tick_node_editor()`, so with the node editor off
+the session's animation frame never advances -- clip playback and recording
+are inert on the visual host. That is an architectural coupling (a document
+timeline tied to a UI panel's visibility), not a wire bug, and it needs its
+own step.
 
 Two separate questions now, and they should not be conflated:
 

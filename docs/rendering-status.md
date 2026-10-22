@@ -176,3 +176,20 @@ In priority order, and each is a roadmap item rather than a footnote:
 4. Timeline interpolation, and the clip strip actually in the app.
 5. Render-mode commands in the protocol so R1/R2 become switches rather
    than start-up environment variables.
+
+- **Fullscreen coverage (fixed):** `fullscreen.vert` generated its third
+  vertex as `(-1,1)` instead of `(-1,3)`, so every pass using it covered only
+  75% of its target and left the bottom-right quarter at the clear colour --
+  the live tonemap included. The PT capture's "composite" was this, not a
+  second writer; the capture's Spearman correlation with the accumulation went
+  from 0.05 to 0.9994 once fixed. Guarded by
+  `VulkanHardware.CaptureArrangementScenePassBeforeCompose`, which asserts
+  zero clear-colour pixels in the composed image.
+- **PT resize correctness (fixed):** both compose chains now re-point their
+  external source after the path tracer's accumulation image is rebuilt; the
+  capture chain had been registering the pre-rebuild view, which the rebuild
+  destroys.
+- **Viewport clip dispatch (fixed):** the viewport now delegates all eight
+  timeline-clip control kinds. The wire table parsed them; the dispatch switch
+  did not, so the viewport answered "unhandled command". The session tick is
+  still coupled to the node editor's visibility -- open.
