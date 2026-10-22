@@ -1149,6 +1149,27 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
       // key edits now share one CommandStack, so undo/redo cover ALL paths
       // and the document stays replayable no matter where the edit came
       // from. The view flags cover the resulting rebuild.
+      // G3: timeline clips ride the session like every other document
+      // command. They were missing from this switch entirely, so the wire
+      // table advertised the kinds while the host answered "unhandled
+      // command" -- the parse table and the dispatch had drifted apart, and
+      // only a live proof could see it because the unit tests drive the
+      // session directly.
+      case CK::ClipAdd:
+      case CK::ClipRemove:
+      case CK::ClipMove:
+      case CK::ClipRecord:
+      case CK::ClipRecordStop:
+      case CK::ClipPlay:
+      case CK::ClipStop:
+      case CK::ClipsInfo: {
+        const bool structural = command.kind == CK::ClipAdd ||
+                                command.kind == CK::ClipRemove ||
+                                command.kind == CK::ClipMove;
+        reply = app_.editor.on_control(command);
+        if (reply.ok && structural) app_.node_dirty = true;
+        break;
+      }
       case CK::ListObjects:
       case CK::GetObject:
       case CK::SetProperty:
@@ -1496,6 +1517,28 @@ bool setup_wm_delete_protocol(ViewportApp& app) {
                    width, height);
       app.pt_stack_built = false;
       app.pt_mode = false;
+    }
+    // The rebuild destroyed the old accumulation image and view (create() is
+    // re-entrant and calls destroy_resources() first). BOTH compose chains
+    // still hold the DESTROYED handles: the live chain from PT entry, and the
+    // capture chain from build_capture_stack, which runs BEFORE this block and
+    // therefore re-registered the old view. Sampling a destroyed view is
+    // undefined and produces no validation diagnostic once the driver reuses
+    // the handle, so it must be re-pointed at the new image, not discovered
+    // later. If the rebuild failed, clear them instead of leaving them stale.
+    if (app.pt_mode && app.pt_tracer != nullptr && app.pt_tracer->ready()) {
+      app.renderer.set_external_tonemap_source(app.pt_tracer->accum_image(),
+                                               app.pt_tracer->accum_view());
+      if (app.capture_chain != nullptr && app.capture_chain->ready()) {
+        app.capture_chain->set_external_source(app.pt_tracer->accum_image(),
+                                               app.pt_tracer->accum_view());
+      }
+    } else {
+      app.renderer.set_external_tonemap_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
+      if (app.capture_chain != nullptr && app.capture_chain->ready()) {
+        app.capture_chain->set_external_source(VK_NULL_HANDLE,
+                                               VK_NULL_HANDLE);
+      }
     }
   }
 
