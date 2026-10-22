@@ -484,7 +484,7 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
     // non-black frame that DIFFERED from bloom-off, so EXPECT_NE alone passed
     // it. Difference is a weak property; the hash is the strong one.
     switch (on_frame.canonical_hash) {
-      case 5278270949640476686ULL:  // NVIDIA (RTX 2060)
+      case 9622751058503674142ULL:  // NVIDIA (RTX 2060), fullscreen coverage fixed
         SUCCEED();
         break;
       default:
@@ -537,7 +537,7 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
   allocator.cleanup();
 
   switch (readback_pinned.canonical_hash) {
-    case 16601212335261142594ULL:  // NVIDIA (RTX 2060)
+    case 12508388375569283214ULL:  // NVIDIA (RTX 2060), fullscreen coverage fixed
       SUCCEED();
       break;
     default:
@@ -991,6 +991,27 @@ TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
     return sum / static_cast<double>(r.pixels.size());
   };
   const double composed_mean = luma(composed);
+
+  // COVERAGE. The tonemap's fullscreen triangle must cover EVERY pixel of the
+  // target. It did not: `fullscreen.vert` generated its third vertex as
+  // (-1, 1) instead of (-1, 3), so a right triangle -- a quarter of the
+  // target, the bottom-right in Vulkan's y-down viewport -- was never
+  // rasterized and kept the render pass's clear colour. That was the "second
+  // writer" behind the capture showing a composite: not a second draw, but a
+  // region that was never drawn. Every mean-based assertion in the suite
+  // passed through it, because a quarter of near-black pixels moves a mean
+  // and not a tolerance.
+  //
+  // The accumulation here is a white sky (radiance 1.0) around a lit box, so
+  // every composed pixel is strictly brighter than the clear colour. Any
+  // pure-black pixel is therefore unwritten, not dark content.
+  std::size_t unwritten = 0U;
+  for (const std::uint32_t px : composed.pixels) {
+    if ((px & 0x00FFFFFFU) == 0U) ++unwritten;
+  }
+  EXPECT_EQ(unwritten, 0U)
+      << unwritten << " pixels kept the clear colour: the fullscreen pass did "
+      << "not cover the target";
 
   // The same accumulation composed WITHOUT the scene pass: the control.
   auto cb2 = omnicpp::render::VulkanRenderer::allocate_command_buffer(
