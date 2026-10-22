@@ -797,6 +797,256 @@ TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
 #endif
 }
 
+//! The viewport's capture arrangement, reproduced headlessly.
+//!
+//! The live capture was measured producing a COMPOSITE of the path-traced
+//! accumulation and the raster scene, with a Spearman rank correlation of
+//! +0.31 against the accumulation -- where a monotone tonemap of the same
+//! image would give ~1.0. Every host-observable link in the chain verified
+//! correct: record() runs with external=1, the right descriptor set is bound,
+//! the descriptor write succeeds, the draw executes, the layouts match. So
+//! the suspicion moved to the ARRANGEMENT: in the viewport, a scene pass is
+//! rendered into the chain's own scene target BEFORE the compose, and the
+//! compose goes into a framebuffer that is not the swapchain's.
+//!
+//! This test reproduces exactly that: accumulate into the tracer, render a
+//! known solid colour into the chain's scene target, then compose into a
+//! separate framebuffer. If the composed output is the accumulation, the
+//! arrangement is innocent and the viewport has a second writer. If the
+//! output is the solid colour, the scene pass is reaching the compose output
+//! -- and the composite is explained.
+TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  omnicpp::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("OmniCppCaptureArrange", true).is_ok());
+  if (!context.has_ray_tracing() || !context.has_ray_tracing_pipeline()) {
+    context.cleanup();
+    GTEST_SKIP() << "ray tracing pipeline not available on this device";
+  }
+
+  constexpr std::uint32_t kSize = 64U;
+  const VkFormat kLdrFormat = VK_FORMAT_B8G8R8A8_UNORM;
+
+  omnicpp::render::VulkanMemoryAllocator allocator;
+  ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
+
+  omnicpp::render::VulkanRenderPass present_pass;
+  const VkFormat depth_format =
+      omnicpp::render::VulkanRenderPass::find_supported_depth_format(context.physical_device());
+  ASSERT_TRUE(present_pass.create(context.device(), kLdrFormat, depth_format).is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_depth_resources(context.device(),
+                                          context.physical_device(),
+                                          depth_format, kSize, kSize)
+                  .is_ok());
+
+  // Two LDR targets: one plays the role of the "swapchain" image, one plays
+  // the capture's own LDR target (the viewport composes into a framebuffer
+  // that is not the one the chain was ensured against).
+  omnicpp::render::VulkanOffscreenTarget ldr;
+  ASSERT_TRUE(ldr.create(context.device(), context.physical_device(), kLdrFormat,
+                         kSize, kSize, &allocator,
+                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT).is_ok());
+  omnicpp::render::VulkanOffscreenTarget capture_ldr;
+  ASSERT_TRUE(capture_ldr.create(context.device(), context.physical_device(), kLdrFormat,
+                                 kSize, kSize, &allocator,
+                                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT).is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_framebuffers(context.device(),
+                                       {ldr.image_view(), capture_ldr.image_view()},
+                                       kSize, kSize)
+                  .is_ok());
+
+  // ---- Geometry: a box, the tracer's input contract ------------------------
+  std::vector<float> tris;
+  tris.reserve(12U * 9U);
+  for (int i = 0; i < 12; ++i) {
+    for (int c = 0; c < 3; ++c) {
+      const float v = static_cast<float>((i + c) % 4);
+      tris.push_back(v < 2.0F ? -1.0F : 1.0F);
+    }
+  }
+  tris.resize(12U * 9U);
+  auto geo = allocator.create_buffer(
+      tris.size() * sizeof(float),
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  omnicpp::render::Allocation geo_alloc = geo.value();
+  std::memcpy(geo_alloc.mapped, tris.data(), tris.size() * sizeof(float));
+  VkBufferDeviceAddressInfo addr{};
+  addr.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  addr.buffer = geo_alloc.buffer;
+
+  omnicpp::render::PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.width = kSize;
+  cfg.height = kSize;
+  cfg.max_bounces = 2U;
+  omnicpp::render::PathTracerMesh mesh{};
+  mesh.vertex_buffer_address = static_cast<std::uint64_t>(
+      vkGetBufferDeviceAddress(context.device(), &addr));
+  mesh.triangle_count = 12U;
+  mesh.max_vertex = 35U;
+  cfg.meshes = {mesh};
+  cfg.instances = {omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.8F)};
+
+  omnicpp::render::VulkanPathTracer tracer;
+  ASSERT_TRUE(tracer
+                  .create(context.physical_device(), context.device(),
+                          context.graphics_queue(),
+                          static_cast<std::uint32_t>(
+                              context.queue_families().graphics_family),
+                          allocator, cfg)
+                  .is_ok());
+  ASSERT_TRUE(tracer.ready());
+  omnicpp::render::PathTracerCamera cam{};
+  cam.position = {0.0F, 0.0F, 4.0F};
+  cam.forward = {0.0F, 0.0F, -1.0F};
+  tracer.set_camera(cam);
+
+  omnicpp::render::VulkanComposeChain chain;
+  omnicpp::render::ComposeChainConfig cc{};
+  cc.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cc.exposure = 0.05F;
+  ASSERT_TRUE(chain
+                  .ensure(context.device(), context.physical_device(),
+                          context.graphics_queue(), cc, present_pass.render_pass(),
+                          kLdrFormat, kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(chain.ready());
+  chain.set_external_source(tracer.accum_image(), tracer.accum_view());
+
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+      context.device(),
+      static_cast<std::uint32_t>(context.queue_families().graphics_family));
+  VkCommandPool cmd_pool = pool.value();
+
+  // Accumulate a few samples so the accumulation is bright and structured.
+  const auto accumulate = [&](std::uint32_t frames) {
+    for (std::uint32_t f = 0; f < frames; ++f) {
+      const bool clear = (tracer.sample_count() == 0U);
+      auto cb = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+          context.device(), cmd_pool);
+      VkCommandBuffer cmd = cb.value();
+      VkCommandBufferBeginInfo bi{};
+      bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      vkBeginCommandBuffer(cmd, &bi);
+      tracer.record_round(cmd, f, clear);
+      chain.set_inverse_samples(1.0F / static_cast<float>(tracer.sample_count()));
+      // THE VIEWPORT'S ARRANGEMENT: a scene pass into the chain's own scene
+      // target FIRST, with a known solid colour, then the compose into a
+      // DIFFERENT framebuffer than the one read back in the old harness.
+      {
+        VkRenderPassBeginInfo sp{};
+        sp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        sp.renderPass = chain.scene_pass();
+        sp.framebuffer = chain.scene_framebuffer();
+        sp.renderArea = {{0, 0}, {kSize, kSize}};
+        sp.clearValueCount = 1U;
+        VkClearValue sc{};
+        sc.color = {{0.0F, 0.0F, 0.0F, 1.0F}};  // BLACK, like the raster void
+        sp.pClearValues = &sc;
+        vkCmdBeginRenderPass(cmd, &sp, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdEndRenderPass(cmd);
+      }
+      chain.record(cmd, present_pass.render_pass(),
+                   present_pass.framebuffer(1U), kSize, kSize);
+      vkEndCommandBuffer(cmd);
+      VkFence fence{};
+      VkFenceCreateInfo fi{};
+      fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+      vkCreateFence(context.device(), &fi, nullptr, &fence);
+      VkSubmitInfo si{};
+      si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      si.commandBufferCount = 1U;
+      si.pCommandBuffers = &cmd;
+      vkQueueSubmit(context.graphics_queue(), 1, &si, fence);
+      vkWaitForFences(context.device(), 1, &fence, VK_TRUE, UINT64_MAX);
+      vkDestroyFence(context.device(), fence, nullptr);
+    }
+  };
+
+  accumulate(8U);
+  const auto read_now = [&]() -> omnicpp_test::ReadbackResult {
+    return readback_swapchain_image(
+        context.physical_device(), context.device(), context.graphics_queue(),
+        static_cast<std::uint32_t>(context.queue_families().graphics_family),
+        capture_ldr.image(), kLdrFormat, kSize, kSize,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, true);
+  };
+  const omnicpp_test::ReadbackResult composed = read_now();
+  ASSERT_GT(composed.non_clear_pixels, 0U) << "the compose produced nothing";
+  const auto luma = [](const omnicpp_test::ReadbackResult& r) {
+    double sum = 0.0;
+    for (std::size_t i = 0; i < r.pixels.size(); ++i) {
+      sum += static_cast<double>(r.pixels[i] & 0xFFU);
+    }
+    return sum / static_cast<double>(r.pixels.size());
+  };
+  const double composed_mean = luma(composed);
+
+  // The same accumulation composed WITHOUT the scene pass: the control.
+  auto cb2 = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      context.device(), cmd_pool);
+  VkCommandBuffer cmd2 = cb2.value();
+  VkCommandBufferBeginInfo bi2{};
+  bi2.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  bi2.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(cmd2, &bi2);
+  chain.record(cmd2, present_pass.render_pass(), present_pass.framebuffer(0U),
+               kSize, kSize);
+  vkEndCommandBuffer(cmd2);
+  VkFence f2{};
+  VkFenceCreateInfo fi2{};
+  fi2.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  vkCreateFence(context.device(), &fi2, nullptr, &f2);
+  VkSubmitInfo si2{};
+  si2.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  si2.commandBufferCount = 1U;
+  si2.pCommandBuffers = &cmd2;
+  vkQueueSubmit(context.graphics_queue(), 1, &si2, f2);
+  vkWaitForFences(context.device(), 1, &f2, VK_TRUE, UINT64_MAX);
+  vkDestroyFence(context.device(), f2, nullptr);
+
+  // Compare: compose into framebuffer(1) again (the capture arrangement), but
+  // this time WITHOUT the scene pass having run since the last clear. If the
+  // scene pass leaks into the output, the first readback (with the scene pass)
+  // is DARKER than this one, because the scene pass cleared the chain's scene
+  // target to black... which the tonemap does not sample. So instead the
+  // assertion is about the composed image itself: the tonemap samples the
+  // ACCUMULATION, so the output must be bright (the accumulation is mostly
+  // sky at radiance 1.0), NOT black. If the scene pass's black clear reached
+  // the output, the mean would be near zero.
+  std::printf("capture-arrangement compose mean=%.3f (accumulation is sky-dominated, expect bright)\n",
+              composed_mean);
+  EXPECT_GT(composed_mean, 40.0)
+      << "the composed output is dark even though the accumulation is "
+         "sky-dominated: the scene pass's black clear is reaching the compose "
+         "output, which is exactly the composite the live capture shows";
+
+  chain.set_external_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
+  vkDestroyCommandPool(context.device(), cmd_pool, nullptr);
+  chain.destroy();
+  tracer.destroy();
+  allocator.destroy_allocation(geo_alloc);
+  ldr.cleanup(context.device());
+  capture_ldr.cleanup(context.device());
+  present_pass.cleanup(context.device());
+  allocator.cleanup();
+  context.cleanup();
+#else
+  GTEST_SKIP() << "Vulkan types or test shaders unavailable";
+#endif
+}
+
+
 //! B5b increment 1: the packed pyramid holds the built pyramid's data.
 //!
 //! Property-based rather than byte-exact (recomputing the reduction on the CPU

@@ -6366,16 +6366,6 @@ void ViewportApp::run() {
         };
         compose_path_ptr = &compose_path;
       }
-      if (frame_index == 299U && pt_tracer != nullptr && pt_tracer->ready()) {
-        const auto m = pt_tracer->read_mean();
-        if (m.is_ok() && !m.value().empty()) {
-          std::FILE* f = std::fopen("/tmp/pt_accum.bin", "wb");
-          if (f != nullptr) {
-            std::fwrite(m.value().data(), sizeof(float), m.value().size(), f);
-            std::fclose(f);
-          }
-        }
-      }
       const bool captured = capture.capture(
           context.graphics_queue(), [&](VkCommandBuffer cmd) {
             return record_scene_into(cmd, *this, last_recorded_time,

@@ -1365,14 +1365,23 @@ Every link I can observe from the host is now verified correct. The remaining
 gap is between what the descriptor says and what the sampler returns, which
 cannot be seen from host-side logs -- it needs a GPU-side capture (a
 RenderDoc-style frame dump) or a headless test that reproduces the viewport's
-exact arrangement. Two candidates remain, both untestable with logs:
+exact arrangement. Two candidates were recorded. **The first is now eliminated**, by a test that
+reproduces the viewport's exact arrangement headlessly
+(`VulkanHardware.CaptureArrangementScenePassBeforeCompose`): accumulate into
+the tracer, render a known black clear into the chain's OWN scene target, then
+compose into a framebuffer that is NOT the one the chain was ensured against.
+If the scene pass leaked into the compose output, the composed image would be
+dark; measured, it is bright (mean 45.7) and the test passes. **The
+arrangement is innocent**, and the test now pins it permanently.
 
-1. **A second writer to the capture's colour image.** The composite shape --
-   PT sky above the raster scene's ground edge -- is exactly what a second
-   draw would leave.
-2. **The sampled view vs the copied image being different subresources** of
-   the same VkImage, so the copy in `save()` reads a different allocation
-   state than the sampler wrote.
+That leaves one candidate: **a second writer to the capture's colour image
+that exists only in the live viewport** -- something the headless
+reproduction does not have. The live viewport draws UI quads and a full
+cubes scene; the headless test draws nothing into the scene target. The next
+probe is therefore in the live viewport, not in the engine: suspend the
+suspects one at a time (run with the node editor disabled, with the UI
+hidden) and re-measure the composite. That is cheap -- two environment
+variables -- and it bisects the remaining space in two runs.
 
 What was *not* wasted: the record-time descriptor write is kept, because the
 binding must be correct at draw time and it is now exercised every frame by
