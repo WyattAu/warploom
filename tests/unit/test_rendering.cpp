@@ -949,10 +949,15 @@ TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
         sp.renderPass = chain.scene_pass();
         sp.framebuffer = chain.scene_framebuffer();
         sp.renderArea = {{0, 0}, {kSize, kSize}};
-        sp.clearValueCount = 1U;
-        VkClearValue sc{};
-        sc.color = {{0.0F, 0.0F, 0.0F, 1.0F}};  // BLACK, like the raster void
-        sp.pClearValues = &sc;
+        // BOTH attachments are LOAD_OP_CLEAR: colour at 0, depth at 1. A
+        // single clear value was read past the end as the depth clear
+        // (2.16e28), which the validation layer reported as two VUIDs per
+        // round -- the kind of "it passes anyway" the suite exists to catch.
+        VkClearValue clears[2]{};
+        clears[0].color = {{0.0F, 0.0F, 0.0F, 1.0F}};  // BLACK, like the void
+        clears[1].depthStencil = {1.0F, 0U};
+        sp.clearValueCount = 2U;
+        sp.pClearValues = clears;
         vkCmdBeginRenderPass(cmd, &sp, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdEndRenderPass(cmd);
       }

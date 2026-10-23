@@ -1095,6 +1095,10 @@ TEST(path_tracing_real, linear_mean_converges_to_a_constant) {
     sample_counts.push_back(tracer.sample_count());
   }
   tracer.destroy();
+  // The pool owns every command buffer allocated from it (416 of them across
+  // the three runs); leaving it alive leaked all of them into vkDestroyDevice,
+  // which the validation layer reported as VUID-vkDestroyDevice-device-05137.
+  vkDestroyCommandPool(ctx.device(), pool.value(), nullptr);
   auto keep_geo = geo.value();
   alloc.destroy_allocation(keep_geo);
   alloc.cleanup();
