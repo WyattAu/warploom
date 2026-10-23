@@ -792,17 +792,28 @@ declares a slot 3.
 2. **Modules real** — the viewport and tests consume installed packages; no
    monolithic target. **Met** (S5, A3).
 3. **Demo story works** — record, replay, scrub, save/load, proven over the
-   live protocol. **Met** for everything except physics (C3).
+   live protocol. **Met** for the render/document timeline; D1 (real physics)
+   remains open.
 4. **Signature render feature** — R1 path tracing, toggleable in the
-   viewport. **Not met (R1)** — but the R1 spec now exists
-   (docs/research/rendering-and-graphs.md): "offline-quality stepped PT"
-   through the deterministic record/replay machinery, which turns the
-   accumulation phase into a product capability (pause, converge, read back
-   the converged mean) rather than a per-frame cost. The E1/E2 unblocks
-   landed: render mode is a protocol command with a build-once RT stack, the
-   live-proof harness covers the mode wire contract, and the RT pipeline +
-   PT shaders are test-proven — R1 is a viewport integration with a written
-   design, not an engine gap.
+   viewport. **Met.** "Offline-quality stepped PT" runs through the
+   deterministic record/replay machinery: pause, accumulate, read back the
+   converged mean. Verified rather than asserted:
+   - the mode round-trips `forward -> pt -> forward` over a real socket with
+     0 validation diagnostics (R1b);
+   - convergence is pinned headlessly by the *spatial noise floor* falling
+     with sample count (mean brightness is not the assertion -- ACES compresses
+     a missing 1/n into a few percent);
+   - the linear accumulation mean holds at 0.74895 / 0.74888 / 0.74888 across
+     32/128/256 samples, bit-identical across runs;
+   - the live capture now matches the accumulation at **0.9994** rank
+     correlation with 0% unwritten pixels (the 75%-coverage bug is fixed); the
+     coverage property is pinned by a sabotage-validated test.
+
+   What is *not* met is PT usability, and the docs say so: no denoiser (a
+   deliberate v1 deferral -- pause-to-converge is the shipped story, see the
+   comparison matrix §5), no adaptive sampling, a cubes-only scene, and bloom
+   does not layer on the PT source. Those are post-0.1 feature steps, not
+   correctness gaps in what 0.1 claims.
 
 It commits to a scope, not a date.
 
@@ -1230,7 +1241,8 @@ at the capture site, and the captured image's statistics match a converged
 path-traced image (mean 182.7959, std 105.5407) instead of the raster scene's
 (mean 10.48 and falling).
 
-**Still not explained, and recorded as such.** The captured image is not a
+**Still not explained at this point in the investigation** (it is resolved
+below, under "The capture defect: RESOLVED"). The captured image is not a
 faithful tonemap of the accumulation: the Spearman rank correlation between
 the accumulation's per-pixel values and the capture's luma is **+0.31**, where
 a monotone tonemap of the same image would give ~1.0. Smoothing the
@@ -1431,20 +1443,14 @@ are inert on the visual host. That is an architectural coupling (a document
 timeline tied to a UI panel's visibility), not a wire bug, and it needs its
 own step.
 
-Two separate questions now, and they should not be conflated:
+The second question above -- "why does the capture show the PT sky AND the
+raster ground?" -- dissolved into the first. There was no second writer and no
+composite: the "raster ground" was the *unwritten* quarter showing the clear
+colour, and once the triangle covered the target the capture was the
+accumulation alone. The raster path's own blackness is the separate,
+still-open environment-light gap recorded above.
 
-1. **Why does the raster path render the ground black and the background
-   black?** The PT path renders the same geometry lit. Same scene, two
-   lighting paths, and they disagree. That is a lighting/material defect in
-   the raster path, and it is worth more than the capture.
-2. **Why does the capture show the PT sky AND the raster ground?** The capture
-   composes a bright sky with a black ground wedge, so the two images are
-   being combined somewhere -- the chain's own intermediate (which holds the
-   raster scene) is reaching the output alongside the accumulation. That is
-   the remaining capture defect, and it is now precisely characterised: the
-   capture is a composite of the PT accumulation and the raster scene rather
-   than the accumulation alone.
-
-Honest state: the tracer is proven correct in situ and headlessly; the capture
-path is proven broken; the fix is understood in shape but not landed, and the
-feature is not claimed to be demonstrable through the capture path.
+Honest state now: the tracer is proven correct in situ and headlessly, and
+the capture path is verified end-to-end (0.9994 rank correlation with the
+accumulation, 0% unwritten pixels). What remains for PT is usability rather
+than correctness: no denoiser, no adaptive sampling, and the cubes-only scene.

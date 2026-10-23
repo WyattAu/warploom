@@ -71,7 +71,7 @@ Two verification milestones worth knowing when reading the Proof column:
 | GPU timestamps / frame latency percentiles | yes | yes | `GpuTiming`; telemetry `gpu_ns` |
 | Parallel secondary command-buffer recording | yes | **test-only** | `test_parallel_recorder` |
 | Async-compute queue submission | no | no | queue family discovered, never used for submission |
-| HDR intermediate + exposure | yes | yes | `WARPLOOM_EXPOSURE=<float>`; exposure is read at start-up, making it a protocol command is roadmap item E1 |
+| HDR intermediate + exposure | yes | yes | `WARPLOOM_EXPOSURE=<float>` at start-up and `set_exposure` over the control socket (v1.9); the configured value is pinned by `ComposeChainHonoursConfiguredExposure` |
 | Deferred / G-buffer, MSAA | no | no | every image is `VK_SAMPLE_COUNT_1_BIT` |
 | CSM / cascaded shadow maps | no | no | single 2048² map |
 | SSAO, SSR, TAA, denoiser, volumetrics | no | no | — |
@@ -85,7 +85,7 @@ Genuinely implemented, and the strongest part of the repository.
 |---|---|---|---|
 | BLAS build + per-frame TLAS on caller command buffers | yes | yes | `test_ray_query_first_contact` |
 | RT pipeline: SBT, `vkCmdTraceRaysKHR`, device-adaptive alignment | yes | no | `test_path_tracing` vs a bit-exact CPU simulator |
-| `VulkanPathTracer` (R1a/R1b): rgba32f accumulation, BLAS/TLAS, SBT, clear-once/add-per-frame, `read_mean` | yes | yes — `set_render_mode("pt")` / `WARPLOOM_PT=1`, renders the cube + ground slab scene | compose exposure — `ensure()` adopts the caller's configured exposure on the first call and preserves the live one afterwards; preserving on the first call too silently discarded the configured value, which only a 20x exposure change producing a byte-identical frame revealed; pinned by `ComposeChainHonoursConfiguredExposure`, configured at 0.37 and 2.75 because a test using the default value passes a broken build | RT dispatch — `rt_for()` resolves entry points per call instead of caching them in a global keyed by `VkDevice` handle value; handle reuse after destruction made stale pointers callable, which surfaced as a SIGSEGV in the NVIDIA driver from `vkGetAccelerationStructureBuildSizesKHR` in ~1 full-suite run in 6 (never in isolation). BLAS build and size query now share one `fill_blas_geometry`, which had drifted to describe vertex data at address 0 | viewport resize — `set_viewport_size` (v1.11) drives the full recreate path on demand: swapchain, depth + framebuffers, `resync_for_swapchain`, capture stack (target AND chain — the chain alone is not sufficient), path tracer accumulation, UI layout; measured across five consecutive resizes with capture on: 0 device losses, 0 VUIDs, PPM headers follow the live extent, and the PT accumulation rebuilds at the new extent | `frame_allocator` — pure frame-graph lifetime planner (no Vulkan): disjoint compatible transients share, overlapping ones never do, and a history resource (H-Z pyramid, PT accumulation) is never aliased in either direction; the rule is enforced by interval arithmetic alone and validated by sabotage, because three redundant guards once made every sabotage a no-op; 200-configuration deterministic sweep; 4 of 10 allocations elided on a compose-shaped frame | `capture_arrangement` — the viewport's capture arrangement (scene pass into the chain's scene target, compose into a different framebuffer) reproduced headlessly and pinned: the scene pass does not leak into the compose output | `path_tracing_real` — CPU-mirrored `EXPECT_FLOAT_EQ` probes + byte-identical repeat through the engine object, viewport-geometry build, resize + sample count; `VulkanHardware.PathTracedFrameConvergesThroughCompose` proves the noise floor falls from 1 to 8 samples; ~~live capture showed 36.6 → 17.5 std-dev over 12 samples~~ — CORRECTED: the capture chain's `using_external_source()` is FALSE in PT mode, so that measured the chain's own intermediate, not the PT accumulation. What is verified is the LINEAR accumulation: flat in situ (0.7336 → 0.7357 over 300–1800 samples inside the running viewport) and headlessly (0.01% drift). The captured PT image is not |
+| `VulkanPathTracer` (R1a/R1b): rgba32f accumulation, BLAS/TLAS, SBT, clear-once/add-per-frame, `read_mean` | yes | yes — `set_render_mode("pt")` / `WARPLOOM_PT=1`, renders the cube + ground slab scene | compose exposure — `ensure()` adopts the caller's configured exposure on the first call and preserves the live one afterwards; preserving on the first call too silently discarded the configured value, which only a 20x exposure change producing a byte-identical frame revealed; pinned by `ComposeChainHonoursConfiguredExposure`, configured at 0.37 and 2.75 because a test using the default value passes a broken build | RT dispatch — `rt_for()` resolves entry points per call instead of caching them in a global keyed by `VkDevice` handle value; handle reuse after destruction made stale pointers callable, which surfaced as a SIGSEGV in the NVIDIA driver from `vkGetAccelerationStructureBuildSizesKHR` in ~1 full-suite run in 6 (never in isolation). BLAS build and size query now share one `fill_blas_geometry`, which had drifted to describe vertex data at address 0 | viewport resize — `set_viewport_size` (v1.11) drives the full recreate path on demand: swapchain, depth + framebuffers, `resync_for_swapchain`, capture stack (target AND chain — the chain alone is not sufficient), path tracer accumulation, UI layout; measured across five consecutive resizes with capture on: 0 device losses, 0 VUIDs, PPM headers follow the live extent, and the PT accumulation rebuilds at the new extent | `frame_allocator` — pure frame-graph lifetime planner (no Vulkan): disjoint compatible transients share, overlapping ones never do, and a history resource (H-Z pyramid, PT accumulation) is never aliased in either direction; the rule is enforced by interval arithmetic alone and validated by sabotage, because three redundant guards once made every sabotage a no-op; 200-configuration deterministic sweep; 4 of 10 allocations elided on a compose-shaped frame | `capture_arrangement` — the viewport's capture arrangement (scene pass into the chain's scene target, compose into a different framebuffer) reproduced headlessly and pinned: the scene pass does not leak into the compose output | `path_tracing_real` — CPU-mirrored `EXPECT_FLOAT_EQ` probes + byte-identical repeat through the engine object, viewport-geometry build, resize + sample count; `VulkanHardware.PathTracedFrameConvergesThroughCompose` proves the noise floor falls from 1 to 8 samples; ~~live capture showed 36.6 → 17.5 std-dev over 12 samples~~ — CORRECTED: the capture chain's `using_external_source()` is FALSE in PT mode, so that measured the chain's own intermediate, not the PT accumulation. What is verified is the LINEAR accumulation: flat in situ (0.7336 → 0.7357 over 300–1800 samples inside the running viewport) and headlessly (0.01% drift). The captured PT image is now verified: 0.9994 rank correlation with the accumulation and 0% unwritten pixels, after the `fullscreen.vert` coverage fix (it had been 0.05) |
 | Compose chain tonemap from an external source (PT accumulation, sampled in GENERAL) | yes | yes | `PathTracedFrameConvergesThroughCompose`; two sabotage directions (missing 1/n, stuck frame index) both caught |
 | Loop path tracer (N-bounce, per-pixel PCG streams, temporal accumulation) | yes | no | `test_path_tracing_real`, validated against an independent fp64 MC integrator (262k samples) |
 | Ray-query shadows vs PCF, A/B | yes | yes | `test_rt_shadows`; app needs `WARPLOOM_RT_MODE=1` |
@@ -110,8 +110,10 @@ Two honest caveats on the ray tracing:
   cubes-scene cube + ground slab at the swapchain extent captured when the
   stack was built, accumulates one sample per rendered frame, and tonemaps the
   accumulation image directly. It also **holds the camera** while active (a
-  moving view averages a smear rather than converging). No resize handling, no
-  app-scene integration, and bloom does not layer on it (the source is already
+  moving view averages a smear rather than converging). A resize rebuilds the
+  accumulation and re-points both compose chains, so the mode survives
+  `set_viewport_size`. What is still narrow: no app-scene integration (one cube
+  + slab), and bloom does not layer on the PT source (the source is already
   divided by n).
 
 ## Determinism
@@ -165,17 +167,27 @@ unimplemented.
 
 In priority order, and each is a roadmap item rather than a footnote:
 
-1. Route the viewport through `record_pbr_frame`, the render graph and an
-   HDR target, so the module's own frame is the app's frame. This is what
-   turns every "test-only" row above into a shipped feature.
-2. One data model. The ECS has no production consumer while the document,
-   `VulkanScene` and `PhysicsWorld` are three private worlds; unify them so
-   physics becomes both ECS-integrated and replayable.
-3. Real physics: broadphase, shapes, constraints, deterministic by
+The first five items this list used to name are now done: the viewport
+records through `record_pbr_frame` + the compose chain + an HDR target, the
+document projects into one ECS driven by one `tick(FrameInput)`, timeline
+evaluation is interpolated and eased, and render mode is a protocol command.
+What remains, in priority order:
+
+1. Lighting parity between the two render paths. The cubes scene has no
+   environment light: the raster path lights it with the sun alone (ambient
+   0.03) while the tracer's constant white sky lights everything, so a viewer
+   comparing them would conclude the tracer is the broken one. `ibl_set` is
+   simply never assigned for that scene.
+2. PT scene coverage. The tracer builds its AS from one cube + slab. The
+   skinned, mannequin and city scenes have no PT geometry path, and bloom does
+   not layer on the PT source.
+3. The document timeline is still coupled to a UI panel: `editor.tick()` runs
+   only inside `tick_node_editor()`, so clip playback and recording are inert
+   with the node editor off, and the clip strip is not in the app.
+4. Real physics (D1): broadphase, shapes, joints, deterministic by
    construction, stepped inside the shared tick.
-4. Timeline interpolation, and the clip strip actually in the app.
-5. Render-mode commands in the protocol so R1/R2 become switches rather
-   than start-up environment variables.
+5. RT sub-toggles (R2: reflections/AO) and GPU-driven skinned scenes (R3);
+   R6b waits on graph-shaped resource declarations, not on the planner.
 
 - **Fullscreen coverage (fixed):** `fullscreen.vert` generated its third
   vertex as `(-1,1)` instead of `(-1,3)`, so every pass using it covered only

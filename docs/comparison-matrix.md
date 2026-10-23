@@ -73,7 +73,7 @@ dependence.
 | **Sampling** | One stratified-ish jittered sample per frame; fixed seed = frame index | n/a | `sampling_pattern` (5) × `direct_light_sampling_type` (3) × guiding (3×3); Light Tree; MNEE; **adaptive sampling on, threshold 0.01** | n/a | Auto vs Path-Traced convergence; **Pixel Oracle**; path guiding | Radiance cache + incoming-light importance sampling | `Seed Mode`/`customSeed`; accumulate until camera moves |
 | **CAD / parametric geometry** | glTF + a document model; **no BRep** | No | No | **BRep_TFace holds a list of `Poly_Triangulation` + an active one**, selectable by `Poly_MeshPurpose`; per-surface-type mesher dispatch via RangeSplitter templates; anisotropic U/V tolerance | SOPs + VOPs; USD-centric | Nanite clusters (not CAD) | No |
 | **Virtualized geometry** | LOD mesh chain; no cluster scheme | No | No | n/a | No | **Nanite**: hierarchical clusters, crack-free LOD, own pass bypassing draw calls; RT against Nanite unsupported (fallback mesh) | No |
-| **Determinism** | **Product feature, verified**: `-ffp-contract=off`; no wall-clock reads in a tick; hash-verified replay; **628/628 under `--gtest_shuffle`** and 3 fixed seeds | **None claimed** — only shader-compile ordering | Per-pixel seeding makes streams schedule-independent; **BVH packed arrays explicitly not deterministic**; `Deterministic Guiding` default true | **[UNVERIFIED]** | **Documented**: device-mixture reproducibility, XPU only, hedged with "should" | None documented | None documented |
+| **Determinism** | **Product feature, verified**: `-ffp-contract=off`; no wall-clock reads in a tick; hash-verified replay; **629/629 under `--gtest_shuffle`** and 3 fixed seeds | **None claimed** — only shader-compile ordering | Per-pixel seeding makes streams schedule-independent; **BVH packed arrays explicitly not deterministic**; `Deterministic Guiding` default true | **[UNVERIFIED]** | **Documented**: device-mixture reproducibility, XPU only, hedged with "should" | None documented | None documented |
 
 ## 3. Where Warploom is genuinely ahead
 
@@ -92,9 +92,12 @@ Not much, and it should be said plainly rather than buried. Two things:
 
 ## 4. Where Warploom is behind, ordered by how much it hurts
 
-1. **No denoiser** (§1.2). Every converged-tracer peer has one. Without it, PT
-   is a research mode rather than a usable one. *Blocked on a design decision*,
-   not on effort — see §5.
+1. **No denoiser** (§1.2). Every converged-tracer peer has one. It is
+   **deliberately deferred for v1**, not blocked: the shipped PT story is
+   pause-to-converge, where accumulation alone converges, and a denoiser only
+   matters for *live* (unpaused) PT, which is outside the v1 spec. The
+   recorded follow-up is in-tree à-trous/SVGF over the existing G-buffer —
+   see §5, which now records the decision instead of asking for one.
 2. **No transient aliasing, and the planner is unexercised.** R6b is gated
    behind a prerequisite that does not exist yet: the renderer declares
    resources against a fixed pass list, not a graph, so "a resource live on
@@ -112,10 +115,13 @@ Not much, and it should be said plainly rather than buried. Two things:
    active*. That decouples render-resolution from analysis-resolution, which is
    the property that makes CAD and rendering coexist at all. Warploom has
    exactly one mesh per object.
-6. **Path tracing is not usable from the capture path.** The tracer is verified
-   correct; the viewport's capture of it is not — see
-   `docs/roadmap.md`, "The live path-traced capture is not showing the
-   path-traced image".
+6. **PT scene coverage is a demo, not the app's scene.** The tracer builds its
+   acceleration structure from the cubes scene's cube + ground slab. The
+   skinned, mannequin and city paths have no PT geometry path, so "path
+   tracing" is one scene, not a scene-independent engine feature. The capture
+   path itself is no longer a gap: it is verified against the accumulation at
+   0.9994 rank correlation with 0% unwritten pixels (the 75%-coverage bug in
+   `fullscreen.vert` is fixed and pinned by a sabotage-validated test).
 
 ## 5. The denoiser decision, stated before it is built
 
@@ -133,27 +139,42 @@ work.
 - **Denoise by construction**, à la Lumen. Radically more work: it changes the
   architecture rather than adding a pass, and the payoff depends on solving
   radiosity problems Warploom has not started.
-- **Do nothing, document the gap.** Current state.
+- **Do nothing, document the gap.**
 
-The recorded choice should be one of these *written down*, because the gap
-survives an unwritten decision and not a documented one.
+**Recorded choice (docs/research/loop7-10-scripting-ecs-determinism-pt.md,
+loop 10):** for v1, **do nothing** — PT ships un-denoised and pause-to-converge
+is the product feature, because a static paused view converges from
+accumulation alone and a denoiser only earns its keep on live PT. When live PT
+is wanted, the answer is **in-tree à-trous/SVGF over the existing G-buffer**
+(OIDN is excluded by the dependency budget), with one constraint written down
+in advance: SVGF's temporal-history validation must be a pure function of the
+accumulation state, or it breaks deterministic stepping. That is a
+qualification of the follow-up, not an open question.
+
+So the gap is real and the choice is made: this is a *deliberate v1 scope
+decision*, and it should not be described as "blocked".
 
 ## 6. Where Warploom actually stands
 
 Stated precisely, because "measured" and "designed" are different things here.
 
-**Measured on this machine (RTX 2060, `default` preset):** 628 unit tests green
-under `VK_LAYER_KHRONOS_validation=1`; ctest 6/6; ASan/UBSan 555; TSan 0 races;
-74 shader sources compile; live protocol proofs 76/76 headless and 28/28 on a
-visual host; viewport matrix (hdr, bloom, no-hdr, node editor, pt) all clean
-with 0 validation diagnostics; clang and GCC both warning-free.
+**Measured on this machine (RTX 2060, `default` preset):** 629 unit tests green
+under `VK_LAYER_KHRONOS_validation=1` with 0 diagnostics and 0 leaked objects;
+ctest 6/6; ASan/UBSan 555 (594 ran, 39 skipped because the sanitizer preset
+builds `WARPLOOM_USE_VULKAN=OFF`); 74 shader sources compile; live protocol
+proofs 76/76 headless and 28/28 on a visual host; the viewport matrix
+(hdr, bloom, rt+bloom, no-hdr, node editor, pt) re-run after the fullscreen
+fix, all six clean with 0 validation diagnostics; clang and GCC both
+warning-free.
 
 **Measured about the path tracer specifically:** the *linear* accumulation mean
 is flat — 0.7336 → 0.7357 across 300–1800 samples read from inside the running
-viewport, and 0.01% drift headlessly, bit-identical across runs, robust to
-scene, exposure, seed schedule and accumulated depth to 1632 samples. The RNG is
-unbiased and uncorrelated over 4096 frames. **The captured image is not
-verified** and is currently broken.
+viewport, and 0.74895 / 0.74888 / 0.74888 at 32/128/256 samples headlessly
+(0.01% drift, bit-identical across runs, robust to scene, exposure, seed
+schedule and accumulated depth to 1632 samples). The RNG is unbiased and
+uncorrelated over 4096 frames. **The captured image is now verified**: the live
+capture correlates with the accumulation at 0.9994 (Spearman) with 0% of
+pixels left unwritten, after the `fullscreen.vert` coverage fix.
 
 **Designed but not running:** the frame-graph lifetime planner
 (`plan_resource_allocations`) — 4 of 10 allocations elided on a compose-shaped
