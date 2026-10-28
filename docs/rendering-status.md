@@ -173,11 +173,14 @@ document projects into one ECS driven by one `tick(FrameInput)`, timeline
 evaluation is interpolated and eased, and render mode is a protocol command.
 What remains, in priority order:
 
-1. Lighting parity between the two render paths. The cubes scene has no
-   environment light: the raster path lights it with the sun alone (ambient
-   0.03) while the tracer's constant white sky lights everything, so a viewer
-   comparing them would conclude the tracer is the broken one. `ibl_set` is
-   simply never assigned for that scene.
+1. Background parity between the two render paths. The earlier "no
+   environment light" diagnosis was wrong and is retracted: the cubes scene's
+   `ibl_set` is assigned and the IBL bake contributes (frame mean 104.3 with
+   IBL, 85.8 with `WARPLOOM_LEGACY_LIGHTING=1` at frame 30). The image looked
+   unlit because it was vertically inverted -- `scene_camera_projection` now
+   negates its y row (Vulkan NDC y is down). What remains is that the raster
+   path draws no sky for this scene (the clear colour shows) while the tracer
+   renders a constant white sky.
 2. PT scene coverage. The tracer builds its AS from one cube + slab. The
    skinned, mannequin and city scenes have no PT geometry path, and bloom does
    not layer on the PT source.

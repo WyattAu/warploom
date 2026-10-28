@@ -1341,14 +1341,21 @@ project's load subsides. That is an environment, not a regression -- but it
 means a perf assertion in the suite should be understood as a
 canary, not a gate.
 
-**What is still dark, and why.** The scene remains mostly black even with the
-ground present, because the cubes scene has **no environment light**: the
-raster path lights it with the sun alone, so only the few faces the sun
-happens to strike are lit, while the path tracer's own constant white sky
-lights everything. That is a scene-authoring gap rather than an engine fault,
-but it is why the two paths disagreed so violently, and it is worth closing --
-a viewer comparing the two renderings would reasonably conclude the tracer
-was the broken one.
+**What is still different, and why (corrected).** The earlier claim here --
+that the cubes scene has no environment light and that the raster path is
+sun-only -- was **wrong**, and it came from reading a vertically inverted
+frame. `scene_camera_projection` fed Vulkan an OpenGL-style NDC (`p[5] =
++f`), so world +Y mapped to the bottom of the viewport: the ground slab
+appeared above the cubes and the clear-colour sky below them, which reads as
+a plausible "backdrop behind the cubes". The orientation fix (`p[5] = -f`) is
+committed separately. The environment light was always present and it
+contributes measurably: on the cubes scene at frame 30, `WARPLOOM_LEGACY_
+LIGHTING=1` (IBL off) lowers the frame mean from 104.3 to 85.8, and the lower
+rows of the corrected image have mean luma 166-168. What genuinely differs is
+the background: this scene has no sky pass, so the clear colour shows, while
+the tracer renders a constant white sky. That is a scene-authoring gap, not a
+lighting failure, and it is worth closing -- but it is much smaller than the
+orientation bug it was hiding behind.
 
 ### The capture defect: RESOLVED -- the fullscreen triangle covered 75% of the target
 
