@@ -16,9 +16,11 @@
  *
  * Conventions (matching the existing scene path): right-handed look-at view
  * space with the camera looking down -Z at rest (eye at the origin, target at
- * (0,0,-1) yields the identity view), and the projection used by every
- * hardware scene test (fov_y over the vertical axis, aspect = width / height,
- * column-major with w = -z_view).
+ * (0,0,-1) yields the identity view), and a Vulkan-clip-space projection
+ * (fov_y over the vertical axis, aspect = width / height, column-major with
+ * w = -z_view, near -> NDC z 0, far -> 1). The y row is NEGATED so that world
+ * +Y is up on screen: Vulkan's NDC y points down. Omitting that sign renders
+ * every scene vertically inverted in a positive-height viewport, and it did.
  */
 
 #include "warploom/core/ecs.hpp"

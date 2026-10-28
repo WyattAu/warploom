@@ -78,7 +78,14 @@ SceneMatrix scene_camera_projection(float fov_y, float aspect, float z_near,
   const float f = 1.0f / std::tan(fov_y * 0.5f);
   const float z_span_inv = 1.0f / (z_near - z_far);
   p[0] = f / aspect;
-  p[5] = f;
+  // NEGATIVE: Vulkan's NDC y points DOWN, while a right-handed look-at has
+  // +Y up. With `p[5] = +f` every scene rendered upside down -- the viewport
+  // showed the ground slab above the cubes and the clear-colour sky below
+  // them, which read as a plausible "backdrop behind the cubes" and was
+  // misdiagnosed as a lighting failure for several rounds. The path tracer,
+  // whose ray generation uses the camera basis directly, was upright, so the
+  // two render paths disagreed in orientation as well as in lighting.
+  p[5] = -f;
   p[10] = z_far * z_span_inv;
   p[11] = -1.0f;
   p[14] = z_near * z_far * z_span_inv;

@@ -111,7 +111,9 @@ TEST(SceneCameraMath, ProjectionMatchesSceneConvention) {
   const float f = 1.0f / std::tan(fov_y * 0.5f);
   const float inv = 1.0f / (z_near - z_far);
   EXPECT_FLOAT_EQ(p[0], f / aspect);
-  EXPECT_FLOAT_EQ(p[5], f);
+  // Vulkan NDC y is down, so the y scale is negative. With +f here every
+  // raster scene rendered vertically inverted (the ground above the cubes).
+  EXPECT_FLOAT_EQ(p[5], -f);
   EXPECT_FLOAT_EQ(p[10], z_far * inv);
   EXPECT_FLOAT_EQ(p[11], -1.0f);
   EXPECT_FLOAT_EQ(p[14], z_near * z_far * inv);
@@ -155,6 +157,16 @@ TEST(SceneCameraMath, ViewProjectionComposesLookAtTimesProjection) {
   EXPECT_NEAR(rx, f / 5.0f, 1e-5f);
   EXPECT_NEAR(ry, 0.0f, 1e-6f);
   EXPECT_NEAR(rz, cz, 1e-6f);
+
+  // ORIENTATION. World +Y must land at NEGATIVE NDC y, because Vulkan maps
+  // NDC y = -1 to the top of the viewport. A positive value here means the
+  // scene renders upside down; that is what shipped, and the ground slab
+  // appeared above the cubes with the sky below them.
+  float ux, uy, uz;
+  transform_point(vp, 0.0f, 1.0f, 0.0f, ux, uy, uz);
+  EXPECT_LT(uy, 0.0f) << "world +Y mapped to NDC y >= 0: the scene is "
+                         "vertically inverted in a Vulkan viewport";
+  EXPECT_NEAR(uy, -f / 5.0f, 1e-5f);
 }
 
 // =============================================================================
