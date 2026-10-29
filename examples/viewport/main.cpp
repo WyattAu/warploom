@@ -56,6 +56,7 @@
 #include "warploom/render/vulkan_ibl_baker.hpp"
 #include "warploom/render/vulkan_memory_allocator.hpp"
 #include "warploom/render/vulkan_path_tracer.hpp"
+#include "warploom/render/vulkan_sky_pass.hpp"
 #include "warploom/render/vulkan_render_pass.hpp"
 #include "warploom/render/vulkan_renderer.hpp"
 #include "warploom/render/vulkan_scene.hpp"
@@ -631,6 +632,12 @@ struct ViewportApp {
   VkDescriptorSet ibl5_set{VK_NULL_HANDLE};
   //! Engine-side GPU bake: analytic sky -> prefiltered/irradiance/LUT.
   omnicpp::render::VulkanIblBaker ibl_baker;
+  //! Analytic-sky background (sky.vert/sky.frag): pipeline + SkyParams UBO.
+  //! The params are fixed at start-up (the sun direction is the baked
+  //! light's); the per-frame view is applied in record_scene_into, so the
+  //! background is the same sky the path tracer evaluates in sky mode 1.
+  omnicpp::render::VulkanSkyPass sky_pass;
+  bool sky_ready{false};
   //! Shadow resources: D32 image (depth+sampled usage), depth/sample views,
   //! compare sampler, 64-byte light-VP UBO + set-4 descriptor, depth-only
   //! render pass + framebuffer, static and skinned depth-only pipelines.
@@ -3559,6 +3566,22 @@ bool setup_path_tracing(ViewportApp& app) {
   cfg.width = std::max(1U, app.pt_extent_width);
   cfg.height = std::max(1U, app.pt_extent_height);
   cfg.max_bounces = 4U;
+  // Background parity (roadmap item 1): the miss branch evaluates the same
+  // analytic sky the raster pre-draw shades, with the baked light's sun.
+  // The default origin is the model's surface anchor, so only the sun needs
+  // setting; mode 0 stays the bit-exact legacy white every probe pins and
+  // is intentionally left behind here.
+  cfg.sky.mode = 1U;
+  {
+    const float sun_len = std::sqrt(app.sun_direction[0] * app.sun_direction[0] +
+                                    app.sun_direction[1] * app.sun_direction[1] +
+                                    app.sun_direction[2] * app.sun_direction[2]);
+    if (sun_len > 0.0f) {
+      cfg.sky.sun_direction[0] = app.sun_direction[0] / sun_len;
+      cfg.sky.sun_direction[1] = app.sun_direction[1] / sun_len;
+      cfg.sky.sun_direction[2] = app.sun_direction[2] / sun_len;
+    }
+  }
   omnicpp::render::PathTracerMesh cube{};
   cube.vertex_buffer_address = addresses[0];
   cube.triangle_count = 12U;
@@ -3719,6 +3742,70 @@ void destroy_rt_shadows(ViewportApp& app) {
     app.city_lights_buffer = VK_NULL_HANDLE;
   }
   app.city_lights_layout = VK_NULL_HANDLE;
+}
+
+//! Analytic-sky background setup: one shared sky (sky.vert/sky.frag) for
+//! every scene branch. The sun is the baked light's direction, normalized;
+//! the scattering coefficients are the headless parity harness's canonical
+//! set (test_pt_sky_parity), so this background and the path tracer's sky
+//! mode 1 evaluate one model with one sun. The view is per-frame (see
+//! update_sky_view); the origin stays the model's surface anchor -- the
+//! unit-scale camera would sit inside the planet and extinguish the shell.
+//! False is non-fatal: the background stays the pass's clear colour, which
+//! is exactly the pre-sky behaviour.
+bool setup_sky_pass(ViewportApp& app) {
+  omnicpp::render::SkyParams params;
+  const float sun_len = std::sqrt(app.sun_direction[0] * app.sun_direction[0] +
+                                  app.sun_direction[1] * app.sun_direction[1] +
+                                  app.sun_direction[2] * app.sun_direction[2]);
+  if (sun_len > 0.0f) {
+    params.sun_direction[0] = app.sun_direction[0] / sun_len;
+    params.sun_direction[1] = app.sun_direction[1] / sun_len;
+    params.sun_direction[2] = app.sun_direction[2] / sun_len;
+  }
+  std::string error;
+  const auto built = app.sky_pass.initialize(
+      app.context.device(), app.allocator, app.descriptors,
+      app.scene_render_pass(), app.scene_color_format(), warploom_shader_dir(),
+      params, error);
+  if (!built.is_ok()) {
+    std::fprintf(stderr, "viewport: sky pass unavailable (%s); clear-colour "
+                         "background\n", error.c_str());
+    return false;
+  }
+  app.sky_ready = true;
+  return true;
+}
+
+//! Direction-only backdrop for one recorded frame: orthonormal basis from
+//! the frame's eye/target/up (the same construction record_pt_round_cb
+//! uses, so the raster and PT skies look through the same view), then
+//! pointed at the scene the caller is about to record. No-op without a
+//! built pass, so legacy/failed setups keep the clear colour.
+void update_sky_view(ViewportApp& app, const float eye[3],
+                     const float target[3], const float up_hint[3], float fov_y,
+                     float aspect) {
+  if (!app.sky_ready) return;
+  float fwd[3] = {target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]};
+  const float fwd_len =
+      std::sqrt(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
+  if (fwd_len <= 0.0f) return;
+  fwd[0] /= fwd_len; fwd[1] /= fwd_len; fwd[2] /= fwd_len;
+  float right[3] = {fwd[1] * up_hint[2] - fwd[2] * up_hint[1],
+                    fwd[2] * up_hint[0] - fwd[0] * up_hint[2],
+                    fwd[0] * up_hint[1] - fwd[1] * up_hint[0]};
+  const float right_len =
+      std::sqrt(right[0] * right[0] + right[1] * right[1] +
+                right[2] * right[2]);
+  if (right_len <= 0.0f) return;
+  right[0] /= right_len; right[1] /= right_len; right[2] /= right_len;
+  const float up[3] = {right[1] * fwd[2] - right[2] * fwd[1],
+                       right[2] * fwd[0] - right[0] * fwd[2],
+                       right[0] * fwd[1] - right[1] * fwd[0]};
+  app.sky_pass.set_view({fwd[0], fwd[1], fwd[2]},
+                        {right[0], right[1], right[2]}, {up[0], up[1], up[2]},
+                        std::tan(fov_y * 0.5f), aspect);
+  app.sky_pass.apply_to(app.scene);
 }
 
 bool setup_lighting(ViewportApp& app) {
@@ -4967,6 +5054,9 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
       static_cast<float>(width) / static_cast<float>(height), 0.1f, 100.0f);
   // Camera position in view conventions: the look_at eye.
   app.scene.camera_position = {eye[0], eye[1], eye[2], 1.0f};
+  // Analytic-sky backdrop for this frame's view (no-op without a built pass).
+  update_sky_view(app, eye, target, up, 1.05f,
+                  static_cast<float>(width) / static_cast<float>(height));
   // Published for the path tracer's pre-pass, which runs on a different
   // thread's data and must not re-derive the orbit camera (a second
   // derivation would be a second source of truth for "where is the camera").
@@ -5029,6 +5119,9 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
             static_cast<float>(width) / static_cast<float>(height), 0.5f,
             300.0f);
     app.scene.camera_position = {city_eye[0], city_eye[1], city_eye[2], 1.0f};
+    // City branch has its own framing: sky for this view, same shared pass.
+    update_sky_view(app, city_eye, city_target, city_up, 1.05f,
+                    static_cast<float>(width) / static_cast<float>(height));
     // Sun ortho box covering the street grid.
     const float city_light_eye[3] = {app.sun_direction[0] * 30.0f,
                                      app.sun_direction[1] * 30.0f,
@@ -5818,6 +5911,11 @@ bool ViewportApp::initialize() {
   // Composed full lighting (IBL + shadow map + composed PBR). Non-fatal:
   // failure falls back to the basic pbr_scene path.
   lighting_ready = setup_lighting(*this);
+  // Analytic-sky background for every scene branch (non-fatal: without it
+  // the background is the pass's clear colour, as before). Independent of
+  // lighting_ready on purpose -- the background is identical in the legacy
+  // A/B arm, so the legacy-vs-composed comparison still isolates lighting.
+  sky_ready = setup_sky_pass(*this);
   // R1b: path tracing from the first frame when WARPLOOM_PT=1. Also the
   // isolation switch: building the stack here (before the frame loop) versus
   // on a live set_render_mode is what distinguishes "the build is wrong" from
@@ -6594,6 +6692,10 @@ void ViewportApp::shutdown() {
   shadow_pipeline_skinned.cleanup(context.device());
   shadow_pipeline_static.cleanup(context.device());
   ibl_baker.cleanup(context.device());
+  if (sky_ready) {
+    sky_pass.cleanup(context.device());
+    sky_ready = false;
+  }
   skinned_pipeline.cleanup(context.device());
   pbr_pipeline.cleanup(context.device());
   render_pass.cleanup(context.device());

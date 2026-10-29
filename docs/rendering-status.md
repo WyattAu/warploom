@@ -13,7 +13,7 @@ most important thing on this page: the renderer module's most impressive
 APIs are not used by the application.
 
 Proof runs under the Khronos validation layer. The full suite
-(660 tests, `warploom_unit_tests`) passes on an RTX 2060 with **0
+(662 tests, `warploom_unit_tests`) passes on an RTX 2060 with **0
 validation diagnostics and 0 leaked objects**; on CI's Mesa lavapipe
 software Vulkan, every ray-tracing test skips because the extensions are
 absent. asan-ubsan (581 tests, 0 diagnostics, 0 leaks) and tsan (581
@@ -59,7 +59,7 @@ Two verification milestones worth knowing when reading the Proof column:
 | Bloom (Karis bright-pass downsample; the tonemap's binding-1 add IS the upsample) | yes | yes — opt-in via `RendererConfig::enable_bloom` (`WARPLOOM_BLOOM=1`), runtime-togglable via `set_bloom` (v1.10) | `test_postprocessing`; the chain's bloom-on frame pinned by hash, toggle round-trip bit-identical, live wire proof on the RTX 2060 |
 | PBR (Cook-Torrance, metallic-roughness, bindless, tangent-space normals, emissive) | yes | yes | `test_pbr_scene`; the app's own fragment path |
 | IBL: prefiltered env + irradiance + BRDF LUT bake | yes | yes | `test_pbr_ibl`; `VulkanIblBaker` is called by the app |
-| Analytic sky (Rayleigh + Mie, sun disc) | yes | partial | `test_sky_integration`; `test_pt_sky_parity` proves the raster pass and the PT miss branch evaluate one shared model (pixel parity max 0.0137, orientation pinned) — the app only uses it *baked into* IBL |
+| Analytic sky (Rayleigh + Mie, sun disc) | yes | yes — the viewport draws it as the background pre-draw (cubes, mannequin and city branches) and runs the tracer in sky mode 1 with the baked light's sun | `test_sky_integration`; `test_pt_sky_parity` proves the raster pass and the PT miss branch evaluate one shared model (pixel parity max 0.0137, orientation pinned); `VulkanSkyPass.*` pins the one owned pipeline+UBO construction (sabotage-checked); live on the RTX 2060 the two backgrounds agree — raster top-band (212,227,235) vs PT (208,225,235) at identical views, PT sky-patch std 0.66 at 120 samples. Caveat: the GPU-driven draw path bypasses `record_pbr_scene`, so gd mode keeps the clear colour |
 | Shadow map: depth pre-pass, PCF, bias | yes | yes — via `record_shadow_pre_pass`, the hand-rolled copy deleted | `test_shadow_mapping`, `test_rt_shadows`; app A/B: identical texel occupancy, uniform bias shift |
 | Mesh LOD selection (GPU projected-size) | yes | yes | `test_lod_integration`, `test_gpu_driven_cull` |
 | Per-object static/rigged pipeline switch in one pass | yes | yes | `test_pbr_frame_variants` |
@@ -173,16 +173,26 @@ document projects into one ECS driven by one `tick(FrameInput)`, timeline
 evaluation is interpolated and eased, and render mode is a protocol command.
 What remains, in priority order:
 
-1. Background parity between the two render paths. The earlier "no
-   environment light" diagnosis was wrong and is retracted: the cubes scene's
-   `ibl_set` is assigned and the IBL bake contributes (frame mean 104.3 with
-   IBL, 85.8 with `WARPLOOM_LEGACY_LIGHTING=1` at frame 30). The image looked
-   unlit because it was vertically inverted -- `scene_camera_projection` now
-   negates its y row (Vulkan NDC y is down). What remains is that the raster
-   path draws no sky for this scene (the clear colour shows) while the tracer
-   renders a constant white sky. The two sky *models* are proven identical
-   headlessly (`test_pt_sky_parity`), so what remains is scene-authoring
-   (wiring a sky into the scene), not model divergence.
+1. Background parity between the two render paths — CLOSED. The earlier
+   "no environment light" diagnosis was wrong and is retracted: the cubes
+   scene's `ibl_set` is assigned and the IBL bake contributes (frame mean
+   104.3 with IBL, 85.8 with `WARPLOOM_LEGACY_LIGHTING=1` at frame 30).
+   The image looked unlit because it was vertically inverted --
+   `scene_camera_projection` now negates its y row (Vulkan NDC y is down).
+   The remaining gap was scene-authoring (no sky wired into the scene),
+   not model divergence, and it is now wired: `VulkanSkyPass` owns the one
+   raster-sky construction (pipeline + SkyParams UBO against the scene
+   render pass, per-frame view from the recorded camera, fixed
+   surface-anchor origin because the unit-scale eye sits inside the shell),
+   applied in `record_scene_into` for the cubes, mannequin and city
+   branches, and the tracer runs in sky mode 1 with the baked light's sun
+   and the parity harness's canonical coefficients. Measured live on the
+   RTX 2060: 91% blue-dominant raster frame with a bright-zenith-to-horizon
+   gradient, PT sky-patch std 0.66 at 120 samples, and cross-path top-band
+   means within 4 counts ((212,227,235) vs (208,225,235)). Validation A/B
+   is identical with and without the change (20 pre-existing HiZ dispatch
+   VUIDs in both arms, 0 new). Honest remainder: the GPU-driven draw path
+   bypasses `record_pbr_scene`, so gd mode still shows the clear colour.
 2. PT scene coverage. The tracer builds its AS from one cube + slab. The
    skinned, mannequin and city scenes have no PT geometry path, and bloom does
    not layer on the PT source.

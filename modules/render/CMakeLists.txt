@@ -65,6 +65,7 @@ add_library(warploom_render SHARED
     src/warploom/render/vulkan_rt_pipeline.cpp
     src/warploom/render/vulkan_rt_query.cpp
     src/warploom/render/vulkan_scene.cpp
+    src/warploom/render/vulkan_sky_pass.cpp
     src/warploom/render/vulkan_surface.cpp
     src/warploom/render/vulkan_swapchain.cpp
     src/warploom/render/vulkan_ui_renderer.cpp
