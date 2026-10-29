@@ -1,6 +1,10 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
+# Core PUBLIC-links physics (the session tick steps PhysicsWorld), so the
+# physics package is a link-time dependency of the exported target.
+# Co-installed prefixes resolve via find_package's relative-prefix search.
+find_dependency(WarploomPhysics)
 find_dependency(Threads)
 
 include("${CMAKE_CURRENT_LIST_DIR}/WarploomCoreTargets.cmake")

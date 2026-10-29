@@ -818,8 +818,19 @@ declares a slot 3.
       contract job is self-contained (estate checkout at `estate/` +
       `scripts/check_cpp_contract.py` — an inline heredoc was tried and
       is un-runnable under YAML block scalars, so it was replaced rather
-      than shipped), warploom's `test.yml` calls it and the local files
-      are deleted. Next in E7: the first dogfooding consumer repo.
+      than shipped), warploom's `test.yml` calls it and the local files      are deleted. Loop 23 (2026-10-29) closed E7's consumer half:
+      `WyattAu/warploom-game` (20-cube tower drop, 600 fixed steps, public
+      API only) proves capture→load reproduces the document byte-identically,
+      identical setups integrate bit-identically, and the pile fell and rests
+      (top 5.9 → 3.49, bottom 0.498). Its CI calls the estate `cpp-kit.yml`
+      (warploom-specific legs disabled), making it the second caller that
+      proves the kit outside warploom. Dogfooding paid immediately: two
+      install defects (physics missing `EXPORT_NAME`, core config missing
+      `find_dependency(WarploomPhysics)`) and a real replay defect
+      (same-frame open/close checkpoints collide in the scrubber ring, so
+      load restored the closing bytes and re-applied the log on top — fixed
+      with `restore_bytes`). E7 done; the next all-directions loop is the
+      content pipeline (glTF/compressed textures).
 
 ## The 0.1 gate
 

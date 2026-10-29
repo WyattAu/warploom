@@ -70,6 +70,17 @@ class ReplayScrubber final {
   [[nodiscard]] bool restore(std::uint64_t frame, SceneDocument& doc,
                              std::string& error);
 
+  //! Restores the document from checkpoint BYTES (not a ring lookup), with
+  //! the same two-layer verification as restore(). load_replay uses this
+  //! for the opening checkpoint: opening and closing can share a frame (a
+  //! capture with no Step between start and stop), and same-frame ring
+  //! insertion replaces newest-wins — so restoring the opening frame from
+  //! the ring can return the CLOSING bytes and the log then re-applies on
+  //! top of them.
+  [[nodiscard]] bool restore_bytes(const std::string& json,
+                                   std::uint64_t hash, SceneDocument& doc,
+                                   std::string& error);
+
   //! Hash check only (no mutation): is a checkpoint present for `frame`,
   //! and does its bytes still hash to the stored hash?
   [[nodiscard]] bool verify(std::uint64_t frame) const;

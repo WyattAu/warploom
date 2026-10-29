@@ -193,6 +193,29 @@ TEST(CommandRecorder, FreshSessionLoadReproducesByteIdenticalState) {
   std::remove(path.c_str());
 }
 
+TEST(CommandRecorder, LoadSucceedsWhenOpenAndCloseShareAFrame) {
+  // A capture with no Step between start and stop embeds opening and
+  // closing checkpoints at the SAME frame. Same-frame ring insertion
+  // replaces newest-wins, so restoring the opening frame from the ring
+  // returned the CLOSING bytes and the spawn re-applied on top of them
+  // (duplicated cube + closing-hash mismatch). load_replay restores the
+  // opening from the hydrated bytes, so this loads clean.
+  EditorSession live;
+  const std::string path = "/tmp/omnicpp_test_recorder_sameframe.replay";
+  std::string error;
+  ASSERT_TRUE(live.capture_start(0, "sameframe", error)) << error;
+  spawn_cube(live, "solo", 1.0);
+  ASSERT_TRUE(live.capture_stop(path, error)) << error;
+  EXPECT_EQ(live.document().objects.size(), 2U);  // env + cube
+
+  EditorSession loaded;
+  error.clear();
+  ASSERT_TRUE(loaded.load_replay(path, error)) << error;
+  EXPECT_EQ(loaded.document().objects.size(), 2U);
+  EXPECT_EQ(loaded.document().to_json(), live.document().to_json());
+  std::remove(path.c_str());
+}
+
 TEST(CommandRecorder, LoadRejectsGarbageTruncatedAndMissing) {
   EditorSession session;
   std::string error;

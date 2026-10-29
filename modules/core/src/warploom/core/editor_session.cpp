@@ -1650,9 +1650,16 @@ bool EditorSession::load_replay(const std::string& path,
   // Re-apply needs a defined start state: restore the EARLIEST checkpoint
   // (the capture-start snapshot; `start` embeds at the start frame before
   // any command exists, so earliest == opening) before replaying the log.
+  // Restored from the hydrated BYTES, not the ring: opening and closing
+  // can share a frame (a capture with no Step between start and stop),
+  // and same-frame ring insertion replaces newest-wins, so a ring lookup
+  // by frame can return the closing bytes and the log then re-applies on
+  // top of them (duplicated objects + a closing-hash mismatch).
   if (!hydrated.empty()) {
     std::string restore_error;
-    if (!scrubber_.restore(hydrated.front().frame, doc_, restore_error)) {
+    if (!scrubber_.restore_bytes(hydrated.front().json,
+                                  hydrated.front().hash, doc_,
+                                  restore_error)) {
       error = "load_replay: opening checkpoint failed to restore: " +
               restore_error;
       return false;

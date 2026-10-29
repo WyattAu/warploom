@@ -165,7 +165,12 @@ Loading a replay file (`load_replay` protocol command, v1.7) into a session:
 1. Parse + validate header (`schema_version == 1`, `format` matches). Reject
    otherwise (clean protocol error, state untouched).
 2. Every checkpoint record is hash-verified (bytes → hash) and inserted into
-   the session's scrubber ring.
+   the session's scrubber ring. The opening state is restored from the
+   hydrated opening BYTES, not from a ring lookup by frame: opening and
+   closing can share a frame (a capture with no Step between start and
+   stop), and same-frame ring insertion replaces newest-wins, so a lookup
+   by frame could return the closing bytes and the log would re-apply on
+   top of them.
 3. **Re-apply the command log in `seq` order** through the session's normal
    `on_control` path (same mutation authority as live editing, so undo
    history, bindings, and validation behave identically), executing the

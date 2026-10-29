@@ -85,23 +85,26 @@ bool ReplayScrubber::restore(std::uint64_t frame, SceneDocument& doc,
     error = "scrub: no checkpoint at frame " + std::to_string(frame);
     return false;
   }
-  if (fnv1a64(cp->json.data(), cp->json.size()) != cp->hash) {
-    error = "scrub: checkpoint at frame " + std::to_string(frame) +
-            " failed hash verification";
+  return restore_bytes(cp->json, cp->hash, doc, error);
+}
+
+bool ReplayScrubber::restore_bytes(const std::string& json,
+                                   std::uint64_t hash, SceneDocument& doc,
+                                   std::string& error) {
+  if (fnv1a64(json.data(), json.size()) != hash) {
+    error = "scrub: checkpoint bytes failed hash verification";
     return false;
   }
   SceneDocument parsed;
   // Node types validate against the target's registry: seed the builtins so
   // graph-bearing documents restore (same contract as LoadDocument).
   register_builtin_node_types(parsed.node_graph);
-  if (!SceneDocument::from_json(cp->json, parsed, error)) {
-    error = "scrub: checkpoint at frame " + std::to_string(frame) +
-            " failed to parse: " + error;
+  if (!SceneDocument::from_json(json, parsed, error)) {
+    error = "scrub: checkpoint bytes failed to parse: " + error;
     return false;
   }
-  if (parsed.to_json() != cp->json) {
-    error = "scrub: checkpoint at frame " + std::to_string(frame) +
-            " failed round-trip verification";
+  if (parsed.to_json() != json) {
+    error = "scrub: checkpoint bytes failed round-trip verification";
     return false;
   }
   doc = std::move(parsed);

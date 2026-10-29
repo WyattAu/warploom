@@ -20,6 +20,7 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 add_library(warploom_physics INTERFACE)
+set_target_properties(warploom_physics PROPERTIES EXPORT_NAME physics)
 add_library(Warploom::physics ALIAS warploom_physics)
 
 target_include_directories(warploom_physics INTERFACE

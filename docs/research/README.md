@@ -250,6 +250,18 @@ not.
   and replaced with an estate checkout + `scripts/check_cpp_contract.py`.
   Sabotage A/B both directions. Next: the dogfooding consumer repo.
 
+## Loop 23 — first dogfooding consumer (2026-10-29, second of the all series)
+
+- [loop23-dogfooding-consumer.md](loop23-dogfooding-consumer.md) —
+  `WyattAu/warploom-game`: 20-cube tower drop, three claims (replay
+  reproduces, external determinism, the pile fell). Second `cpp-kit.yml`
+  caller (warploom legs disabled via the new inputs). Three defects no
+  in-tree test could find: two install (`EXPORT_NAME`, missing
+  `find_dependency`) and one replay (same-frame open/close ring
+  collision → `restore_bytes` + regression test, both sabotage-checked).
+  Session-level Step is ack-only by design — the game is the host. Next:
+  the content pipeline (glTF/compressed textures).
+
 ## Follow-up searches for the next loop
 
 - Visual-scripting execution models (dataflow pull vs imperative push, and
