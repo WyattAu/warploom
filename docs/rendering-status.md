@@ -13,10 +13,10 @@ most important thing on this page: the renderer module's most impressive
 APIs are not used by the application.
 
 Proof runs under the Khronos validation layer. The full suite
-(607 tests, `warploom_unit_tests`) passes on an RTX 2060 with **0
+(660 tests, `warploom_unit_tests`) passes on an RTX 2060 with **0
 validation diagnostics and 0 leaked objects**; on CI's Mesa lavapipe
 software Vulkan, every ray-tracing test skips because the extensions are
-absent. asan-ubsan (540 tests, 0 diagnostics, 0 leaks) and tsan (540
+absent. asan-ubsan (581 tests, 0 diagnostics, 0 leaks) and tsan (581
 tests, 0 data races) build and run on the Vulkan-off Debug tree.
 
 Two verification milestones worth knowing when reading the Proof column:
@@ -59,7 +59,7 @@ Two verification milestones worth knowing when reading the Proof column:
 | Bloom (Karis bright-pass downsample; the tonemap's binding-1 add IS the upsample) | yes | yes — opt-in via `RendererConfig::enable_bloom` (`WARPLOOM_BLOOM=1`), runtime-togglable via `set_bloom` (v1.10) | `test_postprocessing`; the chain's bloom-on frame pinned by hash, toggle round-trip bit-identical, live wire proof on the RTX 2060 |
 | PBR (Cook-Torrance, metallic-roughness, bindless, tangent-space normals, emissive) | yes | yes | `test_pbr_scene`; the app's own fragment path |
 | IBL: prefiltered env + irradiance + BRDF LUT bake | yes | yes | `test_pbr_ibl`; `VulkanIblBaker` is called by the app |
-| Analytic sky (Rayleigh + Mie, sun disc) | yes | partial | `test_sky_integration`; the app only uses it *baked into* IBL |
+| Analytic sky (Rayleigh + Mie, sun disc) | yes | partial | `test_sky_integration`; `test_pt_sky_parity` proves the raster pass and the PT miss branch evaluate one shared model (pixel parity max 0.0137, orientation pinned) — the app only uses it *baked into* IBL |
 | Shadow map: depth pre-pass, PCF, bias | yes | yes — via `record_shadow_pre_pass`, the hand-rolled copy deleted | `test_shadow_mapping`, `test_rt_shadows`; app A/B: identical texel occupancy, uniform bias shift |
 | Mesh LOD selection (GPU projected-size) | yes | yes | `test_lod_integration`, `test_gpu_driven_cull` |
 | Per-object static/rigged pipeline switch in one pass | yes | yes | `test_pbr_frame_variants` |
@@ -180,7 +180,9 @@ What remains, in priority order:
    unlit because it was vertically inverted -- `scene_camera_projection` now
    negates its y row (Vulkan NDC y is down). What remains is that the raster
    path draws no sky for this scene (the clear colour shows) while the tracer
-   renders a constant white sky.
+   renders a constant white sky. The two sky *models* are proven identical
+   headlessly (`test_pt_sky_parity`), so what remains is scene-authoring
+   (wiring a sky into the scene), not model divergence.
 2. PT scene coverage. The tracer builds its AS from one cube + slab. The
    skinned, mannequin and city scenes have no PT geometry path, and bloom does
    not layer on the PT source.
