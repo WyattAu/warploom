@@ -89,17 +89,21 @@ void main() {
                            (2.0 * pc.tan_half_fov);
 
     // --- LOD selection: first threshold the projected size clears ----------
+    // The host count is clamped to the array bound (GLSL out-of-bounds
+    // array indexing is undefined behaviour; past index 3 lies outside the
+    // push range entirely). Identity for every in-tree count (<= 4).
+    const uint lod_n = min(pc.lod_threshold_count, 4u);
     uint level = 0u;
-    for (uint t = 0; t + 1u < pc.lod_threshold_count; ++t) {
+    for (uint t = 0; t + 1u < lod_n; ++t) {
       if (screen_h < pc.lod_thresholds[t]) {
         level = t + 1u;
         break;
       }
     }
     // Sane fallback when every threshold misses: coarsest level.
-    if (level == 0u && pc.lod_threshold_count > 1u &&
-        screen_h < pc.lod_thresholds[pc.lod_threshold_count - 1u]) {
-      level = pc.lod_threshold_count - 1u;
+    if (level == 0u && lod_n > 1u &&
+        screen_h < pc.lod_thresholds[lod_n - 1u]) {
+      level = lod_n - 1u;
     }
 
     // Payload fields relative to `base` (= object start + 18):

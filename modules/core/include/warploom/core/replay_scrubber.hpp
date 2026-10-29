@@ -63,8 +63,10 @@ class ReplayScrubber final {
   //! time hash and (b) the parsed document re-serializes to the exact same
   //! bytes. Returns false + `error` when the frame is not checkpointed, a
   //! check fails, or parsing fails; `doc` untouched on failure. NOTE: this
-  //! does NOT clear the session's command history — protocol-level scrub
-  //! (v1.6) resets the stack so post-restore undo cannot cross a time warp.
+  //! is document-only — the session's `scrub_to` additionally resets the
+  //! command stack, disarms clip record/play, and drops selections the
+  //! restored document no longer has, so post-restore undo cannot cross
+  //! a time warp.
   [[nodiscard]] bool restore(std::uint64_t frame, SceneDocument& doc,
                              std::string& error);
 

@@ -517,6 +517,41 @@ TEST(NodeScriptNodes, ScriptNodeIsDeterministicAcrossEvaluations) {
   (void)first;
 }
 
+TEST(NodeScriptNodes, OutOfContractPinCountsDegradeToZeroWithoutCrashing) {
+  // Regression class: pin counts size heap vectors from a document double.
+  // A blind cast turned inputs=1e18 into a bad_alloc and inputs=-1 into a
+  // wrap; now they degrade to zeros on out0, total and deterministic.
+  // Note: make_doc registers builtins but NOT the unbound script type —
+  // register it here like the neighboring tests do.
+  auto doc = make_doc();
+  ed::register_script_node_type(doc.node_graph);
+  const auto bad = [&](std::map<std::string, ed::NodeValue> params) {
+    const auto id = doc.node_graph.add_node("script", params);
+    std::string err;
+    EXPECT_TRUE(doc.node_graph.evaluate(err)) << err;
+    const auto* node = doc.node_graph.find(id);
+    EXPECT_DOUBLE_EQ(node->outputs.at("out0").number, 0.0);
+  };
+  bad({{"module", ed::NodeValue::make_string("test_doubler")},
+       {"inputs", ed::NodeValue::make_number(10.0)},
+       {"outputs", ed::NodeValue::make_number(1.0)}});
+  bad({{"module", ed::NodeValue::make_string("test_doubler")},
+       {"inputs", ed::NodeValue::make_number(-1.0)},
+       {"outputs", ed::NodeValue::make_number(1.0)}});
+  bad({{"module", ed::NodeValue::make_string("test_doubler")},
+       {"inputs", ed::NodeValue::make_number(1e18)},
+       {"outputs", ed::NodeValue::make_number(1.0)}});
+  bad({{"module", ed::NodeValue::make_string("test_doubler")},
+       {"inputs", ed::NodeValue::make_number(1.5)},
+       {"outputs", ed::NodeValue::make_number(1.0)}});
+  bad({{"module", ed::NodeValue::make_string("test_doubler")},
+       {"inputs", ed::NodeValue::make_string("one")},
+       {"outputs", ed::NodeValue::make_number(1.0)}});
+  bad({{"module", ed::NodeValue::make_string("test_doubler")},
+       {"inputs", ed::NodeValue::make_number(0.0)},
+       {"outputs", ed::NodeValue::make_number(1.0)}});
+}
+
 TEST(NodeScriptNodes, UnknownModuleDegradesToZeroOutputs) {
   auto doc = make_doc();
   ed::register_script_node_type(doc.node_graph);

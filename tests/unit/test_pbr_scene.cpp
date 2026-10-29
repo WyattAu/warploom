@@ -54,7 +54,7 @@ SceneMatrix make_perspective(float fov_y_degrees, float aspect, float znear,
   SceneMatrix m = scene_identity_matrix();
   const float f = 1.0f / std::tan(fov_y_degrees * 3.14159265f / 360.0f);
   m[0] = f / aspect;
-  m[5] = f;
+  m[5] = -f;  // Vulkan NDC y points DOWN: +f renders the scene inverted
   m[10] = (zfar + znear) / (znear - zfar);
   m[11] = -1.0f;
   m[14] = (2.0f * zfar * znear) / (znear - zfar);
@@ -710,6 +710,78 @@ TEST(VulkanHardware, PbrEmissiveAddsUnlitColor) {
   EXPECT_GT(r, 150U) << "emissive red not bright enough at centre";
   EXPECT_LT(g, 30U);
   EXPECT_LT(b, 30U);
+}
+
+//! ORIENTATION: world +Y must land in the TOP half of the framebuffer.
+//!
+//! This is the hardware-level guard for the sign of the projection's y row.
+//! `scene_camera_projection` once returned `p[5] = +f` (an OpenGL-style NDC)
+//! while the renderer feeds it to Vulkan, whose NDC y points DOWN, so every
+//! scene rendered upside down. Nothing in this suite noticed, because every
+//! existing assertion is symmetric under a vertical flip (bright-pixel counts,
+//! centre pixel, cube presence). The viewport showed the ground slab above the
+//! cubes and the black clear colour below them, which read as a lighting
+//! failure for several rounds.
+//!
+//! Two emissive cubes -- red at world +Y, green at world -Y -- make the flip
+//! visible: readback rows are top-left origin, so with the correct sign the
+//! upper probe (row h/4) is red and the lower probe (row 13h/16) is green.
+//! With `+f` the two swap, and the test fails with both colours named.
+TEST(VulkanHardware, PbrSceneOrientationIsUpright) {
+  PbrSceneHarness h;
+  if (!h.initialize("pbr_orientation")) {
+    GTEST_SKIP() << "Vulkan context or descriptor indexing unavailable";
+  }
+
+  PbrMaterialData materials[2]{};
+  for (auto& m : materials) {
+    m.base_color_factor = {0.0f, 0.0f, 0.0f, 1.0f};  // no ambient/diffuse
+    m.metallic_factor = 0.0f;
+    m.roughness_factor = 1.0f;
+  }
+  materials[0].emissive_factor = {1.0f, 0.0f, 0.0f};  // red, world +Y
+  materials[1].emissive_factor = {0.0f, 1.0f, 0.0f};  // green, world -Y
+  h.write_materials(materials, 2U);
+
+  // z = -8 keeps both cubes fully inside the 45-degree frustum: the visible
+  // half-height there is 8 * tan(22.5) = 3.31 world units, and cube centres at
+  // y = +/-2 project to +/-77 px around the 256x256 centre with a half-height
+  // of 39 px, so row 64 is inside the upper cube and row 208 inside the lower.
+  VulkanPbrScene scene = make_base_scene(h);
+  ScenePbrObject upper;
+  upper.mesh = &h.cube.mesh;
+  upper.model = make_translation(0.0f, 2.0f, -8.0f);
+  upper.material_index = 0U;
+  scene.objects.push_back(upper);
+  ScenePbrObject lower;
+  lower.mesh = &h.cube.mesh;
+  lower.model = make_translation(0.0f, -2.0f, -8.0f);
+  lower.material_index = 1U;
+  scene.objects.push_back(lower);
+
+  const omnicpp_test::ReadbackResult result = h.render(scene);
+  h.cleanup();
+
+  ASSERT_TRUE(result.submitted);
+  EXPECT_GT(result.non_clear_pixels, 4000U)
+      << "neither emissive cube rendered";
+
+  const auto channels = [](std::uint32_t pixel) {
+    return std::array<std::uint32_t, 3>{pixel & 0xFFU, (pixel >> 8U) & 0xFFU,
+                                        (pixel >> 16U) & 0xFFU};
+  };
+  const auto upper_rgb = channels(result.upper_triangle_pixel);
+  const auto lower_rgb = channels(result.lower_triangle_pixel);
+
+  EXPECT_GT(upper_rgb[0], upper_rgb[1] + 20U)
+      << "row h/4 is not the red (+Y) cube: world +Y is not at the top of the "
+         "frame. upper=" << upper_rgb[0] << "," << upper_rgb[1] << ","
+      << upper_rgb[2] << " -- the projection's y row has the wrong sign "
+         "(Vulkan NDC y is down; p[5] must be -f)";
+  EXPECT_GT(lower_rgb[1], lower_rgb[0] + 20U)
+      << "row 13h/16 is not the green (-Y) cube: world -Y is not at the "
+         "bottom of the frame. lower=" << lower_rgb[0] << "," << lower_rgb[1]
+      << "," << lower_rgb[2];
 }
 
 //! baseColorTexture through the PBR path: a 1x1 red texture bound at set-1

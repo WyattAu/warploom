@@ -144,6 +144,10 @@ error, state untouched). No partial loads.
 - `start_capture` itself embeds one checkpoint at the start frame.
 - Each `scrub_start` command recorded during capture embeds another
   checkpoint (that is exactly what a scrub_start does — it captures).
+- Each recorded `scrub_to` whose target frame has no checkpoint yet
+  embeds the restored document at the target frame (a warp to a
+  pre-capture checkpoint would otherwise write a file that fails to load
+  itself at that exact command).
 - Everything else is the command log.
 
 Rationale: checkpoints are the expensive, high-value records (multi-KiB
@@ -174,10 +178,20 @@ Loading a replay file (`load_replay` protocol command, v1.7) into a session:
    produced — documented, not hidden: the failure is reported, the
    scrubber keeps the hydrated checkpoints, and `scrub_to` to the last
    good checkpoint recovers a known state.
-4. The document ends at the state after the final command — which, for a
-   deterministic engine, must equal the state hashed in the final checkpoint
-   if the writer embedded one at capture end. (Writers SHOULD embed a
-   final `scrub_start`-style checkpoint; readers MAY verify this and warn.)
+4. The document ends at the state after the final command — which MUST
+   equal the state hashed in the closing checkpoint, and the loader
+   enforces it: after re-apply it hashes the document and compares
+   against the last checkpoint record in file order (which `stop_capture`
+   always writes last — a mid-file `scrub_start` may target a frame ahead
+   of the final log position, so greatest-frame would pick the wrong
+   record), failing the load loudly on mismatch. Writers always embed
+   that closing checkpoint (`stop_capture` snapshots the live document),
+   so a mismatch means the capture contains effects outside the command
+   log (e.g. host ticks never issued as commands) and the file cannot
+   replay itself. Verified by
+   `TimelineSession.LoadReplayVerifiesEndStateAgainstClosingCheckpoint`.
+   Files with no checkpoint records skip the check (nothing to compare
+   against).
 
 Scrub-to-a-checkpoint after load is plain W1 time warp (history clears at
 the warp, same as live).
@@ -192,10 +206,16 @@ the warp, same as live).
   frame, ends recording. Requires capture active and a non-empty path.
 - `capture_status`: query; detail JSON `{recording, frame, commands,
   checkpoints, path}`.
-- Capture state is session-local: `load_document`/`load_replay`/`scrub_to`
-  do NOT stop an active capture (the recorder logs them like any other
-  command), but `stop_capture` after a load records the loaded state's
-  checkpoint — self-consistent by construction.
+- Capture state is session-local. `load_document` and `load_replay`
+  are REJECTED while a capture is active: both replace the whole document
+  with bytes no command in the file could reproduce (the loader replays
+  from the single opening checkpoint plus the log), so allowing them
+  would write files that silently diverge on load. Stop the capture
+  first, then load. `scrub_to` does not stop a capture either, but the
+  warp target's bytes must travel in the file or the replayed `scrub_to`
+  finds no checkpoint: the session embeds the restored document at the
+  target frame when the recorder has no checkpoint there yet
+  (`scrub_start`-prepared warps already do, so no byte is stored twice).
 
 ## Threading & determinism notes
 

@@ -190,7 +190,8 @@ What remains, in priority order:
 4. Real physics (D1): broadphase, shapes, joints, deterministic by
    construction, stepped inside the shared tick.
 5. RT sub-toggles (R2: reflections/AO) and GPU-driven skinned scenes (R3);
-   R6b waits on graph-shaped resource declarations, not on the planner.
+   R6b waits on the Vulkan side of the plan (create/alias/destroy), not on the
+   planner: Loop 13 derives the declarations from the node sequence now.
 
 - **Fullscreen coverage (fixed):** `fullscreen.vert` generated its third
   vertex as `(-1,1)` instead of `(-1,3)`, so every pass using it covered only

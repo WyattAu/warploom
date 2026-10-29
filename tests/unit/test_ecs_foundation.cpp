@@ -256,6 +256,74 @@ TEST(SystemScheduler, ParallelExecutionRunsIndependentSystemsConcurrently) {
   EXPECT_EQ(counter.load(), 3);
 }
 
+TEST(SystemScheduler, DependentSystemsNeverShareAWaveDespiteDisjointMasks) {
+  // Regression: the old mask-only partition put dependent systems with
+  // disjoint masks in the SAME wave, so run_parallel ran them concurrently
+  // and violated the dependency edge. A sabotage that drops the
+  // dependency check collapses these two waves back into one.
+  omnicpp::core::SystemScheduler scheduler;
+  omnicpp::core::ComponentMask pos_mask;
+  pos_mask.set(omnicpp::core::component_type_id<Position>());
+  omnicpp::core::ComponentMask vel_mask;
+  vel_mask.set(omnicpp::core::component_type_id<Velocity>());
+
+  scheduler.add_system(
+      {"producer", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {}, pos_mask});
+  scheduler.add_system(
+      {"consumer", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {"producer"}, vel_mask});
+  ASSERT_TRUE(scheduler.build_schedule());
+
+  const auto waves = scheduler.partition_into_waves();
+  ASSERT_EQ(waves.size(), 2u);
+  EXPECT_EQ(waves[0].size(), 1u);
+  EXPECT_EQ(waves[1].size(), 1u);
+
+  // Ordering is preserved through run_parallel: the consumer observes the
+  // producer's write even though the masks are disjoint.
+  omnicpp::core::World world;
+  auto e = world.create_entity();
+  world.add_component<Position>(e, {0.0f, 0.0f});
+  world.add_component<Velocity>(e, {0.0f, 0.0f});
+  omnicpp::core::SystemScheduler ordered;
+  ordered.add_system({"producer",
+                      [](omnicpp::core::World& w, std::uint64_t) {
+                        w.for_each<Position>([](omnicpp::core::Entity, Position& p) { p.x = 42.0f; });
+                      },
+                      {}, pos_mask});
+  ordered.add_system({"consumer",
+                      [](omnicpp::core::World& w, std::uint64_t) {
+                        w.for_each<Position, Velocity>(
+                            [](omnicpp::core::Entity, Position& p, Velocity& v) { v.dx = p.x; });
+                      },
+                      {"producer"}, vel_mask});
+  ASSERT_TRUE(ordered.build_schedule());
+  omnicpp::core::ThreadPool pool(4);
+  for (int i = 0; i < 50; ++i) {
+    world.get_component<Position>(e).x = 0.0f;
+    world.get_component<Velocity>(e).dx = 0.0f;
+    ordered.run_parallel(world, static_cast<std::uint64_t>(i), pool);
+    EXPECT_FLOAT_EQ(world.get_component<Velocity>(e).dx, 42.0f) << "iter " << i;
+  }
+}
+
+TEST(SystemScheduler, IndependentDisjointMasksShareOneWave) {
+  // The other direction: systems with no edge and disjoint masks MUST share
+  // a wave, or the fix over-serializes and parallel execution is lost.
+  omnicpp::core::SystemScheduler scheduler;
+  omnicpp::core::ComponentMask pos_mask;
+  pos_mask.set(omnicpp::core::component_type_id<Position>());
+  omnicpp::core::ComponentMask vel_mask;
+  vel_mask.set(omnicpp::core::component_type_id<Velocity>());
+  scheduler.add_system(
+      {"a", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {}, pos_mask});
+  scheduler.add_system(
+      {"b", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {}, vel_mask});
+  ASSERT_TRUE(scheduler.build_schedule());
+  const auto waves = scheduler.partition_into_waves();
+  ASSERT_EQ(waves.size(), 1u);
+  EXPECT_EQ(waves[0].size(), 2u);
+}
+
 TEST(Query, SingleComponentQuery) {
   omnicpp::core::World world;
   auto e1 = world.create_entity();

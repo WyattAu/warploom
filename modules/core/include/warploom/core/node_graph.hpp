@@ -46,8 +46,15 @@ struct NodePinDesc final {
 //! Evaluation context: engine-provided inputs available to every node.
 //! Deterministic — hosts drive time/tick, never the nodes themselves.
 struct GraphContext final {
-  double time{0.0};        //!< simulation seconds
-  std::uint64_t tick{0};   //!< evaluation counter
+  double time{0.0};        //!< simulation seconds (host-driven)
+  std::uint64_t tick{0};   //!< evaluation counter (host-driven)
+  //! Per-node tick delta, set by evaluate_with for EACH node from that
+  //! node's own previous evaluation time (0.0 on its first evaluation).
+  //! Node functions must read dt here, never from captured host state:
+  //! a lambda shared by a whole node TYPE cannot tell its instances apart,
+  //! so per-node state kept in the type is both shared across instances
+  //! (every node after the first sees dt=0) and invisible to replay.
+  double dt{0.0};
 };
 
 //! One evaluated node instance.
@@ -81,7 +88,10 @@ struct NodeType final {
                     std::map<std::string, NodeValue>& outputs)>
       evaluate;
   //! Context-aware alternative (M13): time/tick-driven node types set this
-  //! INSTEAD of `evaluate`. Called with the graph's current context.
+  //! INSTEAD of `evaluate`. Called with the node's own context copy: time
+  //! and tick are the graph's, dt is this node's tick delta (0 on its first
+  //! evaluation). Must stay a pure function of (params, inputs, context) —
+  //! no captured mutable state (see GraphContext::dt).
   std::function<void(const std::map<std::string, NodeValue>& params,
                     const std::map<std::string, NodeValue>& inputs,
                     std::map<std::string, NodeValue>& outputs,
@@ -191,6 +201,14 @@ class NodeGraph final {
   [[nodiscard]] static bool from_json(std::string_view text, NodeGraph& out,
                                       std::string& error);
 
+  //! Clears per-node evaluation state (previous evaluation times). Replay
+  //! and scrub-seeks re-simulate from a snapshot, which starts with empty
+  //! eval state — call this when reusing one graph object for a new history
+  //! (fresh/deserialized graphs start empty). Without it, re-evaluating the
+  //! same object replays dt=0 rather than the recorded deltas, which is
+  //! correct behaviour for eval-local state but the wrong call sequence.
+  void reset_eval_state() noexcept { last_node_time_.clear(); }
+
  private:
   //! True when `target` is reachable from `source` through output->input
   //! links (cycle check walks the link graph downstream).
@@ -202,7 +220,11 @@ class NodeGraph final {
   std::vector<NodeType> types_{};
   std::vector<GraphNode> nodes_{};  // id order (sorted by construction)
   std::vector<GraphLink> links_{};
-  GraphContext context_{};
+  GraphContext context_;
+  //! Previous evaluation time per node id (ordered map: iteration, if it
+  //! ever happens, is deterministic). Eval-local, never serialized: part
+  //! of the run, not of the snapshot — see reset_eval_state().
+  std::map<std::uint64_t, double> last_node_time_{};
   std::uint64_t next_node_id_{1};
   std::uint64_t version_{0};
 };

@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "warploom/core/contract.hpp"
+#include "warploom/core/numeric_cast.hpp"
 #include "warploom/core/script_module.hpp"
 
 namespace warploom::editor {
@@ -72,10 +73,6 @@ const NodePinDesc* find_pin(const std::vector<NodePinDesc>& pins,
   }
   return nullptr;
 }
-
-//! Error sink for module loads inside evaluation (errors degrade to zero
-//! outputs; the scratch keeps the evaluate signature pure).
-std::string g_error_scratch;
 
 }  // namespace
 
@@ -362,9 +359,19 @@ bool NodeGraph::evaluate_with(const GraphContext& context,
       }
       node->inputs[link.to_pin] = out_it->second;
     }
+    // Per-node tick delta: a pure function of (node id, time sequence).
+    // Stored in the graph — never in the node TYPE, whose lambdas are
+    // shared by every instance of that type (per-type state made every
+    // node after the first observe dt=0 and hid the state from replay).
+    GraphContext node_ctx = context;
+    const auto prev_it = last_node_time_.find(id);
+    node_ctx.dt = (prev_it == last_node_time_.end())
+                      ? 0.0
+                      : context.time - prev_it->second;
+    last_node_time_[id] = context.time;
     if (type->context_evaluate) {
       type->context_evaluate(node->params, node->inputs, node->outputs,
-                             context);
+                             node_ctx);
     } else {
       type->evaluate(node->params, node->inputs, node->outputs);
     }
@@ -1059,25 +1066,52 @@ void register_script_node_type(NodeGraph& graph) {
                   std::map<std::string, NodeValue>& outputs) {
     // Resolve the module per call (cheap string lookup; the module itself
     // is process-cached by name inside ScriptModule's builtin/shared lists).
+    // A local error sink: the old file-scope scratch string was mutable
+    // process-global state on the evaluation path (a data race under any
+    // concurrent evaluate, and replay-visible state that is not snapshotted).
+    std::string load_error;
     const auto mod_it = params.find("module");
     const auto n_in_it = params.find("inputs");
     const auto n_out_it = params.find("outputs");
     const std::string module_name =
-        mod_it != params.end() ? mod_it->second.text : std::string();
-    const std::size_t n_in =
-        n_in_it != params.end()
-            ? static_cast<std::size_t>(n_in_it->second.number)
-            : 1U;
-    const std::size_t n_out =
-        n_out_it != params.end()
-            ? static_cast<std::size_t>(n_out_it->second.number)
-            : 1U;
+        (mod_it != params.end() &&
+         mod_it->second.type == NodeValue::Type::String)
+            ? mod_it->second.text
+            : std::string();
+    // Pin counts are structural: they size heap vectors, so they go
+    // through the same range-checked conversion as every other
+    // double->int document boundary (a blind cast turned inputs=1e18 into
+    // a bad_alloc and inputs=-1 into a wrap). Bounds are the pin contract:
+    // 1..9. Out-of-contract counts degrade to zeros on the declared out0 —
+    // the same total-and-deterministic failure shape as an unknown module
+    // below, never a crash and never a silent 200-pin evaluation.
+    const auto parse_count =
+        [&](std::map<std::string, NodeValue>::const_iterator it,
+            std::uint64_t& out) {
+          if (it == params.end()) {
+            out = 1;
+            return true;
+          }
+          if (it->second.type != NodeValue::Type::Number ||
+              !::warploom::core::checked_double_to_uint64(it->second.number,
+                                                          out) ||
+              out < 1U || out > 9U) {
+            return false;
+          }
+          return true;
+        };
+    std::uint64_t n_in_u = 1, n_out_u = 1;
+    if (!parse_count(n_in_it, n_in_u) || !parse_count(n_out_it, n_out_u)) {
+      outputs["out0"] = NodeValue::make_number(0.0);
+      return;
+    }
+    const std::size_t n_in = static_cast<std::size_t>(n_in_u);
+    const std::size_t n_out = static_cast<std::size_t>(n_out_u);
 
-    // Gather inputs in pin-name order ("in0", "in1", ... — std::map's
-    // lexicographic order matches numeric order for single digits; the
-    // pin-count contract keeps graphs at 9 inputs, documented).
+    // Gather inputs by constructed pin key ("in0", "in1", ...), so map
+    // order is irrelevant; the 1..9 contract is enforced above.
     std::vector<double> in(n_in, 0.0);
-    for (std::size_t i = 0; i < n_in && i < 9U; ++i) {
+    for (std::size_t i = 0; i < n_in; ++i) {
       const std::string key = "in" + std::to_string(i);
       const auto it = inputs.find(key);
       if (it != inputs.end() &&
@@ -1090,7 +1124,7 @@ void register_script_node_type(NodeGraph& graph) {
     // simulation — the module sees a constant so replays stay exact.
     std::vector<double> out(n_out, 0.0);
     auto module = ::warploom::core::ScriptModule::load_builtin(module_name,
-                                                            g_error_scratch);
+                                                            load_error);
     if (module == nullptr) {
       // Unknown module: outputs stay zero (total + deterministic).
       for (std::size_t i = 0; i < n_out; ++i) {

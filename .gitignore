@@ -149,3 +149,6 @@ omni_scripts/**/__pycache__/
 packages/
 validation_reports/
 *_CPack_Packages/
+
+# Lean proof build products (proofs/ is a Lake package; the manifest stays)
+proofs/.lake/

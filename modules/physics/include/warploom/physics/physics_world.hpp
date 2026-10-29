@@ -91,12 +91,51 @@ class PhysicsWorld final {
   void set_substeps(std::uint32_t n) noexcept { substeps_ = n > 0U ? n : 1U; }
   [[nodiscard]] std::uint32_t substeps() const noexcept { return substeps_; }
 
+  //! XPBD contact compliance (Loop 12, staged after Small Steps SIGGRAPH
+  //! 2021 / XPBD MIG 2016). The sphere-sphere positional correction divides
+  //! by `inv_sum + compliance` instead of `inv_sum` alone, so alpha > 0
+  //! softens contacts and alpha = 0 is definitionally the historical stiff
+  //! projection (pinned by `Loop12ComplianceZeroIsBitIdentical` and by the
+  //! Lean proof `compliance_zero_is_stiff`). Default 0: existing replays
+  //! reproduce bit-identically unless the caller opts in.
+  void set_contact_compliance(float alpha) noexcept {
+    contact_compliance_ = alpha >= 0.0F ? alpha : 0.0F;
+  }
+  [[nodiscard]] float contact_compliance() const noexcept {
+    return contact_compliance_;
+  }
+
+  //! Jolt-style record-rewind-replay validator (Loop 12). When enabled,
+  //! every step runs the substep sequence TWICE from the same saved state
+  //! and compares position fingerprints; a mismatch increments
+  //! `determinism_violations()` instead of aborting, so tests pin it
+  //! without death-tests. Deterministic-by-construction when the contract
+  //! holds: both runs start from identical state and end in identical
+  //! state, so enabling the flag perturbs nothing. 2x physics cost while
+  //! on; default off, zero release cost. A velocity-only divergence with
+  //! identical positions cannot hide for more than one step: positions
+  //! integrate velocities every step, so it surfaces in the fingerprint on
+  //! the very next checked step.
+  void set_determinism_check(bool on) noexcept { determinism_check_ = on; }
+  [[nodiscard]] bool determinism_check() const noexcept {
+    return determinism_check_;
+  }
+  [[nodiscard]] std::uint64_t determinism_violations() const noexcept {
+    return determinism_violations_;
+  }
+
   void step(float dt) noexcept {
-    const std::uint32_t n = substeps_;
-    const float sub_dt = dt / static_cast<float>(n);
-    for (std::uint32_t sub = 0; sub < n; ++sub) {
-      step_single(sub_dt);
+    if (!determinism_check_) {
+      run_substeps(dt);
+      return;
     }
+    check_saved_ = bodies_;  // member scratch: steady-state no-alloc,
+                              // same policy as the other step scratch members
+    run_substeps(dt);
+    const std::uint64_t fp1 = position_fingerprint();
+    bodies_ = check_saved_;
+    run_substeps(dt);
+    if (position_fingerprint() != fp1) ++determinism_violations_;
   }
 
   //! One full solve at the given increment (integration + detect + resolve).
@@ -205,8 +244,12 @@ class PhysicsWorld final {
         for (const ContactSolve& solve : solve_contacts_) {
           PhysicsBody& a = bodies_[solve.a];
           PhysicsBody& b = bodies_[solve.b];
-          // Positional correction proportional to inverse mass.
-          const float corr = solve.penetration / solve.inv_sum;
+          // Positional correction proportional to inverse mass. The
+          // compliance term is 0 by default, i.e. the historical stiff
+          // projection; XPBD staging (Loop 12) opts in via
+          // set_contact_compliance().
+          const float corr =
+              solve.penetration / (solve.inv_sum + contact_compliance_);
           if (a.inverse_mass > 0.0f) {
             a.position[0] -= solve.nx * corr * a.inverse_mass;
             a.position[1] -= solve.ny * corr * a.inverse_mass;
@@ -413,9 +456,20 @@ class PhysicsWorld final {
     float vel_n{0.0f};
   };
 
+  //! The substep loop behind step(). Split out so the determinism-check
+  //! path can run the identical sequence twice from a saved state.
+  void run_substeps(float dt) noexcept {
+    const std::uint32_t n = substeps_;
+    const float sub_dt = dt / static_cast<float>(n);
+    for (std::uint32_t sub = 0; sub < n; ++sub) {
+      step_single(sub_dt);
+    }
+  }
+
   std::vector<PhysicsBody> bodies_;
   //! Per-step scratch, kept as members so the steady-state step allocates
   //! nothing after the first frame at a given body count.
+  std::vector<PhysicsBody> check_saved_{};
   std::vector<SolveSnapshot> solve_snapshot_{};
   std::vector<ContactSolve> solve_contacts_{};
   //! Uniform-grid scratch. Bodies are bucketed in index order, so each bucket
@@ -448,6 +502,9 @@ class PhysicsWorld final {
   float gravity_;
   std::uint32_t solver_iterations_{1};  //!< Positional-correction passes.
   std::uint32_t substeps_{1};           //!< Integration+solve substeps per step.
+  float contact_compliance_{0.0f};      //!< XPBD alpha, 0 = stiff (default).
+  bool determinism_check_{false};       //!< Double-step validator (debug).
+  std::uint64_t determinism_violations_{0};  //!< Mismatches seen while on.
 };
 
 }  // namespace warploom::physics

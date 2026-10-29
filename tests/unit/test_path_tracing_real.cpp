@@ -1149,6 +1149,238 @@ TEST(path_tracing_real, linear_mean_converges_to_a_constant) {
   tracer.destroy();
 }
 
+//! Loop 14 (research loop 3 of 10): the second moment must track E[X^2].
+//!
+//! read_second_moment returns E[X^2] per texel; with the mean m from
+//! read_mean, per-pixel variance is E[X^2] - m^2. Two properties, both of
+//! which a broken moment store fails:
+//!
+//!   1. Variance is POSITIVE on a frame with real Monte Carlo noise. A
+//!      zeroed moment store (descriptor never written, clear missing)
+//!      yields E[X^2] = 0 and hence negative variance -- the failure is a
+//!      sign flip, not a tolerance question.
+//!   2. A tiny RELATIVE EXCESS over bright texels: E2_luma/m_luma^2 - 1
+//!      (~1e-4 measured, band 2%). Dimensionless; sky texels contribute
+//!      exactly 0. Plus a MID-TONE absolute band: over texels with luma
+//!      in (0.05, 0.95) the linear impostor reads mean*(1-mean) ~= 0.11,
+//!      22x above truth (~5e-3). Band at 0.02: 4x above truth, 5x below
+//!      the impostor. Scene-specific, in the spirit of kExpected.
+//!   3. STABLE with depth: the sample variance converges to sigma^2 (8 vs
+//!      32 samples agree within 25%), while the mean's own noise floor
+//!      falls ~1/n. Measured 8.54e-5 -> 8.40e-5.
+//!
+//! A first version of this test asserted variance DECAYS with depth --
+//! wrong: E[X^2] - E[X]^2 estimates the sample variance sigma^2, which
+//! converges to a constant. The measurement corrected the spec.
+//! Deterministic seeding keeps all three bands stable run to run.
+//! The moment image is also pinned byte-identical across repeats, mirroring
+//! the accumulation contract (determinism test, pass 2).
+TEST(path_tracing_real, second_moment_tracks_squares) {
+  omnicpp::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("OmniCppPtSecondMoment", true).is_ok());
+  if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+  const std::uint32_t side = 32U;
+
+  omnicpp::render::VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+
+  const std::vector<float> box = {
+      -0.5F, -0.5F, -0.5F,  -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,  -0.5F, -0.5F, -0.5F,
+      -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, -0.5F, 0.5F,  -0.5F, -0.5F, -0.5F};
+  auto geo = alloc.create_buffer(box.size() * sizeof(float),
+                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  std::memcpy(geo.value().mapped, box.data(), box.size() * sizeof(float));
+  VkBufferDeviceAddressInfo ai{};
+  ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  ai.buffer = geo.value().buffer;
+
+  omnicpp::render::PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.width = side;
+  cfg.height = side;
+  cfg.max_bounces = 4U;
+  omnicpp::render::PathTracerMesh cube{};
+  cube.vertex_buffer_address = static_cast<std::uint64_t>(
+      vkGetBufferDeviceAddress(ctx.device(), &ai));
+  cube.triangle_count = 12U;
+  cube.max_vertex = 35U;
+  cfg.meshes = {cube};
+  cfg.instances = {
+      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+
+  omnicpp::render::VulkanPathTracer tracer;
+  ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
+                            ctx.graphics_queue(), qf, alloc, cfg)
+                  .is_ok());
+  omnicpp::render::PathTracerCamera cam{};
+  cam.position = {0.0F, 0.6F, 2.6F};
+  cam.forward = {0.0F, -0.2F, -1.0F};
+  cam.right = {1.0F, 0.0F, 0.0F};
+  cam.up = {0.0F, 1.0F, 0.0F};
+  tracer.set_camera(cam);
+
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+      ctx.device(), qf);
+  ASSERT_TRUE(pool.is_ok());
+
+  const auto accumulate = [&](std::uint32_t rounds) {
+    for (std::uint32_t r = 0; r < rounds; ++r) {
+      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+          ctx.device(), pool.value());
+      EXPECT_TRUE(cbr.is_ok());
+      VkCommandBuffer cb = cbr.value();
+      VkCommandBufferBeginInfo bi{};
+      bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+      tracer.record_round(cb, r, r == 0U);
+      EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+      VkFence fence{};
+      VkFenceCreateInfo fi{};
+      fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+      vkCreateFence(ctx.device(), &fi, nullptr, &fence);
+      VkSubmitInfo si{};
+      si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      si.commandBufferCount = 1U;
+      si.pCommandBuffers = &cb;
+      EXPECT_EQ(vkQueueSubmit(ctx.graphics_queue(), 1, &si, fence), VK_SUCCESS);
+      EXPECT_EQ(vkWaitForFences(ctx.device(), 1, &fence, VK_TRUE, UINT64_MAX),
+                VK_SUCCESS);
+      vkDestroyFence(ctx.device(), fence, nullptr);
+    }
+  };
+
+  // Frame statistics from the mean/second-moment pair. Unclamped on
+  // purpose -- a zeroed moment store goes NEGATIVE, which is exactly the
+  // failure signature. ASSERT_* cannot initialize a double, so sizes are
+  // checked by hand (equal by construction: same width_/height_). Luma
+  // weights match the convergence test's spatial-noise computation.
+  struct FrameStats {
+    double abs_var{0.0};     // E[X^2] - E[X]^2, averaged over all channels
+    double rel_excess{0.0};  // E2_luma/m_luma^2 - 1 over bright texels
+    double bright_frac{0.0};
+    double mid_var{0.0};     // abs variance over mid-tone texels only
+    double mid_frac{0.0};
+  };
+  const auto frame_stats = [&]() -> FrameStats {
+    FrameStats s;
+    auto m = tracer.read_mean();
+    auto e2 = tracer.read_second_moment();
+    EXPECT_TRUE(m.is_ok());
+    EXPECT_TRUE(e2.is_ok());
+    if (!m.is_ok() || !e2.is_ok()) return s;
+    if (m.value().size() != e2.value().size()) return s;
+    double total = 0.0;
+    double rel = 0.0;
+    double mid_total = 0.0;
+    std::size_t bright = 0U;
+    std::size_t mid = 0U;
+    const std::size_t texels = m.value().size() / 4U;
+    for (std::size_t t = 0; t < texels; ++t) {
+      double ml = 0.0;
+      double el = 0.0;
+      constexpr double w[3] = {0.2126, 0.7152, 0.0722};
+      for (std::size_t c = 0; c < 3U; ++c) {
+        const double mean = static_cast<double>(m.value()[t * 4U + c]);
+        const double sq = static_cast<double>(e2.value()[t * 4U + c]);
+        total += sq - mean * mean;
+        ml += w[c] * mean;
+        el += w[c] * sq;
+      }
+      // Bright-texel relative excess: dimensionless, so it separates the
+      // true second moment (excess ~= sigma^2/mu^2, ~1e-4) from the linear
+      // impostor (excess = 1/mu - 1, ~0.3-1.0) by orders of magnitude.
+      // Sky texels (mu = E2 = 1) contribute exactly 0.
+      if (ml > 0.5) {
+        rel += el / (ml * ml) - 1.0;
+        ++bright;
+      }
+      if (ml > 0.05 && ml < 0.95) {
+        mid_total += (el - ml * ml);
+        ++mid;
+      }
+    }
+    s.abs_var = total / static_cast<double>(texels * 3U);
+    s.bright_frac =
+        static_cast<double>(bright) / static_cast<double>(texels);
+    if (bright > 0U) s.rel_excess = rel / static_cast<double>(bright);
+    s.mid_frac = static_cast<double>(mid) / static_cast<double>(texels);
+    if (mid > 0U) s.mid_var = mid_total / static_cast<double>(mid);
+    return s;
+  };
+
+  tracer.reset_accumulation();
+  accumulate(8U);
+  const FrameStats st8 = frame_stats();
+  auto moment8a = tracer.read_second_moment();
+  ASSERT_TRUE(moment8a.is_ok());
+  tracer.reset_accumulation();
+  accumulate(32U);
+  const FrameStats st32 = frame_stats();
+  std::printf("Loop14 diagnostics: abs8=%.6e abs32=%.6e rel8=%.6e "
+               "rel32=%.6e bright=%.3f midvar8=%.6e midvar32=%.6e mid=%.3f\n",
+               st8.abs_var, st32.abs_var, st8.rel_excess, st32.rel_excess,
+               st8.bright_frac, st8.mid_var, st32.mid_var, st8.mid_frac);
+
+  // Byte-identical moment image across repeats (the pass-2 contract,
+  // extended to the second moment): a fresh 8-sample run reproduces
+  // moment8a bit-for-bit -- equal depths, unlike a read after the
+  // 32-sample run.
+  tracer.reset_accumulation();
+  accumulate(8U);
+  auto moment8b = tracer.read_second_moment();
+  ASSERT_TRUE(moment8b.is_ok());
+  ASSERT_EQ(moment8a.value().size(), moment8b.value().size());
+  EXPECT_EQ(std::memcmp(moment8a.value().data(), moment8b.value().data(),
+                        moment8a.value().size() * sizeof(float)),
+            0)
+      << "second moment must be byte-identical across repeats";
+
+  tracer.destroy();
+  vkDestroyCommandPool(ctx.device(), pool.value(), nullptr);
+  auto keep_geo = geo.value();
+  alloc.destroy_allocation(keep_geo);
+  alloc.cleanup();
+  ctx.cleanup();
+
+  EXPECT_GT(st8.bright_frac, 0.5)
+      << "too few bright texels for the relative-excess check to mean anything";
+  EXPECT_GT(st8.mid_frac, 0.005)
+      << "mid-tone mask is empty: the impostor-killing band has nothing to "
+         "measure (midvar would read 0.0 and pass by accident)";
+  EXPECT_GT(st8.abs_var, 0.0) << "no measurable variance at 8 samples: the "
+                                  "moment store is not accumulating squares";
+  EXPECT_GT(st8.mid_var, 0.0) << "mid-tone variance is not positive: the "
+                                  "moment store is zeroed or stale";
+  EXPECT_GE(st8.rel_excess, 0.0)
+      << "negative relative excess: E[X^2] < E[X]^2, the moment store "
+         "is zeroed or stale";
+  EXPECT_LT(st8.rel_excess, 0.02)
+      << "relative excess " << st8.rel_excess << " is two orders above the "
+         "true second moment (~1e-4): the store is accumulating radiance, "
+         "not squares";
+  // The impostor-killer: over mid-tones the linear store reads
+  // mean*(1-mean) ~= 0.11 here, 22x above truth (~5e-3). Band at 0.02:
+  // 4x above truth, 5x below the impostor. Scene-specific, like kExpected.
+  EXPECT_LT(st8.mid_var, 0.02)
+      << "mid-tone variance " << st8.mid_var << " matches a linear store "
+         "(radiance, not squares): the moment image is not tracking E[X^2]";
+  const double stability = st8.abs_var > 0.0
+                               ? std::fabs(st32.abs_var - st8.abs_var) / st8.abs_var
+                               : 1.0;
+  EXPECT_LT(stability, 0.25)
+      << "sample variance did not stabilize (abs8=" << st8.abs_var << " abs32="
+      << st32.abs_var << "): the moment image is not tracking E[X^2]";
+}
+
 #else  // !WARPLOOM_HAS_VULKAN
 
 TEST(path_tracing_real, disabled_without_vulkan) {

@@ -18,16 +18,6 @@ void register_script_node_type(NodeGraph& graph,
   OMNICPP_CONTRACT(module != nullptr);
   OMNICPP_CONTRACT(input_count > 0U || output_count > 0U);
 
-  // Per-node-instance host state: the previous evaluation time, so dt is a
-  // function of the tick sequence rather than a clock. The evaluate contract
-  // forbids mutating GRAPH state; this is the node host's own bookkeeping,
-  // the same class as the module's internal accumulators.
-  struct TickState {
-    double last_time{0.0};
-    bool first{true};
-  };
-  auto state = std::make_shared<TickState>();
-
   NodeType t;
   t.name = "script:" + std::string(module->module_name());
   t.doc = "G4 script node: calls the module's tick(dt, inputs) and maps the "
@@ -38,17 +28,19 @@ void register_script_node_type(NodeGraph& graph,
   for (std::uint32_t i = 0; i < output_count; ++i) {
     t.outputs.push_back({"out" + std::to_string(i), PinType::Number});
   }
+  // dt arrives in the per-node context (computed by NodeGraph::evaluate_with
+  // from the graph-owned previous-time map). The old code kept one shared
+  // TickState in the TYPE lambda: every node after the first of a type saw
+  // dt=0 at a shared timestamp, and re-evaluating the same time gave a
+  // different dt — the header's "deterministic under replay" claim was
+  // false. The lambda is now stateless: a pure function of its arguments.
   t.context_evaluate =
-      [module, input_count, output_count, state](
+      [module, input_count, output_count](
           const std::map<std::string, NodeValue>&,
           const std::map<std::string, NodeValue>& inputs,
           std::map<std::string, NodeValue>& outputs,
           const GraphContext& context) {
-        // dt from the tick sequence: deterministic under replay, 0 on the
-        // first evaluation.
-        const double dt = state->first ? 0.0 : context.time - state->last_time;
-        state->last_time = context.time;
-        state->first = false;
+        const double dt = context.dt;
 
         std::vector<double> in(static_cast<std::size_t>(input_count), 0.0);
         for (std::uint32_t i = 0; i < input_count; ++i) {

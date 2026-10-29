@@ -360,3 +360,89 @@ TEST(PhysicsWorld, ForceAllPairsIsHonouredAndReversible) {
   world.set_force_all_pairs(false);
   EXPECT_FALSE(world.force_all_pairs());
 }
+
+// Loop 12 (research loop 1 of 10): the spec listed a Jolt-style
+// record-rewind-replay validator and an XPBD compliance opt-in as adopted,
+// but neither existed in code. These cases pin both.
+TEST(PhysicsWorld, Loop12DeterminismCheckPassesOnCollidingScene) {
+  omnicpp::physics::PhysicsWorld w(-9.81F);
+  EXPECT_FALSE(w.determinism_check());
+  w.set_determinism_check(true);
+  EXPECT_TRUE(w.determinism_check());
+  // Colliding scene: ground contacts plus sphere-sphere contacts, with
+  // substeps and iterations on so the check covers the full schedule.
+  w.set_substeps(2U);
+  w.set_solver_iterations(4U);
+  for (std::uint32_t i = 0; i < 6U; ++i) {
+    omnicpp::physics::PhysicsBody b;
+    b.position[0] = (i % 2U == 0U) ? -0.4F : 0.4F;
+    b.position[1] = 0.5F + 1.0F * static_cast<float>(i);
+    b.restitution = 0.2F;
+    (void)w.add_body(b);
+  }
+  for (std::size_t i = 0; i < static_cast<std::size_t>(300); ++i) {
+    w.step(kDt);
+  }
+  EXPECT_EQ(w.determinism_violations(), 0ULL);
+  EXPECT_FALSE(w.contacts().empty());  // the check ran over real contacts
+  // Disabling the flag restores the single-run path exactly.
+  w.set_determinism_check(false);
+  const std::uint64_t fp = w.position_fingerprint();
+  for (std::size_t i = 0; i < static_cast<std::size_t>(60); ++i) {
+    w.step(kDt);
+  }
+  EXPECT_EQ(w.determinism_violations(), 0ULL);
+  EXPECT_NE(w.position_fingerprint(), fp);  // the world still advances
+}
+
+TEST(PhysicsWorld, Loop12ComplianceZeroIsBitIdentical) {
+  auto run = [](float alpha) {
+    omnicpp::physics::PhysicsWorld w(-9.81F);
+    w.set_contact_compliance(alpha);
+    w.set_substeps(2U);
+    w.set_solver_iterations(4U);
+    for (std::uint32_t i = 0; i < 6U; ++i) {
+      omnicpp::physics::PhysicsBody b;
+      b.position[0] = (i % 2U == 0U) ? -0.4F : 0.4F;
+      b.position[1] = 0.5F + 1.0F * static_cast<float>(i);
+      b.restitution = 0.2F;
+      (void)w.add_body(b);
+    }
+    for (std::size_t i = 0; i < static_cast<std::size_t>(300); ++i) {
+      w.step(kDt);
+    }
+    return w.position_fingerprint();
+  };
+  // Default (never set) and explicit 0 agree bit-for-bit: opting in is
+  // what changes output, not the existence of the knob.
+  EXPECT_EQ(run(-1.0F), run(0.0F));  // negative clamps to 0
+  EXPECT_EQ(omnicpp::physics::PhysicsWorld(-9.81F).contact_compliance(), 0.0F);
+}
+
+TEST(PhysicsWorld, Loop12ComplianceSoftensAndStaysDeterministic) {
+  auto settle_top = [](float alpha) {
+    omnicpp::physics::PhysicsWorld w(-9.81F);
+    w.set_contact_compliance(alpha);
+    for (std::uint32_t i = 0; i < 6U; ++i) {
+      omnicpp::physics::PhysicsBody b;
+      b.position[1] = 0.5F + 1.0F * static_cast<float>(i);
+      b.restitution = 0.0F;
+      (void)w.add_body(b);
+    }
+    for (std::size_t i = 0; i < static_cast<std::size_t>(600); ++i) {
+      w.step(kDt);
+    }
+    return std::pair<float, std::uint64_t>(w.body(5).position[1],
+                                           w.position_fingerprint());
+  };
+  const auto stiff = settle_top(0.0F);
+  const auto soft = settle_top(1.0F);
+  // Compliance softens the correction, so the tower settles lower...
+  EXPECT_LT(soft.first, stiff.first);
+  // ...and the outputs differ, so a test using only the default value
+  // could never catch a broken knob (the exposure-bug lesson: never let
+  // the tested value coincide with the buggy value).
+  EXPECT_NE(soft.second, stiff.second);
+  // ...while determinism is preserved at the new setting.
+  EXPECT_EQ(soft.second, settle_top(1.0F).second);
+}

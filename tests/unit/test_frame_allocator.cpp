@@ -8,10 +8,13 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <vector>
 
 #include "warploom/render/vulkan_frame_allocator.hpp"
+#include "warploom/render/vulkan_graph_resources.hpp"
+#include "warploom/render/vulkan_render_graph.hpp"
 
 namespace {
 
@@ -224,4 +227,183 @@ TEST(FrameAllocator, NoOverlappingShareAcrossManyConfigurations) {
     ASSERT_FALSE(invariant_violated(resources, timeline, &why))
         << "trial " << trial << ": " << why;
   }
+}
+
+// Loop 13 (research loop 2 of 10): lifetimes derived from the node sequence
+// instead of hand-declared -- the prerequisite R6b was gated behind.
+namespace loop13 {
+
+VkImage img(std::uintptr_t id) { return reinterpret_cast<VkImage>(id); }
+
+std::uint64_t size_of(VkImage image) noexcept {
+  switch (reinterpret_cast<std::uintptr_t>(image)) {
+    case 1U:
+    case 6U:
+      return 65536U;  // hdr target, swapchain image
+    case 2U:
+    case 3U:
+      return 16384U;  // bloom chain (quarter res)
+    default:
+      return 4096U;  // scratch + history metadata images
+  }
+}
+bool is_history(VkImage image) noexcept {
+  // Caller knowledge the graph cannot supply (RPS external/persistent): the
+  // swapchain image belongs to the next frame's present, the pyramid and the
+  // PT accumulation are read by a later frame.
+  const auto id = reinterpret_cast<std::uintptr_t>(image);
+  return id == 6U || id == 7U || id == 8U;
+}
+std::uint64_t tag_of(VkImage) noexcept { return 7U; }
+
+// Five passes shaped like the compose frame: scene -> bloom x2 -> present,
+// plus a compute H-Z pass. First-touch order fixes the generated names.
+struct Scene {
+  std::vector<warploom::render::GraphPass> passes;
+  std::vector<warploom::render::GraphComputePass> computes;
+  std::vector<warploom::render::GraphNode> nodes;
+};
+Scene make_scene() {
+  using namespace warploom::render;
+  Scene s;
+  s.passes.resize(4);
+  s.computes.resize(1);
+  // pass 0: scene writes hdr + pt accumulation.
+  s.passes[0].name = "scene";
+  s.passes[0].attachments = {RenderPassAttachment{}, RenderPassAttachment{}};
+  s.passes[0].attachments[0].image = img(1U);
+  s.passes[0].attachments[1].image = img(8U);
+  // pass 1: bloom down samples hdr, writes bloomA + scratch1.
+  s.passes[1].name = "bloom_down";
+  s.passes[1].attachments = {RenderPassAttachment{}, RenderPassAttachment{}};
+  s.passes[1].attachments[0].image = img(2U);
+  s.passes[1].attachments[1].image = img(4U);
+  s.passes[1].sampled_images = {GraphSampledImage{}};
+  s.passes[1].sampled_images[0].image = img(1U);
+  // pass 2: bloom up samples bloomA, writes bloomB (overlaps bloomA at 2).
+  s.passes[2].name = "bloom_up";
+  s.passes[2].attachments = {RenderPassAttachment{}};
+  s.passes[2].attachments[0].image = img(3U);
+  s.passes[2].sampled_images = {GraphSampledImage{}};
+  s.passes[2].sampled_images[0].image = img(2U);
+  // pass 3: present samples hdr + bloomB, writes scratch2 + swapchain.
+  s.passes[3].name = "present";
+  s.passes[3].attachments = {RenderPassAttachment{}, RenderPassAttachment{}};
+  s.passes[3].attachments[0].image = img(5U);
+  s.passes[3].attachments[1].image = img(6U);
+  s.passes[3].sampled_images = {GraphSampledImage{}, GraphSampledImage{}};
+  s.passes[3].sampled_images[0].image = img(1U);
+  s.passes[3].sampled_images[1].image = img(3U);
+  // pass 4 (compute): H-Z reduction reads depth into the pyramid, samples
+  // the accumulation for the capture-chain contract.
+  s.computes[0].name = "hiz";
+  s.computes[0].image_uses = {GraphImageUse{}, GraphImageUse{}};
+  s.computes[0].image_uses[0].image = img(7U);
+  s.computes[0].image_uses[1].image = img(8U);
+  for (const GraphPass& p : s.passes) s.nodes.push_back(GraphNode::from_render(p));
+  // NOTE: nodes holds pointers into s.passes/s.computes; the Scene owns
+  // both, so the pointers stay valid for the Scene's lifetime.
+  s.nodes.push_back(GraphNode::from_compute(s.computes[0]));
+  return s;
+}
+
+const FrameResource* find(const std::vector<FrameResource>& rs,
+                          const std::string& name) {
+  for (const FrameResource& r : rs) {
+    if (r.name == name) return &r;
+  }
+  return nullptr;
+}
+
+}  // namespace loop13
+
+TEST(FrameAllocator, Loop13DeriveLifetimesFromNodes) {
+  const loop13::Scene s = loop13::make_scene();
+  const auto derived = warploom::render::derive_frame_resources(
+      s.nodes, loop13::size_of, loop13::is_history, loop13::tag_of);
+  ASSERT_EQ(derived.size(), 8U);  // 8 distinct images, nulls skipped
+  // First-touch order: hdr, ptAccum, bloomA, scratch1, bloomB, scratch2,
+  // swap, pyramid.
+  const std::uint32_t first[] = {0U, 0U, 1U, 1U, 2U, 3U, 3U, 4U};
+  const std::uint32_t last[] = {3U, 4U, 2U, 1U, 3U, 3U, 3U, 4U};
+  for (std::size_t i = 0; i < derived.size(); ++i) {
+    EXPECT_EQ(derived[i].name, "graph_img_" + std::to_string(i));
+    EXPECT_EQ(derived[i].first_use, first[i]) << derived[i].name;
+    EXPECT_EQ(derived[i].last_use, last[i]) << derived[i].name;
+  }
+  // Caller knowledge carried through, not inferred.
+  EXPECT_TRUE(loop13::find(derived, "graph_img_6")->history);   // swap
+  EXPECT_TRUE(loop13::find(derived, "graph_img_7")->history);   // pyramid
+  EXPECT_TRUE(loop13::find(derived, "graph_img_1")->history);   // ptAccum
+  EXPECT_FALSE(loop13::find(derived, "graph_img_0")->history);  // hdr
+  EXPECT_EQ(loop13::find(derived, "graph_img_0")->size_bytes, 65536U);
+  EXPECT_EQ(loop13::find(derived, "graph_img_3")->size_bytes, 4096U);
+}
+
+TEST(FrameAllocator, Loop13DerivedPlanElidesAndProtectsHistory) {
+  const loop13::Scene s = loop13::make_scene();
+  const auto derived = warploom::render::derive_frame_resources(
+      s.nodes, loop13::size_of, loop13::is_history, loop13::tag_of);
+  const auto plan = warploom::render::plan_resource_allocations(
+      derived, static_cast<std::uint32_t>(s.nodes.size()));
+  ASSERT_EQ(plan.size(), derived.size());
+  const auto* scratch2 = loop13::find(derived, "graph_img_5");
+  ASSERT_NE(scratch2, nullptr);
+  const std::size_t idx =
+      static_cast<std::size_t>(scratch2 - derived.data());
+  // scratch2 [3,3] reuses scratch1 [1,1]: same size, disjoint, most recent.
+  EXPECT_EQ(plan[idx].kind, warploom::render::ResourceAllocation::Aliased);
+  EXPECT_EQ(plan[idx].shares_with, "graph_img_3");
+  // bloomB [2,3] overlaps bloomA [1,2] at pass 2: no share despite same size.
+  const auto* bloom_b = loop13::find(derived, "graph_img_4");
+  const std::size_t bidx =
+      static_cast<std::size_t>(bloom_b - derived.data());
+  EXPECT_EQ(plan[bidx].kind, warploom::render::ResourceAllocation::Dedicated);
+  // Every history resource keeps its own allocation -- the invariant that
+  // motivated the whole R6 line, now over derived (not hand-written) input.
+  for (const auto& entry : plan) {
+    const FrameResource* r = loop13::find(derived, entry.resource);
+    ASSERT_NE(r, nullptr);
+    if (r->history) {
+      EXPECT_EQ(entry.kind, warploom::render::ResourceAllocation::Dedicated)
+          << entry.resource;
+    }
+    if (entry.kind == warploom::render::ResourceAllocation::Aliased) {
+      EXPECT_NE(entry.shares_with, "graph_img_1");  // ptAccum
+      EXPECT_NE(entry.shares_with, "graph_img_6");  // swap
+      EXPECT_NE(entry.shares_with, "graph_img_7");  // pyramid
+    }
+  }
+  std::string why;
+  EXPECT_FALSE(invariant_violated(
+      derived, static_cast<std::uint32_t>(s.nodes.size()), &why))
+      << why;
+}
+
+TEST(FrameAllocator, Loop13DerivationIsDeterministicAndSkipsNull) {
+  const loop13::Scene s = loop13::make_scene();
+  const auto once = warploom::render::derive_frame_resources(
+      s.nodes, loop13::size_of, loop13::is_history, loop13::tag_of);
+  const auto twice = warploom::render::derive_frame_resources(
+      s.nodes, loop13::size_of, loop13::is_history, loop13::tag_of);
+  ASSERT_EQ(once.size(), twice.size());
+  for (std::size_t i = 0; i < once.size(); ++i) {
+    EXPECT_EQ(once[i].name, twice[i].name);
+    EXPECT_EQ(once[i].first_use, twice[i].first_use);
+    EXPECT_EQ(once[i].last_use, twice[i].last_use);
+  }
+  // A pass with only null handles contributes no resource.
+  warploom::render::GraphPass empty;
+  empty.name = "empty";
+  empty.attachments = {warploom::render::RenderPassAttachment{}};
+  const std::vector<warploom::render::GraphNode> nodes = {
+      warploom::render::GraphNode::from_render(empty)};
+  EXPECT_TRUE(warploom::render::derive_frame_resources(
+                    nodes, loop13::size_of, loop13::is_history,
+                    loop13::tag_of)
+                    .empty());
+  EXPECT_TRUE(warploom::render::derive_frame_resources(
+                    {}, loop13::size_of, loop13::is_history,
+                    loop13::tag_of)
+                    .empty());
 }

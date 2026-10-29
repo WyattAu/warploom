@@ -79,15 +79,19 @@ void main() {
           (s.w / d) * (push.viewport_h / (2.0f * push.tan_half_fov));
 
       // Choose the finest LOD whose threshold the size still meets.
+      // The host count is clamped to the array bound: indexing thresholds[]
+      // past 7 reads the words that FOLLOW the array in the push block
+      // (camera_position), which compare as 0.0 px and select a bogus LOD.
+      const uint n_thresholds = min(push.threshold_count, 8u);
       uint selected = push.threshold_count;  // sentinel = below all thresholds
-      for (uint t = 0u; t < push.threshold_count; ++t) {
+      for (uint t = 0u; t < n_thresholds; ++t) {
         if (screen_size >= push.thresholds[t]) {
           selected = t;
           break;
         }
       }
 
-      if (selected < push.threshold_count && screen_size >= push.far_margin) {
+      if (selected < n_thresholds && screen_size >= push.far_margin) {
         out_lod = selected;
         out_visible = 1u;
       }

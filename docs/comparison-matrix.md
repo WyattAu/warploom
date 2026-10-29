@@ -98,11 +98,16 @@ Not much, and it should be said plainly rather than buried. Two things:
    matters for *live* (unpaused) PT, which is outside the v1 spec. The
    recorded follow-up is in-tree à-trous/SVGF over the existing G-buffer —
    see §5, which now records the decision instead of asking for one.
-2. **No transient aliasing, and the planner is unexercised.** R6b is gated
-   behind a prerequisite that does not exist yet: the renderer declares
-   resources against a fixed pass list, not a graph, so "a resource live on
-   passes [i, j]" does not yet describe anything real. UE solved exactly this
-   and documented the setup/execute split that makes lifetimes expressible.
+2. **No transient aliasing, and the planner's input is now derived.** R6b
+   was gated behind a prerequisite that did not exist: the renderer declared
+   resources against a fixed pass list, not a graph. Loop 13 closed that
+   prerequisite — `derive_frame_resources` walks the recorded `GraphNode`
+   sequence and emits lifetimes in first-touch order (history/size/tag as
+   explicit caller callbacks, the RPS external/persistent split), tested
+   over a compose-shaped frame and modelled in Lean (`proofs/FrameAllocator.lean`).
+   UE solved the same shape and documented the setup/execute split that makes
+   lifetimes expressible. What remains is R6b proper: allocating/aliasing
+   Vulkan images from the plan.
 3. **No adaptive sampling.** Cycles (threshold 0.01) and Karma (Pixel Oracle)
    both stop sampling converged pixels. Warploom spends samples uniformly, so
    simple regions cost the same as corners — and at a fixed wall-clock budget

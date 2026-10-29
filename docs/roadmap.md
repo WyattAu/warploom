@@ -425,6 +425,25 @@ declares a slot 3.
       replay), ReSTIR (reservoir stream state), MGPBD (no deformables).
       Remaining: rotation, joints — each a design arc, sized in
       docs/research/physics-solver.md.
+
+      Loop 12 correction (2026-10-26, research loop 1 of 10): the paragraph
+      above listed the validator and the compliance opt-in as ADOPTED, but
+      `code_search` showed neither existed in `modules/physics/` — the spec
+      claimed adoption ahead of the code. Both now exist and are verified:
+      `set_determinism_check(bool)` runs the substep sequence twice from a
+      saved state per step and counts fingerprint mismatches in
+      `determinism_violations()` (Jolt's sample-checkbox pattern, but
+      test-pinned rather than sample-only); `set_contact_compliance(alpha)`
+      divides the correction by `inv_sum + alpha`, default 0, so existing
+      replays reproduce bit-identically. Verified: 3 new Loop12 tests, each
+      sabotage-checked in both directions (ignoring the compliance term
+      fails Softens; skipping the restore fails the validator test),
+      13/13 PhysicsWorld, 99/99 physics-adjacent suites. Lean formalization
+      in `proofs/PhysicsDeterminism.lean` (`lake build` clean): detection is
+      a pure function of the frozen snapshot, the 1D grid is conservative
+      when cell >= r1+r2, compliance 0 is definitionally the stiff
+      projection. Still open: velocity-from-position update, island
+      sleeping, capsule — sleeping is the scheduled Loop 2 of 10 item.
 - [x] **D2a interpolated, eased track evaluation** — `TimelineClip::evaluate_at`
       takes a fractional frame and an `Easing`, and interpolates Number and
       Vec3 between the bracketing samples. Bool and String hold the earlier
@@ -878,6 +897,22 @@ list) first, which is the same unbaking that R3 (GPU-driven) and the
 dynamic-rendering work are pushing toward. The planner is ready when that
 exists; until then a live caller would be worse than none, because it would
 describe an allocation that does not happen.
+
+Loop 13 update (2026-10-26, research loop 2 of 10): the prerequisite now
+EXISTS. `derive_frame_resources(nodes, size_of, is_history, tag_of)`
+(`modules/render/.../vulkan_graph_resources.{hpp,cpp}`) walks the node
+sequence the renderer actually records and emits `FrameResource`s in
+first-touch order — lifetimes derived from the graph, with the three
+things a graph cannot supply (byte size, cross-frame history, alias tag)
+travelling as explicit caller callbacks in the RPS external/persistent
+split. Verified: 3 new Loop13 tests over a compose-shaped 5-node frame
+(scratch elided, overlapping bloom kept apart, all history Dedicated),
+sabotage-checked (never-extend-last_use fails the 2 behavior tests),
+10/10 FrameAllocator, plus the Lean model `proofs/FrameAllocator.lean`
+(history always Dedicated; every Aliased entry names a compatible,
+disjoint owner). R6b proper — create/alias/destroy Vulkan images from
+the plan — is still unwired and stays a separate change with its own
+verification run, now unblocked rather than gated.
 
 Process note, kept because it is the third time: the first sabotage of this
 invariant **passed**, because three separate guards enforced it and removing

@@ -789,9 +789,16 @@ public:
 
   //! Run systems in parallel where possible.
   //! Systems are partitioned into "waves" — each wave contains only systems
-  //! whose component masks don't overlap with each other.
-  //! Within each wave, systems run concurrently via the provided thread pool.
-  //! Falls back to sequential execution if pool has 1 thread.
+  //! whose component masks don't overlap AND that have no dependency edge
+  //! between them (dependencies always force a later wave, even when masks
+  //! are disjoint). Within each wave, systems run concurrently via the
+  //! provided thread pool. Falls back to sequential execution if pool has
+  //! 1 thread.
+  //!
+  //! Contract: systems in one wave must not perform structural World changes
+  //! (add/remove entity or component); the World is shared mutably and only
+  //! component-data disjointness is enforced. Structural changes serialize
+  //! through run() or a single-system wave.
   void run_parallel(World& world, std::uint64_t tick,
                     ::warploom::core::ThreadPool& pool) {
     // Partition into waves
@@ -845,22 +852,63 @@ public:
   }
   [[nodiscard]] const std::vector<System>& systems() const noexcept { return systems_; }
 
-private:
-  //! Partition the execution order into waves of independent systems.
-  //! Two systems are independent if their component masks don't overlap.
+  //! Wave partition used by run_parallel, exposed for testing.
+  //! Two systems share a wave only if their component masks are disjoint
+  //! AND neither depends on the other (dependency edges force later waves).
   [[nodiscard]] std::vector<std::vector<std::size_t>> partition_into_waves() const {
+    std::unordered_map<std::string, std::size_t> name_to_idx;
+    for (std::size_t i = 0; i < systems_.size(); ++i) {
+      name_to_idx[systems_[i].name] = i;
+    }
+    auto depends_on_idx = [&](std::size_t a, std::size_t b) -> bool {
+      for (const auto& dep : systems_[a].depends_on) {
+        auto it = name_to_idx.find(dep);
+        if (it != name_to_idx.end() && it->second == b) return true;
+      }
+      return false;
+    };
+
     std::vector<std::vector<std::size_t>> waves;
     std::vector<bool> scheduled(systems_.size(), false);
 
     for (std::size_t pass = 0; pass < systems_.size(); ++pass) {
       std::vector<std::size_t> wave;
+      std::vector<bool> in_wave(systems_.size(), false);
       ComponentMask wave_mask;
 
       for (auto idx : execution_order_) {
         if (scheduled[idx]) continue;
         // Check if this system's components overlap with the current wave
         if ((systems_[idx].component_mask & wave_mask).any()) continue;
+        // All direct dependencies must already be scheduled in an EARLIER
+        // wave. A dependency that is unscheduled, or one sitting in the
+        // current wave, would run concurrently with this system -- which is
+        // exactly the ordering violation the old mask-only partition allowed
+        // (dependent systems with disjoint masks shared a wave).
+        bool ready = true;
+        for (const auto& dep : systems_[idx].depends_on) {
+          auto it = name_to_idx.find(dep);
+          if (it == name_to_idx.end()) continue;
+          const std::size_t j = it->second;
+          if (!scheduled[j] || in_wave[j]) {
+            ready = false;
+            break;
+          }
+        }
+        if (!ready) continue;
+        // Reverse edge: no member already in this wave may depend on idx.
+        // Unreachable when execution_order_ is topological (members are
+        // earlier, so they cannot depend on a later idx), but cheap to
+        // enforce if build_schedule was skipped or failed.
+        for (auto k : wave) {
+          if (depends_on_idx(k, idx)) {
+            ready = false;
+            break;
+          }
+        }
+        if (!ready) continue;
         wave.push_back(idx);
+        in_wave[idx] = true;
         wave_mask |= systems_[idx].component_mask;
       }
 
@@ -871,6 +919,8 @@ private:
 
     return waves;
   }
+
+private:
 
   std::vector<System> systems_;
   std::vector<std::size_t> execution_order_;

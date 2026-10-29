@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <tuple>
 #include <vector>
 #include <thread>
 #include <cstdio>
@@ -112,6 +113,30 @@ TEST(DeterministicRuntime, HashIsReproducible) {
   first.advance(0.2, [](std::uint64_t) {}, [](std::uint64_t) {});
   second.advance(0.2, [](std::uint64_t) {}, [](std::uint64_t) {});
   EXPECT_EQ(first.state_hash(), second.state_hash());
+}
+
+TEST(DeterministicRuntime, IntegerModeSplitsComposeExactly) {
+  // The property that makes integer-nanoseconds the replay mode: splitting
+  // one advance into pieces yields EXACTLY the same ticks, accumulator and
+  // state hash as the single advance. The floating-point path documents
+  // drift and deliberately offers no such guarantee.
+  auto run = [](const std::vector<double>& pieces) {
+    omnicpp::core::DeterministicRuntime runtime(1.0 / 60.0);
+    runtime.set_time_mode(omnicpp::core::TimeMode::integer_nanoseconds);
+    EXPECT_TRUE(runtime.start().is_ok());
+    for (double piece : pieces) {
+      runtime.advance(piece, [](std::uint64_t) {}, [](std::uint64_t) {});
+    }
+    return std::make_tuple(runtime.tick_count(), runtime.accumulator_ns(),
+                            runtime.state_hash());
+  };
+  const auto whole = run({1.0});
+  const auto split = run({0.3, 0.7});
+  const auto many = run({0.1, 0.1, 0.1, 0.1, 0.1,
+                         0.1, 0.1, 0.1, 0.1, 0.1});
+  EXPECT_EQ(whole, split);
+  EXPECT_EQ(whole, many);
+  EXPECT_EQ(std::get<0>(whole), 60U);
 }
 
 TEST(DeterministicRuntime, ReportsEventOverflow) {

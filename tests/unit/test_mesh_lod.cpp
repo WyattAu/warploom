@@ -241,4 +241,175 @@ TEST(VulkanHardware, LodSelectByDistance) {
 #endif
 }
 
+//! A host count above the shader's threshold capacity must not read past
+//! the array. thresholds[8] aliases camera_position[0] in the push block
+//! (both 0.0 here): unclamped, a 6.5 px sphere below every real threshold
+//! still satisfies `6.5 >= 0.0` at t=8, so the shader reports visible with
+//! a bogus LOD 8. Clamped, the sentinel survives and the sphere is culled.
+TEST(VulkanHardware, LodSelectClampsThresholdCountToArrayBound) {
+#ifdef WARPLOOM_TEST_SHADER_DIR
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+
+  omnicpp::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("OmniCppLodClampTest", true).is_ok());
+  omnicpp::render::VulkanMemoryAllocator allocator;
+  ASSERT_TRUE(
+      allocator.initialize(context.device(), context.physical_device()).is_ok());
+  omnicpp::render::VulkanDescriptorManager manager;
+  ASSERT_TRUE(manager.initialize(context.device()).is_ok());
+
+  constexpr std::uint32_t kN = 1;
+  constexpr std::uint32_t kSphOff = 26U;
+  constexpr std::uint32_t kResOff = kSphOff + 4U * kN;
+  constexpr std::uint32_t kWords = kResOff + 2U * kN;
+  auto lod_buf = allocator.create_buffer(
+      kWords * 4U, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(lod_buf.is_ok());
+  auto* words = static_cast<std::uint32_t*>(lod_buf.value().mapped);
+
+  const float tan_half = 0.57735026f;
+  const float near_z = 0.1f;
+  const float half_h = tan_half * near_z;
+  const float planes[6][4] = {
+      {-1, 0, 0, half_h}, {1, 0, 0, half_h}, {0, -1, 0, half_h},
+      {0, 1, 0, half_h},  {0, 0, -1, near_z}, {0, 0, 1, 100.0f},
+  };
+  // Depth 96, radius 1 -> (1/96) * (720 / 2*tan30) ~= 6.5 px, below the
+  // smallest real threshold (8 px) but above the aliased 0.0 at index 8.
+  const float sphere[4] = {0.f, 0.f, -96.f, 1.f};
+
+  words[0] = kN;
+  words[1] = 0U;
+  {
+    float plane_words[24];
+    std::memcpy(plane_words, planes, sizeof(plane_words));
+    std::uint32_t pw[24];
+    std::memcpy(pw, plane_words, sizeof(pw));
+    for (std::size_t i = 0; i < static_cast<std::size_t>(24); ++i) words[2 + i] = pw[i];
+  }
+  {
+    std::uint32_t sw[4];
+    std::memcpy(sw, sphere, sizeof(sw));
+    for (std::size_t k = 0; k < static_cast<std::size_t>(4); ++k)
+      words[kSphOff + k] = sw[k];
+  }
+  words[kResOff + 0] = 0xDEADBEEFU;
+  words[kResOff + 1] = 0xDEADBEEFU;
+
+  std::vector<omnicpp::render::ReflectedBinding> bindings(1);
+  bindings[0].binding = 0;
+  bindings[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  bindings[0].count = 1;
+  bindings[0].stage_flags = VK_SHADER_STAGE_COMPUTE_BIT;
+  auto layout_res = manager.create_layout(bindings, 8);
+  ASSERT_TRUE(layout_res.is_ok());
+  auto set_res = manager.allocate_set(layout_res.value());
+  ASSERT_TRUE(set_res.is_ok());
+  ASSERT_TRUE(manager
+                  .write_buffer(set_res.value(), 0,
+                                VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                lod_buf.value().buffer, 0, VK_WHOLE_SIZE)
+                  .is_ok());
+
+  omnicpp::render::VulkanPipeline pipeline;
+  ASSERT_TRUE(pipeline
+                  .load_shader_stage_file(context.device(),
+                                          WARPLOOM_TEST_SHADER_DIR
+                                              "/lod_select.comp.spv",
+                                          "compute")
+                  .is_ok());
+  VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(LodPush)};
+  ASSERT_TRUE(
+      pipeline
+          .create_pipeline_layout(
+              context.device(),
+              std::vector<VkDescriptorSetLayout>{layout_res.value()}.data(), 1,
+              &range)
+          .is_ok());
+  ASSERT_TRUE(
+      pipeline.create_compute_pipeline(context.device(), pipeline.pipeline_layout())
+          .is_ok());
+
+  LodPush push{};
+  push.sphere_offset = kSphOff;
+  push.result_offset = kResOff;
+  push.tan_half_fov = tan_half;
+  push.viewport_h = 720.f;
+  push.near_z = near_z;
+  push.far_margin = 2.0f;
+  push.threshold_count = 10U;  // hostile: capacity is 8
+  push.pad0 = 0;
+  const float thresholds[8] = {200.f, 150.f, 100.f, 80.f,
+                               60.f, 40.f, 20.f, 8.f};
+  std::memcpy(push.thresholds, thresholds, sizeof(thresholds));
+  push.camera_position[0] = 0.f;
+  push.camera_position[1] = 0.f;
+  push.camera_position[2] = 0.f;
+  push.camera_position[3] = 0.f;
+  push.forward[0] = 0.f;
+  push.forward[1] = 0.f;
+  push.forward[2] = -1.f;
+  push.forward[3] = 0.f;
+
+  VkCommandPoolCreateInfo pci{};
+  pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+  pci.queueFamilyIndex =
+      static_cast<std::uint32_t>(context.queue_families().graphics_family);
+  VkCommandPool pool;
+  ASSERT_EQ(vkCreateCommandPool(context.device(), &pci, nullptr, &pool),
+            VK_SUCCESS);
+  VkCommandBufferAllocateInfo ai{};
+  ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  ai.commandPool = pool;
+  ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  ai.commandBufferCount = 1;
+  VkCommandBuffer cb;
+  ASSERT_EQ(vkAllocateCommandBuffers(context.device(), &ai, &cb), VK_SUCCESS);
+  VkCommandBufferBeginInfo bi{};
+  bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  ASSERT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+  vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline());
+  VkDescriptorSet set = set_res.value();
+  vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          pipeline.pipeline_layout(), 0, 1, &set, 0, nullptr);
+  vkCmdPushConstants(cb, pipeline.pipeline_layout(),
+                     VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+  vkCmdDispatch(cb, 1, 1, 1);
+  vkEndCommandBuffer(cb);
+  VkFenceCreateInfo fi{};
+  fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  VkFence fence;
+  ASSERT_EQ(vkCreateFence(context.device(), &fi, nullptr, &fence), VK_SUCCESS);
+  VkSubmitInfo si{};
+  si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  si.commandBufferCount = 1;
+  si.pCommandBuffers = &cb;
+  ASSERT_EQ(vkQueueSubmit(context.graphics_queue(), 1, &si, fence), VK_SUCCESS);
+  ASSERT_EQ(vkWaitForFences(context.device(), 1, &fence, VK_TRUE, UINT64_MAX),
+            VK_SUCCESS);
+
+  EXPECT_EQ(words[1], 0U) << "nothing may be counted visible";
+  const std::uint32_t out_lod = words[kResOff + 0];
+  const std::uint32_t out_vis = words[kResOff + 1];
+  EXPECT_EQ(out_vis, 0U) << "6.5 px is below every real threshold: culled";
+  EXPECT_EQ(out_lod, 0U) << "culled instances must not carry LOD 8";
+
+  vkDestroyFence(context.device(), fence, nullptr);
+  vkDestroyCommandPool(context.device(), pool, nullptr);
+  pipeline.cleanup(context.device());
+  manager.cleanup();
+  auto lod_alloc = lod_buf.value();
+  allocator.destroy_allocation(lod_alloc);
+  allocator.cleanup();
+  context.cleanup();
+#else
+  GTEST_SKIP() << "shader dir unavailable";
+#endif
+}
+
 #endif  // WARPLOOM_HAS_VULKAN

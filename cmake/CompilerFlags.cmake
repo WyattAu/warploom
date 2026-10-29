@@ -349,10 +349,18 @@ endif()
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    # Note: -march=native may cause issues with cross-compilation
-    # Consider using -march=x86-64-v3 for broad compatibility
-    if(NOT CMAKE_CROSSCOMPILING)
-        string(APPEND CMAKE_CXX_FLAGS_RELEASE " -march=native")
+    # Replay contract (research loop 6, docs/research/loop16-*): physics
+    # fingerprints must be a pure function of source + flags, so Release
+    # codegen must not depend on the build host. -march=native bakes the
+    # host CPU into every Release binary (AVX-512 vs AVX2 vector width
+    # changes FP reduction order; FMA availability changes instruction
+    # selection), so two machines produce different fingerprints from
+    # identical sources. x86-64-v3 (AVX2+FMA) is the fixed baseline on
+    # x86_64 — both compilers here accept it, and the released artifacts
+    # are then host-independent by construction. Other architectures keep
+    # the compiler default, which is already a portable baseline.
+    if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        string(APPEND CMAKE_CXX_FLAGS_RELEASE " -march=x86-64-v3")
     endif()
 endif()
 

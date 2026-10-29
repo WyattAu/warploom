@@ -23,6 +23,12 @@
 // radiance (imageLoad+add+store, deterministic single-queue order).
 
 layout(set = 0, binding = 0, rgba32f) uniform image2D accum;
+// Second moment (Loop 14): per-texel sum of squared radiance, added with
+// the same pure (pixel, frame) seeding as the sum. E[X^2] and E[X] together
+// are the SVGF input pair and the variance signal adaptive sampling needs;
+// tracking the squares deterministically is what keeps the replay contract
+// intact while unblocking both arcs. rgb holds the per-channel squares.
+layout(set = 0, binding = 4, rgba32f) uniform image2D moment;
 layout(set = 0, binding = 1, std430) readonly buffer Params {
   vec4 cam_pos_frame;      // xyz = camera position, w = frame index
   vec4 cam_basis_r;        // camera right (unit)
@@ -103,4 +109,6 @@ void main() {
 
   imageStore(accum, ivec2(pix), imageLoad(accum, ivec2(pix)) +
                                   vec4(radiance, 0.0));
+  imageStore(moment, ivec2(pix), imageLoad(moment, ivec2(pix)) +
+                                   vec4(radiance * radiance, 0.0));
 }

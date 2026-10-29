@@ -12,9 +12,12 @@
 //! proven deterministic byte-for-byte — so replay determinism inherits from
 //! the graph's existing tick order.
 //!
-//! dt comes from the graph context (time minus the time of the previous
-//! evaluation of THIS node; 0 on the first call), not from a wall clock, so
-//! replay re-simulation produces the same sequence.
+//! dt comes from the per-node graph context (NodeGraph::evaluate_with sets
+//! context.dt from the graph-owned previous-time map: time minus the time
+//! of the previous evaluation of THIS node; 0 on the first call), not from
+//! a wall clock and not from type-shared lambda state, so replay
+//! re-simulation from a snapshot (or after reset_eval_state()) produces
+//! the same sequence. The node function itself is stateless.
 
 #include <cstdint>
 #include <memory>

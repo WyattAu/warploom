@@ -61,7 +61,7 @@ SceneMatrix make_perspective(float fov_y_degrees, float aspect, float znear,
   SceneMatrix m = scene_identity_matrix();
   const float f = 1.0f / std::tan(fov_y_degrees * 3.14159265f / 360.0f);
   m[0] = f / aspect;
-  m[5] = f;
+  m[5] = -f;  // Vulkan NDC y points DOWN: +f renders the scene inverted
   m[10] = (zfar + znear) / (znear - zfar);
   m[11] = -1.0f;
   m[14] = (2.0f * zfar * znear) / (znear - zfar);

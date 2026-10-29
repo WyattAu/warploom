@@ -24,6 +24,13 @@
 
 namespace warploom::asset {
 
+//! Hard cap on decoded pixel memory (RGBA, level 0). Same 256 MiB budget as
+//! the PNG (`kMaxDecodedPngBytes`) and JPEG (`kMaxDecodedJpegBytes`)
+//! decoders: guards the 32-bit width*height product and keeps hostile
+//! dimensions from exhausting memory before any payload is touched.
+inline constexpr std::uint64_t kMaxDecodedKtx2Bytes =
+    256ULL * 1024ULL * 1024ULL;
+
 //! Decode a KTX2 container whose payload is uncompressed R8G8B8A8.
 //! Returns the level-0 image in RGBA8 order. On any malformed input the
 //! Result carries malformed_asset and `error_detail` (when non-null) names

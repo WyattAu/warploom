@@ -1,0 +1,27 @@
+name = "proofs"
+version = "0.1.0"
+defaultTargets = ["PhysicsDeterminism", "FrameAllocator", "EcsScheduler", "DataflowEval", "FloatContract", "TimelineReplay", "AssetBounds", "LodSelect"]
+
+[[lean_lib]]
+name = "PhysicsDeterminism"
+
+[[lean_lib]]
+name = "FrameAllocator"
+
+[[lean_lib]]
+name = "EcsScheduler"
+
+[[lean_lib]]
+name = "DataflowEval"
+
+[[lean_lib]]
+name = "FloatContract"
+
+[[lean_lib]]
+name = "TimelineReplay"
+
+[[lean_lib]]
+name = "AssetBounds"
+
+[[lean_lib]]
+name = "LodSelect"

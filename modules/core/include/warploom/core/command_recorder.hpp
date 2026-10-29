@@ -63,6 +63,15 @@ class CommandRecorder final {
 
   //! True while a capture is active.
   [[nodiscard]] bool active() const noexcept { return active_; }
+  //! True when a checkpoint is already embedded at `frame` (the scrub_to
+  //! handler uses it to avoid duplicating bytes the scrub_start handler
+  //! already embedded for the same warp target).
+  [[nodiscard]] bool has_checkpoint(std::uint64_t frame) const noexcept {
+    for (const auto& c : checkpoints_) {
+      if (c.frame == frame) return true;
+    }
+    return false;
+  }
   //! Current logical frame (start frame + accumulated step ticks).
   [[nodiscard]] std::uint64_t frame() const noexcept { return frame_; }
   //! Number of recorded commands so far.

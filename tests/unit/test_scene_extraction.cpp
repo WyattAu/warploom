@@ -146,7 +146,7 @@ void make_test_camera(SceneCameraComponent& out) {
   const float f = 1.0f / std::tan(fov_y * 0.5f);
   const float zn = 1.0f / (0.1f - 100.0f);
   m[0] = f;         // square aspect
-  m[5] = f;
+  m[5] = -f;  // Vulkan NDC y points DOWN (scene_camera_projection)
   m[10] = 100.0f * zn;
   m[11] = -1.0f;
   m[14] = 0.1f * 100.0f * zn;

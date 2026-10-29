@@ -113,6 +113,68 @@ TEST_F(ScriptNode, DtFollowsTheTickSequence) {
 }
 
 
+TEST_F(ScriptNode, TwoNodesOfOneTypeGetIndependentDt) {
+  // Regression: dt used to live in ONE TickState shared by the whole node
+  // TYPE, so the second node of a type always observed dt=0 (its sibling
+  // had just stamped the shared last_time with the same timestamp).
+  ::warploom::editor::NodeGraph g;
+  register_script_node_type(g, module_, 1U, 1U);
+  const auto a = g.add_node("script:g4_double", {});
+  const auto b = g.add_node("script:g4_double", {});
+  auto* na = g.find_mut(a);
+  auto* nb = g.find_mut(b);
+  ASSERT_NE(na, nullptr);
+  ASSERT_NE(nb, nullptr);
+  na->inputs["in0"] = ::warploom::editor::NodeValue::make_number(0.0);
+  nb->inputs["in0"] = ::warploom::editor::NodeValue::make_number(0.0);
+  ::warploom::editor::GraphContext ctx;
+  std::string error;
+  ctx.time = 1.0;
+  ctx.tick = 1;
+  ASSERT_TRUE(g.evaluate_with(ctx, error)) << error;
+  EXPECT_DOUBLE_EQ(na->outputs["out0"].number, 0.0);
+  EXPECT_DOUBLE_EQ(nb->outputs["out0"].number, 0.0);
+  ctx.time = 1.5;
+  ctx.tick = 2;
+  ASSERT_TRUE(g.evaluate_with(ctx, error)) << error;
+  // out = in*2 + dt: both nodes must see dt=0.5, not just the first.
+  EXPECT_DOUBLE_EQ(na->outputs["out0"].number, 0.5);
+  EXPECT_DOUBLE_EQ(nb->outputs["out0"].number, 0.5);
+}
+
+TEST_F(ScriptNode, EvalStateResetsForANewHistory) {
+  // dt is eval-local state, not snapshot state: re-evaluating the SAME
+  // object at the same time yields dt=0; after reset_eval_state() the
+  // recorded sequence replays identically.
+  ::warploom::editor::NodeGraph g;
+  register_script_node_type(g, module_, 1U, 1U);
+  const auto id = g.add_node("script:g4_double", {});
+  auto* node = g.find_mut(id);
+  node->inputs["in0"] = ::warploom::editor::NodeValue::make_number(0.0);
+  ::warploom::editor::GraphContext ctx;
+  std::string error;
+  ctx.time = 1.0;
+  ctx.tick = 1;
+  ASSERT_TRUE(g.evaluate_with(ctx, error)) << error;
+  ctx.time = 1.5;
+  ctx.tick = 2;
+  ASSERT_TRUE(g.evaluate_with(ctx, error)) << error;
+  ASSERT_DOUBLE_EQ(node->outputs["out0"].number, 0.5);
+  // Same object, same time again: eval state already stamped 1.5, dt=0.
+  ASSERT_TRUE(g.evaluate_with(ctx, error)) << error;
+  EXPECT_DOUBLE_EQ(node->outputs["out0"].number, 0.0);
+  // New history: reset, replay the recorded times, identical outputs.
+  g.reset_eval_state();
+  ctx.time = 1.0;
+  ctx.tick = 1;
+  ASSERT_TRUE(g.evaluate_with(ctx, error)) << error;
+  EXPECT_DOUBLE_EQ(node->outputs["out0"].number, 0.0);
+  ctx.time = 1.5;
+  ctx.tick = 2;
+  ASSERT_TRUE(g.evaluate_with(ctx, error)) << error;
+  EXPECT_DOUBLE_EQ(node->outputs["out0"].number, 0.5);
+}
+
 // G4 .so path: the same node-type registration bound to a REAL dlopen'd
 // module (the fixture .so built for the script-module tests). This is the
 // path a gameplay module takes; the builtin path above proves the graph

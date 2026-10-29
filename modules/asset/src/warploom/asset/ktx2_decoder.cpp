@@ -103,6 +103,17 @@ constexpr std::uint32_t kFormatR8G8B8A8Srgb = 43U;    // VK_FORMAT_R8G8B8A8_SRGB
   if (width == 0U || height == 0U) {
     return fail("KTX2 pixelWidth and pixelHeight must be nonzero");
   }
+  // Decoded-size cap, checked BEFORE the level index is walked and before
+  // any allocation: a hostile header claiming e.g. 30000x30000 would
+  // otherwise attempt a multi-GB `resize` first. Same 256 MiB budget as
+  // the PNG/JPEG decoders; the product is 64-bit so the check itself
+  // cannot overflow. Level-0 is the largest mip, so capping it caps the
+  // allocation (only level 0 is returned).
+  const std::uint64_t level0_bytes =
+      static_cast<std::uint64_t>(width) * height * 4ULL;
+  if (level0_bytes > kMaxDecodedKtx2Bytes) {
+    return fail("KTX2 dimensions exceed the decoded-size cap");
+  }
   if (depth != 1U) {
     return fail("KTX2 3D textures (pixelDepth != 1) are not supported");
   }
@@ -152,10 +163,8 @@ constexpr std::uint32_t kFormatR8G8B8A8Srgb = 43U;    // VK_FORMAT_R8G8B8A8_SRGB
     }
   }
 
-  // Level 0 payload -> DecodedImage.
+  // Level 0 payload -> DecodedImage (level0_bytes computed and capped above).
   const std::uint64_t level0_offset = read_u64(level_index_offset);
-  const std::uint64_t level0_bytes = static_cast<std::uint64_t>(width) *
-                                     height * 4ULL;
   DecodedImage image;
   image.width = width;
   image.height = height;

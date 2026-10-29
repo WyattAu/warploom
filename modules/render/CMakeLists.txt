@@ -52,6 +52,7 @@ add_library(warploom_render SHARED
     src/warploom/render/vulkan_mesh_table.cpp
     src/warploom/render/vulkan_offscreen.cpp
     src/warploom/render/vulkan_frame_allocator.cpp
+    src/warploom/render/vulkan_graph_resources.cpp
     src/warploom/render/vulkan_parallel_recorder.cpp
     src/warploom/render/vulkan_path_tracer.cpp
     src/warploom/render/vulkan_pipeline.cpp

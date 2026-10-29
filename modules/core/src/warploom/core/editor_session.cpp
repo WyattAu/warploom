@@ -782,6 +782,19 @@ bool EditorSession::handle_edit(
       return true;
     }
     case CK::LoadDocument: {
+      // A wholesale document replace mid-capture is unrepresentable in
+      // warploom-replay-v1: the loader replays from the single opening
+      // checkpoint plus the command log, and neither the load command nor
+      // the loaded bytes would be in the file (docs/replay-format.md used
+      // to claim this was "self-consistent by construction" — it was
+      // silent divergence). Reject loudly instead; stop capture first.
+      if (recorder_.active()) {
+        reply.ok = false;
+        reply.error =
+            "load_document during active capture forks the timeline; "
+            "stop capture first";
+        return true;
+      }
       if (command.text.empty()) {
         reply.ok = false;
         reply.error = "load_document needs \"path\"";
@@ -842,6 +855,14 @@ bool EditorSession::handle_edit(
         reply.error = error;
         return true;
       }
+      // The scrub_to command replays through the hydrated ring, so the
+      // target bytes must travel in the file. scrub_start already embeds
+      // them when the warp was prepared that way; a warp to an older
+      // (pre-capture) checkpoint would otherwise write a file that fails
+      // to load itself. Embed the restored bytes when missing.
+      if (recorder_.active() && !recorder_.has_checkpoint(frame)) {
+        recorder_.embed_checkpoint(doc_, frame);
+      }
       reply.ok = true;
       reply.detail = "scrubbed to frame " + std::to_string(frame);
       return true;
@@ -901,6 +922,18 @@ bool EditorSession::handle_edit(
       return true;
     }
     case CK::LoadReplay: {
+      // Same unrepresentability as LoadDocument above: a nested replay
+      // replaces the document and resets the stack with no trace the file
+      // format could re-apply (re-applied commands are deliberately NOT
+      // re-recorded). Reject loudly instead of writing a file that cannot
+      // replay itself.
+      if (recorder_.active()) {
+        reply.ok = false;
+        reply.error =
+            "load_replay during active capture forks the timeline; "
+            "stop capture first";
+        return true;
+      }
       if (command.text.empty()) {
         reply.ok = false;
         reply.error = "load_replay needs \"path\"";
@@ -1668,6 +1701,29 @@ bool EditorSession::load_replay(const std::string& path,
     }
   }
   replaying_ = false;
+  // End-state verification (W2 contract, docs/replay-format.md "Load
+  // semantics"): re-applying the log from the opening checkpoint must
+  // reproduce the file's closing checkpoint byte-for-byte. Anything the
+  // live run did outside the log (free-run ticks the host never issued
+  // as commands, unreplayable state) lands here instead of silently
+  // diverging. The closing checkpoint is the LAST checkpoint record in
+  // file order: stop() embeds it after every command and every earlier
+  // checkpoint (a mid-file ScrubStart can target a frame AHEAD of the
+  // final log position, so greatest-frame would pick the wrong record).
+  if (!hydrated.empty()) {
+    const std::size_t closing = hydrated.size() - 1U;
+    const std::string now_json = doc_.to_json();
+    const std::uint64_t now_hash = fnv1a64(now_json.data(), now_json.size());
+    if (now_hash != hydrated[closing].hash) {
+      error = "load_replay: re-applied state does not match the closing "
+              "checkpoint at frame " +
+              std::to_string(hydrated[closing].frame) + " (replay " +
+              std::to_string(now_hash) + " vs file " +
+              std::to_string(hydrated[closing].hash) +
+              "): the capture contains effects outside the command log";
+      return false;
+    }
+  }
   return true;
 }
 

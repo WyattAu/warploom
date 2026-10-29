@@ -103,42 +103,64 @@ namespace {
   height_ = config.height;
   max_bounces_ = config.max_bounces;
 
-  // ---- Accumulation image (rgba32f storage) --------------------------------
-  VkImageCreateInfo image_info{};
-  image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-  image_info.imageType = VK_IMAGE_TYPE_2D;
-  image_info.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-  image_info.extent = {width_, height_, 1};
-  image_info.mipLevels = 1;
-  image_info.arrayLayers = 1;
-  image_info.samples = VK_SAMPLE_COUNT_1_BIT;
-  image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-  image_info.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                     VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                     // SAMPLED is not optional: the accumulation image is what
-                     // the compose chain tonemaps (R1b), and binding a
-                     // storage-only view as a combined image sampler is
-                     // VUID-VkWriteDescriptorSet-descriptorType-00337. The
-                     // tests that only read the accumulation back never
-                     // sampled it, so this was invisible until the image
-                     // reached a real tonemap.
-                     VK_IMAGE_USAGE_SAMPLED_BIT;
-  image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  if (vkCreateImage(device_, &image_info, nullptr, &accum_image_) != VK_SUCCESS) {
-    return refuse("accumulation image creation failed");
+  // ---- Accumulation + second-moment images (rgba32f storage) ---------------
+  // One creation path for both: the moment image is the same extent, format
+  // and usage as the accumulation, cleared and added alongside it. A second
+  // copy of this block would be a second place for the usage flags to drift
+  // (the SAMPLED-bit lesson above was exactly that class of drift).
+  // Returns false when refuse() ran (which itself returns ok() by the
+  // file's convention: failure is reported via failed(), not the Result).
+  const auto make_storage_image = [&](VkImage& image, VkImageView& view,
+                                      Allocation& memory) -> bool {
+    VkImageCreateInfo image_info{};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    image_info.extent = {width_, height_, 1};
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                       VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                       // SAMPLED is not optional: the accumulation image is what
+                       // the compose chain tonemaps (R1b), and binding a
+                       // storage-only view as a combined image sampler is
+                       // VUID-VkWriteDescriptorSet-descriptorType-00337. The
+                       // tests that only read the accumulation back never
+                       // sampled it, so this was invisible until the image
+                       // reached a real tonemap. The moment image carries the
+                       // same flags so a future moment-sampling tonemap or
+                       // denoiser needs no recreate.
+                       VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (vkCreateImage(device_, &image_info, nullptr, &image) != VK_SUCCESS) {
+      refuse("accumulation image creation failed");
+      return false;
+    }
+    auto mem = allocator.bind_image(image, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (!mem.is_ok()) {
+      refuse("accumulation image memory failed");
+      return false;
+    }
+    memory = mem.value();
+    VkImageViewCreateInfo view_info{};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.image = image;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    view_info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    if (vkCreateImageView(device_, &view_info, nullptr, &view) != VK_SUCCESS) {
+      refuse("accumulation image view failed");
+      return false;
+    }
+    return true;
+  };
+  if (!make_storage_image(accum_image_, accum_view_, accum_allocation_)) {
+    return ::warploom::core::Result<void>::ok();  // refuse() already ran
   }
-  auto accum_mem =
-      allocator.bind_image(accum_image_, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-  if (!accum_mem.is_ok()) return refuse("accumulation image memory failed");
-  accum_allocation_ = accum_mem.value();
-  VkImageViewCreateInfo view_info{};
-  view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-  view_info.image = accum_image_;
-  view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-  view_info.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-  view_info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-  if (vkCreateImageView(device_, &view_info, nullptr, &accum_view_) != VK_SUCCESS) {
-    return refuse("accumulation image view failed");
+  if (!make_storage_image(moment_image_, moment_view_, moment_allocation_)) {
+    return ::warploom::core::Result<void>::ok();  // refuse() already ran
   }
 
   // ---- Host-visible params + instance buffers -------------------------------
@@ -313,7 +335,7 @@ namespace {
   }
   pool_guard();
 
-  // ---- Descriptor set: 0 accum, 1 params, 2 TLAS, 3 instances --------------
+  // ---- Descriptor set: 0 accum, 1 params, 2 TLAS, 3 instances, 4 moment ----
   descriptor_manager_ = std::make_unique<VulkanDescriptorManager>();
   if (!descriptor_manager_->initialize(device_).is_ok()) {
     return refuse("descriptor manager failed");
@@ -326,7 +348,9 @@ namespace {
        {0, 2, 1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
         VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
        {0, 3, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}},
+        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
+       {0, 4, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_SHADER_STAGE_RAYGEN_BIT_KHR}},
       1U);
   if (!layout.is_ok()) return refuse("descriptor layout failed");
   layout_ = layout.value();
@@ -406,6 +430,10 @@ namespace {
       !descriptor_manager_
            ->write_buffer(descriptor_set_, 3U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                           instance_allocation_.buffer, 0, VK_WHOLE_SIZE)
+           .is_ok() ||
+      !descriptor_manager_
+           ->write_image(descriptor_set_, 4U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                         VK_NULL_HANDLE, moment_view_, VK_IMAGE_LAYOUT_GENERAL, 0U)
            .is_ok()) {
     return refuse("descriptor write failed");
   }
@@ -449,17 +477,31 @@ void VulkanPathTracer::record_round([[maybe_unused]] VkCommandBuffer command_buf
   barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  // Both accumulation targets travel together: the moment image gets the
+  // same barrier shapes as the accumulation, with only .image differing.
+  // A single-image barrier here would leave the moment image's layout and
+  // visibility to chance -- the same silent-race class as the missing
+  // SHADER_READ bit below (no validation diagnostic, wrong picture).
+  const auto emit_both = [&](const VkImageMemoryBarrier& shape,
+                             VkPipelineStageFlags src, VkPipelineStageFlags dst) {
+    VkImageMemoryBarrier pair[2] = {shape, shape};
+    pair[0].image = accum_image_;
+    pair[1].image = moment_image_;
+    vkCmdPipelineBarrier(command_buffer, src, dst, 0, 0, nullptr, 0, nullptr, 2,
+                         pair);
+  };
   if (clear_first) {
     barrier.srcAccessMask = 0;
     barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
-                         1, &barrier);
+    emit_both(barrier, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+              VK_PIPELINE_STAGE_TRANSFER_BIT);
     VkClearColorValue black{};
     VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     vkCmdClearColorImage(command_buffer, accum_image_, VK_IMAGE_LAYOUT_GENERAL,
+                         &black, 1, &range);
+    vkCmdClearColorImage(command_buffer, moment_image_, VK_IMAGE_LAYOUT_GENERAL,
                          &black, 1, &range);
     // Clear -> shader read/write so the trace both reads (nothing yet) and
     // writes the frame's contribution into GENERAL.
@@ -467,9 +509,8 @@ void VulkanPathTracer::record_round([[maybe_unused]] VkCommandBuffer command_buf
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
     barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
     barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr,
-                         0, nullptr, 1, &barrier);
+    emit_both(barrier, VK_PIPELINE_STAGE_TRANSFER_BIT,
+              VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
   } else {
     // Cross-submission visibility: the previous round's shader write must be
     // visible to this round's read-modify-write.
@@ -477,9 +518,8 @@ void VulkanPathTracer::record_round([[maybe_unused]] VkCommandBuffer command_buf
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
     barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
     barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr,
-                         0, nullptr, 1, &barrier);
+    emit_both(barrier, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+              VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
   }
   rt_pipeline_.trace_rays(command_buffer, width_, height_, 1U);
 
@@ -502,10 +542,9 @@ void VulkanPathTracer::record_round([[maybe_unused]] VkCommandBuffer command_buf
   barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
   barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
   barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-  vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                       VK_PIPELINE_STAGE_TRANSFER_BIT |
-                           VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                       0, 0, nullptr, 0, nullptr, 1, &barrier);
+  emit_both(barrier, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+            VK_PIPELINE_STAGE_TRANSFER_BIT |
+                VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
 
   if (clear_first) {
     samples_ = 1U;
@@ -541,14 +580,18 @@ void VulkanPathTracer::set_camera([[maybe_unused]] const PathTracerCamera& camer
 #endif
 }
 
-::warploom::core::Result<std::vector<float>> VulkanPathTracer::read_mean() const {
+::warploom::core::Result<std::vector<float>> VulkanPathTracer::read_image_sum(
+    [[maybe_unused]] VkImage image) const {
 #ifdef OMNICPP_HAS_VULKAN
-  if (!ready_ || allocator_ == nullptr) {
+  if (!ready_ || allocator_ == nullptr || image == VK_NULL_HANDLE) {
     return ::warploom::core::Result<std::vector<float>>::error(
         ::warploom::core::RuntimeError::invalid_config);
   }
-  // Copy the accumulation image into a host-visible buffer and divide by the
-  // sample count on the CPU — the same two steps the PT tests perform by hand.
+  // Copy one rgba32f image into a host-visible buffer WITHOUT dividing —
+  // the shared readback behind read_mean and read_second_moment, which divide
+  // by the sample count on the CPU (the same two steps the PT tests perform
+  // by hand). Factored so the moment image cannot drift from the accumulation
+  // path: one copy sequence, parameterized by image, not two.
   const VkDeviceSize texel = 16U;  // rgba32f
   const VkDeviceSize bytes = texel * width_ * height_;
   auto staging = allocator_->create_buffer(
@@ -589,7 +632,7 @@ void VulkanPathTracer::set_camera([[maybe_unused]] const PathTracerCamera& camer
   to_transfer.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
   to_transfer.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
   to_transfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-  to_transfer.image = accum_image_;
+  to_transfer.image = image;
   to_transfer.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
   to_transfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   to_transfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -599,7 +642,7 @@ void VulkanPathTracer::set_camera([[maybe_unused]] const PathTracerCamera& camer
   VkBufferImageCopy region{};
   region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
   region.imageExtent = {width_, height_, 1};
-  vkCmdCopyImageToBuffer(cmd, accum_image_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+  vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                          staging_alloc.buffer, 1, &region);
   to_transfer.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
   to_transfer.dstAccessMask = 0U;
@@ -617,14 +660,49 @@ void VulkanPathTracer::set_camera([[maybe_unused]] const PathTracerCamera& camer
   vkQueueWaitIdle(graphics_queue_);
   vkDestroyCommandPool(device_, pool.value(), nullptr);
 
-  std::vector<float> mean(static_cast<std::size_t>(width_ * height_) * 4U, 0.0F);
+  std::vector<float> sums(static_cast<std::size_t>(width_ * height_) * 4U, 0.0F);
   if (staging_alloc.mapped != nullptr) {
-    std::memcpy(mean.data(), staging_alloc.mapped, static_cast<std::size_t>(bytes));
+    std::memcpy(sums.data(), staging_alloc.mapped, static_cast<std::size_t>(bytes));
   }
   allocator_->destroy_allocation(staging_alloc);
+  return ::warploom::core::Result<std::vector<float>>::ok(std::move(sums));
+#else
+  return ::warploom::core::Result<std::vector<float>>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
+::warploom::core::Result<std::vector<float>> VulkanPathTracer::read_mean() const {
+#ifdef OMNICPP_HAS_VULKAN
+  auto sums = read_image_sum(accum_image_);
+  if (!sums.is_ok()) {
+    return ::warploom::core::Result<std::vector<float>>::error(
+        ::warploom::core::RuntimeError::invalid_config);
+  }
+  std::vector<float> mean = sums.value();
   const float inv = samples_ > 0U ? 1.0F / static_cast<float>(samples_) : 0.0F;
   for (float& v : mean) v *= inv;
   return ::warploom::core::Result<std::vector<float>>::ok(std::move(mean));
+#else
+  return ::warploom::core::Result<std::vector<float>>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
+::warploom::core::Result<std::vector<float>> VulkanPathTracer::read_second_moment()
+    const {
+#ifdef OMNICPP_HAS_VULKAN
+  auto sums = read_image_sum(moment_image_);
+  if (!sums.is_ok()) {
+    return ::warploom::core::Result<std::vector<float>>::error(
+        ::warploom::core::RuntimeError::invalid_config);
+  }
+  // E[X^2]: the mean of the squared contributions, mirroring read_mean.
+  // Variance follows host-side as E[X^2] - E[X]^2 per channel.
+  std::vector<float> moment = sums.value();
+  const float inv = samples_ > 0U ? 1.0F / static_cast<float>(samples_) : 0.0F;
+  for (float& v : moment) v *= inv;
+  return ::warploom::core::Result<std::vector<float>>::ok(std::move(moment));
 #else
   return ::warploom::core::Result<std::vector<float>>::error(
       ::warploom::core::RuntimeError::vulkan_not_available);
@@ -660,12 +738,14 @@ void VulkanPathTracer::destroy_resources() noexcept {
     if (instance_allocation_.is_valid()) allocator_->destroy_allocation(instance_allocation_);
     if (sbt_allocation_.is_valid()) allocator_->destroy_allocation(sbt_allocation_);
     if (accum_allocation_.is_valid()) allocator_->destroy_allocation(accum_allocation_);
+    if (moment_allocation_.is_valid()) allocator_->destroy_allocation(moment_allocation_);
   }
   blas_list_.clear();
   params_allocation_ = Allocation{};
   instance_allocation_ = Allocation{};
   sbt_allocation_ = Allocation{};
   accum_allocation_ = Allocation{};
+  moment_allocation_ = Allocation{};
   tlas_ = TopLevelAS{};
 
   if (accum_view_ != VK_NULL_HANDLE) {
@@ -675,6 +755,14 @@ void VulkanPathTracer::destroy_resources() noexcept {
   if (accum_image_ != VK_NULL_HANDLE) {
     vkDestroyImage(device_, accum_image_, nullptr);
     accum_image_ = VK_NULL_HANDLE;
+  }
+  if (moment_view_ != VK_NULL_HANDLE) {
+    vkDestroyImageView(device_, moment_view_, nullptr);
+    moment_view_ = VK_NULL_HANDLE;
+  }
+  if (moment_image_ != VK_NULL_HANDLE) {
+    vkDestroyImage(device_, moment_image_, nullptr);
+    moment_image_ = VK_NULL_HANDLE;
   }
 #endif
   width_ = 0;

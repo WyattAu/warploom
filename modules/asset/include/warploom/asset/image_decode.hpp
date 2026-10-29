@@ -26,8 +26,12 @@ struct DecodedImage {
   std::vector<std::uint8_t> rgba{};
 
   [[nodiscard]] bool valid() const noexcept {
+    // 64-bit product: the 32-bit width*height*4 can wrap (e.g. 65536x65536
+    // aliases a small size) and falsely validate a truncated buffer.
+    const std::uint64_t want =
+        static_cast<std::uint64_t>(width) * height * 4ULL;
     return width != 0U && height != 0U &&
-           rgba.size() == static_cast<std::size_t>(width) * height * 4U;
+           want == static_cast<std::uint64_t>(rgba.size());
   }
 };
 

@@ -158,6 +158,14 @@ class VulkanPathTracer final {
   //! the converged mean"), never the per-frame one.
   [[nodiscard]] ::warploom::core::Result<std::vector<float>> read_mean() const;
 
+  //! Copy the second-moment image back and divide by sample_count(): per
+  //! texel E[X^2] (rgb; w is 0). Together with read_mean this is the full
+  //! SVGF input pair (first + second moments) and the variance signal an
+  //! adaptive sampler needs — tracked deterministically, because the squares
+  //! are accumulated with the same pure (pixel, frame) seeding as the sums.
+  //! Same host-side inspection contract as read_mean.
+  [[nodiscard]] ::warploom::core::Result<std::vector<float>> read_second_moment() const;
+
   void destroy() noexcept;
 
   [[nodiscard]] bool ready() const noexcept { return ready_; }
@@ -173,6 +181,11 @@ class VulkanPathTracer final {
   //! AS builders are inert in their destructors, so this is explicit.
   void destroy_resources() noexcept;
 
+  //! Shared image readback behind read_mean / read_second_moment: copies
+  //! `image` back WITHOUT dividing. Returns the raw per-texel sums.
+  [[nodiscard]] ::warploom::core::Result<std::vector<float>> read_image_sum(
+      VkImage image) const;
+
   VkPhysicalDevice physical_device_{VK_NULL_HANDLE};
   VkDevice device_{VK_NULL_HANDLE};
   VkQueue graphics_queue_{VK_NULL_HANDLE};
@@ -187,6 +200,13 @@ class VulkanPathTracer final {
   VkImage accum_image_{VK_NULL_HANDLE};
   VkImageView accum_view_{VK_NULL_HANDLE};
   Allocation accum_allocation_{};
+
+  //! Second-moment image (rgba32f storage): per-texel sum of squared
+  //! radiance, cleared and added alongside the accumulation with identical
+  //! barriers. Same extent/format/usage so the readback path is shared.
+  VkImage moment_image_{VK_NULL_HANDLE};
+  VkImageView moment_view_{VK_NULL_HANDLE};
+  Allocation moment_allocation_{};
 
   // Host-visible, host-coherent; mirrored into these by set_camera().
   Allocation params_allocation_{};

@@ -131,6 +131,37 @@ TEST(Ktx2Decoder, DecodesSingleLevelMinimalContainer) {
   EXPECT_EQ(decoded.value().rgba.size(), 8U);
 }
 
+TEST(Ktx2Decoder, RejectsDimensionsAboveDecodedSizeCap) {
+  // 30000x30000 RGBA8 = 3.6 GiB, far above the 256 MiB budget shared with
+  // the PNG/JPEG decoders. The container below is otherwise well-formed
+  // for 4x4 (level index untouched): the cap must fire BEFORE any payload
+  // is touched or allocated, so the diagnostic names the cap, not a
+  // downstream truncation.
+  std::vector<std::uint8_t> container = make_ktx2(4U, 4U, 1U);
+  poke32(container, 16U, 30000U);  // pixelWidth
+  poke32(container, 20U, 30000U);  // pixelHeight
+  std::string error;
+  const auto decoded = omnicpp::asset::decode_ktx2(container.data(),
+                                                   container.size(), &error);
+  EXPECT_FALSE(decoded.is_ok());
+  EXPECT_NE(error.find("decoded-size cap"), std::string::npos) << error;
+}
+
+TEST(Ktx2Decoder, ValidRejectsWrapped32BitProduct) {
+  // 65536x65536x4 = 2^34 wraps to 0 in 32-bit arithmetic, so a 32-bit
+  // comparison would validate an EMPTY buffer (nonzero dims, 0 == 0).
+  // The 64-bit product must reject it. On LP64 the old code was already
+  // 64-bit via size_t promotion (wasm32 is where it wrapped); the
+  // uint32 check below pins the wrap fact the fix guards against, so this
+  // test cannot pass by accident on any platform.
+  EXPECT_EQ(65536U * 65536U * 4U, 0U);  // 32-bit wrap premise
+  omnicpp::asset::DecodedImage image;
+  image.width = 65536U;
+  image.height = 65536U;
+  image.rgba.clear();
+  EXPECT_FALSE(image.valid());
+}
+
 TEST(Ktx2Decoder, RejectsMalformedContainers) {
   // Bad magic.
   {

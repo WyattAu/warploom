@@ -47,7 +47,7 @@ using omnicpp::render::scene_identity_matrix;
 SceneMatrix make_perspective(float fov_y_deg, float aspect, float zn, float zf) {
   SceneMatrix m = scene_identity_matrix();
   float f = 1.0f / std::tan(fov_y_deg * 3.14159265f / 360.0f);
-  m[0] = f / aspect; m[5] = f;
+  m[0] = f / aspect; m[5] = -f;  // Vulkan NDC y points DOWN: +f renders the scene inverted
   m[10] = (zf + zn) / (zn - zf); m[11] = -1.0f;
   m[14] = (2.0f * zf * zn) / (zn - zf); m[15] = 0.0f;
   return m;

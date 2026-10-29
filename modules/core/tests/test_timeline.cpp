@@ -449,4 +449,146 @@ TEST(TimelineSession, ClipEditsAreRecordedAndReplay) {
   EXPECT_EQ(clip->length_frames, 3U);
 }
 
+// ============================================================================
+// 7. Capture integrity: wholesale document replaces are unrepresentable
+//    mid-capture; warp targets must travel in the file
+// ============================================================================
+
+TEST(TimelineSession, LoadDocumentDuringCaptureIsRejected) {
+  // A mid-capture load replaces the whole document with bytes no command
+  // in the file could reproduce (the loader replays from the single
+  // opening checkpoint plus the log). The old code silently dropped the
+  // load from the record — a file that diverges on replay. Now loud.
+  ed::EditorSession s;
+  ok(s, [] {
+    omnicpp::core::ControlCommand c;
+    c.kind = CK::SpawnCube;
+    c.number_count = 0;
+    return c;
+  }());
+  const std::string before = s.document().to_json();
+  std::string capture_error;
+  ASSERT_TRUE(s.capture_start(0, "g3", capture_error)) << capture_error;
+  omnicpp::core::ControlCommand load;
+  load.kind = CK::LoadDocument;
+  load.text = "/nonexistent-doc.warploom";
+  const auto reply = s.on_control(load);
+  EXPECT_FALSE(reply.ok);
+  EXPECT_NE(reply.error.find("capture"), std::string::npos);
+  // Untouched: same document, capture still active and stoppable.
+  EXPECT_EQ(s.document().to_json(), before);
+  EXPECT_TRUE(s.capture_stop("/tmp/g3_load_rejected.replay", capture_error))
+      << capture_error;
+}
+
+TEST(TimelineSession, LoadReplayDuringCaptureIsRejected) {
+  // Same unrepresentability as LoadDocument: a nested replay resets the
+  // document and the stack with no trace the format could re-apply
+  // (re-applied commands are deliberately NOT re-recorded).
+  ed::EditorSession s;
+  std::string capture_error;
+  ASSERT_TRUE(s.capture_start(0, "g3", capture_error)) << capture_error;
+  omnicpp::core::ControlCommand load;
+  load.kind = CK::LoadReplay;
+  load.text = "/nonexistent.replay";
+  const auto reply = s.on_control(load);
+  EXPECT_FALSE(reply.ok);
+  EXPECT_NE(reply.error.find("capture"), std::string::npos);
+  EXPECT_TRUE(s.capture_stop("/tmp/g3_loadrep_rejected.replay",
+                              capture_error))
+      << capture_error;
+}
+
+TEST(TimelineSession, ScrubToDuringCaptureCarriesTargetBytes) {
+  // Warp to a PRE-capture checkpoint mid-capture: the target bytes are in
+  // the session ring but not in the recorder. Without the session
+  // embedding them at the warp, the file loads only until the replayed
+  // scrub_to finds no checkpoint — a capture that cannot replay itself.
+  ed::EditorSession s;
+  ok(s, [] {
+    omnicpp::core::ControlCommand c;
+    c.kind = CK::SpawnCube;
+    c.number_count = 0;
+    return c;
+  }());
+  omnicpp::core::ControlCommand scrub_start;
+  scrub_start.kind = CK::ScrubStart;
+  scrub_start.numbers[0] = 5;
+  scrub_start.number_count = 1;
+  ok(s, scrub_start);
+  const std::string state_at_5 = s.document().to_json();
+  // Diverge the document, checkpoint the new state, then capture.
+  ok(s, set_position(s, 11.0, 0.0, 0.0));
+  scrub_start.numbers[0] = 15;
+  ok(s, scrub_start);
+  std::string capture_error;
+  ASSERT_TRUE(s.capture_start(0, "g3", capture_error)) << capture_error;
+  // Warp back to the pre-capture checkpoint: live restore must succeed
+  // AND the bytes must be embedded for the file.
+  omnicpp::core::ControlCommand scrub_to;
+  scrub_to.kind = CK::ScrubTo;
+  scrub_to.numbers[0] = 5;
+  scrub_to.number_count = 1;
+  ok(s, scrub_to);
+  EXPECT_EQ(s.document().to_json(), state_at_5);
+  const std::string path = "/tmp/g3_scrub_carry.replay";
+  ASSERT_TRUE(s.capture_stop(path, capture_error)) << capture_error;
+  // The file replays end to end and lands on the warped state.
+  ed::EditorSession fresh;
+  std::string load_error;
+  ASSERT_TRUE(fresh.load_replay(path, load_error)) << load_error;
+  EXPECT_EQ(fresh.document().to_json(), state_at_5);
+}
+
+TEST(TimelineSession, LoadReplayVerifiesEndStateAgainstClosingCheckpoint) {
+  // End-state verification (W2 contract): the file's closing checkpoint
+  // must be exactly what the log reproduces. Five host ticks run WITHOUT
+  // recording steps, so the live track holds five samples while the
+  // three-entry log can only re-simulate three. The per-record hashes
+  // are all valid — only the re-applied END state betrays the unlogged
+  // ticks. Without the check the load succeeds on divergent bytes.
+  ed::EditorSession s;
+  ok(s, [] {
+    omnicpp::core::ControlCommand c;
+    c.kind = CK::SpawnCube;
+    c.number_count = 0;
+    return c;
+  }());
+  const auto cube_id = s.document().objects.back().id;
+  ok(s, set_position(s, 7.0, 0.0, 0.0));
+  std::string capture_error;
+  ASSERT_TRUE(s.capture_start(0, "g3", capture_error)) << capture_error;
+  omnicpp::core::ControlCommand add;
+  add.kind = CK::ClipAdd;
+  add.text = "intro";
+  add.numbers[0] = 0;
+  add.numbers[1] = 8;
+  add.number_count = 2;
+  ok(s, add);
+  omnicpp::core::ControlCommand rec;
+  rec.kind = CK::ClipRecord;
+  rec.numbers[0] = 1;
+  rec.numbers[1] = static_cast<double>(cube_id);
+  rec.text = "position.x";
+  rec.number_count = 2;
+  ok(s, rec);
+  // Five live ticks, zero of them recorded as steps.
+  for (std::uint64_t i = 0; i < 5; ++i) {
+    host_tick(s, i);
+  }
+  ok(s, step_cmd(1));
+  const std::string path = "/tmp/g3_unlogged_ticks.replay";
+  ASSERT_TRUE(s.capture_stop(path, capture_error)) << capture_error;
+  const auto* clip = s.document().find_clip(1);
+  ASSERT_NE(clip, nullptr);
+  ASSERT_EQ(clip->tracks.size(), 1U);
+  EXPECT_EQ(clip->tracks.begin()->second.samples.size(), 5U);
+  // The load must refuse: the log reproduces three samples, not five.
+  ed::EditorSession fresh;
+  std::string load_error;
+  EXPECT_FALSE(fresh.load_replay(path, load_error));
+  EXPECT_NE(load_error.find("closing checkpoint"), std::string::npos)
+      << load_error;
+}
+
 }  // namespace
