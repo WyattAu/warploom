@@ -225,6 +225,21 @@ not.
   `noise1d`, mpsc ordering, graph-clock wiring, tile residency,
   pyramid-reuse proof, `lod_count == 0`, legacy toolchain flag).
 
+## Loop 21 — shared C++ gates (2026-10-29, first of the all-directions series)
+
+- [loop21-shared-cpp-ci.md](loop21-shared-cpp-ci.md) — the estate runs one
+  reusable workflow per language and C++ had none. Warploom's 10-job CI is
+  extracted into `.github/workflows/cpp-gates.yml` (`on: workflow_call`),
+  developed and CI-executed here first so the handoff to
+  `engineering-standards` is a verbatim copy; `test.yml` is a thin caller.
+  Sources: GitHub reusable-workflow vendor docs plus the estate's own
+  gate-matrix page and `go-kit.yml` raw. Adopted: the kit shape
+  (sequence shared, parameters per repo), `persist-credentials: false` on
+  checkouts. Deferred to handoff: SHA-pinning. Verified: caller/callee
+  contract script, sabotage-checked both directions, moved jobs
+  byte-identical modulo the checkout hardening. Next in E7: the first
+  dogfooding consumer repo.
+
 ## Follow-up searches for the next loop
 
 - Visual-scripting execution models (dataflow pull vs imperative push, and

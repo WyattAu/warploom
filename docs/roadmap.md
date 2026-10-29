@@ -801,6 +801,22 @@ declares a slot 3.
       now runs that exact command in CI.
 - [ ] **E6 P1–P4** — WASM leg, native Wayland surface, adoption
       (FetchContent/vcpkg), docs rebrand, GitHub repo rename.
+- [~] **E7 estate-shared C++ gates** — the estate runs one reusable workflow
+      per language (rust-kit, go-kit, haskell-kit, node-ci, python-kit); C++
+      had none, and warploom's 10-job CI is the only instance. Loop 21
+      (2026-10-29, first of the all-directions series): `.github/workflows/
+      cpp-gates.yml` holds the matrix as `on: workflow_call`, developed and
+      executed HERE first — `test.yml` is a thin caller (triggers +
+      concurrency only), all 10 job bodies moved byte-identically except
+      `persist-credentials: false` on checkouts (estate convention; no job
+      pushes, so zero behaviour change). The `contract` job
+      (`scripts/check_ci_contract.py`) enforces the caller/callee interface
+      and is sabotage-checked both directions. SHA-pinning of actions rides
+      with the handoff, not this move (unresolvable locally without risking
+      a wrong SHA). Handoff pending: verbatim copy to
+      `engineering-standards/.github/workflows/cpp-kit.yml`, caller flips
+      `uses:` to `WyattAu/engineering-standards/...@main`, this file is
+      deleted. Next in E7: the first dogfooding consumer repo.
 
 ## The 0.1 gate
 

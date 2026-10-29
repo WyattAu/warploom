@@ -1,0 +1,432 @@
+# Warploom C++ gates — the shared gate matrix, in estate-kit shape.
+#
+# A GitHub reusable workflow (on: workflow_call) developed and executed HERE
+# first: .github/workflows/test.yml calls it on every push, so the sequence
+# below is tested by this repo's own CI. The estate handoff is a verbatim
+# copy to engineering-standards/.github/workflows/cpp-kit.yml, at which
+# point the caller flips its `uses:` to
+# WyattAu/engineering-standards/.github/workflows/cpp-kit.yml@main and this
+# file is deleted. Until then the two must not drift: the `contract` job
+# enforces the caller/callee interface (scripts/check_ci_contract.py).
+name: Warploom C++ gates
+
+on:
+  workflow_call:
+
+jobs:
+  # The interface check travels with the gates so the estate copy carries it.
+  contract:
+    name: "CI contract"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Check caller/callee contract
+        run: python3 scripts/check_ci_contract.py
+
+  # ============================================================================
+  # Format check — .clang-format compliance across modules/examples/tests/tools
+  # ============================================================================
+  format-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+
+      - name: Check formatting
+        run: |
+          find modules examples tests tools \
+            \( -name '*.cpp' -o -name '*.hpp' \) -print0 |
+            xargs -0 clang-format --dry-run --Werror
+
+  # ============================================================================
+  # Headless Debug — canonical runtime + rendering tests
+  # ============================================================================
+  headless-debug:
+    name: "Headless Debug"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ python3
+
+      - name: Configure
+        run: cmake --preset headless-debug
+
+      - name: Build
+        run: cmake --build build/headless-debug -j$(nproc)
+
+      - name: Test
+        run: ctest --test-dir build/headless-debug --output-on-failure --timeout 120
+
+      - name: Benchmark
+        run: |
+          build/headless-debug/bin/warploom_deterministic_runtime_benchmark --output benchmark.json
+          cat benchmark.json
+
+  # ============================================================================
+  # Headless Debug (Clang) — fallback-compiler matrix leg: exercises every
+  # non-GCC-gated C++26 path (no reflection/contracts on Clang yet)
+  # ============================================================================
+  headless-debug-clang:
+    name: "Headless Debug (Clang)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang python3
+
+      - name: Configure
+        run: cmake --preset headless-debug-clang
+
+      - name: Build
+        run: cmake --build build/headless-debug-clang -j$(nproc)
+
+      - name: Test
+        run: ctest --test-dir build/headless-debug-clang --output-on-failure --timeout 120
+
+  # ============================================================================
+  # Headless Release — optimized build validation
+  # ============================================================================
+  headless-release:
+    name: "Headless Release"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ python3
+
+      - name: Configure
+        run: cmake --preset headless-release
+
+      - name: Build
+        run: cmake --build build/headless-release -j$(nproc)
+
+      - name: Test
+        run: ctest --test-dir build/headless-release --output-on-failure --timeout 120
+
+  # ============================================================================
+  # ThreadSanitizer
+  # ============================================================================
+  tsan:
+    name: "ThreadSanitizer"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ python3
+
+      - name: Configure
+        run: cmake --preset tsan
+
+      - name: Build
+        run: cmake --build build/tsan -j$(nproc)
+
+      - name: Test
+        env:
+          TSAN_OPTIONS: "halt_on_error=1 history_size=7"
+        run: ctest --test-dir build/tsan --output-on-failure --timeout 120
+
+  # ============================================================================
+  # AddressSanitizer + UndefinedBehaviorSanitizer
+  # ============================================================================
+  asan-ubsan:
+    name: "ASan + UBSan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ python3
+
+      - name: Configure
+        run: cmake --preset asan-ubsan
+
+      - name: Build
+        run: cmake --build build/asan-ubsan -j$(nproc)
+
+      - name: Test
+        run: ctest --test-dir build/asan-ubsan --output-on-failure --timeout 120
+
+  # ============================================================================
+  # Vulkan validation — Khronos layer on Mesa lavapipe (software GPU)
+  # ============================================================================
+  vulkan-validation:
+    name: "Vulkan Validation (lavapipe)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: Install toolchain + Vulkan stack
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ python3 \
+            libvulkan-dev glslang-tools vulkan-validationlayers vulkan-tools \
+            mesa-vulkan-drivers libx11-dev libxcb1-dev
+
+      - name: Vulkan driver smoke test
+        run: vulkaninfo --summary
+
+      - name: Configure
+        run: cmake --preset vulkan-validation
+
+      - name: Build
+        run: cmake --build build/vulkan-validation -j$(nproc)
+
+      - name: Test
+        run: ctest --test-dir build/vulkan-validation --output-on-failure --timeout 300
+
+  # ============================================================================
+  # Live protocol proofs (P0) — the checked-in harness (tools/live_proof.py)
+  # against headless control hosts (EditorSession + ControlServer, no GPU):
+  # W1 scrubber, G1 save/load round-trip, the W2 record→load→
+  # byte-identical two-instance proof, and the G3 timeline clip proof,
+  # all over a real socket.
+  # ============================================================================
+  live-proof:
+    name: "Live Protocol Proofs (headless)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ python3
+
+      - name: Configure
+        run: cmake --preset headless-debug
+
+      - name: Build
+        run: |
+          cmake --build build/headless-debug -j$(nproc)
+
+      - name: Start headless hosts
+        run: |
+          build/headless-debug/bin/warploom_headless_host /tmp/proof_a.sock 2>/tmp/proof_a.log &
+          build/headless-debug/bin/warploom_headless_host /tmp/proof_b.sock 2>/tmp/proof_b.log &
+          for i in $(seq 1 50); do
+            [ -S /tmp/proof_a.sock ] && [ -S /tmp/proof_b.sock ] && break
+            sleep 0.2
+          done
+          test -S /tmp/proof_a.sock && test -S /tmp/proof_b.sock
+
+      - name: Run live proofs (w1 + g1 + w2 + g3)
+        run: python3 tools/live_proof.py all --sock /tmp/proof_a.sock --sock-a /tmp/proof_a.sock --sock-b /tmp/proof_b.sock
+
+  # ============================================================================
+  # Documentation links
+  # ============================================================================
+  docs:
+    name: "Documentation"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # CPM's source cache is shared across binary directories, so this also
+      # makes switching preset free locally. Keyed on the manifests that can
+      # change what gets fetched.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: Check docs links
+        run: python3 scripts/check_docs_links.py
+
+  # ============================================================================
+  # Examples — builds the viewport, the one user-facing artifact.
+  #
+  # Every other job sets WARPLOOM_BUILD_EXAMPLES=OFF, so a 5,500-line
+  # translation unit that is the engine's only real application had never been
+  # compiled by CI. It also proves the shader pipeline (cmake/Shaders.cmake)
+  # runs from a clean checkout: the .spv output directory is the build root,
+  # not somewhere under tests/.
+  #
+  # It builds here; it cannot present, because lavapipe has no window. The
+  # viewport binary is uploaded so the build is verifiable by artifact.
+  # ============================================================================
+  examples:
+    name: "Viewport builds"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warploom/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: Install toolchain + Vulkan stack + shader compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang python3 \
+            libvulkan-dev glslang-tools mesa-vulkan-drivers \
+            libx11-dev libxcb1-dev pkg-config
+
+      - name: Configure
+        run: cmake --preset default
+
+      - name: Build (compiles all 73 shaders into the build root)
+        run: cmake --build build/default -j$(nproc)
+
+      - name: Assert the viewport and its shaders exist
+        run: |
+          test -x build/default/bin/warploom_viewport
+          n=$(ls build/default/shaders/*.spv | wc -l)
+          echo "compiled shaders: $n"
+          test "$n" -ge 70
+
+      - name: Upload the viewport binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: warploom-viewport
+          path: build/default/bin/warploom_viewport
+          retention-days: 7
+
+  # ============================================================================
+  # Presets — the documented entry points must actually configure.
+  #
+  # cmake --preset default used to abort on a hardcoded /nix/store Qt6_DIR,
+  # which is the command a new contributor runs first. Cheap to check, so it
+  # is checked on every push.
+  # ============================================================================
+  presets:
+    name: "Presets are usable"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang python3
+
+      - name: Every visible preset lists
+        run: |
+          cmake --list-presets
+          cmake --build --list-presets
+          ctest --list-presets
+
+      - name: default configures and builds
+        run: |
+          cmake --preset default
+          cmake --build build/default -j$(nproc)
+          ctest --test-dir build/default --output-on-failure --timeout 300
