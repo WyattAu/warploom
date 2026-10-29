@@ -75,7 +75,7 @@ Two verification milestones worth knowing when reading the Proof column:
 | Deferred / G-buffer, MSAA | no | no | every image is `VK_SAMPLE_COUNT_1_BIT` |
 | CSM / cascaded shadow maps | no | no | single 2048² map |
 | SSAO, SSR, TAA, denoiser, volumetrics | no | no | — |
-| Compressed textures beyond RGBA8 | no | no | the KTX2 decoder accepts uncompressed RGBA8 only |
+| Compressed textures beyond RGBA8 | partial | no | KTX2 BC1/BC3 decode in-tree to RGBA8 (loop 24); GPU-native compressed upload deferred |
 
 ## Ray tracing
 

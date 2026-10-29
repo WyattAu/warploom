@@ -1,5 +1,6 @@
 //! @file ktx2_decoder.cpp
-//! @brief KTX2 container decoding for uncompressed RGBA8 textures.
+//! @brief KTX2 container decoding: uncompressed RGBA8 plus BC1/BC3 payloads
+//!        (decoded in-tree to RGBA8, same DecodedImage contract).
 //!
 //! Layout per the KTX2 2.0 specification:
 //!   [0]   8-byte identifier «KTX 20»
@@ -18,6 +19,8 @@
 #include "warploom/asset/ktx2_decoder.hpp"
 
 #include <cstring>
+
+#include "warploom/asset/bc_decode.hpp"
 
 namespace warploom::asset {
 
@@ -91,13 +94,17 @@ constexpr std::uint32_t kFormatR8G8B8A8Srgb = 43U;    // VK_FORMAT_R8G8B8A8_SRGB
   const std::uint32_t levels = read_u32(36U);
   const std::uint32_t scheme = read_u32(40U);
 
-  if (format != kFormatR8G8B8A8Unorm && format != kFormatR8G8B8A8Srgb) {
+  const bool is_uncompressed = format == kFormatR8G8B8A8Unorm ||
+                                format == kFormatR8G8B8A8Srgb;
+  const std::uint32_t block_bytes =
+      is_uncompressed ? 0U : bc_block_bytes(format);
+  if (!is_uncompressed && block_bytes == 0U) {
     return fail("KTX2 vkFormat " + std::to_string(format) +
-                " is not uncompressed R8G8B8A8; only UNORM (37) and SRGB "
-                "(43) RGBA8 payloads are supported");
+                " is not supported; uncompressed R8G8B8A8 (37, 43) and "
+                "BC1 (131-134) / BC3 (137-138) payloads are accepted");
   }
   if (type_size != 1U) {
-    return fail("KTX2 typeSize must be 1 for RGBA8; got " +
+    return fail("KTX2 typeSize must be 1; got " +
                 std::to_string(type_size));
   }
   if (width == 0U || height == 0U) {
@@ -144,7 +151,9 @@ constexpr std::uint32_t kFormatR8G8B8A8Srgb = 43U;    // VK_FORMAT_R8G8B8A8_SRGB
     const std::uint64_t byte_offset = read_u64(entry);
     const std::uint64_t byte_length = read_u64(entry + 8U);
     const std::uint64_t uncompressed = read_u64(entry + 16U);
-    const std::uint64_t expected = level_bytes(width, height, level);
+    const std::uint64_t expected =
+        is_uncompressed ? level_bytes(width, height, level)
+                        : bc_level_bytes(width, height, block_bytes, level);
     if (uncompressed != expected) {
       return fail("KTX2 level " + std::to_string(level) +
                   " uncompressedByteLength " + std::to_string(uncompressed) +
@@ -163,15 +172,29 @@ constexpr std::uint32_t kFormatR8G8B8A8Srgb = 43U;    // VK_FORMAT_R8G8B8A8_SRGB
     }
   }
 
-  // Level 0 payload -> DecodedImage (level0_bytes computed and capped above).
+  // Level 0 payload -> DecodedImage. Uncompressed RGBA8 copies verbatim;
+  // BC payloads decode in-tree to RGBA8 (same 256 MiB decoded-size cap
+  // applies: level0_bytes is the w*h*4 output for both classes).
   const std::uint64_t level0_offset = read_u64(level_index_offset);
-  DecodedImage image;
-  image.width = width;
-  image.height = height;
-  image.rgba.resize(static_cast<std::size_t>(level0_bytes));
-  std::memcpy(image.rgba.data(), bytes + level0_offset,
-              static_cast<std::size_t>(level0_bytes));
-  return ::warploom::core::Result<DecodedImage>::ok(std::move(image));
+  const std::uint64_t level0_length = read_u64(level_index_offset + 8U);
+  if (is_uncompressed) {
+    DecodedImage image;
+    image.width = width;
+    image.height = height;
+    image.rgba.resize(static_cast<std::size_t>(level0_bytes));
+    std::memcpy(image.rgba.data(), bytes + level0_offset,
+                static_cast<std::size_t>(level0_bytes));
+    return ::warploom::core::Result<DecodedImage>::ok(std::move(image));
+  }
+  std::string bc_error;
+  auto bc = decode_bc_level(width, height, format,
+                            bytes + level0_offset,
+                            static_cast<std::size_t>(level0_length),
+                            &bc_error);
+  if (!bc.is_ok()) {
+    return fail("KTX2 level 0 BC payload rejected: " + bc_error);
+  }
+  return bc;
 }
 
 }  // namespace warploom::asset

@@ -87,6 +87,62 @@ void poke_level64(std::vector<std::uint8_t>& data, std::size_t level,
   std::memcpy(data.data() + 80U + level * 24U + field * 8U, &value, 8U);
 }
 
+//! Build a spec-conformant KTX2 container for a WxH BC texture: payloads are
+//! the given block bytes repeated per level (block count from the spec grid
+//! formula, mirrored from the decoder's own bc_level_bytes). Level sizes
+//! are hardcoded at the call sites so the math stays provable, never
+//! inferred from a run.
+std::vector<std::uint8_t> make_ktx2_bc(std::uint32_t width,
+                                       std::uint32_t height,
+                                       std::uint32_t levels,
+                                       std::uint32_t format,
+                                       const std::vector<std::uint8_t>& block,
+                                       std::uint32_t level0_bytes,
+                                       std::uint32_t level1_bytes) {
+  struct LevelEntry {
+    std::uint64_t offset;
+    std::uint64_t length;
+    std::uint64_t uncompressed;
+  };
+  std::vector<LevelEntry> entries;
+  std::vector<std::uint8_t> mip_data;
+  for (std::uint32_t level = 0; level < levels; ++level) {
+    const std::uint64_t bytes =
+        level == 0U ? level0_bytes : level1_bytes;
+    entries.push_back({mip_data.size(), bytes, bytes});
+    for (std::uint64_t i = 0; i < bytes; i += block.size()) {
+      mip_data.insert(mip_data.end(), block.begin(), block.end());
+    }
+  }
+  std::vector<std::uint8_t> out(80U + entries.size() * 24U);
+  std::memcpy(out.data(), "\xAB\x4B\x54\x58\x20\x32\x30\xBB", 8U);
+  auto put32 = [&out](std::size_t offset, std::uint32_t value) {
+    std::memcpy(out.data() + offset, &value, 4U);
+  };
+  auto put64 = [&out](std::size_t offset, std::uint64_t value) {
+    std::memcpy(out.data() + offset, &value, 8U);
+  };
+  put32(8U, format);
+  put32(12U, 1U);  // typeSize
+  put32(16U, width);
+  put32(20U, height);
+  put32(24U, 1U);  // depth
+  put32(28U, 1U);  // layers
+  put32(32U, 1U);  // faces
+  put32(36U, levels);
+  put32(40U, 0U);  // supercompressionScheme: none
+  const std::size_t index_offset = 80U;
+  const std::uint64_t payload_base = 80U + entries.size() * 24U;
+  for (std::size_t level = 0; level < entries.size(); ++level) {
+    put64(index_offset + level * 24U,
+          payload_base + entries[level].offset);
+    put64(index_offset + level * 24U + 8U, entries[level].length);
+    put64(index_offset + level * 24U + 16U, entries[level].uncompressed);
+  }
+  out.insert(out.end(), mip_data.begin(), mip_data.end());
+  return out;
+}
+
 }  // namespace
 
 TEST(Ktx2Decoder, DecodesLevel0FromMipChainedContainer) {
@@ -285,5 +341,114 @@ TEST(Ktx2Decoder, RejectsMalformedContainers) {
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("80-byte header"), std::string::npos) << error;
+  }
+}
+
+TEST(Ktx2Decoder, DecodesBc1Container) {
+  // 8x8 BC1 (format 131): level 0 = 2x2 blocks = 32 bytes, level 1 =
+  // 4x4 = 1 block = 8 bytes. Solid red block (c0 = red, all indices 0).
+  const std::vector<std::uint8_t> red_block = {0x00, 0xF8, 0x1F, 0x00,
+                                               0x00, 0x00, 0x00, 0x00};
+  const std::vector<std::uint8_t> container =
+      make_ktx2_bc(8U, 8U, 2U, 131U, red_block, 32U, 8U);
+  std::string error;
+  const auto decoded = omnicpp::asset::decode_ktx2(container.data(),
+                                                   container.size(), &error);
+  ASSERT_TRUE(decoded.is_ok()) << error;
+  const auto& image = decoded.value();
+  EXPECT_EQ(image.width, 8U);
+  EXPECT_EQ(image.height, 8U);
+  ASSERT_EQ(image.rgba.size(), 8U * 8U * 4U);
+  for (std::size_t t = 0; t < 64U; ++t) {
+    EXPECT_EQ(image.rgba[4U * t], 255U) << "texel " << t;
+    EXPECT_EQ(image.rgba[4U * t + 1U], 0U) << "texel " << t;
+    EXPECT_EQ(image.rgba[4U * t + 2U], 0U) << "texel " << t;
+    EXPECT_EQ(image.rgba[4U * t + 3U], 255U) << "texel " << t;
+  }
+  // The magic-byte dispatch routes the BC container to the same decoder.
+  const auto via_dispatch =
+      omnicpp::asset::decode_image(container.data(), container.size(),
+                                    &error);
+  ASSERT_TRUE(via_dispatch.is_ok()) << error;
+  EXPECT_EQ(via_dispatch.value().rgba, image.rgba);
+}
+
+TEST(Ktx2Decoder, DecodesBc3Container) {
+  // 4x4 BC3 sRGB (format 138): 1 block = 16 bytes. Solid red with full
+  // alpha (alpha a0 = 255, all indices 0).
+  const std::vector<std::uint8_t> red_block = {
+      255U, 0U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,  // alpha
+      0x00, 0xF8, 0x1F, 0x00, 0x00, 0x00, 0x00, 0x00};    // red, all 0
+  const std::vector<std::uint8_t> container =
+      make_ktx2_bc(4U, 4U, 1U, 138U, red_block, 16U, 16U);
+  std::string error;
+  const auto decoded = omnicpp::asset::decode_ktx2(container.data(),
+                                                   container.size(), &error);
+  ASSERT_TRUE(decoded.is_ok()) << error;
+  const auto& image = decoded.value();
+  EXPECT_EQ(image.width, 4U);
+  EXPECT_EQ(image.height, 4U);
+  ASSERT_EQ(image.rgba.size(), 64U);
+  for (std::size_t t = 0; t < 16U; ++t) {
+    EXPECT_EQ(image.rgba[4U * t], 255U) << "texel " << t;
+    EXPECT_EQ(image.rgba[4U * t + 1U], 0U) << "texel " << t;
+    EXPECT_EQ(image.rgba[4U * t + 2U], 0U) << "texel " << t;
+    EXPECT_EQ(image.rgba[4U * t + 3U], 255U) << "texel " << t;
+  }
+}
+
+TEST(Ktx2Decoder, RejectsBadBcContainers) {
+  const std::vector<std::uint8_t> red_block = {0x00, 0xF8, 0x1F, 0x00,
+                                               0x00, 0x00, 0x00, 0x00};
+  // Level payload shorter than the block grid demands.
+  {
+    std::vector<std::uint8_t> container =
+        make_ktx2_bc(8U, 8U, 1U, 131U, red_block, 32U, 32U);
+    poke_level64(container, 0U, 1U, 24U);  // byteLength
+    poke_level64(container, 0U, 2U, 24U);  // uncompressedByteLength
+    std::string error;
+    const auto decoded = omnicpp::asset::decode_ktx2(
+        container.data(), container.size(), &error);
+    EXPECT_FALSE(decoded.is_ok());
+    EXPECT_NE(error.find("does not match the spec size"), std::string::npos)
+        << error;
+  }
+  // Truncated level payload runs past the end of the container.
+  {
+    std::vector<std::uint8_t> container =
+        make_ktx2_bc(8U, 8U, 1U, 131U, red_block, 32U, 32U);
+    container.resize(container.size() - 8U);
+    std::string error;
+    const auto decoded = omnicpp::asset::decode_ktx2(
+        container.data(), container.size(), &error);
+    EXPECT_FALSE(decoded.is_ok());
+    EXPECT_NE(error.find("runs past the end"), std::string::npos) << error;
+  }
+  // A BC format with a non-1 typeSize is malformed.
+  {
+    std::vector<std::uint8_t> container =
+        make_ktx2_bc(4U, 4U, 1U, 137U, red_block, 8U, 8U);
+    poke32(container, 12U, 2U);  // typeSize
+    std::string error;
+    const auto decoded = omnicpp::asset::decode_ktx2(
+        container.data(), container.size(), &error);
+    EXPECT_FALSE(decoded.is_ok());
+    EXPECT_NE(error.find("typeSize"), std::string::npos) << error;
+  }
+  // Compressed BC (byteLength != uncompressed) is still rejected. Uses a
+  // full 16-byte BC3 block so the uncompressed size itself is spec-valid
+  // and only the compression mismatch fires.
+  {
+    const std::vector<std::uint8_t> red_block16 = {
+        255U, 0U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,  // alpha: all 255
+        0x00, 0xF8, 0x1F, 0x00, 0x00, 0x00, 0x00, 0x00};    // red, all 0
+    std::vector<std::uint8_t> container =
+        make_ktx2_bc(4U, 4U, 1U, 137U, red_block16, 16U, 16U);
+    poke_level64(container, 0U, 1U, 4U);  // byteLength < uncompressed
+    std::string error;
+    const auto decoded = omnicpp::asset::decode_ktx2(
+        container.data(), container.size(), &error);
+    EXPECT_FALSE(decoded.is_ok());
+    EXPECT_NE(error.find("is compressed"), std::string::npos) << error;
   }
 }

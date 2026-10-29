@@ -28,6 +28,7 @@ include(CMakePackageConfigHelpers)
 # ---------------------------------------------------------------------------
 
 add_library(warploom_asset SHARED
+    src/warploom/asset/bc_decode.cpp
     src/warploom/asset/gltf_animation.cpp
     src/warploom/asset/gltf_importer.cpp
     src/warploom/asset/image_decode.cpp

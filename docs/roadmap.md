@@ -830,7 +830,14 @@ declares a slot 3.
       (same-frame open/close checkpoints collide in the scrubber ring, so
       load restored the closing bytes and re-applied the log on top — fixed
       with `restore_bytes`). E7 done; the next all-directions loop is the
-      content pipeline (glTF/compressed textures).
+      content pipeline (glTF/compressed textures). Loop 24 (2026-10-29)
+      opened it: KTX2 BC1/BC3 decode in-tree (`bc_decode`, ~200 lines,
+      integer-only, zero dependencies) into the existing `DecodedImage`
+      contract, so real-world compressed KTX2 loads instead of failing.
+      Hand-computed texel vectors, both BC1 endpoint modes, both BC3
+      alpha modes, sabotage A/B precise; default ctest 6/6 with 658/658
+      and asan-ubsan 581/0-diagnostics. GPU-native compressed upload
+      stays deferred with its trigger (measured VRAM pressure).
 
 ## The 0.1 gate
 
