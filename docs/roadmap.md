@@ -811,12 +811,15 @@ declares a slot 3.
       `persist-credentials: false` on checkouts (estate convention; no job
       pushes, so zero behaviour change). The `contract` job
       (`scripts/check_ci_contract.py`) enforces the caller/callee interface
-      and is sabotage-checked both directions. SHA-pinning of actions rides
-      with the handoff, not this move (unresolvable locally without risking
-      a wrong SHA). Handoff pending: verbatim copy to
-      `engineering-standards/.github/workflows/cpp-kit.yml`, caller flips
-      `uses:` to `WyattAu/engineering-standards/...@main`, this file is
-      deleted. Next in E7: the first dogfooding consumer repo.
+      and is sabotage-checked both directions. Loop 22 (2026-10-29)
+      executed the handoff: `engineering-standards/.github/workflows/
+      cpp-kit.yml` is live (tier input `fast|full`, all 22 action refs
+      SHA-pinned to the SHAs already in use by sibling kits), the
+      contract job is self-contained (estate checkout at `estate/` +
+      `scripts/check_cpp_contract.py` — an inline heredoc was tried and
+      is un-runnable under YAML block scalars, so it was replaced rather
+      than shipped), warploom's `test.yml` calls it and the local files
+      are deleted. Next in E7: the first dogfooding consumer repo.
 
 ## The 0.1 gate
 

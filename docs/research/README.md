@@ -240,6 +240,16 @@ not.
   byte-identical modulo the checkout hardening. Next in E7: the first
   dogfooding consumer repo.
 
+## Loop 22 — estate handoff (2026-10-29)
+
+- [loop22-estate-handoff.md](loop22-estate-handoff.md) — plumbing, no new
+  technique. `cpp-kit.yml` is live in `engineering-standards` (tiered
+  `fast|full`, 22 SHA-pinned action refs reusing sibling-kit SHAs);
+  warploom's `test.yml` calls it, local files deleted. The inline-heredoc
+  contract design was un-runnable (YAML block scalars vs column-0 Python)
+  and replaced with an estate checkout + `scripts/check_cpp_contract.py`.
+  Sabotage A/B both directions. Next: the dogfooding consumer repo.
+
 ## Follow-up searches for the next loop
 
 - Visual-scripting execution models (dataflow pull vs imperative push, and

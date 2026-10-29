@@ -11,9 +11,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Thin caller: the whole matrix lives in cpp-gates.yml (workflow_call) so
-  # the estate can adopt it verbatim. Triggers and concurrency stay here —
-  # a called workflow cannot own them.
+  # Thin caller: the whole matrix lives in the estate-shared cpp-kit. The
+  # local cpp-gates.yml is deleted — the contract job travels with the kit,
+  # so the interface check still runs on every push.
   gates:
     name: "C++ gates (shared matrix)"
-    uses: ./.github/workflows/cpp-gates.yml
+    uses: WyattAu/engineering-standards/.github/workflows/cpp-kit.yml@main
+    with:
+      tier: full
