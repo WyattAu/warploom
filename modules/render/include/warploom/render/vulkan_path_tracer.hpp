@@ -91,11 +91,36 @@ struct PathTracerInstance {
 //! Orthonormal camera basis + position + the frame index the shaders seed
 //! their PCG stream with. All vectors point where the camera looks/looks
 //! from; the shaders build the ray direction from them.
+//!
+//! tan_half_fov/aspect scale the [-1, 1] pixel UV into ray angles, exactly
+//! like the raster sky pass (ndc.x*tan*aspect, ndc.y*tan). The historical
+//! default (1, 1) preserves the old hardcoded 90-degree mapping bit-for-bit;
+//! anything else must be set deliberately — the tracer cannot guess the
+//! raster field of view, and a silent 90-vs-60 mismatch is how the PT image
+//! used to disagree with the raster one about where everything is.
 struct PathTracerCamera {
   std::array<float, 3> position{{0.0F, 0.0F, 0.0F}};
   std::array<float, 3> right{{1.0F, 0.0F, 0.0F}};
   std::array<float, 3> up{{0.0F, 1.0F, 0.0F}};
   std::array<float, 3> forward{{0.0F, 0.0F, 1.0F}};
+  float tan_half_fov{1.0F};
+  float aspect{1.0F};
+};
+
+//! Analytic-sky parameters for the miss branch. Mode 0 (default) keeps the
+//! legacy constant-white sky every existing probe pins bit-exactly; mode 1
+//! evaluates the shared sky_eval.glsl model (the same definition the raster
+//! sky pass shades) with these params. `origin` must be surface-anchored
+//! (see sky_eval.glsl's convention); the default is the raster sky test's
+//! anchor, so headless parity checks need only set mode = 1. Field order
+//! mirrors the raster SkyParams UBO so one host fill serves both paths.
+struct PathTracerSky {
+  std::uint32_t mode{0};  // 0 = legacy white, 1 = analytic (dims.w in GLSL)
+  std::array<float, 4> sun_direction{{0.0F, 0.7F, -0.7F, 0.0F}};
+  std::array<float, 4> rayleigh{{5.8e-6F, 13.5e-6F, 33.1e-6F, 0.0F}};
+  std::array<float, 4> mie{{21e-6F, 0.76F, 0.0F, 0.0F}};
+  std::array<float, 4> misc{{1.0F, 0.0F, 0.0F, 0.0F}};  // x = exposure
+  std::array<float, 4> origin{{0.0F, 6360e3F + 100.0F, 0.0F, 0.0F}};
 };
 
 struct PathTracerConfig {
@@ -110,6 +135,9 @@ struct PathTracerConfig {
   std::vector<PathTracerMesh> meshes{};
   //! Initial instance list (one BLAS per mesh, identity transform).
   std::vector<PathTracerInstance> instances{};
+  //! Sky for the miss branch. Default mode 0 = legacy constant white, so
+  //! every existing tracer behaves exactly as before unless opted in.
+  PathTracerSky sky{};
 };
 
 //! Owns a complete, deterministic path-tracing setup. See the file comment

@@ -37,10 +37,10 @@ find_program(WARPLOOM_GLSLANG_VALIDATOR glslangValidator)
 
 if(WARPLOOM_GLSLC)
     set(WARPLOOM_SHADER_COMPILER "${WARPLOOM_GLSLC}")
-    set(WARPLOOM_SHADER_COMPILER_ARGS --target-env=vulkan1.2)
+    set(WARPLOOM_SHADER_COMPILER_ARGS --target-env=vulkan1.2 -I${CMAKE_SOURCE_DIR}/assets/shaders)
 elseif(WARPLOOM_GLSLANG_VALIDATOR)
     set(WARPLOOM_SHADER_COMPILER "${WARPLOOM_GLSLANG_VALIDATOR}")
-    set(WARPLOOM_SHADER_COMPILER_ARGS -V --target-env vulkan1.2)
+    set(WARPLOOM_SHADER_COMPILER_ARGS -V --target-env vulkan1.2 -I${CMAKE_SOURCE_DIR}/assets/shaders)
 endif()
 
 if(NOT WARPLOOM_SHADER_COMPILER)
@@ -72,6 +72,12 @@ endforeach()
 file(GLOB _warploom_shader_sources CONFIGURE_DEPENDS ${_warploom_shader_globs})
 list(SORT _warploom_shader_sources)
 
+# Shared GLSL (sky_eval.glsl and any future include): not compiled (no
+# stage extension), but every shader that may #include one must rebuild
+# when it changes — otherwise an edit silently does nothing, the exact
+# trap the marker-binary rule exists for.
+file(GLOB _warploom_shader_includes CONFIGURE_DEPENDS "${WARPLOOM_SHADER_SOURCE_DIR}/*.glsl")
+
 set(_warploom_shader_outputs "")
 foreach(_src IN LISTS _warploom_shader_sources)
     get_filename_component(_name "${_src}" NAME)
@@ -80,7 +86,7 @@ foreach(_src IN LISTS _warploom_shader_sources)
         OUTPUT "${_out}"
         COMMAND ${WARPLOOM_SHADER_COMPILER} ${WARPLOOM_SHADER_COMPILER_ARGS}
                 "${_src}" -o "${_out}"
-        DEPENDS "${_src}"
+        DEPENDS "${_src}" ${_warploom_shader_includes}
         COMMENT "Compiling shader ${_name}"
         VERBATIM
     )

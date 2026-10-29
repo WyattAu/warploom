@@ -28,6 +28,26 @@ namespace {
 
 #ifdef OMNICPP_HAS_VULKAN
 
+//! Host mirror of pt_real's Params block (camera words, dims incl. the sky
+//! mode in dims[3], then the five sky vec4s). ONE definition: three
+//! function-local copies used to live at the use sites, and a layout this
+//! wide must not exist in triplicate — that is the drift class that bit
+//! the BLAS geometry. Prefix offsets are unchanged, so mode-0 tracers read
+//! bit-identical params to before.
+struct TracerGpuParams {
+  float cam_pos_frame[4];
+  float cam_basis_r[4];
+  float cam_basis_u[4];
+  float cam_basis_f[4];
+  std::uint32_t dims[4];
+  float cam_fov[4];
+  float sky_sun[4];
+  float sky_rayleigh[4];
+  float sky_mie[4];
+  float sky_misc[4];
+  float sky_origin[4];
+};
+
 //! Minimal SPIR-V file loader for the RT stages. VulkanPipeline's stage loader
 //! only understands vertex/fragment/compute; the ray stages are out of its
 //! vocabulary, and a path tracer must not borrow a graphics pipeline object
@@ -164,26 +184,29 @@ namespace {
   }
 
   // ---- Host-visible params + instance buffers -------------------------------
-  // Params layout is the pt_real shaders' GpuParams: four vec4 camera words
-  // (position.xyz + frame in .w, then the basis) and a uvec4 of dims.
-  struct GpuParams {
-    float cam_pos_frame[4];
-    float cam_basis_r[4];
-    float cam_basis_u[4];
-    float cam_basis_f[4];
-    std::uint32_t dims[4];
-  };
   auto params_buf = allocator.create_buffer(
-      sizeof(GpuParams), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+      sizeof(TracerGpuParams), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   if (!params_buf.is_ok()) return refuse("params buffer failed");
   params_allocation_ = params_buf.value();
-  auto* gpu_params = static_cast<GpuParams*>(params_allocation_.mapped);
-  *gpu_params = GpuParams{};
+  auto* gpu_params = static_cast<TracerGpuParams*>(params_allocation_.mapped);
+  *gpu_params = TracerGpuParams{};
+  // Legacy 90-degree mapping until set_camera says otherwise.
+  gpu_params->cam_fov[0] = 1.0F;
+  gpu_params->cam_fov[1] = 1.0F;
   gpu_params->dims[0] = width_;
   gpu_params->dims[1] = height_;
   gpu_params->dims[2] = max_bounces_;
-  gpu_params->dims[3] = 0U;
+  // Mode 0 (legacy white) unless the config opts into the analytic sky;
+  // the extra words stay zeroed, which the shader only reads in mode 1.
+  gpu_params->dims[3] = config.sky.mode;
+  for (int i = 0; i < 4; ++i) {
+    gpu_params->sky_sun[i] = config.sky.sun_direction[static_cast<std::size_t>(i)];
+    gpu_params->sky_rayleigh[i] = config.sky.rayleigh[static_cast<std::size_t>(i)];
+    gpu_params->sky_mie[i] = config.sky.mie[static_cast<std::size_t>(i)];
+    gpu_params->sky_misc[i] = config.sky.misc[static_cast<std::size_t>(i)];
+    gpu_params->sky_origin[i] = config.sky.origin[static_cast<std::size_t>(i)];
+  }
 
   instance_capacity_ = static_cast<std::uint32_t>(config.instances.size());
   if (instance_capacity_ == 0U) return refuse("no instances");
@@ -455,14 +478,7 @@ void VulkanPathTracer::record_round([[maybe_unused]] VkCommandBuffer command_buf
 
   // The frame index is the sample seed; write it before the trace records so
   // the host upload and the GPU dispatch agree on which sample this is.
-  struct GpuParams {
-    float cam_pos_frame[4];
-    float cam_basis_r[4];
-    float cam_basis_u[4];
-    float cam_basis_f[4];
-    std::uint32_t dims[4];
-  };
-  auto* gpu_params = static_cast<GpuParams*>(params_allocation_.mapped);
+  auto* gpu_params = static_cast<TracerGpuParams*>(params_allocation_.mapped);
   gpu_params->cam_pos_frame[3] = static_cast<float>(frame);
 
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
@@ -557,14 +573,9 @@ void VulkanPathTracer::record_round([[maybe_unused]] VkCommandBuffer command_buf
 void VulkanPathTracer::set_camera([[maybe_unused]] const PathTracerCamera& camera) noexcept {
 #ifdef OMNICPP_HAS_VULKAN
   if (params_allocation_.mapped == nullptr) return;
-  struct GpuParams {
-    float cam_pos_frame[4];
-    float cam_basis_r[4];
-    float cam_basis_u[4];
-    float cam_basis_f[4];
-    std::uint32_t dims[4];
-  };
-  auto* gpu_params = static_cast<GpuParams*>(params_allocation_.mapped);
+  auto* gpu_params = static_cast<TracerGpuParams*>(params_allocation_.mapped);
+  gpu_params->cam_fov[0] = camera.tan_half_fov;
+  gpu_params->cam_fov[1] = camera.aspect;
   gpu_params->cam_pos_frame[0] = camera.position[0];
   gpu_params->cam_pos_frame[1] = camera.position[1];
   gpu_params->cam_pos_frame[2] = camera.position[2];

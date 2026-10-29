@@ -1,5 +1,9 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_GOOGLE_include_directive : require
+
+// Analytic sky for mode 1 (same definition the raster sky pass shades).
+#include "sky_eval.glsl"
 
 // pt_real.rgen — REAL path tracing (E4): iterative N-bounce loop, per-pixel
 // RNG streams, cosine-weighted sampling, temporal accumulation.
@@ -34,7 +38,13 @@ layout(set = 0, binding = 1, std430) readonly buffer Params {
   vec4 cam_basis_r;        // camera right (unit)
   vec4 cam_basis_u;        // camera up (unit)
   vec4 cam_basis_f;        // camera forward (unit)
-  uvec4 dims;              // x = width, y = height, z = max bounces, w = unused
+  uvec4 dims;              // x = width, y = height, z = max bounces, w = sky mode
+  vec4 cam_fov;            // x = tan_half_fov, y = aspect (both 1.0 = legacy)
+  vec4 sky_sun;            // xyz = normalized dir toward sun (mode 1)
+  vec4 sky_rayleigh;       // rgb = Rayleigh scattering coefficient (mode 1)
+  vec4 sky_mie;            // x = Mie coeff, y = g asymmetry (mode 1)
+  vec4 sky_misc;           // x = exposure (mode 1)
+  vec4 sky_origin;         // xyz = surface-anchored origin (mode 1)
 };
 layout(set = 0, binding = 2) uniform accelerationStructureEXT scene;
 
@@ -84,7 +94,8 @@ void main() {
   const float jy = rand01(rng) - 0.5;
 
   const vec2 uv = (vec2(pix) + vec2(jx, jy)) / vec2(size) * 2.0 - 1.0;
-  vec3 dir = normalize(cam_basis_r.xyz * uv.x + cam_basis_u.xyz * (-uv.y) +
+  vec3 dir = normalize(cam_basis_r.xyz * (uv.x * cam_fov.x * cam_fov.y) +
+                       cam_basis_u.xyz * (-uv.y * cam_fov.x) +
                        cam_basis_f.xyz);
   vec3 origin = cam_pos_frame.xyz;
 
@@ -96,7 +107,14 @@ void main() {
     traceRayEXT(scene, gl_RayFlagsOpaqueEXT, 0xffu, 0u, 0u, 0u,
                 origin, kEps, dir, 1.0e30, 0);
     if (payload.w < 0.0) {            // miss -> sky, path ends
-      radiance += throughput * kSkyRadiance;
+      // Mode 0 keeps the legacy constant-white sky every exact probe pins.
+      // Mode 1 evaluates the shared analytic model (same definition the
+      // raster sky pass shades) so both paths show one sky.
+      const vec3 sky = dims.w == 0u
+          ? kSkyRadiance
+          : sky_radiance(sky_origin.xyz, dir, sky_sun, sky_rayleigh,
+                         sky_mie, sky_misc);
+      radiance += throughput * sky;
       break;
     }
     // Hit: Lambertian (grey albedo), cosine-weighted next direction; no

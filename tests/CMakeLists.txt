@@ -22,6 +22,7 @@ set(WARPLOOM_GPU_TEST_SOURCES
     unit/test_rt_reflections.cpp
     unit/test_path_tracing.cpp
     unit/test_path_tracing_real.cpp
+    unit/test_pt_sky_parity.cpp
     unit/test_ui_gpu.cpp
 )
 

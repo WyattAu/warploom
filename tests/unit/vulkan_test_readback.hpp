@@ -255,8 +255,12 @@ inline ReadbackResult readback_swapchain_image(VkPhysicalDevice physical_device,
         if (is_rgba16f) {
           std::uint16_t c[4];
           std::memcpy(c, bytes + offset, 8U);
-          return f16_to_u8(c[2]) | (f16_to_u8(c[1]) << 8U) |
-                 (f16_to_u8(c[0]) << 16U) | (f16_to_u8(c[3]) << 24U);
+          // Texel halves are in R,G,B,A order; pack like every other path
+          // (r | g<<8 | b<<16 | a<<24). This used to swap R and B here,
+          // which went unnoticed because no FP16 consumer asserted on
+          // individual channels — PT/raster sky parity caught it.
+          return f16_to_u8(c[0]) | (f16_to_u8(c[1]) << 8U) |
+                 (f16_to_u8(c[2]) << 16U) | (f16_to_u8(c[3]) << 24U);
         }
         const auto first = bytes[offset];
         const auto second = bytes[offset + 1];
