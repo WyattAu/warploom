@@ -252,6 +252,12 @@ def main():
                         help="walk-cycle duration of the loaded model")
     parser.add_argument("--allow-zoom", action="store_true",
                         help="scripted zoom changes camera radius by design")
+    parser.add_argument("--check-budgets", default=None,
+                        help="compare p95 GPU/record times against a budget "
+                             "file, e.g. --check-budgets default:" \
+                             "docs/perf-budgets.json (budgets are canaries " \
+                             "on loaded machines: re-run at low load before " \
+                             "blaming the change)")
     args = parser.parse_args()
 
     (manifest, frames, events, telemetry_dir, scene_objects, skeleton,
@@ -294,6 +300,34 @@ def main():
             # Allocator stats are stable and nonzero.
             check(all(p["allocator_reserved"] > 0 for p in poses),
                   "allocator telemetry populated")
+
+    if args.check_budgets is not None:
+        print("== Perf budgets ==")
+        try:
+            key, path = args.check_budgets.split(":", 1)
+            budgets = json.loads(Path(path).read_text(encoding="utf-8"))
+            budget = budgets[key]
+        except (ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
+            check(False, "budget file parses and names the config", str(exc))
+            budget = None
+        if budget is not None:
+            gpu = sorted(f.get("gpu_ns", 0.0) / 1000.0 for f in frames
+                         if f.get("gpu_ns", 0.0) > 0.0)
+            rec = sorted(f["record_us"] for f in frames if "record_us" in f)
+            cov = len(gpu) / max(len(frames), 1)
+            check(cov >= float(budget["min_coverage"]),
+                  "gpu timestamp coverage meets budget",
+                  f"{len(gpu)}/{len(frames)}")
+            if gpu:
+                p95 = gpu[int(len(gpu) * 0.95)]
+                check(p95 <= float(budget["gpu_p95_us"]),
+                      "gpu p95 within budget",
+                      f"p95 {p95:.0f} us vs {budget['gpu_p95_us']} us")
+            if rec:
+                p95 = rec[int(len(rec) * 0.95)]
+                check(p95 <= float(budget["record_p95_us"]),
+                      "record p95 within budget",
+                      f"p95 {p95:.0f} us vs {budget['record_p95_us']} us")
 
     print(f"\n{CHECKS_PASSED} passed, {CHECKS_FAILED} failed")
     return 1 if CHECKS_FAILED else 0

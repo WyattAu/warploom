@@ -1,0 +1,7 @@
+{
+  "default": {"gpu_p95_us": 1400, "record_p95_us": 500, "min_coverage": 0.9},
+  "bloom": {"gpu_p95_us": 1400, "record_p95_us": 500, "min_coverage": 0.9},
+  "nohdr": {"gpu_p95_us": 1200, "record_p95_us": 200, "min_coverage": 0.9},
+  "gd": {"gpu_p95_us": 500, "record_p95_us": 100, "min_coverage": 0.9},
+  "scale10k": {"gpu_p95_us": 500, "record_p95_us": 100, "min_coverage": 0.9}
+}
