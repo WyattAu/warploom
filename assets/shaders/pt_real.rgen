@@ -67,7 +67,12 @@ float rand01(inout uint state) {
 }
 
 // Cosine-weighted hemisphere sample around +Z, rotated into the normal frame
-// (Duff et al. 2017 branchless ONB).
+// with the TRUE Duff et al. 2017 branchless ONB. The previous code claimed
+// Duff but was a naive projection (up minus its normal component, crossed
+// with n): for n = +/-Z that difference is the zero vector, so normalize
+// degenerates and every z-facing wall collapsed its cosine lobe to exactly
+// the normal (wall probes read exactly albedo on both GPU and CPU sides).
+// Duff's form never divides by zero: sign+n.z stays in [1,2] / [-2,-1).
 vec3 cosine_dir(vec3 n, inout uint rng) {
   const float r1 = rand01(rng);
   const float r2 = rand01(rng);
@@ -75,9 +80,11 @@ vec3 cosine_dir(vec3 n, inout uint rng) {
   const float s = sqrt(r2);
   const vec3 t = vec3(s * cos(phi), s * sin(phi), sqrt(max(0.0, 1.0 - r2)));
   const float sg = n.z < 0.0 ? -1.0 : 1.0;
-  const vec3 up = vec3(0.0, 0.0, sg);
-  const vec3 tx = normalize(cross(up - n * dot(up, n), n));
-  return normalize(tx * t.x + cross(n, tx) * t.y + n * t.z);
+  const float a = -1.0 / (sg + n.z);
+  const float b = n.x * n.y * a;
+  const vec3 tx = vec3(1.0 + sg * n.x * n.x * a, sg * b, -sg * n.x);
+  const vec3 ty = vec3(b, sg + n.y * n.y * a, -n.y);
+  return normalize(tx * t.x + ty * t.y + n * t.z);
 }
 
 void main() {

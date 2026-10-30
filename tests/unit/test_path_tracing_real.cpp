@@ -167,8 +167,11 @@ RoomHit room_hit_fp64(const double o[3], const double d[3]) {
 
 // ---- fp64 triangle soup (rotated-box reference) ----------------------------
 // Möller–Trumbore, two-sided like the opaque GPU trace. The geometric
-// normal is cross(e1, e2), the same orientation the fixed rchit reports,
-// so the reference and the shader agree on tilted faces by construction.
+// normal is cross(e1, e2) flipped toward the incident ray (Faceforward),
+// the same rule the fixed rchit applies, so the reference and the shader
+// agree on tilted faces by construction. The flip matters: this repo's box
+// winding makes the raw cross point INTO the solid, and without the flip
+// both sides trap every path inside the geometry (GPU reads exactly 0).
 struct TriSoupHit {
   bool hit{false};
   double t{1.0e30};
@@ -201,15 +204,22 @@ bool ray_tri_fp64(const double o[3], const double d[3], const double v0[3],
                        e1[0] * e2[1] - e1[1] * e2[0]};
   const double l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
   if (l <= 0.0) return false;
-  n_out[0] = n[0] / l;
-  n_out[1] = n[1] / l;
-  n_out[2] = n[2] / l;
+  double nx = n[0] / l, ny = n[1] / l, nz = n[2] / l;
+  // Faceforward: match the rchit rule so the lobe samples the hemisphere
+  // the ray came from. Without this the soup traps paths exactly like the
+  // unflipped shader did (both read 0 and agree vacuously).
+  if (nx * d[0] + ny * d[1] + nz * d[2] > 0.0) {
+    nx = -nx; ny = -ny; nz = -nz;
+  }
+  n_out[0] = nx;
+  n_out[1] = ny;
+  n_out[2] = nz;
   t_hit = t;
   return true;
 }
 
-// Cosine-weighted hemisphere sample around +Z rotated into n (same ONB form
-// as the shader), fp64, from an independent mt19937_64 stream.
+// Cosine-weighted hemisphere sample around +Z rotated into n (same Duff
+// ONB as the shader), fp64, from an independent mt19937_64 stream.
 void cosine_dir_fp64(const double n[3], std::mt19937_64& rng, double out[3]) {
   std::uniform_real_distribution<double> U(0.0, 1.0);
   const double r1 = U(rng);
@@ -218,18 +228,13 @@ void cosine_dir_fp64(const double n[3], std::mt19937_64& rng, double out[3]) {
   const double s = std::sqrt(r2);
   const double tz[3] = {s * std::cos(phi), s * std::sin(phi),
                         std::sqrt(std::max(0.0, 1.0 - r2))};
-  // Build ONB around n (n is axis-aligned here except the ceiling normal).
+  // True Duff et al. 2017 ONB (matches pt_real.rgen); the old projection
+  // degenerated for z-axis normals (zero vector, normalized).
   const double sg = n[2] < 0.0 ? -1.0 : 1.0;
-  const double up[3] = {0.0, 0.0, sg};
-  const double d = up[0] * n[0] + up[1] * n[1] + up[2] * n[2];
-  double txv[3] = {up[0] - n[0] * d, up[1] - n[1] * d, up[2] - n[2] * d};
-  const double tl = std::sqrt(txv[0] * txv[0] + txv[1] * txv[1] +
-                              txv[2] * txv[2]);
-  txv[0] /= tl; txv[1] /= tl; txv[2] /= tl;
-  // ty = cross(n, tx)
-  const double tyv[3] = {n[1] * txv[2] - n[2] * txv[1],
-                         n[2] * txv[0] - n[0] * txv[2],
-                         n[0] * txv[1] - n[1] * txv[0]};
+  const double a = -1.0 / (sg + n[2]);
+  const double b = n[0] * n[1] * a;
+  const double txv[3] = {1.0 + sg * n[0] * n[0] * a, sg * b, -sg * n[0]};
+  const double tyv[3] = {b, sg + n[1] * n[1] * a, -n[1]};
   for (std::size_t k = 0; k < static_cast<std::size_t>(3); ++k) {
     out[k] = txv[k] * tz[0] + tyv[k] * tz[1] + n[k] * tz[2];
   }
@@ -390,7 +395,7 @@ std::array<float, 3> gpu_first_segments(std::uint32_t px, std::uint32_t py,
       break;
     }
     T *= kAlbedo;  // grey
-    // Cosine sample (same ONB), fp32.
+    // Cosine sample (same Duff ONB as the shader), fp32.
     const float r1 = rand01(rng);
     const float r2 = rand01(rng);
     const float phi = 6.28318530718f * r1;
@@ -398,14 +403,10 @@ std::array<float, 3> gpu_first_segments(std::uint32_t px, std::uint32_t py,
     const float tz[3] = {sq * std::cos(phi), sq * std::sin(phi),
                          std::sqrt(std::max(0.0f, 1.0f - r2))};
     const float sg = n[2] < 0.0f ? -1.0f : 1.0f;
-    const float upv[3] = {0.0f, 0.0f, sg};
-    const float dd = upv[0] * n[0] + upv[1] * n[1] + upv[2] * n[2];
-    float txv[3] = {upv[0] - n[0] * dd, upv[1] - n[1] * dd, upv[2] - n[2] * dd};
-    const float tl = std::sqrt(txv[0] * txv[0] + txv[1] * txv[1] + txv[2] * txv[2]);
-    txv[0] /= tl; txv[1] /= tl; txv[2] /= tl;
-    const float tyv[3] = {n[1] * txv[2] - n[2] * txv[1],
-                          n[2] * txv[0] - n[0] * txv[2],
-                          n[0] * txv[1] - n[1] * txv[0]};
+    const float a = -1.0f / (sg + n[2]);
+    const float b = n[0] * n[1] * a;
+    const float txv[3] = {1.0f + sg * n[0] * n[0] * a, sg * b, -sg * n[0]};
+    const float tyv[3] = {b, sg + n[1] * n[1] * a, -n[1]};
     std::array<float, 3> nd{txv[0] * tz[0] + tyv[0] * tz[1] + n[0] * tz[2],
                             txv[1] * tz[0] + tyv[1] * tz[1] + n[1] * tz[2],
                             txv[2] * tz[0] + tyv[2] * tz[1] + n[2] * tz[2]};
@@ -728,6 +729,27 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
     }
   }
 
+  // GPU-side anti-vacuity: the agreement checks above compare against a CPU
+  // model that once SHARED the shader's sign error (inward normals trapped
+  // every path on both sides, GPU and reference agreeing at exactly 0). Pin
+  // the GPU image itself instead. Trapped transport reads 0; a collapsed
+  // cosine lobe (the naive ONB on z-facing walls) reads exactly albedo.
+  // Correct multi-bounce transport from these probes is strictly between.
+  for (std::size_t i = 0; i < static_cast<std::size_t>(3); ++i) {
+    for (int c = 0; c < 3; ++c) {
+      EXPECT_GT(pixel(img, probe_px[i], probe_py[i], c), 0.15F)
+          << probes[static_cast<std::size_t>(i)].first
+          << " trapped transport reads 0, channel " << c;
+    }
+  }
+  for (std::size_t i = 1; i < static_cast<std::size_t>(3); ++i) {
+    for (int c = 0; c < 3; ++c) {
+      EXPECT_LT(pixel(img, probe_px[i], probe_py[i], c), 0.79F)
+          << probes[static_cast<std::size_t>(i)].first
+          << " collapsed lobe reads exactly albedo, channel " << c;
+    }
+  }
+
   // Sky probe: exact radiance (fp32 mirror, first segment must miss).
   {
     const auto expect = gpu_first_segments(
@@ -951,9 +973,9 @@ TEST(path_tracing_real, rotated_box_matches_reference) {
         static_cast<int>((ny + 1.0f) * 0.5f * static_cast<float>(kImg)));
   };
 
-  // Robust branchless ONB (Duff et al.), fp64 mirror of pt_real.rgen.
-  // Deliberately NOT cosine_dir_fp64: that helper degenerates for z-axis
-  // normals, which a tilted box produces.
+  // True Duff et al. 2017 ONB, fp64 mirror of pt_real.rgen (now that both
+  // the shader and cosine_dir_fp64 use it, this is the same form; kept as
+  // a separate lambda because the rotated-box reference predates the fix).
   auto cosine_duff = [](const double n[3], std::mt19937_64& rng, double out[3]) {
     std::uniform_real_distribution<double> U(0.0, 1.0);
     const double r1 = U(rng), r2 = U(rng);
@@ -962,16 +984,10 @@ TEST(path_tracing_real, rotated_box_matches_reference) {
     const double t[3] = {s * std::cos(phi), s * std::sin(phi),
                          std::sqrt(std::max(0.0, 1.0 - r2))};
     const double sg = n[2] < 0.0 ? -1.0 : 1.0;
-    const double upv[3] = {0.0, 0.0, sg};
-    const double d = upv[0] * n[0] + upv[1] * n[1] + upv[2] * n[2];
-    double ax[3] = {upv[0] - n[0] * d, upv[1] - n[1] * d, upv[2] - n[2] * d};
-    double txv[3] = {ax[1] * n[2] - ax[2] * n[1], ax[2] * n[0] - ax[0] * n[2],
-                     ax[0] * n[1] - ax[1] * n[0]};
-    double tl = std::sqrt(txv[0] * txv[0] + txv[1] * txv[1] + txv[2] * txv[2]);
-    txv[0] /= tl; txv[1] /= tl; txv[2] /= tl;
-    const double tyv[3] = {n[1] * txv[2] - n[2] * txv[1],
-                           n[2] * txv[0] - n[0] * txv[2],
-                           n[0] * txv[1] - n[1] * txv[0]};
+    const double a = -1.0 / (sg + n[2]);
+    const double b = n[0] * n[1] * a;
+    const double txv[3] = {1.0 + sg * n[0] * n[0] * a, sg * b, -sg * n[0]};
+    const double tyv[3] = {b, sg + n[1] * n[1] * a, -n[1]};
     for (int k = 0; k < 3; ++k)
       out[k] = txv[k] * t[0] + tyv[k] * t[1] + n[k] * t[2];
   };
