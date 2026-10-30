@@ -9,6 +9,7 @@
 #include <warploom/render/vulkan_compose_chain.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <array>
 #include <utility>
@@ -361,13 +362,80 @@ namespace warploom::render {
   compose_width_ = width;
   compose_height_ = height;
 
-  // SAMPLED: the compose chain samples this image, and so does anything the
-  // application reads back through the capture path.
-  if (!hdr_target_->create(device_, physical_device_, hdr_format_, width,
-                          height, allocator_.get(),
-                          VK_IMAGE_USAGE_SAMPLED_BIT)
+  // R6b: the depth usage probe create_depth() used to do inline. The store
+  // needs the usage BEFORE creating the image (adopt separates creation
+  // from the render-pass shell), so the probe moves up here. Same rule:
+  // D32_SFLOAT with SAMPLED only when the format supports it.
+  bool depth_sampleable = false;
+  {
+    constexpr VkImageUsageFlags kBaseDepthUsage =
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    VkImageFormatProperties fmt_props{};
+    if (vkGetPhysicalDeviceImageFormatProperties(
+            physical_device_, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D,
+            VK_IMAGE_TILING_OPTIMAL, kBaseDepthUsage, 0U, &fmt_props) !=
+        VK_SUCCESS) {
+      return refuse("HDR depth format unsupported");
+    }
+    VkFormatProperties format_properties{};
+    vkGetPhysicalDeviceFormatProperties(physical_device_,
+                                       VK_FORMAT_D32_SFLOAT,
+                                       &format_properties);
+    depth_sampleable = (format_properties.optimalTilingFeatures &
+                        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0U;
+    if (depth_sampleable) {
+      VkImageFormatProperties sampled_props{};
+      if (vkGetPhysicalDeviceImageFormatProperties(
+              physical_device_, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D,
+              VK_IMAGE_TILING_OPTIMAL,
+              kBaseDepthUsage | VK_IMAGE_USAGE_SAMPLED_BIT, 0U,
+              &sampled_props) != VK_SUCCESS) {
+        depth_sampleable = false;
+      }
+    }
+  }
+
+  // Bloom shader/layout attempt, hoisted ahead of the plan: the skeleton
+  // includes the bloom_down stage exactly when it could record, so the
+  // store only creates a bloom image the chain can actually use. Failure
+  // here is NOT fatal (same as before): the chain runs tonemap-only.
+  const bool bloom_shaders_ok = build_bloom_pipelines();
+  if (!bloom_shaders_ok) {
+    WARPLOOM_WARN("render",
+                  "bloom shaders unavailable; continuing tonemap-only "
+                  "(no bloom image planned)\n");
+  }
+
+  // R6b: derive the superset plan, materialize it in the store, and adopt
+  // the images into the render-pass shells. The hand-written target image
+  // list is gone: no create()/bind_image() call names an HDR/bloom/depth
+  // image anymore. SAMPLED on the color images: the compose chain samples
+  // them, and so does anything the application reads back through capture.
+  std::vector<TransientImageDesc> store_descs;
+  if (!derive_compose_plan(width, height, bw, bh, hdr_format_,
+                           depth_sampleable, bloom_shaders_ok, store_descs)) {
+    return refuse("transient plan derivation failed");
+  }
+  if (!transient_store_
+           .allocate(device_, physical_device_, allocator_.get(),
+                     planned_resources_, planned_plan_, store_descs)
+           .is_ok()) {
+    return refuse("transient store allocation failed");
+  }
+  if (!hdr_target_
+           ->adopt_color(device_,
+                         transient_store_.image(
+                             transient_kind_name(kKindHdrColor)),
+                         transient_store_.view(transient_kind_name(kKindHdrColor)),
+                         hdr_format_, width, height)
            .is_ok() ||
-      !hdr_target_->create_depth(device_, physical_device_, VK_FORMAT_D32_SFLOAT)
+      !hdr_target_
+           ->adopt_depth(device_,
+                         transient_store_.image(
+                             transient_kind_name(kKindHdrDepth)),
+                         transient_store_.view(transient_kind_name(kKindHdrDepth)),
+                         VK_FORMAT_D32_SFLOAT, depth_sampleable)
            .is_ok() ||
       // COLOR_ATTACHMENT_OPTIMAL: this target is sampled immediately, and
       // letting the compose chain own the transition to SHADER_READ_ONLY keeps
@@ -392,34 +460,39 @@ namespace warploom::render {
     return refuse("compose pipeline creation failed");
   }
 
-  // Bloom target + pipelines, allocated regardless of the live toggle state.
-  // Quarter-resolution RGBA16F: the whole point is that this is cheap enough to
-  // always exist (docs/research/rendering-and-graphs.md, R7 -- the idTech 6
-  // lesson that a disabled feature's resources are still there, and only its
-  // COST is skipped). So the target is built first, then the pipelines; if the
-  // bloom shaders are missing, bloom_available_ stays false, the target is
-  // released again, and the chain runs with bloom permanently off.
+  // Bloom shell over the store's image, built when the shaders exist.
+  // Quarter-resolution RGBA16F: cheap enough to always exist when usable
+  // (docs/research/rendering-and-graphs.md, R7 -- the idTech 6 lesson that a
+  // disabled feature's resources are still there, and only its COST is
+  // skipped). Without shaders nothing is planned, the shell stays empty,
+  // and the chain runs with bloom permanently off.
   bloom_available_ = false;
-  if (!bloom_target_->create(device_, physical_device_, hdr_format_, bw, bh,
-                             allocator_.get(), VK_IMAGE_USAGE_SAMPLED_BIT)
-           .is_ok() ||
-      !bloom_target_->create_render_pass(
-           device_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-           .is_ok() ||
-      !bloom_target_->create_framebuffer(device_).is_ok()) {
+  if (!bloom_shaders_ok) {
+    bloom_target_->cleanup();
+  } else if (!bloom_target_
+                    ->adopt_color(device_,
+                                 transient_store_.image(
+                                     transient_kind_name(kKindBloomColor)),
+                                 transient_store_.view(
+                                     transient_kind_name(kKindBloomColor)),
+                                 hdr_format_, bw, bh)
+                    .is_ok() ||
+               !bloom_target_->create_render_pass(
+                    device_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+                    .is_ok() ||
+               !bloom_target_->create_framebuffer(device_).is_ok()) {
     // Not fatal. Bloom is an enhancement; losing it must not take the HDR
     // tonemap with it.
     WARPLOOM_WARN("render",
                   "bloom target creation failed; bloom unavailable this "
                   "session (tonemap unaffected)\n");
     bloom_target_->cleanup();
-  } else if (!build_bloom_pipelines() ||
-             !bloom_down_pipeline_
-                  ->create_graphics_pipeline(device_, bloom_target_->render_pass(),
-                                             hdr_format_,
-                                             bloom_down_pipeline_->pipeline_layout(),
-                                             false, false, false)
-                  .is_ok()) {
+  } else if (!bloom_down_pipeline_
+                    ->create_graphics_pipeline(
+                        device_, bloom_target_->render_pass(), hdr_format_,
+                        bloom_down_pipeline_->pipeline_layout(), false, false,
+                        false)
+                    .is_ok()) {
     WARPLOOM_WARN("render",
                   "bloom pipeline creation failed; bloom unavailable this "
                   "session (tonemap unaffected)\n");
@@ -805,6 +878,327 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
 #endif
 }
 
+VkImage VulkanComposeChain::skeleton_image_of(int kind) noexcept {
+#ifdef OMNICPP_HAS_VULKAN
+  return reinterpret_cast<VkImage>(static_cast<std::uintptr_t>(kind));
+#else
+  return reinterpret_cast<VkImage>(static_cast<std::uintptr_t>(kind));
+#endif
+}
+
+int VulkanComposeChain::skeleton_kind_of(VkImage image) noexcept {
+  const auto id = static_cast<std::uintptr_t>(
+      reinterpret_cast<std::uintptr_t>(image));
+  if (id >= static_cast<std::uintptr_t>(kKindHdrColor) &&
+      id <= static_cast<std::uintptr_t>(kKindExternal)) {
+    return static_cast<int>(id);
+  }
+  return 0;
+}
+
+const char* VulkanComposeChain::transient_kind_name(int kind) noexcept {
+  switch (kind) {
+    case kKindHdrColor:
+      return "hdr_color";
+    case kKindHdrDepth:
+      return "hdr_depth";
+    case kKindBloomColor:
+      return "bloom_color";
+    case kKindExternal:
+      return "external";
+    default:
+      return "unknown";
+  }
+}
+
+void VulkanComposeChain::build_plan_skeleton_nodes(
+    bool include_bloom, std::vector<GraphPass>& passes) {
+  passes.clear();
+  GraphPass scene{};
+  scene.name = "scene";
+  RenderPassAttachment hdr_att{};
+  hdr_att.image = skeleton_image_of(kKindHdrColor);
+  RenderPassAttachment depth_att{};
+  depth_att.image = skeleton_image_of(kKindHdrDepth);
+  scene.attachments = {hdr_att, depth_att};
+  passes.push_back(scene);
+  if (include_bloom) {
+    GraphPass down{};
+    down.name = "bloom_down";
+    RenderPassAttachment bloom_att{};
+    bloom_att.image = skeleton_image_of(kKindBloomColor);
+    down.attachments = {bloom_att};
+    GraphSampledImage sample{};
+    sample.image = skeleton_image_of(kKindHdrColor);
+    down.sampled_images = {sample};
+    passes.push_back(down);
+  }
+  GraphPass tonemap{};
+  tonemap.name = "tonemap";
+  GraphSampledImage sample_hdr{};
+  sample_hdr.image = skeleton_image_of(kKindHdrColor);
+  tonemap.sampled_images.push_back(sample_hdr);
+  if (include_bloom) {
+    GraphSampledImage sample_bloom{};
+    sample_bloom.image = skeleton_image_of(kKindBloomColor);
+    tonemap.sampled_images.push_back(sample_bloom);
+  }
+  GraphSampledImage sample_external{};
+  sample_external.image = skeleton_image_of(kKindExternal);
+  tonemap.sampled_images.push_back(sample_external);
+  passes.push_back(tonemap);
+}
+
+bool VulkanComposeChain::derive_compose_plan(
+    std::uint32_t width, std::uint32_t height, std::uint32_t bw,
+    std::uint32_t bh, VkFormat hdr_format, bool depth_sampleable,
+    bool include_bloom, std::vector<TransientImageDesc>& descs) {
+  descs.clear();
+  if (width == 0U || height == 0U || bw == 0U || bh == 0U ||
+      hdr_format == VK_FORMAT_UNDEFINED) {
+    return false;
+  }
+  std::vector<GraphPass> skeleton;
+  build_plan_skeleton_nodes(include_bloom, skeleton);
+  // Kind-aware walk: the same visit order derive_frame_resources uses
+  // (attachments, then sampled images, per node), so these intervals ARE the
+  // skeleton's lifetimes, not restated constants.
+  struct Interval {
+    bool seen{false};
+    std::uint32_t first{0};
+    std::uint32_t last{0};
+  };
+  Interval by_kind[kKindExternal + 1]{};
+  int first_touch[kKindExternal + 1]{0, 0, 0, 0, 0};
+  int touch_count = 0;
+  for (std::uint32_t p = 0; p < skeleton.size(); ++p) {
+    const GraphPass& node = skeleton[p];
+    for (const RenderPassAttachment& att : node.attachments) {
+      const int kind = skeleton_kind_of(att.image);
+      if (kind <= 0) return false;
+      if (!by_kind[kind].seen) {
+        by_kind[kind].seen = true;
+        by_kind[kind].first = p;
+        first_touch[touch_count++] = kind;
+      }
+      by_kind[kind].last = p;
+    }
+    for (const GraphSampledImage& sample : node.sampled_images) {
+      const int kind = skeleton_kind_of(sample.image);
+      if (kind <= 0) return false;
+      if (!by_kind[kind].seen) {
+        by_kind[kind].seen = true;
+        by_kind[kind].first = p;
+        first_touch[touch_count++] = kind;
+      }
+      by_kind[kind].last = p;
+    }
+  }
+  // Bytes per HDR pixel: the format was picked as SFLOAT-with-fallback, so
+  // only these two can arrive here; anything else fails loudly.
+  std::uint64_t hdr_bpp = 0U;
+  if (hdr_format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+    hdr_bpp = 8U;
+  } else if (hdr_format == VK_FORMAT_B8G8R8A8_UNORM) {
+    hdr_bpp = 4U;
+  } else {
+    return false;
+  }
+  planned_resources_.clear();
+  planned_kinds_.clear();
+  for (int t = 0; t < touch_count; ++t) {
+    const int kind = first_touch[t];
+    FrameResource r;
+    r.name = transient_kind_name(kind);
+    r.first_use = by_kind[kind].first;
+    r.last_use = by_kind[kind].last;
+    // The external source is caller-owned history (read across the frame
+    // boundary by the tracer/capture); everything the store creates is
+    // frame-local transient.
+    r.history = (kind == kKindExternal);
+    switch (kind) {
+      case kKindHdrColor:
+        r.size_bytes = static_cast<std::uint64_t>(width) * height * hdr_bpp;
+        break;
+      case kKindHdrDepth:
+        r.size_bytes = static_cast<std::uint64_t>(width) * height * 4U;
+        break;
+      case kKindBloomColor:
+        r.size_bytes = static_cast<std::uint64_t>(bw) * bh * hdr_bpp;
+        break;
+      case kKindExternal:
+        r.size_bytes = static_cast<std::uint64_t>(width) * height * 16U;
+        break;
+      default:
+        return false;
+    }
+    r.layout_tag = static_cast<std::uint64_t>(kind);
+    planned_resources_.push_back(r);
+    planned_kinds_.push_back(kind);
+  }
+  planned_plan_ = plan_resource_allocations(
+      planned_resources_, static_cast<std::uint32_t>(skeleton.size()));
+  if (planned_plan_.size() != planned_resources_.size()) return false;
+
+  // One desc per OWNED kind present in the skeleton. The external source is
+  // caller-owned: planned (its history blocks aliasing) but never created.
+  TransientImageDesc hdr{};
+  hdr.name = transient_kind_name(kKindHdrColor);
+  hdr.format = hdr_format;
+  hdr.width = width;
+  hdr.height = height;
+  hdr.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+              VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  hdr.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+  descs.push_back(hdr);
+  TransientImageDesc depth{};
+  depth.name = transient_kind_name(kKindHdrDepth);
+  depth.format = VK_FORMAT_D32_SFLOAT;
+  depth.width = width;
+  depth.height = height;
+  depth.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  if (depth_sampleable) depth.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+  depth.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+  descs.push_back(depth);
+  if (include_bloom) {
+    TransientImageDesc bloom{};
+    bloom.name = transient_kind_name(kKindBloomColor);
+    bloom.format = hdr_format;
+    bloom.width = bw;
+    bloom.height = bh;
+    bloom.usage = hdr.usage;
+    bloom.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    descs.push_back(bloom);
+  }
+  return true;
+}
+
+int VulkanComposeChain::kind_of_image(VkImage image) const noexcept {
+  if (image == VK_NULL_HANDLE) return 0;
+  if (image == external_image_) return kKindExternal;
+  if (image == transient_store_.image(transient_kind_name(kKindHdrColor))) {
+    return kKindHdrColor;
+  }
+  if (image == transient_store_.image(transient_kind_name(kKindHdrDepth))) {
+    return kKindHdrDepth;
+  }
+  if (image == transient_store_.image(transient_kind_name(kKindBloomColor))) {
+    return kKindBloomColor;
+  }
+  return 0;
+}
+
+bool VulkanComposeChain::verify_frame_nodes(
+    const std::vector<GraphPass>& passes) const {
+  if (!transient_store_.ready()) return false;
+  if (planned_resources_.size() != planned_kinds_.size() ||
+      planned_resources_.size() != planned_plan_.size()) {
+    return false;
+  }
+  // Kind-aware walk over what was ACTUALLY recorded (same visit order as
+  // the skeleton walk). An unknown handle is a shape violation, not a skip:
+  // every image in these nodes must be a planned kind or the external
+  // source, otherwise the plan does not cover the frame.
+  struct Interval {
+    bool seen{false};
+    std::uint32_t first{0};
+    std::uint32_t last{0};
+  };
+  Interval by_kind[kKindExternal + 1]{};
+  for (std::uint32_t p = 0; p < passes.size(); ++p) {
+    const GraphPass& node = passes[p];
+    for (const RenderPassAttachment& att : node.attachments) {
+      const int kind = kind_of_image(att.image);
+      if (kind <= 0) return false;
+      if (!by_kind[kind].seen) {
+        by_kind[kind].seen = true;
+        by_kind[kind].first = p;
+      }
+      by_kind[kind].last = p;
+    }
+    for (const GraphSampledImage& sample : node.sampled_images) {
+      const int kind = kind_of_image(sample.image);
+      if (kind <= 0) return false;
+      if (!by_kind[kind].seen) {
+        by_kind[kind].seen = true;
+        by_kind[kind].first = p;
+      }
+      by_kind[kind].last = p;
+    }
+  }
+  const auto planned_interval = [this](int kind, std::uint32_t* first,
+                                       std::uint32_t* last,
+                                       bool* history) -> bool {
+    for (std::size_t i = 0; i < planned_kinds_.size(); ++i) {
+      if (planned_kinds_[i] == kind) {
+        *first = planned_resources_[i].first_use;
+        *last = planned_resources_[i].last_use;
+        *history = planned_resources_[i].history;
+        return true;
+      }
+    }
+    return false;
+  };
+  // Every recorded kind must be planned, and its actual interval a subset
+  // of the planned one. A planned-but-unrecorded kind (bloom image with the
+  // toggle off, HDR in PT mode) is idle memory, not a violation: skipping
+  // it is sound because an untouched image cannot corrupt an alias pair.
+  for (int kind = kKindHdrColor; kind <= kKindExternal; ++kind) {
+    if (!by_kind[kind].seen) continue;
+    std::uint32_t planned_first = 0U, planned_last = 0U;
+    bool planned_history = false;
+    if (!planned_interval(kind, &planned_first, &planned_last,
+                          &planned_history)) {
+      return false;
+    }
+    if (by_kind[kind].first < planned_first ||
+        by_kind[kind].last > planned_last) {
+      return false;
+    }
+    // Owned images are never history; only the caller-owned external is.
+    if (planned_history && kind != kKindExternal) return false;
+  }
+  // Every planned alias pair still disjoint, with no history on either side.
+  // Vacuous on today's frame (no disjoint same-desc pair exists: HDR spans
+  // the tonemap, depth and bloom differ in format/size) -- the subset
+  // checks above carry the weight, and this is the tripwire for any future
+  // shape that introduces sharing.
+  for (const ResourceAllocationPlan& entry : planned_plan_) {
+    if (entry.kind != ResourceAllocation::Aliased) continue;
+    int owner_kind = 0, sharer_kind = 0;
+    for (std::size_t i = 0; i < planned_resources_.size(); ++i) {
+      if (planned_resources_[i].name == entry.resource) {
+        sharer_kind = planned_kinds_[i];
+      }
+      if (planned_resources_[i].name == entry.shares_with) {
+        owner_kind = planned_kinds_[i];
+      }
+    }
+    if (owner_kind <= 0 || sharer_kind <= 0) return false;
+    if (!by_kind[owner_kind].seen || !by_kind[sharer_kind].seen) continue;
+    const std::uint32_t a_first = by_kind[sharer_kind].first;
+    const std::uint32_t a_last = by_kind[sharer_kind].last;
+    const std::uint32_t b_first = by_kind[owner_kind].first;
+    const std::uint32_t b_last = by_kind[owner_kind].last;
+    if (a_first <= b_last && b_first <= a_last) return false;
+  }
+  // History is never aliased, in either direction. The planner proves this
+  // structurally; the store re-checks the materialized plan because a
+  // corrupted plan entry here would be a cross-frame rendering bug.
+  for (std::size_t i = 0; i < planned_resources_.size(); ++i) {
+    if (!planned_resources_[i].history) continue;
+    if (planned_plan_[i].kind == ResourceAllocation::Aliased) return false;
+    for (const ResourceAllocationPlan& entry : planned_plan_) {
+      if (entry.kind == ResourceAllocation::Aliased &&
+          entry.shares_with == planned_resources_[i].name) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 void VulkanComposeChain::destroy() noexcept {
 #ifdef OMNICPP_HAS_VULKAN
   compose_ready_ = false;
@@ -838,6 +1232,13 @@ void VulkanComposeChain::destroy() noexcept {
   // these were not -- an unguarded unique_ptr deref on the refuse path.
   if (bloom_target_ != nullptr) bloom_target_->cleanup();
   if (hdr_target_ != nullptr) hdr_target_->cleanup();
+  // The store after the shells that adopt from it (adopted images are
+  // borrowed, so shell cleanup must run first), and before the allocator
+  // whose blocks back its owner allocations.
+  transient_store_.destroy();
+  planned_resources_.clear();
+  planned_kinds_.clear();
+  planned_plan_.clear();
   if (black_texture_.view != VK_NULL_HANDLE) {
     vkDestroyImageView(device_, black_texture_.view, nullptr);
     black_texture_.view = VK_NULL_HANDLE;

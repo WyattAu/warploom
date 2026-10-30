@@ -13,6 +13,9 @@
      Dedicated (the never-alias-history invariant, structurally).
   2. `planKind_aliased_sound` — an Aliased entry always names a compatible
      resource with a disjoint live interval.
+  3. `planKind_owner_earlier` (R6b) — an Aliased entry's owner is declared
+     strictly earlier, so the store's declaration-order allocation always
+     materializes the owner's memory before any sharer binds it.
 -/
 
 structure FResource where
@@ -131,6 +134,73 @@ theorem planKind_history_dedicated (rs : List FResource) (t i : Nat)
     findOwner_none_of_history t ri (rs.take i) hh
       (fun r hm => wf r (List.mem_of_mem_take hm))
   simp only [planKind, hr, hfind]
+
+/-- A found owner index is within the searched prefix (by the search's own
+    structure: the tail case returns a shifted tail hit, the head case 0). -/
+theorem findOwner_some_lt_length (t : Nat) (ri : FResource)
+    (pfx : List FResource) (j : Nat)
+    (h : findOwner t ri pfx = some j) : j < pfx.length := by
+  revert j
+  induction pfx with
+  | nil =>
+    intro j h
+    simp only [findOwner] at h
+    cases h
+  | cons hd tl ih =>
+    intro j h
+    simp only [findOwner] at h
+    by_cases htl : ∃ k, findOwner t ri tl = some k
+    · obtain ⟨k, hk⟩ := htl
+      simp only [hk] at h
+      cases h
+      have hlt := ih k hk
+      simp only [List.length_cons]
+      omega
+    · have hnone : findOwner t ri tl = none := by
+        match hm : findOwner t ri tl with
+        | some k => exact absurd ⟨k, hm⟩ htl
+        | none => rfl
+      simp only [hnone] at h
+      by_cases hcond :
+        compat hd ri = true ∧ ¬ ivOverlap (liveL t hd) (liveL t ri)
+      · rw [dite_eq_left hcond] at h
+        cases h
+        simp only [List.length_cons]
+        exact Nat.zero_lt_succ _
+      · rw [dite_eq_right hcond] at h
+        cases h
+
+/-- Wrapper 3 (R6b): an Aliased entry names a STRICTLY EARLIER owner.
+    The store allocates in declaration order, so this is what guarantees the
+    owner's memory exists before any sharer binds it -- no separate guard. -/
+theorem planKind_owner_earlier (rs : List FResource) (t i j : Nat)
+    (ri : FResource) (hr : rs[i]? = some ri)
+    (h : planKind rs t i = .aliased j) : j < i := by
+  have hfind : findOwner t ri (rs.take i) = some j := by
+    have h2 :
+      (match findOwner t ri (rs.take i) with
+        | none => PlanKind.dedicated
+        | some k => PlanKind.aliased k) = PlanKind.aliased j := by
+      simpa [planKind, hr] using h
+    match hm : findOwner t ri (rs.take i) with
+    | none =>
+      have hded : planKind rs t i = .dedicated := by
+        simp only [planKind, hr, hm]
+      rw [hded] at h
+      cases h
+    | some k =>
+      have halk : planKind rs t i = .aliased k := by
+        simp only [planKind, hr, hm]
+      rw [halk] at h
+      -- The goal here is `some k = some j` (the match abstracted the
+      -- discriminant), so `cases h` substitutes k := j and leaves `rfl`.
+      -- This differs from planKind_aliased_sound, whose goal never mentions
+      -- the discriminant, so it can still use hm afterwards.
+      cases h
+      rfl
+  have hlt := findOwner_some_lt_length t ri (rs.take i) j hfind
+  have hlen : (rs.take i).length = min i rs.length := List.length_take
+  omega
 
 /-- Wrapper 2: an Aliased entry names a compatible, disjoint owner. -/
 theorem planKind_aliased_sound (rs : List FResource) (t i j : Nat)

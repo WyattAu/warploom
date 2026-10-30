@@ -110,6 +110,51 @@ VulkanOffscreenTarget::~VulkanOffscreenTarget() { cleanup(); }
 #endif
 }
 
+::warploom::core::Result<void> VulkanOffscreenTarget::adopt_color(
+    VkDevice device, VkImage image, VkImageView view, VkFormat format,
+    std::uint32_t width, std::uint32_t height) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!device || image == VK_NULL_HANDLE || view == VK_NULL_HANDLE ||
+      format == VK_FORMAT_UNDEFINED || width == 0U || height == 0U ||
+      image_ != VK_NULL_HANDLE) {
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
+  }
+  device_ = device;
+  image_ = image;
+  image_view_ = view;
+  format_ = format;
+  width_ = width;
+  height_ = height;
+  adopted_ = true;
+  return ::warploom::core::Result<void>::ok();
+#else
+  (void)device; (void)image; (void)view; (void)format; (void)width; (void)height;
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
+::warploom::core::Result<void> VulkanOffscreenTarget::adopt_depth(
+    VkDevice device, VkImage image, VkImageView view, VkFormat depth_format,
+    bool sampleable) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!device || image == VK_NULL_HANDLE || view == VK_NULL_HANDLE ||
+      depth_format == VK_FORMAT_UNDEFINED ||
+      depth_image_ != VK_NULL_HANDLE) {
+    return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
+  }
+  device_ = device;
+  depth_image_ = image;
+  depth_view_ = view;
+  depth_format_ = depth_format;
+  depth_sampleable_ = sampleable;
+  adopted_depth_ = true;
+  return ::warploom::core::Result<void>::ok();
+#else
+  (void)device; (void)image; (void)view; (void)depth_format; (void)sampleable;
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
 ::warploom::core::Result<void> VulkanOffscreenTarget::create_depth(
     VkDevice device, VkPhysicalDevice physical_device, VkFormat depth_format) {
 #ifdef OMNICPP_HAS_VULKAN
@@ -343,8 +388,10 @@ void VulkanOffscreenTarget::cleanup(VkDevice device) noexcept {
   if (device) {
     if (framebuffer_) vkDestroyFramebuffer(device, framebuffer_, nullptr);
     if (render_pass_) vkDestroyRenderPass(device, render_pass_, nullptr);
-    if (depth_view_) vkDestroyImageView(device, depth_view_, nullptr);
-    if (depth_image_) vkDestroyImage(device, depth_image_, nullptr);
+    // Adopted (R6b store-owned) images and views are borrowed, not owned:
+    // the store destroys them. Everything else here is owned.
+    if (depth_view_ && !adopted_depth_) vkDestroyImageView(device, depth_view_, nullptr);
+    if (depth_image_ && !adopted_depth_) vkDestroyImage(device, depth_image_, nullptr);
     if (depth_uses_allocator_) {
       depth_allocation_.image = VK_NULL_HANDLE;
       allocator_->destroy_allocation(depth_allocation_);
@@ -353,8 +400,8 @@ void VulkanOffscreenTarget::cleanup(VkDevice device) noexcept {
     } else if (depth_memory_) {
       vkFreeMemory(device, depth_memory_, nullptr);
     }
-    if (image_view_) vkDestroyImageView(device, image_view_, nullptr);
-    if (image_) vkDestroyImage(device, image_, nullptr);
+    if (image_view_ && !adopted_) vkDestroyImageView(device, image_view_, nullptr);
+    if (image_ && !adopted_) vkDestroyImage(device, image_, nullptr);
     if (uses_allocator_) {
       // Returns the range to the allocator's free list (no vkFreeMemory).
       allocator_allocation_.image = VK_NULL_HANDLE;
@@ -376,6 +423,8 @@ void VulkanOffscreenTarget::cleanup(VkDevice device) noexcept {
   depth_image_ = VK_NULL_HANDLE;
   depth_view_ = VK_NULL_HANDLE;
   depth_memory_ = VK_NULL_HANDLE;
+  adopted_ = false;
+  adopted_depth_ = false;
   depth_format_ = VK_FORMAT_UNDEFINED;
   depth_sampleable_ = false;
   format_ = VK_FORMAT_UNDEFINED;

@@ -1434,9 +1434,18 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
     for (const GraphPass& pass : all_passes) {
       nodes.push_back(GraphNode::from_render(pass));
     }
+    // R6b gate: the recorded shape must still fit the plan the store was
+    // materialized from. A shape change that breaks coverage fails here --
+    // loudly, before anything records -- instead of aliasing two live
+    // images or sampling an image the plan does not know.
+    if (!compose_->verify_frame_nodes(all_passes)) {
+      unified_frame_failed = true;
+    }
     const CompiledGraph compiled = compile_graph(nodes);
-    execute_graph(cb, nodes, compiled,
-                  &VulkanRenderer::record_unified_frame_node, nullptr);
+    if (!unified_frame_failed) {
+      execute_graph(cb, nodes, compiled,
+                    &VulkanRenderer::record_unified_frame_node, nullptr);
+    }
 
     if (unified_frame_failed) {
       (void)vkEndCommandBuffer(cb);

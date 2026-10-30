@@ -249,9 +249,12 @@ What remains, in priority order:
    0 validation diagnostics, 666/666 unit + 39/39 editor tests.
 4. Real physics (D1): broadphase, shapes, joints, deterministic by
    construction, stepped inside the shared tick.
-5. RT sub-toggles (R2: reflections/AO) and GPU-driven skinned scenes (R3);
-   R6b waits on the Vulkan side of the plan (create/alias/destroy), not on the
-   planner: Loop 13 derives the declarations from the node sequence now.
+5. RT sub-toggles (R2: reflections/AO) and GPU-driven skinned scenes (R3).
+6. Transient store (R6b): `VulkanTransientStore` materializes the plan on-device
+   (per-Dedicated owner allocation, Aliased binds owner memory after a
+   desc-equality check); the compose chain's hand-written target list is
+   deleted and `verify_frame_nodes` gates every unified frame. Proven by 3
+   on-device TransientStore tests; 4-of-10 elision holds on-device.
 
 - **Fullscreen coverage (fixed):** `fullscreen.vert` generated its third
   vertex as `(-1,1)` instead of `(-1,3)`, so every pass using it covered only

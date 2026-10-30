@@ -25,6 +25,7 @@
 #include <warploom/core/deterministic_runtime.hpp>
 #include <warploom/render/vulkan_offscreen.hpp>
 #include <warploom/render/vulkan_render_graph.hpp>
+#include <warploom/render/vulkan_transient_store.hpp>
 #include <warploom/render/vulkan_types.hpp>
 
 namespace warploom::render {
@@ -136,6 +137,43 @@ class VulkanComposeChain final {
   [[nodiscard]] bool bloom_enabled() const noexcept { return bloom_enabled_; }
   //! True when the bloom pipelines were built, i.e. a toggle to ON is legal.
   [[nodiscard]] bool bloom_available() const noexcept { return bloom_available_; }
+
+  //! R6b per-frame gate: re-derive kind lifetimes from the scene + compose
+  //! nodes actually recorded and check the stored plan still covers them:
+  //! every owned image's actual interval is a subset of its planned one, and
+  //! every planned alias pair is still disjoint with no history on either
+  //! side. Returns false (fail the frame, never render wrong) when the
+  //! recorded shape outgrew the plan -- e.g. a future pass extends an
+  //! interval into its alias partner. The renderer calls this on the unified
+  //! graph before executing it.
+  [[nodiscard]] bool verify_frame_nodes(
+      const std::vector<GraphPass>& passes) const;
+
+  //! Image kinds for the plan-derived store. The kind IS the alias-compat-
+  //! ibility tag: equal kinds have identical creation parameters BY
+  //! CONSTRUCTION (one desc per kind), so the planner's size+tag equality
+  //! implies identical memory requirements for the store's bind check.
+  //! Public because the plan skeleton below is a test seam: unit tests run
+  //! derive_frame_resources over it with placeholder callbacks.
+  enum TransientKind : int {
+    kKindHdrColor = 1,
+    kKindHdrDepth = 2,
+    kKindBloomColor = 3,
+    kKindExternal = 4,
+  };
+
+  //! The node shapes derive_compose_plan walks, with placeholder handles
+  //! (skeleton_image_of(kind)). Mirrors build_graph_passes' stage structure:
+  //! scene writes HDR color + depth; bloom_down (when recordable) writes
+  //! bloom sampling HDR; tonemap samples HDR + bloom + external. The tonemap
+  //! sampling all three is the SUPERSET of the raster shape (HDR + bloom)
+  //! and the PT shape (external): real frames only shrink these intervals,
+  //! so a plan over the skeleton covers both.
+  static void build_plan_skeleton_nodes(bool include_bloom,
+                                        std::vector<GraphPass>& passes);
+  [[nodiscard]] static int skeleton_kind_of(VkImage image) noexcept;
+  [[nodiscard]] static VkImage skeleton_image_of(int kind) noexcept;
+  [[nodiscard]] static const char* transient_kind_name(int kind) noexcept;
 
   //! Tonemap from an EXTERNAL HDR source instead of this chain's own
   //! intermediate (R1b: the path tracer's accumulation image). The source is
@@ -286,6 +324,31 @@ class VulkanComposeChain final {
   //! config_.enable_bloom, so a chain built with bloom off can still be
   //! toggled on at runtime; false only when the bloom shaders were missing.
   bool bloom_available_{false};
+  //! R6b: the plan-derived image store backing the HDR color, HDR depth and
+  //! bloom targets. ensure() derives the superset skeleton (bloom + external
+  //! shapes included), plans it, and materializes it here; the
+  //! VulkanOffscreenTargets adopt the store's images and own only their
+  //! render passes + framebuffers. The hand-written target image list is
+  //! gone: no create()/bind_image() calls name an HDR/bloom/depth image.
+  VulkanTransientStore transient_store_;
+  //! Derive the superset plan into planned_* and fill `descs` with one
+  //! image description per owned kind. Pure (no device): the intervals come
+  //! from walking the skeleton nodes, never from constants.
+  bool derive_compose_plan(std::uint32_t width, std::uint32_t height,
+                           std::uint32_t bw, std::uint32_t bh,
+                           VkFormat hdr_format, bool depth_sampleable,
+                           bool include_bloom,
+                           std::vector<TransientImageDesc>& descs);
+  //! Kind of a live image handle (store-owned or the external source).
+  //! 0 when unknown -- verify treats that as a shape violation, not a skip.
+  [[nodiscard]] int kind_of_image(VkImage image) const noexcept;
+  //! Skeleton derivation output, kept for verify_frame_nodes(): the resource
+  //! intervals the store was materialized from.
+  std::vector<FrameResource> planned_resources_;
+  //! Kind per planned resource (parallel to planned_resources_).
+  std::vector<int> planned_kinds_;
+  //! Planned allocation over the skeleton (parallel to planned_resources_).
+  std::vector<ResourceAllocationPlan> planned_plan_;
   //! Tonemap push constants for the frame being built. A MEMBER (not a
   //! build_graph_passes local) because stages point at it and execute_graph
   //! reads it during execute: a local would die at build return. Overwritten

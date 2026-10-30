@@ -34,6 +34,23 @@ public:
       VulkanMemoryAllocator* allocator = nullptr,
       VkImageUsageFlags extra_image_usage = 0U);
 
+  //! Adopt a caller-owned color image + view (R6b): create_depth() (for the
+  //! depth side) / create_render_pass() / create_framebuffer() work unchanged,
+  //! but cleanup() leaves the adopted image, view and memory alone -- the
+  //! VulkanTransientStore owns them. Replaces create() for store-backed
+  //! targets; the hand-written image creation it bypasses is exactly the
+  //! target list R6b deletes.
+  [[nodiscard]] ::warploom::core::Result<void> adopt_color(
+      VkDevice device, VkImage image, VkImageView view, VkFormat format,
+      std::uint32_t width, std::uint32_t height);
+  //! Adopt a caller-owned depth image + view. Call BEFORE create_render_pass(),
+  //! like create_depth(). `sampleable` records whether the H-Z reduction may
+  //! sample it (create_depth probes the format; an adopted image's usage was
+  //! fixed by its owner, so the caller states it).
+  [[nodiscard]] ::warploom::core::Result<void> adopt_depth(
+      VkDevice device, VkImage image, VkImageView view, VkFormat depth_format,
+      bool sampleable);
+
   //! Optional depth-stencil attachment. Call BEFORE create_render_pass();
   //! when present, the render pass gains a depth attachment (cleared to
   //! 1.0, stored for post-pass depth extraction) and the framebuffer includes
@@ -105,6 +122,10 @@ private:
   VkDeviceMemory depth_memory_{VK_NULL_HANDLE};
   VkFormat depth_format_{VK_FORMAT_UNDEFINED};
   bool depth_sampleable_{false};
+  //! R6b: image/view borrowed from the transient store (adopt_color / depth).
+  //! cleanup() destroys render pass + framebuffer but not the image/view.
+  bool adopted_{false};
+  bool adopted_depth_{false};
   bool depth_uses_allocator_{false};
   Allocation depth_allocation_{};
   VkRenderPass render_pass_{VK_NULL_HANDLE};

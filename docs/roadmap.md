@@ -978,9 +978,20 @@ split. Verified: 3 new Loop13 tests over a compose-shaped 5-node frame
 sabotage-checked (never-extend-last_use fails the 2 behavior tests),
 10/10 FrameAllocator, plus the Lean model `proofs/FrameAllocator.lean`
 (history always Dedicated; every Aliased entry names a compatible,
-disjoint owner). R6b proper — create/alias/destroy Vulkan images from
-the plan — is still unwired and stays a separate change with its own
-verification run, now unblocked rather than gated.
+disjoint owner), plus `planKind_owner_earlier` (an Aliased entry's owner
+is declared strictly earlier, so declaration-order allocation materializes
+owner memory before any sharer binds it). R6b LANDED: `VulkanTransientStore`
+(materializes the plan: per-Dedicated owner allocation, Aliased entries bind
+the owner's memory after a desc-equality check that fails loudly on
+mismatch) backs the compose chain — the hand-written HDR/bloom/depth image
+list is deleted, `derive_compose_plan` builds the superset skeleton over
+scene+bloom+tonemap stages, `adopt_color`/`adopt_depth` fit the store images
+into the render-pass shells, and `verify_frame_nodes` re-derives lifetimes
+from the unified scene+compose graph every frame and fails the frame rather
+than rendering wrong when the recorded shape outgrows the plan. Verified:
+669/669 unit (3 TransientStore on-device: disjoint elision, fuzz
+never-aliases-history, skeleton matches derived lifetimes), 6/6 ctest,
+`lake build` clean, 4-of-10 elision holds on-device via owner count.
 
 Process note, kept because it is the third time: the first sabotage of this
 invariant **passed**, because three separate guards enforced it and removing
