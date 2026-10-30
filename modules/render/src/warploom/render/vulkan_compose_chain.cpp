@@ -512,27 +512,30 @@ namespace warploom::render {
 #endif
 }
 
-namespace {
-
-//! One compose stage: the pipeline, the target it renders into, and what it
-//! samples. `target == nullptr` means the stage writes the presentation target
-//! (the swapchain), whose layout the render pass owns.
-struct ComposeStage {
-  const VulkanPipeline* pipeline{nullptr};
-  VulkanOffscreenTarget* target{nullptr};
-  VkRenderPass pass{VK_NULL_HANDLE};
-  VkFramebuffer framebuffer{VK_NULL_HANDLE};
-  std::uint32_t width{0};
-  std::uint32_t height{0};
-  const void* push{nullptr};
-  std::uint32_t push_size{0};
-  VkDescriptorSet set{VK_NULL_HANDLE};
-  //! Images this stage samples, in descriptor-slot order.
-  std::array<GraphSampledImage, 2> samples{};
-  std::uint32_t sample_count{0};
-};
-
-}  // namespace
+void record_compose_stage(VkCommandBuffer command_buffer,
+                          const GraphPass& pass, void* user) {
+#ifdef OMNICPP_HAS_VULKAN
+  const auto* stage = static_cast<const ComposeStage*>(user);
+  if (stage == nullptr || stage->pipeline == nullptr) return;
+  FullscreenPass draw{};
+  draw.pipeline = stage->pipeline->pipeline();
+  draw.pipeline_layout = stage->pipeline->pipeline_layout();
+  draw.render_pass = pass.render_pass;
+  draw.framebuffer = pass.framebuffer;
+  draw.width = pass.width;
+  draw.height = pass.height;
+  draw.clear_values = pass.clear_values;
+  draw.clear_value_count = pass.clear_value_count;
+  draw.push_data = stage->push;
+  draw.push_size = stage->push_size;
+  draw.push_stage_flags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  (void)record_fullscreen_draw(command_buffer, draw, stage->set);
+#else
+  (void)command_buffer;
+  (void)pass;
+  (void)user;
+#endif
+}
 
 void VulkanComposeChain::set_external_source(VkImage image,
                                              VkImageView view) noexcept {
@@ -556,31 +559,32 @@ void VulkanComposeChain::set_external_source(VkImage image,
       0U);
 }
 
-void VulkanComposeChain::record(VkCommandBuffer command_buffer,
-                                          VkRenderPass target_pass,
-                                          VkFramebuffer target_framebuffer,
-                                          std::uint32_t width,
-                                          std::uint32_t height) {
+void VulkanComposeChain::build_graph_passes(
+    VkRenderPass target_pass, VkFramebuffer target_framebuffer,
+    std::uint32_t width, std::uint32_t height, std::vector<GraphPass>& passes,
+    std::vector<ComposeStage>& stages, VkClearValue* clear_storage) {
 #ifdef OMNICPP_HAS_VULKAN
-  if (!compose_ready_ || hdr_sampler_ == VK_NULL_HANDLE) return;
+  passes.clear();
+  stages.clear();
+  if (!compose_ready_ || hdr_sampler_ == VK_NULL_HANDLE ||
+      clear_storage == nullptr) {
+    return;
+  }
 
-  // Where the scene pass left the HDR image. It is recorded outside this graph,
-  // so each stage's first sample of it declares this as the producer state.
+  // Where the scene pass left the HDR image. It is recorded outside this graph
+  // when record() is used alone, so each stage's first sample of it declares
+  // this as the producer state. When a caller embeds these passes AFTER a
+  // scene node in one compile, the compiler already tracks the HDR image from
+  // that node's attachment and these seeds are simply ignored.
   const VkImageLayout hdr_from_scene = hdr_target_->color_final_layout();
 
-  VkClearValue clear[2]{};
-  clear[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-  clear[1].depthStencil = {1.0f, 0U};
+  clear_storage[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+  clear_storage[1].depthStencil = {1.0f, 0U};
 
-  struct ComposePush {
-    float exposure;
-    float inverse_samples;
-    float pad[2];
-  } push{};
-  push.exposure = config_.exposure;
-  push.inverse_samples = inverse_samples_;
-  push.pad[0] = 0.0F;
-  push.pad[1] = 0.0F;
+  compose_push_.exposure = config_.exposure;
+  compose_push_.inverse_samples = inverse_samples_;
+  compose_push_.pad[0] = 0.0F;
+  compose_push_.pad[1] = 0.0F;
 
 
   // --- Declare the stages. ---
@@ -589,7 +593,6 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
   // descriptor set involved was created by ensure() before the first frame, so
   // a toggle cannot invalidate anything the application baked against -- which
   // is exactly what the reverted first attempt got wrong.
-  std::vector<ComposeStage> stages;
   const bool bloom_on =
       bloom_enabled_ && bloom_available_ && bloom_down_pipeline_ != nullptr &&
       bloom_target_->image() != VK_NULL_HANDLE;
@@ -644,8 +647,8 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
   tonemap.framebuffer = target_framebuffer;
   tonemap.width = width;
   tonemap.height = height;
-  tonemap.push = &push;
-  tonemap.push_size = sizeof(push);
+  tonemap.push = &compose_push_;
+  tonemap.push_size = sizeof(compose_push_);
   // Three pre-written sets, selected by what this frame actually contains:
   // external source (path tracing) > bloom > plain raster.
   const bool external = external_image_ != VK_NULL_HANDLE;
@@ -706,19 +709,21 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
   }
   stages.push_back(tonemap);
 
-  // --- Build graph nodes. Each stage writes its target as a real attachment,
+  // --- Build graph passes. Each stage writes its target as a real attachment,
   // so the compiler tracks write-after-write and write-after-read edges too.
-  std::vector<GraphPass> passes;
-  std::vector<ComposeStage> stage_copy;
+  // The pass carries the stage as its opaque record handle; `stages` (the
+  // out-param) owns them, so user_data stays valid through the caller's
+  // execute_graph call.
   passes.reserve(stages.size());
-  for (const ComposeStage& stage : stages) {
+  for (std::size_t i = 0; i < stages.size(); ++i) {
+    const ComposeStage& stage = stages[i];
     GraphPass pass{};
     pass.name = "compose";
     pass.render_pass = stage.pass;
     pass.framebuffer = stage.framebuffer;
     pass.width = stage.width;
     pass.height = stage.height;
-    pass.clear_values = clear;
+    pass.clear_values = clear_storage;
     // Two entries always: pClearValues is indexed by attachment number, and
     // too few is VUID-VkRenderPassBeginInfo-clearValueCount-00902.
     pass.clear_value_count = 2U;
@@ -735,13 +740,8 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
       attachment.stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
       pass.attachments.push_back(attachment);
     }
-    pass.user_data = nullptr;
+    pass.user_data = &stages[i];
     passes.push_back(pass);
-    stage_copy.push_back(stage);
-  }
-  // The recorder needs the stage, and the pass carries an opaque handle.
-  for (std::size_t i = 0; i < passes.size(); ++i) {
-    passes[i].user_data = &stage_copy[i];
   }
 
   // The external-source descriptor is written here, every frame, rather than
@@ -767,6 +767,29 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
         hdr_sampler_, external_view_, VK_IMAGE_LAYOUT_GENERAL, 0U);
   }
 
+  // NOTE: no nodes/compile/execute here. The caller owns the graph: record()
+  // below wraps this in a compose-only graph, while the renderer prepends a
+  // scene node and compiles once (T0 seam) so the scene -> compose transition
+  // is compiler-owned instead of hand-seeded.
+#else
+  (void)target_pass; (void)target_framebuffer;
+  (void)width; (void)height;
+  (void)passes; (void)stages; (void)clear_storage;
+#endif
+}
+
+void VulkanComposeChain::record(VkCommandBuffer command_buffer,
+                                VkRenderPass target_pass,
+                                VkFramebuffer target_framebuffer,
+                                std::uint32_t width, std::uint32_t height) {
+#ifdef OMNICPP_HAS_VULKAN
+  std::vector<GraphPass> passes;
+  std::vector<ComposeStage> stages;
+  VkClearValue clear[2]{};
+  build_graph_passes(target_pass, target_framebuffer, width, height, passes,
+                     stages, clear);
+  if (passes.empty()) return;
+
   std::vector<GraphNode> nodes;
   nodes.reserve(passes.size());
   for (const GraphPass& pass : passes) {
@@ -774,26 +797,7 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
   }
 
   const CompiledGraph compiled = compile_graph(nodes);
-
-  execute_graph(command_buffer, nodes, compiled,
-                +[](VkCommandBuffer cb, const GraphPass& pass, void* user) {
-                  const auto* stage =
-                      static_cast<const ComposeStage*>(user);
-                  if (stage == nullptr || stage->pipeline == nullptr) return;
-                  FullscreenPass draw{};
-                  draw.pipeline = stage->pipeline->pipeline();
-                  draw.pipeline_layout = stage->pipeline->pipeline_layout();
-                  draw.render_pass = pass.render_pass;
-                  draw.framebuffer = pass.framebuffer;
-                  draw.width = pass.width;
-                  draw.height = pass.height;
-                  draw.clear_values = pass.clear_values;
-                  draw.clear_value_count = pass.clear_value_count;
-                  draw.push_data = stage->push;
-                  draw.push_size = stage->push_size;
-                  draw.push_stage_flags = VK_SHADER_STAGE_FRAGMENT_BIT;
-                  (void)record_fullscreen_draw(cb, draw, stage->set);
-                },
+  execute_graph(command_buffer, nodes, compiled, &record_compose_stage,
                 nullptr);
 #else
   (void)command_buffer; (void)target_pass; (void)target_framebuffer;

@@ -1030,9 +1030,80 @@ void gpu_driven_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 #endif
 }
 
-namespace {
+// T0 seam: the unified scene+compose frame graph. The scene pass is a real
+// graph node (declaring the HDR attachments) and each compose stage follows
+// in the same compile, so compile_graph owns every transition -- including
+// scene -> compose -- and no hand-written barrier or initial_layout seed
+// remains on this path.
+struct VulkanRenderer::UnifiedFrameNode {
+  const VulkanRenderer* renderer{nullptr};
+  bool is_scene{false};
+  const ComposeStage* stage{nullptr};
+  std::uint32_t width{0};
+  std::uint32_t height{0};
+  bool* failed{nullptr};
+};
 
-}  // namespace
+void VulkanRenderer::record_unified_frame_node(
+    VkCommandBuffer command_buffer, const GraphPass& pass, void* user_data) {
+  auto* node = static_cast<UnifiedFrameNode*>(user_data);
+  if (node == nullptr || node->renderer == nullptr) return;
+  if (!node->is_scene) {
+    record_compose_stage(command_buffer, pass,
+                         const_cast<ComposeStage*>(node->stage));
+    return;
+  }
+  if (!node->renderer->record_scene_node_contents(command_buffer, node->width,
+                                                  node->height) &&
+      node->failed != nullptr) {
+    *node->failed = true;
+  }
+}
+
+#ifdef OMNICPP_HAS_VULKAN
+bool VulkanRenderer::record_scene_node_contents(
+    VkCommandBuffer command_buffer, std::uint32_t width,
+    std::uint32_t height) const {
+  VkViewport viewport{};
+  viewport.x = 0.0f;
+  viewport.y = 0.0f;
+  viewport.width = static_cast<float>(width);
+  viewport.height = static_cast<float>(height);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+  vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+
+  VkRect2D scissor{};
+  scissor.offset = {0, 0};
+  scissor.extent = {width, height};
+  vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+
+  if (scene_record_callback_) {
+    // Application-owned scene path: the callback records whatever it owns
+    // (PBR scene, GPU-driven frame, post chains) inside this render pass.
+    if (!scene_record_callback_(command_buffer, width, height,
+                                scene_record_user_data_)) {
+      return false;
+    }
+  } else if (pipeline_) {
+    // Built-in demo: three-vertex triangle (no scene callback installed).
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      pipeline_);
+    vkCmdDraw(command_buffer, 3, 1, 0, 0);
+  }
+
+  // Boundary stamp: the scene pass is done, so the Scene segment ends here.
+  // Written inside the pass (timestamps may record inside a render pass;
+  // only the pool reset must stay outside), before compose runs, so a
+  // frame's compose cost is attributed to compose rather than the scene.
+  if (gpu_timing_enabled_ && timestamp_pool_ != VK_NULL_HANDLE) {
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                        timestamp_pool_,
+                        current_frame_ * kGpuStampsPerFrame + kStampAfterScene);
+  }
+  return true;
+}
+#endif
 
 VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
     bool compose, HiZDepthSource hdr_depth, HiZDepthSource swapchain_depth) {
@@ -1295,57 +1366,102 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
   // HDR intermediate pass target when composing, else the swapchain.
   VkRenderPass scene_pass = render_pass_;
   VkFramebuffer scene_framebuffer = framebuffer;
-  if (compose) {
-    scene_pass = compose_->scene_pass();
-    scene_framebuffer = compose_->scene_framebuffer();
-    VkImageMemoryBarrier to_color{};
-    to_color.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    // The HDR target's color attachment declares initialLayout UNDEFINED,
-    // which is also its layout before the first frame of each resize.
-    to_color.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    to_color.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    to_color.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    to_color.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    to_color.image = compose_->scene_image();
-    to_color.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    to_color.srcAccessMask = 0;
-    to_color.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0U,
-                         0U, nullptr, 0U, nullptr, 1U, &to_color);
-  }
-
-  VkRenderPassBeginInfo rp_info{};
-  rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-  rp_info.renderPass = scene_pass;
-  rp_info.framebuffer = scene_framebuffer;
-  rp_info.renderArea.offset = {0, 0};
-  rp_info.renderArea.extent = {width, height};
 
   VkClearValue clear_values[2];
   clear_values[0].color = {{config_.clear_color_r, config_.clear_color_g, config_.clear_color_b, config_.clear_color_a}};
   clear_values[1].depthStencil = {config_.clear_depth, config_.clear_depth_stencil};
-  rp_info.clearValueCount = 2;
-  rp_info.pClearValues = clear_values;
 
-  vkCmdBeginRenderPass(cb, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
+  // T0 seam: under compose the scene pass is a graph node in ONE compile
+  // with the compose stages. The scene node declares the HDR color and depth
+  // attachments, so compile_graph owns the first-use barriers (replacing the
+  // manual UNDEFINED -> COLOR_ATTACHMENT barrier that used to live here) and
+  // the scene -> compose read-after-write edges (replacing the
+  // initial_layout seeds, which now only apply when the chain records alone
+  // via record()). One compile, one execute, no hand-written barrier.
+  bool unified_frame_failed = false;
+  if (compose) {
+    scene_pass = compose_->scene_pass();
+    scene_framebuffer = compose_->scene_framebuffer();
 
-  VkViewport viewport{};
-  viewport.x = 0.0f; viewport.y = 0.0f;
-  viewport.width = static_cast<float>(width);
-  viewport.height = static_cast<float>(height);
-  viewport.minDepth = 0.0f; viewport.maxDepth = 1.0f;
-  vkCmdSetViewport(cb, 0, 1, &viewport);
+    GraphPass scene_node{};
+    scene_node.name = "scene";
+    scene_node.render_pass = scene_pass;
+    scene_node.framebuffer = scene_framebuffer;
+    scene_node.width = width;
+    scene_node.height = height;
+    scene_node.clear_values = clear_values;
+    scene_node.clear_value_count = 2U;
+    scene_node.attachments = {
+        color_attachment(compose_->scene_image(),
+                         compose_->scene_image_view(),
+                         compose_->scene_image_format(),
+                         compose_->scene_color_final_layout()),
+        depth_attachment(compose_->scene_depth_image(),
+                         compose_->scene_depth_view(),
+                         compose_->scene_depth_format(),
+                         compose_->scene_depth_final_layout())};
+    UnifiedFrameNode scene_dispatch{};
+    scene_dispatch.renderer = this;
+    scene_dispatch.is_scene = true;
+    scene_dispatch.width = width;
+    scene_dispatch.height = height;
+    scene_dispatch.failed = &unified_frame_failed;
+    scene_node.user_data = &scene_dispatch;
 
-  VkRect2D scissor{};
-  scissor.offset = {0, 0};
-  scissor.extent = {width, height};
-  vkCmdSetScissor(cb, 0, 1, &scissor);
+    VkClearValue compose_clear[2]{};
+    std::vector<ComposeStage> compose_stages;
+    std::vector<GraphPass> compose_passes;
+    compose_->build_graph_passes(render_pass_, framebuffer, width, height,
+                                 compose_passes, compose_stages, compose_clear);
 
-  if (scene_record_callback_) {
-    // Application-owned scene path: the callback records whatever it owns
-    // (PBR scene, GPU-driven frame, post chains) inside this render pass.
-    if (!scene_record_callback_(cb, width, height, scene_record_user_data_)) {
+    std::vector<UnifiedFrameNode> compose_dispatch(compose_passes.size());
+    for (std::size_t i = 0; i < compose_passes.size(); ++i) {
+      compose_dispatch[i].renderer = this;
+      compose_dispatch[i].is_scene = false;
+      compose_dispatch[i].stage = static_cast<const ComposeStage*>(
+          compose_passes[i].user_data);
+      compose_passes[i].user_data = &compose_dispatch[i];
+    }
+
+    std::vector<GraphPass> all_passes;
+    all_passes.reserve(1U + compose_passes.size());
+    all_passes.push_back(scene_node);
+    for (const GraphPass& compose_pass : compose_passes) {
+      all_passes.push_back(compose_pass);
+    }
+    std::vector<GraphNode> nodes;
+    nodes.reserve(all_passes.size());
+    for (const GraphPass& pass : all_passes) {
+      nodes.push_back(GraphNode::from_render(pass));
+    }
+    const CompiledGraph compiled = compile_graph(nodes);
+    execute_graph(cb, nodes, compiled,
+                  &VulkanRenderer::record_unified_frame_node, nullptr);
+
+    if (unified_frame_failed) {
+      (void)vkEndCommandBuffer(cb);
+      if (pending_hiz_frame_) {
+        hiz_state_.discard_frame(pending_hiz_token_);
+        pending_hiz_frame_ = false;
+      }
+      return ::warploom::core::Result<void>::error(
+          ::warploom::core::RuntimeError::invalid_config);
+    }
+    // The Scene/Compose boundary stamp is written by the scene node itself
+    // (inside the pass) so the attribution is unchanged.
+  } else {
+    VkRenderPassBeginInfo rp_info{};
+    rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp_info.renderPass = scene_pass;
+    rp_info.framebuffer = scene_framebuffer;
+    rp_info.renderArea.offset = {0, 0};
+    rp_info.renderArea.extent = {width, height};
+    rp_info.clearValueCount = 2;
+    rp_info.pClearValues = clear_values;
+
+    vkCmdBeginRenderPass(cb, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
+
+    if (!record_scene_node_contents(cb, width, height)) {
       vkCmdEndRenderPass(cb);
       (void)vkEndCommandBuffer(cb);
       if (pending_hiz_frame_) {
@@ -1355,32 +1471,22 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
       return ::warploom::core::Result<void>::error(
           ::warploom::core::RuntimeError::invalid_config);
     }
-  } else if (pipeline_) {
-    // Built-in demo: three-vertex triangle (no scene callback installed).
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
-    vkCmdDraw(cb, 3, 1, 0, 0);
-  }
 
-  vkCmdEndRenderPass(cb);
+    vkCmdEndRenderPass(cb);
 
-  // Boundary stamp: the scene pass is done, so the Scene segment ends here.
-  // Written before compose so a frame's compose cost is attributed to compose
-  // rather than being folded into the scene.
-  if (gpu_timing_enabled_ && timestamp_pool_ != VK_NULL_HANDLE) {
-    vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, timestamp_pool_,
-                        current_frame_ * kGpuStampsPerFrame + kStampAfterScene);
+    // Boundary stamp: the scene pass is done, so the Scene segment ends here
+    // (non-compose path only; under compose the scene node writes it inside
+    // the pass so compose cost stays attributed to compose).
+    if (gpu_timing_enabled_ && timestamp_pool_ != VK_NULL_HANDLE) {
+      vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, timestamp_pool_,
+                          current_frame_ * kGpuStampsPerFrame + kStampAfterScene);
+    }
   }
 
   // HDR compose: bloom (optional) then tonemap+FXAA into the swapchain
-  // image. Runs after the scene pass and before the end stamp, so the
-  // timestamp still covers the whole frame.
-  if (compose) {
-    // Layout tracking is compile_graph's job: each stage declares what it
-    // reads and writes, and the compiler emits the transitions. The scene
-    // pass is outside the graph, so record_compose_chain seeds the first
-    // sample of each image from that pass's declared final layout.
-    compose_->record(cb, render_pass_, framebuffer, width, height);
-  }
+  // image. Under compose this already ran as graph nodes above; this block
+  // now only owns the Compose boundary stamp, which runs after the graph
+  // and before the end stamp, so the timestamp still covers the whole frame.
 
   if (gpu_timing_enabled_ && timestamp_pool_ != VK_NULL_HANDLE) {
     vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, timestamp_pool_,

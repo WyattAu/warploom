@@ -641,6 +641,20 @@ private:
                                     const GraphComputePass& pass, void* user_data);
   void record_hiz_dispatch(VkCommandBuffer command_buffer,
                            const GraphComputePass& pass);
+  //! One node of the unified scene+compose frame graph (T0): either the
+  //! scene contents or one compose stage. Defined in vulkan_renderer.cpp.
+  struct UnifiedFrameNode;
+  static void record_unified_frame_node(VkCommandBuffer command_buffer,
+                                        const GraphPass& pass,
+                                        void* user_data);
+#ifdef OMNICPP_HAS_VULKAN
+  //! Scene contents for the unified graph's scene node: viewport/scissor
+  //! plus the application callback (or the built-in demo draw). Returns
+  //! false when the application callback fails the frame.
+  [[nodiscard]] bool record_scene_node_contents(VkCommandBuffer command_buffer,
+                                                std::uint32_t width,
+                                                std::uint32_t height) const;
+#endif
 
   VkDevice device_{VK_NULL_HANDLE};
   VkPhysicalDevice physical_device_{VK_NULL_HANDLE};

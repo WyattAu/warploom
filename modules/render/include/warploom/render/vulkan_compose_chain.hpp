@@ -18,8 +18,13 @@
 #include <memory>
 #include <string>
 
+#include <array>
+#include <cstdint>
+#include <vector>
+
 #include <warploom/core/deterministic_runtime.hpp>
 #include <warploom/render/vulkan_offscreen.hpp>
+#include <warploom/render/vulkan_render_graph.hpp>
 #include <warploom/render/vulkan_types.hpp>
 
 namespace warploom::render {
@@ -27,6 +32,30 @@ namespace warploom::render {
 class VulkanMemoryAllocator;
 class VulkanPipeline;
 class VulkanDescriptorManager;
+
+//! One compose stage: the pipeline, the target it renders into, and what it
+//! samples. `target == nullptr` means the stage writes the presentation target
+//! (the swapchain), whose layout the render pass owns.
+struct ComposeStage {
+  const VulkanPipeline* pipeline{nullptr};
+  VulkanOffscreenTarget* target{nullptr};
+  VkRenderPass pass{VK_NULL_HANDLE};
+  VkFramebuffer framebuffer{VK_NULL_HANDLE};
+  std::uint32_t width{0};
+  std::uint32_t height{0};
+  const void* push{nullptr};
+  std::uint32_t push_size{0};
+  VkDescriptorSet set{VK_NULL_HANDLE};
+  //! Images this stage samples, in descriptor-slot order.
+  std::array<GraphSampledImage, 2> samples{};
+  std::uint32_t sample_count{0};
+};
+
+//! Record callback for a compose stage inside an execute_graph render node.
+//! `user` is the stage (a ComposeStage*); shared by VulkanComposeChain::record
+//! and by callers that embed compose stages in a larger graph.
+void record_compose_stage(VkCommandBuffer command_buffer,
+                          const GraphPass& pass, void* user);
 
 struct ComposeChainConfig {
   //! Initial bloom state. The chain PRE-ALLOCATES every bloom resource
@@ -67,6 +96,22 @@ class VulkanComposeChain final {
   void record(VkCommandBuffer command_buffer, VkRenderPass target_pass,
               VkFramebuffer target_framebuffer, std::uint32_t width,
               std::uint32_t height);
+
+  //! Build the compose stages' graph passes WITHOUT recording them, so a
+  //! caller can embed them in a larger graph (T0: the scene pass becomes a
+  //! graph node in the same compile, and the compiler owns the scene ->
+  //! compose transition instead of a hand-written barrier + an initial_layout
+  //! seed). `stages` receives the stage descriptions and `passes` one
+  //! GraphPass per stage with user_data pointing at its stage; both must
+  //! outlive the execute_graph call. `clear_storage` supplies the two clear
+  //! values every pass points at (one caller-owned array, not per-pass
+  //! temporaries). Performs the per-frame external-source descriptor write,
+  //! exactly as record() does.
+  void build_graph_passes(VkRenderPass target_pass,
+                          VkFramebuffer target_framebuffer, std::uint32_t width,
+                          std::uint32_t height, std::vector<GraphPass>& passes,
+                          std::vector<ComposeStage>& stages,
+                          VkClearValue* clear_storage);
 
   void destroy() noexcept;
 
@@ -147,6 +192,21 @@ class VulkanComposeChain final {
     return hdr_target_->framebuffer();
   }
   [[nodiscard]] VkImage scene_image() const noexcept { return hdr_target_->image(); }
+  [[nodiscard]] VkImageView scene_image_view() const noexcept {
+    return hdr_target_->image_view();
+  }
+  [[nodiscard]] VkFormat scene_image_format() const noexcept {
+    return hdr_target_->format();
+  }
+  [[nodiscard]] VkImageLayout scene_color_final_layout() const noexcept {
+    return hdr_target_->color_final_layout();
+  }
+  [[nodiscard]] VkFormat scene_depth_format() const noexcept {
+    return hdr_target_->depth_format();
+  }
+  [[nodiscard]] VkImageLayout scene_depth_final_layout() const noexcept {
+    return hdr_target_->depth_final_layout();
+  }
 
   //! The HDR depth attachment: the scene pass writes it and the H-Z reduction
   //! samples it, so under compose the H-Z pyramid must read THIS depth rather
@@ -226,6 +286,16 @@ class VulkanComposeChain final {
   //! config_.enable_bloom, so a chain built with bloom off can still be
   //! toggled on at runtime; false only when the bloom shaders were missing.
   bool bloom_available_{false};
+  //! Tonemap push constants for the frame being built. A MEMBER (not a
+  //! build_graph_passes local) because stages point at it and execute_graph
+  //! reads it during execute: a local would die at build return. Overwritten
+  //! on every build, and execute_graph is synchronous within record(), so no
+  //! frame-in-flight can observe a torn value.
+  struct ComposePush {
+    float exposure{1.0F};
+    float inverse_samples{1.0F};
+    float pad[2]{0.0F, 0.0F};
+  } compose_push_{};
 };
 
 }  // namespace warploom::render
