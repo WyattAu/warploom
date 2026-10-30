@@ -1518,10 +1518,16 @@ ones (add/remove/move) flagging a node-view rebuild.
 One finding this left open is now fixed rather than papered over: the viewport
 called `editor.tick()` ONLY inside `tick_node_editor()`, so with the node editor
 off the session's animation frame never advanced. The session tick now lives in
-`tick_session()`, called on every frame whether or not the panel is visible;
-`tick_node_editor()` keeps only the UI work (graph evaluate, widget sync,
-layout, paint). Verified: 662/662 unit tests, 6/6 ctest, viewport build
-warning-free.
+`tick_session()`, called on every rendered frame whether or not the panel is
+visible; `tick_node_editor()` keeps only the UI work (graph evaluate, widget
+sync, layout, paint). A second half hid behind the first: the viewport passed
+its live pause flag into the tick, while the headless host ticks steps
+unpaused -- so stepped frames gated the timeline stage and record/playback
+stayed inert under step control even once the tick ran. A step-released frame
+now ticks as running, matching the host. Verified live on the RTX 2060 with
+the editor off: 17/17 (record 4 samples across a mid-take edit, replay holds
+the tail); the same script on the pre-fix tree gives 12/17 with empty tracks.
+Plus 662/662 unit tests, 6/6 ctest, viewport build warning-free.
 
 The second question above -- "why does the capture show the PT sky AND the
 raster ground?" -- dissolved into the first. There was no second writer and no

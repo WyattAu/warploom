@@ -195,11 +195,18 @@ What remains, in priority order:
    bypasses `record_pbr_scene`, so gd mode still shows the clear colour.
 2. PT scene coverage. The tracer builds its AS from one cube + slab. The
    skinned, mannequin and city scenes have no PT geometry path, and bloom does
-   not layer on the PT source.
-3. The document timeline is decoupled from the UI panel: `tick_session()`
-   runs `editor.tick()` on every frame whether or not the node editor is
-   visible (previously it lived inside `tick_node_editor()`, so clip playback
-   and recording were inert with the editor off). Verified: 662/662 unit
+   not layer on the PT source.3. The document timeline is decoupled from the UI panel: `tick_session()`
+   runs `editor.tick()` on every rendered frame whether or not the node
+   editor is visible (previously it lived inside `tick_node_editor()`, so
+   clip playback and recording were inert with the editor off). A
+   step-released frame ticks as running (`paused=false`): a step is the run
+   instruction, matching the headless host, which always ticked steps
+   unpaused while the viewport passed its live pause flag -- so even the
+   decoupled tick recorded nothing under step control until this landed.
+   Verified live on the RTX 2060 with the editor off (`tools/vp_tick_check.py`:
+   pause, wide clip, record across a mid-take edit, playback): 17/17,
+   4 samples head 1.0 / tail 0.75, replay holds 0.75. Baseline A/B without
+   the fix: 12/17, empty tracks, `clip_play` rejected. Plus 662/662 unit
    tests, 6/6 ctest, viewport build warning-free. Remaining: the clip strip
    is not in the app.
 4. Real physics (D1): broadphase, shapes, joints, deterministic by

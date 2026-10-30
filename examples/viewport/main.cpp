@@ -5700,14 +5700,17 @@ void tick_node_editor(ViewportApp& app) {
 //! played in the viewport did nothing while the same document played
 //! correctly under the control host. Lives outside tick_node_editor() so
 //! the document timeline advances even when the panel is hidden.
-void tick_session(ViewportApp& app) {
+//! `paused` travels into the tick (the session gates physics + timeline on
+//! it): free-run frames pass the live pause flag, while a step-released
+//! frame passes false -- a step is an explicit run instruction, exactly as
+//! the headless host ticks, so record/playback advance under step control.
+void tick_session(ViewportApp& app, bool paused) {
   static constexpr double kTickFixedDt = 1.0 / 60.0;
   // sub_frame is 0, so playback stays step-hold and identical to every earlier
   // build. Passing a wall-clock fraction here would look smoother but would
   // make timeline playback depend on when a frame was drawn, so a replay could
   // not reproduce the original take until the fraction is in the protocol.
-  (void)app.editor.tick(
-      {app.frame_index, kTickFixedDt, 0.0, app.control_paused()});
+  (void)app.editor.tick({app.frame_index, kTickFixedDt, 0.0, paused});
 }
 
 //! Pre-pass chain when the node editor is active: the UI atlas one-time
@@ -6349,14 +6352,16 @@ void ViewportApp::run() {
 
     // PT mode deliberately keeps rendering while the SIM is paused: each
     // extra frame is one more sample of an unchanged scene, which is the
-    // whole point of "pause to converge". The simulation tick below stays
-    // gated, so no replay semantics change -- only more frames of the same
-    // image.
+    // whole point of "pause to converge". A paused PT frame still ticks
+    // the session as paused, so no replay semantics change -- only more
+    // frames of the same image.
+    bool step_released = false;
     if (control_paused() && !pt_mode) {
       if (control_steps_requested_ == 0U) {
         continue;
       }
       --control_steps_requested_;
+      step_released = true;
     }
     const auto frame_start = std::chrono::steady_clock::now();
     auto image = renderer.begin_frame();
@@ -6380,11 +6385,14 @@ void ViewportApp::run() {
     if (node_editor) {
       tick_node_editor(*this);
     }
-    // Session tick runs on EVERY frame, node editor or not: the document
-    // timeline / physics / projection must advance even when the panel is
-    // hidden. Previously this lived inside tick_node_editor(), so clip
-    // playback and recording were inert with the editor off.
-    tick_session(*this);
+    // Session tick runs on EVERY rendered frame, node editor or not: the
+    // document timeline / physics / projection must advance even when the
+    // panel is hidden. Previously this lived inside tick_node_editor(), so
+    // clip playback and recording were inert with the editor off. A
+    // step-released frame ticks as running (paused=false): the step is the
+    // run instruction, matching the headless host, so wire-driven
+    // record/playback advance under step control while paused.
+    tick_session(*this, control_paused() && !step_released);
     // Input tick: poll drivers (virtual script when present), let the
     // camera respond, and log consumed events for auditability.
     input.begin_tick();
