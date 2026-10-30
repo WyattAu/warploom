@@ -252,7 +252,14 @@ declares a slot 3.
       correct near/far the shipped scene's captured frames are IDENTICAL,
       which is the correct output, not a failure: 400 cubes spread over a
       12x6 m plane, and a conservative max-depth pyramid cannot cull an
-      object resting on the same surface its comparison tiles sample. The
+      object resting on the same surface its comparison tiles sample. That
+      A/B was re-run after the H-Z depth-rebind fix -- the earlier identical
+      frames were measured with a pyramid reduced from a stale attachment,
+      so the conclusion stood on a broken instrument. With the pyramid
+      sampling the composed scene depth, frame_30 captures with and without
+      `WARPLOOM_OCCLUSION=0` are still byte-identical (md5 28a48c3e, same
+      2,764,816-byte PPM), and the cull reports active (40x23 tiles): the
+      occlusion-sparse conclusion now rests on a valid instrument. The
       shader-level occluder-present/occludee-culled proof remains
       `test_gpu_driven_occlusion_frame.cpp`; a scene with genuine overlap
       (walls, hills, a dense wall of cubes) is what would show live savings.
