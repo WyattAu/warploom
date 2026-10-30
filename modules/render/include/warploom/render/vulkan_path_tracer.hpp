@@ -107,6 +107,12 @@ struct PathTracerCamera {
   float aspect{1.0F};
 };
 
+//! Diagnostic normal visualization. When true, create() writes 2 into
+//! Params::dims.w and the raygen encodes the first-bounce shading normal as
+//! color instead of shading: radiance = albedo * (n * 0.5 + 0.5). This pins
+//! normal orientation with no Monte Carlo tolerance involved (a sign error
+//! reads the inward color). Mode 2 is a diagnostic encoding, not a sky;
+//! it follows the mode-0 precedent (constant white kept for the probes).
 //! Analytic-sky parameters for the miss branch. Mode 0 (default) keeps the
 //! legacy constant-white sky every existing probe pins bit-exactly; mode 1
 //! evaluates the shared sky_eval.glsl model (the same definition the raster
@@ -138,6 +144,9 @@ struct PathTracerConfig {
   //! Sky for the miss branch. Default mode 0 = legacy constant white, so
   //! every existing tracer behaves exactly as before unless opted in.
   PathTracerSky sky{};
+  //! Diagnostic: encode first-bounce normals as color (dims.w = 2).
+  //! Default false, so every existing tracer behaves exactly as before.
+  bool visualize_normals{false};
 };
 
 //! Owns a complete, deterministic path-tracing setup. See the file comment

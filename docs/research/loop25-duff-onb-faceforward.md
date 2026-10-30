@@ -57,13 +57,18 @@ a naive projection — the novelty here is nil, the correction is the work.
   old comment made (cross points outward) is therefore retracted: for this
   repo's box winding the raw cross points inward, measured on top (+Y face
   reports −Y) and bottom faces.
-- Honest residual (recorded, not hidden): negating the Faceforward rule
-  (normals facing away) yields slab 0.54 / walls 0.64 — inside the 0.40 MC
-  tolerance — via through-solid transport (two 0.8 bounces out the far
-  side: 0.8² = 0.64). The committed guards catch trapping (exactly 0 via
-  `> 0.15`) and lobe collapse (exactly 0.8 via `< 0.79`) but cannot separate
-  face-toward from face-away numerically in this all-grey scene; orientation
-  rests on the normal-encoding measurement above plus the analytic anchor
-  (CPU room model uses independent outward AABB normals and agrees at
-  0.64/0.59). A two-tone scene (per-instance albedo the rgen actually
-  reads) would make the leak observable — future work, not this step.
+- Follow-up, now closed: negating the Faceforward rule (normals facing
+  away) yields slab 0.54 / walls 0.64 — inside the 0.40 MC tolerance — via
+  through-solid transport (two 0.8 bounces out the far side: 0.8² = 0.64),
+  and the sign-flip sabotage PASSED the MC agreement (confirming the
+  blindness rather than assuming it). Orientation now has its own committed
+  instrument instead of sharing the MC's blindness: `dims.w = 2`
+  (`PathTracerConfig::visualize_normals`) encodes the first-bounce shading
+  normal as color through the accumulation path, and
+  `faceforward_normals_face_outward` pins slab/wall/x-wall at
+  (0.4,0.8,0.4)/(0.4,0.4,0.8)/(0.0,0.4,0.4) within 5e-3 — wrong-side colors
+  differ by 0.4, and the negated-flip sabotage fails all three probes. The
+  single-payload `vec4` (normal + t) is why orientation goes through a vis
+  mode rather than a two-tone albedo: per-instance albedo cannot ride the
+  payload without a second location, which this driver aliases onto
+  location 0 (see the rchit comment history).

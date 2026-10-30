@@ -779,6 +779,186 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   ctx.cleanup();
 }
 
+//! Faceforward orientation is outward, pinned with no Monte Carlo tolerance.
+//! Dims.w = 2 (PathTracerConfig::visualize_normals) encodes the first-bounce
+//! shading normal as color through the accumulation path: albedo * (n * 0.5
+//! + 0.5). A sign error reads the inward color instead -- for the slab top
+//! (0.4, 0.0, 0.4) rather than (0.4, 0.8, 0.4) -- and no tolerance or
+//! reference model is involved: the expected values are exact axis colors.
+//! This is the committed form of the transient normal-as-color measurement
+//! that exposed the inward-normal defect (loop25): the MC agreement checks
+//! cannot see a face-away flip in the all-grey room (through-solid
+//! transport lands inside tolerance), so orientation gets its own
+//! instrument rather than sharing the MC's blindness.
+TEST(path_tracing_real, faceforward_normals_face_outward) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("path_tracing_real_vis", true).is_ok());
+  if (!ctx.has_ray_tracing() || !ctx.has_ray_tracing_pipeline()) {
+    ctx.cleanup();
+    GTEST_SKIP() << "ray tracing pipeline not available on this device";
+  }
+  VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+
+  const std::array<float, 3> world_up{0.0f, 1.0f, 0.0f};
+  std::array<float, 3> right{kCamFwd[1] * world_up[2] - kCamFwd[2] * world_up[1],
+                             kCamFwd[2] * world_up[0] - kCamFwd[0] * world_up[2],
+                             kCamFwd[0] * world_up[1] - kCamFwd[1] * world_up[0]};
+  {
+    const float l =
+        std::sqrt(right[0] * right[0] + right[1] * right[1] + right[2] * right[2]);
+    right = {right[0] / l, right[1] / l, right[2] / l};
+  }
+  const std::array<float, 3> up{right[1] * kCamFwd[2] - right[2] * kCamFwd[1],
+                                right[2] * kCamFwd[0] - right[0] * kCamFwd[2],
+                                right[0] * kCamFwd[1] - right[1] * kCamFwd[0]};
+  auto pixel_for = [&](const std::array<float, 3>& p) {
+    const std::array<float, 3> d = {p[0] - kCamEye[0], p[1] - kCamEye[1],
+                                    p[2] - kCamEye[2]};
+    const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    const std::array<float, 3> dn{d[0] / dl, d[1] / dl, d[2] / dl};
+    const float df = dn[0] * kCamFwd[0] + dn[1] * kCamFwd[1] + dn[2] * kCamFwd[2];
+    const float dr = dn[0] * right[0] + dn[1] * right[1] + dn[2] * right[2];
+    const float du = dn[0] * up[0] + dn[1] * up[1] + dn[2] * up[2];
+    return std::make_pair(
+        static_cast<int>((dr / df + 1.0f) * 0.5f * static_cast<float>(kImg)),
+        static_cast<int>((-du / df + 1.0f) * 0.5f * static_cast<float>(kImg)));
+  };
+  const auto [slab_px, slab_py] = pixel_for({0.0f, -5.0f, -3.0f});
+  const auto [wz_px, wz_py] = pixel_for({0.0f, -2.5f, -5.0f});
+  const auto [wx_px, wx_py] = pixel_for({5.0f, -4.0f, -4.0f});
+  for (int v : {slab_px, slab_py, wz_px, wz_py, wx_px, wx_py}) {
+    ASSERT_GE(v, 1);
+    ASSERT_LT(v, static_cast<int>(kImg) - 1);
+  }
+
+  const std::string sd = WARPLOOM_TEST_SHADER_DIR;
+  std::vector<std::vector<float>> tri_data;
+  tri_data.push_back(make_box_triangles(static_cast<float>(kRoomHx),
+                                        static_cast<float>(kRoomHy),
+                                        static_cast<float>(kRoomHx)));
+  tri_data.push_back(make_box_triangles(static_cast<float>(kRoomHx),
+                                        static_cast<float>(kRoomHy), 0.01f));
+  tri_data.push_back(make_box_triangles(static_cast<float>(kRoomHx),
+                                        static_cast<float>(kRoomHy), 0.01f));
+  tri_data.push_back(make_box_triangles(0.01f, static_cast<float>(kRoomHy),
+                                        static_cast<float>(kRoomHx)));
+  tri_data.push_back(make_box_triangles(0.01f, static_cast<float>(kRoomHy),
+                                        static_cast<float>(kRoomHx)));
+  std::vector<Allocation> geom_allocs;
+  for (auto& td : tri_data) {
+    auto r = alloc.create_buffer(
+        td.size() * sizeof(float),
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    ASSERT_TRUE(r.is_ok());
+    geom_allocs.push_back(r.value());
+    std::memcpy(r.value().mapped, td.data(), td.size() * sizeof(float));
+  }
+  auto addr_of = [&](VkBuffer b) {
+    VkBufferDeviceAddressInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    info.buffer = b;
+    return vkGetBufferDeviceAddress(ctx.device(), &info);
+  };
+  std::vector<PathTracerMesh> meshes;
+  for (auto& ga : geom_allocs) {
+    PathTracerMesh m{};
+    m.vertex_buffer_address = addr_of(ga.buffer);
+    m.triangle_count = 12U;
+    m.max_vertex = 35U;
+    meshes.push_back(m);
+  }
+  const std::array<std::array<float, 3>, 5> centers = {
+      std::array<float, 3>{0.0f, -2 * kRoomHy, 0.0f},
+      std::array<float, 3>{0.0f, -kRoomHy, -kRoomHx},
+      std::array<float, 3>{0.0f, -kRoomHy, kRoomHx},
+      std::array<float, 3>{-kRoomHx, -kRoomHy, 0.0f},
+      std::array<float, 3>{kRoomHx, -kRoomHy, 0.0f}};
+  std::vector<PathTracerInstance> instances;
+  for (std::size_t i = 0; i < centers.size(); ++i) {
+    PathTracerInstance inst = PathTracerInstance::translated(centers[i], kAlbedo);
+    inst.custom_index = static_cast<std::uint32_t>(i);
+    instances.push_back(inst);
+  }
+
+  PathTracerConfig pt_cfg{};
+  pt_cfg.shader_dir = sd;
+  pt_cfg.width = kImg;
+  pt_cfg.height = kImg;
+  pt_cfg.max_bounces = 2U;
+  pt_cfg.meshes = meshes;
+  pt_cfg.instances = instances;
+  pt_cfg.visualize_normals = true;
+  VulkanPathTracer tracer;
+  ASSERT_TRUE(tracer
+                  .create(ctx.physical_device(), ctx.device(),
+                          ctx.graphics_queue(), qf, alloc, pt_cfg)
+                  .is_ok());
+  ASSERT_TRUE(tracer.ready());
+  PathTracerCamera cam{};
+  cam.position = kCamEye;
+  cam.right = right;
+  cam.up = up;
+  cam.forward = kCamFwd;
+  tracer.set_camera(cam);
+
+  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
+      ctx.device(), qf);
+  ASSERT_TRUE(pool_r.is_ok());
+  auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      ctx.device(), pool_r.value());
+  ASSERT_TRUE(cb_r.is_ok());
+  VkCommandBufferBeginInfo bi{};
+  bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  ASSERT_EQ(vkBeginCommandBuffer(cb_r.value(), &bi), VK_SUCCESS);
+  tracer.record_round(cb_r.value(), 0U, true);
+  ASSERT_EQ(vkEndCommandBuffer(cb_r.value()), VK_SUCCESS);
+  EXPECT_TRUE(submit_and_wait(ctx.device(), ctx.graphics_queue(), cb_r.value()));
+  ASSERT_EQ(tracer.sample_count(), 1U);
+  auto img_r = tracer.read_mean();
+  ASSERT_TRUE(img_r.is_ok());
+  const std::vector<float>& img = img_r.value();
+  auto pixel = [&](int px, int py, int c) {
+    return img[(static_cast<std::size_t>(py) * kImg +
+                static_cast<std::size_t>(px)) *
+                   4U +
+               static_cast<std::size_t>(c)];
+  };
+  // albedo * (n * 0.5 + 0.5), tight: wrong-side colors differ by 0.4.
+  // Normals are room-side: the wall standing at +x faces the room in -X.
+  const std::array<std::array<float, 3>, 3> expect = {
+      std::array<float, 3>{0.4f, 0.8f, 0.4f},  // slab top, +Y
+      std::array<float, 3>{0.4f, 0.4f, 0.8f},  // wall -z, +Z
+      std::array<float, 3>{0.0f, 0.4f, 0.4f}};  // wall +x, -X
+  const int px[3] = {slab_px, wz_px, wx_px};
+  const int py[3] = {slab_py, wz_py, wx_py};
+  for (std::size_t i = 0; i < 3U; ++i) {
+    for (int c = 0; c < 3; ++c) {
+      EXPECT_NEAR(pixel(px[i], py[i], c), expect[i][static_cast<std::size_t>(c)],
+                  5e-3)
+          << "probe " << i << " channel " << c;
+    }
+  }
+
+  vkDestroyCommandPool(ctx.device(), pool_r.value(), nullptr);
+  tracer.destroy();
+  for (auto& ga : geom_allocs) alloc.destroy_allocation(ga);
+  alloc.cleanup();
+  ctx.cleanup();
+#else
+  GTEST_SKIP() << "Vulkan unavailable";
+#endif
+}
+
 //! Geometric rchit normals agree with an independent fp64 reference on a
 //! ROTATED box. The old dominant-axis normal (hit-minus-center) is exact for
 //! axis-aligned boxes, which is why every existing probe passes, but reports

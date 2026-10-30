@@ -199,7 +199,10 @@ struct TracerGpuParams {
   gpu_params->dims[2] = max_bounces_;
   // Mode 0 (legacy white) unless the config opts into the analytic sky;
   // the extra words stay zeroed, which the shader only reads in mode 1.
-  gpu_params->dims[3] = config.sky.mode;
+  // visualize_normals is a diagnostic encoding (2), not a sky, and wins
+  // over the sky mode: the vis test asserts hit probes only.
+  gpu_params->dims[3] =
+      config.visualize_normals ? 2U : config.sky.mode;
   for (int i = 0; i < 4; ++i) {
     gpu_params->sky_sun[i] = config.sky.sun_direction[static_cast<std::size_t>(i)];
     gpu_params->sky_rayleigh[i] = config.sky.rayleigh[static_cast<std::size_t>(i)];

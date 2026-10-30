@@ -128,6 +128,15 @@ void main() {
     // emitters on surfaces — the open ceiling is the only light.
     throughput *= kAlbedo;
     const vec3 n = normalize(payload.xyz);
+    // Diagnostic mode 2 (dims.w): encode the first-bounce shading normal as
+    // color through the accumulation path. This is the committed instrument
+    // that pins normal orientation: a sign error reads the inward color
+    // instead of the outward one, with no Monte Carlo tolerance involved.
+    // Precedent: mode 0 (constant white) is likewise kept for the probes.
+    if (dims.w == 2u && bounce == 0u) {
+      radiance += throughput * (n * 0.5 + 0.5);
+      break;
+    }
     origin = origin + dir * payload.w + n * kEps;
     dir = cosine_dir(n, rng);
   }
