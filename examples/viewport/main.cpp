@@ -3573,9 +3573,46 @@ bool setup_path_tracing(ViewportApp& app) {
   // isolation test path_tracing_real.viewport_cube_geometry_builds pins
   // exactly this pair of geometries). One small upload per mesh is not worth
   // that, so the "optimisation" is the thing that was removed.
+  // App-scene geometry (T2): the PT stack traces the scene the raster path
+  // draws, not a hardcoded cube pair. The mesh set mirrors the RT shadow
+  // stack's BLAS set (setup_rt_shadows): the canonical cube + ground slab,
+  // each mannequin import in bind pose, each city part pre-baked
+  // world-space, and the merged sponza landmark. Empty soups are skipped
+  // (a zero-triangle BLAS build would refuse the whole tracer) and every
+  // category records its mesh index or kPtNoMesh, so the scene walk below
+  // can only name a mesh that was actually uploaded.
+  std::vector<std::vector<float>> pt_soups;
+  pt_soups.reserve(2U + app.mannequin.meshes.size() + app.city_parts.size() + 1U);
+  pt_soups.push_back(cube_tris);
+  pt_soups.push_back(slab_tris);
+  constexpr std::size_t kPtNoMesh = static_cast<std::size_t>(-1);
+  std::vector<std::size_t> pt_mannequin_mesh(app.mannequin.meshes.size(), kPtNoMesh);
+  for (std::size_t i = 0; i < app.mannequin.meshes.size(); ++i) {
+    std::vector<float> tris = rt_import_triangles(app.mannequin.meshes[i]);
+    if (tris.empty()) continue;
+    pt_mannequin_mesh[i] = pt_soups.size();
+    pt_soups.push_back(std::move(tris));
+  }
+  std::vector<std::size_t> pt_city_mesh(app.city_parts.size(), kPtNoMesh);
+  if (app.city_scene) {
+    for (std::size_t c = 0; c < app.city_parts.size(); ++c) {
+      if (app.city_parts[c].rt_triangles.empty()) continue;
+      pt_city_mesh[c] = pt_soups.size();
+      pt_soups.push_back(app.city_parts[c].rt_triangles);
+    }
+  }
+  std::size_t pt_sponza_mesh = kPtNoMesh;
+  if (app.city_scene && app.sponza_enabled && !app.rt_sponza_triangles.empty()) {
+    pt_sponza_mesh = pt_soups.size();
+    pt_soups.push_back(app.rt_sponza_triangles);
+  }
+
   std::vector<omnicpp::render::Allocation> geometry;
   std::vector<std::uint64_t> addresses;
-  for (const std::vector<float>* tris : {&cube_tris, &slab_tris}) {
+  std::vector<const std::vector<float>*> pt_soup_ptrs;
+  pt_soup_ptrs.reserve(pt_soups.size());
+  for (const auto& soup : pt_soups) pt_soup_ptrs.push_back(&soup);
+  for (const std::vector<float>* tris : pt_soup_ptrs) {
     auto geo = app.allocator.create_buffer(
         static_cast<VkDeviceSize>(tris->size() * sizeof(float)),
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -3617,21 +3654,96 @@ bool setup_path_tracing(ViewportApp& app) {
       cfg.sky.sun_direction[2] = app.sun_direction[2] / sun_len;
     }
   }
-  omnicpp::render::PathTracerMesh cube{};
-  cube.vertex_buffer_address = addresses[0];
-  cube.triangle_count = 12U;
-  cube.max_vertex = 35U;
-  omnicpp::render::PathTracerMesh slab{};
-  slab.vertex_buffer_address = addresses[1];
-  slab.triangle_count = 12U;
-  slab.max_vertex = 35U;
-  cfg.meshes = {cube, slab};
-  cfg.instances = {
-      // pt_real.rchit reports geometric faceforward normals from position
-      // fetch (identity mesh_index: instance i places mesh i); the albedo
-      // words stay bound but unread -- the raygen shades a grey scene.
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F),
-      omnicpp::render::PathTracerInstance::translated({0.0F, -2.0F, 0.0F}, 0.75F)};
+  // One PT mesh per uploaded soup. triangle_count/max_vertex come from the
+  // soup itself, so a mannequin import (thousands of tris) and the canonical
+  // 12-tri cube share the same code with no per-category constants.
+  std::vector<omnicpp::render::PathTracerMesh> pt_meshes;
+  pt_meshes.reserve(pt_soups.size());
+  for (std::size_t m = 0; m < pt_soups.size(); ++m) {
+    omnicpp::render::PathTracerMesh mesh{};
+    mesh.vertex_buffer_address = addresses[m];
+    mesh.triangle_count = static_cast<std::uint32_t>(pt_soups[m].size() / 9U);
+    mesh.max_vertex = static_cast<std::uint32_t>(pt_soups[m].size() / 3U - 1U);
+    pt_meshes.push_back(mesh);
+  }
+  cfg.meshes = pt_meshes;
+  // Static snapshot of the live scene: PT accumulates while the camera is
+  // held, so animation would smear -- bone matrices are read once here and
+  // city actors freeze mid-stride. The matching mirrors build_rt_frame_tlas's
+  // walk over the same objects (cube/ground by mesh pointer, mannequin parts
+  // via object.model * dominant-joint bone, city/sponza identity over
+  // world-baked triangles); the two walks differ on purpose (a per-frame
+  // animated TLAS vs one static snapshot) and must not share a loop body.
+  // pt_real.rchit reports geometric faceforward normals from position fetch;
+  // the albedo words stay bound but unread -- the raygen shades grey.
+  const auto pt_model_to_rows = [](const SceneMatrix& m, float* rows) {
+    for (std::size_t r = 0; r < 3U; ++r) {
+      for (std::size_t c = 0; c < 3U; ++c) rows[r * 4U + c] = m[c * 4U + r];
+      rows[r * 4U + 3U] = m[12U + r];
+    }
+  };
+  const auto pt_push = [&](std::size_t mesh, const SceneMatrix& model, float albedo) {
+    omnicpp::render::PathTracerInstance inst{};
+    pt_model_to_rows(model, inst.transform.data());
+    inst.center = {model[12], model[13], model[14], 0.0F};
+    inst.albedo = {albedo, albedo, albedo, 0.0F};
+    inst.mesh_index = static_cast<std::uint32_t>(mesh);
+    cfg.instances.push_back(inst);
+  };
+  bool pt_sponza_pushed = false;
+  for (const auto& object : app.scene.objects) {
+    if (object.mesh == nullptr || !object.mesh->is_drawable()) continue;
+    if (object.mesh == &app.ground.mesh) {
+      pt_push(1U, object.model, 0.75F);
+    } else if (object.mesh == &app.cube.mesh) {
+      pt_push(0U, object.model, 0.55F);
+    } else {
+      bool matched = false;
+      for (std::size_t i = 0; i < app.mannequin_meshes.size(); ++i) {
+        if (pt_mannequin_mesh[i] == kPtNoMesh) continue;
+        if (object.mesh == &app.mannequin_meshes[i].mesh) {
+          SceneMatrix posed = object.model;
+          const std::size_t j =
+              (i < app.rt_part_joint.size()) ? app.rt_part_joint[i] : 0U;
+          const std::size_t slot = object.joint_base + j;
+          const auto* bones =
+              static_cast<const SceneMatrix*>(app.bone_allocation.mapped);
+          if (bones != nullptr && slot * 64U < app.bone_allocation.size) {
+            posed = multiply(object.model, bones[slot]);
+          }
+          pt_push(pt_mannequin_mesh[i], posed, 0.8F);
+          matched = true;
+          break;
+        }
+      }
+      if (!matched && app.city_scene) {
+        for (std::size_t c = 0; c < app.city_parts.size(); ++c) {
+          if (pt_city_mesh[c] == kPtNoMesh) continue;
+          if (object.mesh == &app.city_parts[c].buffers.mesh) {
+            pt_push(pt_city_mesh[c],
+                    omnicpp::render::scene_identity_matrix(), 0.65F);
+            matched = true;
+            break;
+          }
+        }
+      }
+      if (!matched && pt_sponza_mesh != kPtNoMesh && !pt_sponza_pushed) {
+        pt_sponza_pushed = true;
+        pt_push(pt_sponza_mesh,
+                omnicpp::render::scene_identity_matrix(), 0.65F);
+      }
+    }
+  }
+  if (cfg.instances.empty()) {
+    // The scene walk found nothing drawable (objects not built yet?): keep
+    // the historical cube pair so PT stays available, loudly.
+    std::fprintf(stderr,
+                 "viewport: PT: no drawable scene objects, tracing the "
+                 "fallback cube pair\n");
+    cfg.instances = {
+        omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F),
+        omnicpp::render::PathTracerInstance::translated({0.0F, -2.0F, 0.0F}, 0.75F)};
+  }
 
   // Kept so a window resize can rebuild the tracer: the config is assembled
   // here from the scene's buffer addresses, and rebuilding it means changing
@@ -5993,42 +6105,19 @@ bool ViewportApp::initialize() {
   // lighting_ready on purpose -- the background is identical in the legacy
   // A/B arm, so the legacy-vs-composed comparison still isolates lighting.
   sky_ready = setup_sky_pass(*this);
-  // R1b: path tracing from the first frame when WARPLOOM_PT=1. Also the
-  // isolation switch: building the stack here (before the frame loop) versus
-  // on a live set_render_mode is what distinguishes "the build is wrong" from
-  // "the build is fine but something about the running loop kills it".
+  // R1b: path tracing from the first frame when WARPLOOM_PT=1. The stack
+  // builds through the same request the set_render_mode path uses, on the
+  // first frame whose scene list exists: record_scene_into rebuilds
+  // scene.objects every frame, so at startup there is nothing to trace yet
+  // and an eager build would snapshot an empty list (the fallback cube
+  // pair). One build path, no duplication drift with the handler below; a
+  // build failure still surfaces as "PT stack build failed" on frame 1,
+  // distinct from a loop kill.
   if (warploom_env("WARPLOOM_PT", "OMNICPP_PT") != nullptr) {
-    if (setup_path_tracing(*this)) {
-      pt_stack_built = true;
-      pt_mode = true;
-      // Hold the current pose: the orbit camera advances with the sim clock,
-      // and tracing a different view every round averages a smear rather than
-      // converging one image.
-      pt_hold_camera = true;
-      pt_held_eye = pt_eye;
-      pt_held_target = pt_target;
-      pt_held_up = pt_up;
-      renderer.set_external_tonemap_source(pt_tracer->accum_image(),
-                                          pt_tracer->accum_view());
-      // The capture chain too, or a captured frame tonemaps its own (raster)
-      // HDR target and reports a perfectly plausible picture of a scene the
-      // viewport is not showing. It cost a real debugging session to notice:
-      // the captured mean matched the baseline capture to three decimals,
-      // which is what "identical image" looked like from the outside.
-      if (capture_chain != nullptr && capture_chain->ready()) {
-        capture_chain->set_external_source(pt_tracer->accum_image(),
-                                           pt_tracer->accum_view());
-      }
-      // CHAINED, not assigned: set_frame_pre_pass_callback below installs the
-      // shadow pre-pass and would silently replace this one -- which is
-      // exactly what happened, and why the captured frames never converged
-      // while every other signal said PT was running.
-      pt_pre_pass_index = renderer.add_frame_pre_pass_callback(record_pt_round_cb, this);
-      std::fprintf(stderr, "viewport: PT from start-up (%ux%u accum)\n",
-                   pt_extent_width, pt_extent_height);
-    } else {
-      std::fprintf(stderr, "viewport: PT unavailable at start-up\n");
-    }
+    pt_request_.store(1);
+    std::fprintf(stderr,
+                 "viewport: PT requested at start-up; stack builds on the "
+                 "first frame with a scene\n");
   }
   if (lighting_ready && rt_mode) {
     // RT shadows replace the shadow map: same composed pipeline family,
@@ -6371,8 +6460,18 @@ void ViewportApp::run() {
       const int want = pt_request_.exchange(0);
       if (want == 1) {
         if (!pt_stack_built) {
-          if (setup_path_tracing(*this)) {
+          if (scene.objects.empty()) {
+            // The object list is (re)built per frame inside record_scene_into,
+            // so the first frames have nothing to snapshot yet. Retry on a
+            // later frame rather than tracing the fallback pair: the app-scene
+            // snapshot must see the same objects the raster path draws.
+            pt_request_.store(1);
+          } else if (setup_path_tracing(*this)) {
             pt_stack_built = true;
+            std::fprintf(stderr,
+                         "viewport: PT stack built over %zu scene objects "
+                         "(%zu meshes)\n",
+                         scene.objects.size(), pt_config.meshes.size());
           } else {
             std::fprintf(stderr, "viewport: PT stack build failed; staying on "
                                  "the previous mode\n");

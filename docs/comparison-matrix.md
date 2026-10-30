@@ -120,13 +120,13 @@ Not much, and it should be said plainly rather than buried. Two things:
    active*. That decouples render-resolution from analysis-resolution, which is
    the property that makes CAD and rendering coexist at all. Warploom has
    exactly one mesh per object.
-6. **PT scene coverage is a demo, not the app's scene.** The tracer builds its
-   acceleration structure from the cubes scene's cube + ground slab. The
-   skinned, mannequin and city paths have no PT geometry path, so "path
-   tracing" is one scene, not a scene-independent engine feature. At the
-   engine level the 1:1 mesh/instance constraint is lifted (instances name
-   their mesh; shared BLAS proven bit-identical) -- what is missing is the
-   app wiring, not the engine mapping. The capture
+6. **PT scene coverage was a demo; it now traces the app's scene.** The
+   tracer used to build its acceleration structure from the cubes scene's
+   cube + ground slab. setup_path_tracing now snapshots the live scene
+   list (mannequin parts via model*bone, city/sponza world-baked; static
+   snapshot, actors frozen, skinned parts rigidly placed not vertex-deformed).
+   At the engine level the 1:1 mesh/instance constraint is lifted (instances
+   name their mesh; shared BLAS proven bit-identical). The capture
    path itself is no longer a gap: it is verified against the accumulation at
    0.9994 rank correlation with 0% unwritten pixels (the 75%-coverage bug in
    `fullscreen.vert` is fixed and pinned by a sabotage-validated test).

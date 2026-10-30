@@ -817,28 +817,13 @@ void VulkanComposeChain::build_graph_passes(
     passes.push_back(pass);
   }
 
-  // The external-source descriptor is written here, every frame, rather than
-  // only in set_external_source() and ensure().
-  //
-  // WHY: the binding is the thing that must be correct at DRAW time, and
-  // there are two other writers -- ensure() (which writes the fallback view
-  // when no source is set) and the bloom/no-bloom set selection. A write made
-  // once, at configuration time, can be undone by a later ensure() on a
-  // resized chain, and the symptom is not an error: the compose still runs,
-  // still produces a plausible image, and the source is simply ignored. The
-  // viewport's capture was measured doing exactly that -- with
-  // using_external_source() true and the captured image being the chain's own
-  // (raster) intermediate rather than the path-traced accumulation.
-  //
-  // One vkUpdateDescriptorSets per frame is not free, but it is a handful of
-  // nanoseconds next to a frame, and the alternative is a binding that is
-  // correct only if nothing else touches it.
-  if (external_image_ != VK_NULL_HANDLE && external_view_ != VK_NULL_HANDLE &&
-      compose_set_external_ != VK_NULL_HANDLE && descriptor_manager_ != nullptr) {
-    (void)descriptor_manager_->write_image(
-        compose_set_external_, 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        hdr_sampler_, external_view_, VK_IMAGE_LAYOUT_GENERAL, 0U);
-  }
+  // No per-frame descriptor write here: updating a set the previous frame's
+  // still-pending command buffer references is VUID-vkUpdateDescriptorSets-
+  // None-03047 (10 reports per PT run), and the write is redundant --
+  // set_external_source() writes at set time and ensure() rewrites the
+  // CURRENT source (not the fallback) on every rebuild, so no transition
+  // leaves a stale binding. The old comment's failure (ensure() undoing a
+  // set-time write) predates ensure()'s source-aware write above.
 
   // NOTE: no nodes/compile/execute here. The caller owns the graph: record()
   // below wraps this in a compose-only graph, while the renderer prepends a
@@ -947,6 +932,40 @@ void VulkanComposeChain::build_plan_skeleton_nodes(
   sample_external.image = skeleton_image_of(kKindExternal);
   tonemap.sampled_images.push_back(sample_external);
   passes.push_back(tonemap);
+}
+
+void VulkanComposeChain::skeleton_intervals(bool include_bloom,
+                                            KindInterval* out,
+                                            int* first_touch,
+                                            int* touch_count) {
+  for (int k = 0; k <= kKindExternal; ++k) out[k] = KindInterval{};
+  std::vector<GraphPass> skeleton;
+  build_plan_skeleton_nodes(include_bloom, skeleton);
+  int n = 0;
+  for (std::uint32_t p = 0; p < skeleton.size(); ++p) {
+    const GraphPass& node = skeleton[p];
+    for (const RenderPassAttachment& att : node.attachments) {
+      const int kind = skeleton_kind_of(att.image);
+      if (kind <= 0) continue;
+      if (!out[kind].seen) {
+        out[kind].seen = true;
+        out[kind].first = p;
+        first_touch[n++] = kind;
+      }
+      out[kind].last = p;
+    }
+    for (const GraphSampledImage& sample : node.sampled_images) {
+      const int kind = skeleton_kind_of(sample.image);
+      if (kind <= 0) continue;
+      if (!out[kind].seen) {
+        out[kind].seen = true;
+        out[kind].first = p;
+        first_touch[n++] = kind;
+      }
+      out[kind].last = p;
+    }
+  }
+  *touch_count = n;
 }
 
 bool VulkanComposeChain::derive_compose_plan(
@@ -1071,6 +1090,19 @@ bool VulkanComposeChain::derive_compose_plan(
     bloom.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     descs.push_back(bloom);
   }
+  // Reference intervals for BOTH shapes, each walked from its own skeleton.
+  // The materialization above follows the ensure-time shape, but verify must
+  // compare a recorded frame against the shape it actually has: with the
+  // bloom stage toggled off the tonemap (and the external sample) sit one
+  // index earlier, and an absolute map over the bloom-on skeleton refuses a
+  // legal frame. Both maps come from the same skeleton builder, never from
+  // restated constants.
+  int ft_off[kKindExternal + 1]{};
+  int ft_on[kKindExternal + 1]{};
+  int n_off = 0;
+  int n_on = 0;
+  skeleton_intervals(false, planned_intervals_[0], ft_off, &n_off);
+  skeleton_intervals(true, planned_intervals_[1], ft_on, &n_on);
   return true;
 }
 
@@ -1127,37 +1159,34 @@ bool VulkanComposeChain::verify_frame_nodes(
       by_kind[kind].last = p;
     }
   }
-  const auto planned_interval = [this](int kind, std::uint32_t* first,
-                                       std::uint32_t* last,
-                                       bool* history) -> bool {
-    for (std::size_t i = 0; i < planned_kinds_.size(); ++i) {
-      if (planned_kinds_[i] == kind) {
-        *first = planned_resources_[i].first_use;
-        *last = planned_resources_[i].last_use;
-        *history = planned_resources_[i].history;
-        return true;
-      }
-    }
-    return false;
-  };
+  // Shape-aware reference: the tonemap (and with it the external sample)
+  // sits at index 1 without the bloom stage and index 2 with it. Comparing
+  // a recorded frame against the WRONG shape's absolute indices refuses a
+  // legal frame -- PT with bloom off recorded external [1,1] against the
+  // bloom-on plan [2,2] and failed every frame. The reference comes from the
+  // same skeleton builder as the plan, never from constants.
+  const KindInterval* ref =
+      planned_intervals_[by_kind[kKindBloomColor].seen ? 1 : 0];
   // Every recorded kind must be planned, and its actual interval a subset
-  // of the planned one. A planned-but-unrecorded kind (bloom image with the
-  // toggle off, HDR in PT mode) is idle memory, not a violation: skipping
-  // it is sound because an untouched image cannot corrupt an alias pair.
+  // of the shape's planned one. A planned-but-unrecorded kind (bloom image
+  // with the toggle off, HDR in PT mode) is idle memory, not a violation:
+  // skipping it is sound because an untouched image cannot corrupt an alias
+  // pair.
   for (int kind = kKindHdrColor; kind <= kKindExternal; ++kind) {
     if (!by_kind[kind].seen) continue;
-    std::uint32_t planned_first = 0U, planned_last = 0U;
-    bool planned_history = false;
-    if (!planned_interval(kind, &planned_first, &planned_last,
-                          &planned_history)) {
-      return false;
-    }
-    if (by_kind[kind].first < planned_first ||
-        by_kind[kind].last > planned_last) {
+    if (!ref[kind].seen) return false;
+    if (by_kind[kind].first < ref[kind].first ||
+        by_kind[kind].last > ref[kind].last) {
       return false;
     }
     // Owned images are never history; only the caller-owned external is.
-    if (planned_history && kind != kKindExternal) return false;
+    // (History lives in the stored plan, not the shape maps.)
+    for (std::size_t i = 0; i < planned_kinds_.size(); ++i) {
+      if (planned_kinds_[i] == kind && planned_resources_[i].history &&
+          kind != kKindExternal) {
+        return false;
+      }
+    }
   }
   // Every planned alias pair still disjoint, with no history on either side.
   // Vacuous on today's frame (no disjoint same-desc pair exists: HDR spans

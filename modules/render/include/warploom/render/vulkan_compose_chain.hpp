@@ -140,12 +140,16 @@ class VulkanComposeChain final {
 
   //! R6b per-frame gate: re-derive kind lifetimes from the scene + compose
   //! nodes actually recorded and check the stored plan still covers them:
-  //! every owned image's actual interval is a subset of its planned one, and
-  //! every planned alias pair is still disjoint with no history on either
-  //! side. Returns false (fail the frame, never render wrong) when the
-  //! recorded shape outgrew the plan -- e.g. a future pass extends an
-  //! interval into its alias partner. The renderer calls this on the unified
-  //! graph before executing it.
+  //! every recorded image's actual interval is a subset of the planned one
+  //! for its SHAPE (bloom on/off move the tonemap's absolute index, so one
+  //! absolute map false-positives on the legal toggle-off shrinkage -- PT
+  //! with bloom off recorded the external at [1,1] against a planned [2,2]
+  //! and failed every frame with no validation diagnostic), and every
+  //! planned alias pair is still disjoint with no history on either side.
+  //! Returns false (fail the frame, never render wrong) when the recorded
+  //! shape outgrew the plan -- e.g. a future pass extends an interval into
+  //! its alias partner. The renderer calls this on the unified graph before
+  //! executing it.
   [[nodiscard]] bool verify_frame_nodes(
       const std::vector<GraphPass>& passes) const;
 
@@ -167,10 +171,23 @@ class VulkanComposeChain final {
   //! scene writes HDR color + depth; bloom_down (when recordable) writes
   //! bloom sampling HDR; tonemap samples HDR + bloom + external. The tonemap
   //! sampling all three is the SUPERSET of the raster shape (HDR + bloom)
-  //! and the PT shape (external): real frames only shrink these intervals,
-  //! so a plan over the skeleton covers both.
+  //! and the PT shape (external) -- but only SHAPE-relatively, not in
+  //! absolute indices: without the bloom stage the tonemap sits at index 1,
+  //! not 2, so verify keeps one interval map per bloom shape and compares
+  //! each recorded frame against the shape it actually has.
   static void build_plan_skeleton_nodes(bool include_bloom,
                                         std::vector<GraphPass>& passes);
+  //! Per-kind first/last pass indices over one skeleton shape.
+  struct KindInterval {
+    bool seen{false};
+    std::uint32_t first{0};
+    std::uint32_t last{0};
+  };
+  //! Walk one skeleton shape into per-kind intervals (+ first-touch order).
+  //! The single source for planned intervals: derive uses it for both bloom
+  //! shapes and verify reads the map matching the recorded frame.
+  static void skeleton_intervals(bool include_bloom, KindInterval* out,
+                                 int* first_touch, int* touch_count);
   [[nodiscard]] static int skeleton_kind_of(VkImage image) noexcept;
   [[nodiscard]] static VkImage skeleton_image_of(int kind) noexcept;
   [[nodiscard]] static const char* transient_kind_name(int kind) noexcept;
@@ -349,6 +366,10 @@ class VulkanComposeChain final {
   std::vector<int> planned_kinds_;
   //! Planned allocation over the skeleton (parallel to planned_resources_).
   std::vector<ResourceAllocationPlan> planned_plan_;
+  //! Reference intervals per bloom shape ([0] without, [1] with the bloom
+  //! stage), each walked from its own skeleton. verify selects by whether
+  //! the recorded frame contains a bloom write.
+  KindInterval planned_intervals_[2][kKindExternal + 1]{};
   //! Tonemap push constants for the frame being built. A MEMBER (not a
   //! build_graph_passes local) because stages point at it and execute_graph
   //! reads it during execute: a local would die at build return. Overwritten

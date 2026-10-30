@@ -700,6 +700,208 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
 }
 
 
+//! The viewport's PT arrangement through the RENDERER: headless compose ON,
+//! an external tonemap source from a live tracer, and record_commands over
+//! the unified scene+compose graph (the verify_frame_nodes gate).
+//!
+//! Why this exists: the chain-level PT proof drives tracer + chain directly
+//! and stays green while the viewport's arrangement --
+//! renderer.set_external_tonemap_source + renderer.record_commands -- refused
+//! every frame ("frame recording failed", zero validation diagnostics).
+//! Neither the golden compose test (no external source) nor the chain-level
+//! PT test (no renderer, no verify gate) covers it. Fails on the gate that
+//! refuses planned shapes with a caller-owned external; passes once the
+//! gate accepts them.
+TEST(VulkanHardware, UnifiedFrameWithExternalTonemapSourceRecords) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  constexpr std::uint32_t kSize = 256U;
+  omnicpp::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("OmniCppUnifiedPT", true).is_ok());
+  if (!context.has_ray_tracing() || !context.has_ray_tracing_pipeline()) {
+    context.cleanup();
+    GTEST_SKIP() << "ray tracing pipeline not available on this device";
+  }
+  omnicpp::render::VulkanMemoryAllocator allocator;
+  ASSERT_TRUE(
+      allocator.initialize(context.device(), context.physical_device()).is_ok());
+
+  omnicpp::render::VulkanOffscreenTarget ldr;
+  ASSERT_TRUE(ldr
+                  .create(context.device(), context.physical_device(),
+                          VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator,
+                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+                  .is_ok());
+  const VkFormat depth_format =
+      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+          context.physical_device());
+  omnicpp::render::VulkanRenderPass present_pass;
+  ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
+                                  depth_format)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_depth_resources(context.device(),
+                                          context.physical_device(),
+                                          depth_format, kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_framebuffers(context.device(), {ldr.image_view()},
+                                       kSize, kSize)
+                  .is_ok());
+
+  omnicpp::render::RendererConfig config;
+  config.enable_hiz = false;
+  config.enable_hdr_compose = true;
+  config.enable_bloom = false;
+  config.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  omnicpp::render::VulkanRenderer renderer;
+  ASSERT_TRUE(renderer
+                  .initialize_headless(context, present_pass, kSize, kSize,
+                                       config, VK_FORMAT_B8G8R8A8_UNORM)
+                  .is_ok());
+  ASSERT_TRUE(renderer.hdr_compose_active());
+  omnicpp::render::VulkanPipeline pipeline;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  ASSERT_TRUE(pipeline
+                  .load_shader_file(context.device(),
+                                     shader_dir + "/triangle.vert.spv")
+                  .is_ok());
+  ASSERT_TRUE(pipeline
+                  .load_shader_file(context.device(),
+                                     shader_dir + "/triangle.frag.spv")
+                  .is_ok());
+  ASSERT_TRUE(pipeline
+                  .create_graphics_pipeline(
+                      context.device(), renderer.hdr_render_pass(),
+                      renderer.hdr_format(), VK_NULL_HANDLE, true, true, false)
+                  .is_ok());
+  renderer.set_pipeline(pipeline.pipeline());
+
+  // One-triangle tracer: rays that miss read the sky, so the composed frame
+  // is non-clear with no scene needed.
+  const std::vector<float> tri{0.0F, 0.5F, 0.0F, -0.5F, -0.5F, 0.0F,
+                               0.5F, -0.5F, 0.0F};
+  auto geo = allocator.create_buffer(
+      static_cast<VkDeviceSize>(tri.size() * sizeof(float)),
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  omnicpp::render::Allocation geo_alloc = geo.value();
+  std::memcpy(geo_alloc.mapped, tri.data(), tri.size() * sizeof(float));
+  VkBufferDeviceAddressInfo addr{};
+  addr.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  addr.buffer = geo_alloc.buffer;
+  omnicpp::render::VulkanPathTracer tracer;
+  omnicpp::render::PathTracerConfig tcfg{};
+  tcfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  tcfg.width = kSize;
+  tcfg.height = kSize;
+  tcfg.max_bounces = 2U;
+  omnicpp::render::PathTracerMesh mesh{};
+  mesh.vertex_buffer_address =
+      vkGetBufferDeviceAddress(context.device(), &addr);
+  mesh.triangle_count = 1U;
+  mesh.max_vertex = 2U;
+  tcfg.meshes = {mesh};
+  tcfg.instances = {omnicpp::render::PathTracerInstance::translated(
+      {0.0F, 0.0F, 0.0F}, 0.8F)};
+  ASSERT_TRUE(tracer
+                  .create(context.physical_device(), context.device(),
+                          context.graphics_queue(),
+                          static_cast<std::uint32_t>(
+                              context.queue_families().graphics_family),
+                          allocator, tcfg)
+                  .is_ok());
+  ASSERT_TRUE(tracer.ready());
+  omnicpp::render::PathTracerCamera cam{};
+  cam.position = {0.0F, 0.0F, 4.0F};
+  cam.forward = {0.0F, 0.0F, -1.0F};
+  tracer.set_camera(cam);
+
+  // The viewport's wiring, headlessly: the live chain samples the tracer's
+  // accumulation instead of its own HDR intermediate.
+  renderer.set_external_tonemap_source(tracer.accum_image(),
+                                       tracer.accum_view());
+  ASSERT_TRUE(renderer.compose_uses_external_source());
+
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+      context.device(),
+      static_cast<std::uint32_t>(context.queue_families().graphics_family));
+  ASSERT_TRUE(pool.is_ok());
+  const auto submit_cb = [&](VkCommandBuffer cb) {
+    VkFence fence{};
+    VkFenceCreateInfo fi{};
+    fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    EXPECT_EQ(vkCreateFence(context.device(), &fi, nullptr, &fence),
+              VK_SUCCESS);
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1U;
+    si.pCommandBuffers = &cb;
+    EXPECT_EQ(vkQueueSubmit(context.graphics_queue(), 1, &si, fence),
+              VK_SUCCESS);
+    EXPECT_EQ(
+        vkWaitForFences(context.device(), 1, &fence, VK_TRUE, UINT64_MAX),
+        VK_SUCCESS);
+    vkDestroyFence(context.device(), fence, nullptr);
+  };
+  // One accumulation round on its own submission (the tracer's barrier
+  // orders the dispatch; the unified frame's graph orders the tonemap
+  // sample after it the same way the viewport's pre-pass does).
+  {
+    auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        context.device(), pool.value());
+    ASSERT_TRUE(cb_r.is_ok());
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    ASSERT_EQ(vkBeginCommandBuffer(cb_r.value(), &bi), VK_SUCCESS);
+    tracer.record_round(cb_r.value(), 0U, true);
+    ASSERT_EQ(vkEndCommandBuffer(cb_r.value()), VK_SUCCESS);
+    submit_cb(cb_r.value());
+  }
+  renderer.set_compose_inverse_samples(
+      1.0F / static_cast<float>(tracer.sample_count() > 0U
+                                     ? tracer.sample_count()
+                                     : 1U));
+  auto image = renderer.begin_frame();
+  ASSERT_TRUE(image.is_ok());
+  // THE assertion: the unified scene+compose frame records with a
+  // caller-owned external in the graph. Pre-fix this returned an error here
+  // (the viewport's "frame recording failed") with no validation output.
+  ASSERT_TRUE(renderer
+                  .record_commands(image.value(),
+                                   present_pass.framebuffer(0U), kSize, kSize)
+                  .is_ok())
+      << "unified frame with external tonemap source refused to record";
+  ASSERT_TRUE(renderer.submit_frame().is_ok());
+  renderer.wait_idle();
+  const auto readback = readback_swapchain_image(
+      context.physical_device(), context.device(), context.graphics_queue(),
+      static_cast<std::uint32_t>(context.queue_families().graphics_family),
+      ldr.image(), VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize);
+  EXPECT_GT(readback.non_clear_pixels, 0U)
+      << "external-source compose came back empty";
+  renderer.set_external_tonemap_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
+  renderer.set_compose_inverse_samples(1.0F);
+
+  vkDestroyCommandPool(context.device(), pool.value(), nullptr);
+  tracer.destroy();
+  allocator.destroy_allocation(geo_alloc);
+  renderer.cleanup(context.device());
+  pipeline.cleanup(context.device());
+  present_pass.cleanup(context.device());
+  ldr.cleanup();
+  allocator.cleanup();
+  context.cleanup();
+#else
+  GTEST_SKIP() << "Vulkan types or test shaders unavailable";
+#endif
+}
+
 //! R1b: path-traced pixels reach the screen through the compose chain, and the
 //! image CONVERGES as samples accumulate.
 //!

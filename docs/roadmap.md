@@ -993,6 +993,22 @@ than rendering wrong when the recorded shape outgrows the plan. Verified:
 never-aliases-history, skeleton matches derived lifetimes), 6/6 ctest,
 `lake build` clean, 4-of-10 elision holds on-device via owner count.
 
+Two post-land fixes, both exposed by the first non-cubes PT scene -- which
+is why no earlier proof caught them: every prior PT proof drove
+chain.record directly, never the renderer's unified graph with an external
+source. (1) verify compared absolute pass indices against ONE skeleton, but
+the tonemap sits at index 1 without the bloom stage and 2 with it, so
+PT-with-bloom-off (the default) recorded external [1,1] against planned
+[2,2] and failed every frame with no diagnostic. Verify now keeps one
+interval map per bloom shape from the same skeleton builder and compares
+each frame against the shape it has (sabotage: the wrong-shape map fails the
+new test). (2) build_graph_passes rewrote the external descriptor every
+frame -- VUID-03047 with frames in flight (10 reports); ensure() +
+set_external_source() already cover every transition, so the per-frame write
+is deleted. Pinned by
+`VulkanHardware.UnifiedFrameWithExternalTonemapSourceRecords` (renderer +
+tracer + external through record_commands -- the missing leg).
+
 Process note, kept because it is the third time: the first sabotage of this
 invariant **passed**, because three separate guards enforced it and removing
 one was masked by the other two. Collapsing to a single mechanism exposed that

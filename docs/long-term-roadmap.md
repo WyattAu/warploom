@@ -64,8 +64,10 @@ fingerprint stability, byte-identical replays).
   proof), true Duff ONB + Faceforward normals with a committed
   normal-visualization orientation proof, clip strip in the viewport with
   live drag + undo/redo proof, KTX2 BC1/BC3 decode in-tree.
-- **Known gaps:** PT is cubes-only (no app-scene/skinned/city path, no
-  bloom on PT); no denoiser (deliberate v1 deferral, decision recorded);
+- **Known gaps:** PT is a static snapshot (app-scene geometry landed --
+  mannequin/city/sponza traced, actors frozen mid-stride, skinned parts in
+  bind pose placed by model*bone; no live/deforming PT); no bloom on PT;
+  no denoiser (deliberate v1 deferral, decision recorded);
   no adaptive sampling; transient planner (R6a) unwired — R6b unblocked
   by Loop 13 graph-derived lifetimes but still to wire; physics has no
   rotation/joints, capsule/sleeping/velocity-update partially open;
@@ -111,9 +113,21 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
 
 ### T2. Ray tracing / path tracing (usability → live)
 
-- [ ] **App-scene PT geometry.** Wire mannequin/city/skinned paths;
-  viewport stops tracing the hardcoded pair. Shared-BLAS engine mapping
-  already landed — this is app wiring + proofs.
+- [x] **App-scene PT geometry.** DONE: setup_path_tracing snapshots the
+  live scene list (same matching as the RT shadow TLAS walk: cube/ground by
+  mesh, mannequin parts via model*dominant-joint bone, city/sponza identity
+  over world-baked triangles) instead of the hardcoded cube pair. Startup
+  builds through the control-path request on the first frame with a scene
+  (the list is per-frame; an eager build snapshots emptiness). Proven by
+  `app_scene_general_transforms_contribute` (extra mesh through a general
+  transform contributes + deterministic) and live on the RTX 2060:
+  mannequin scene 10 objects/11 meshes and city 76/60, 0 VUIDs, captures
+  with 0% unwritten converging monotonically. Honest limits: static
+  snapshot (animation smears an accumulator), skinned parts are rigid
+  placements not vertex skinning, bloom does not layer on PT. Exposed two
+  engine bugs, both fixed (see R6b note in roadmap.md): the verify gate's
+  absolute-index subset check refused PT-with-bloom-off, and the per-frame
+  external descriptor write was VUID-03047 with frames in flight.
 - [ ] **RT sub-toggles (R2) + GPU-driven skinned scenes (R3).**
 - [ ] **PT + bloom layering** (source already divided by n; design the
   combine, then pin by hash).

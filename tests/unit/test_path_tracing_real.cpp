@@ -1104,6 +1104,165 @@ TEST(path_tracing_real, shared_mesh_renders_identically) {
 #endif
 }
 
+//! An app-scene-shaped PT config -- several meshes with general (rotated +
+//! translated) instance transforms, the shape setup_path_tracing builds for
+//! mannequin/city scenes -- renders deterministically and every mesh
+//! contributes. No CPU reference: the claims are (a) a finite in-range
+//! image, (b) a byte-identical repeat, and (c) removing the third mesh
+//! changes the image, so an unwired mesh cannot hide behind a passing test.
+TEST(path_tracing_real, app_scene_general_transforms_contribute) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("path_tracing_real_appscene", true).is_ok());
+  if (!ctx.has_ray_tracing() || !ctx.has_ray_tracing_pipeline()) {
+    ctx.cleanup();
+    GTEST_SKIP() << "ray tracing pipeline not available on this device";
+  }
+  VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+  const std::array<float, 3> world_up{0.0f, 1.0f, 0.0f};
+  std::array<float, 3> right{kCamFwd[1] * world_up[2] - kCamFwd[2] * world_up[1],
+                             kCamFwd[2] * world_up[0] - kCamFwd[0] * world_up[2],
+                             kCamFwd[0] * world_up[1] - kCamFwd[1] * world_up[0]};
+  {
+    const float l =
+        std::sqrt(right[0] * right[0] + right[1] * right[1] + right[2] * right[2]);
+    right = {right[0] / l, right[1] / l, right[2] / l};
+  }
+  const std::array<float, 3> up{right[1] * kCamFwd[2] - right[2] * kCamFwd[1],
+                                right[2] * kCamFwd[0] - right[0] * kCamFwd[2],
+                                right[0] * kCamFwd[1] - right[1] * kCamFwd[0]};
+  PathTracerCamera cam{};
+  cam.position = kCamEye;
+  cam.right = right;
+  cam.up = up;
+  cam.forward = kCamFwd;
+
+  const std::vector<float> floor_tris = make_box_triangles(5.0f, 5.0f, 5.0f);
+  const std::vector<float> cube_tris = make_box_triangles(1.0f, 1.0f, 1.0f);
+  const std::array<float, 3> floor_at{0.0f, -10.0f, 0.0f};
+  const std::array<float, 3> cube_at{-1.5f, -3.5f, -4.0f};
+  auto run_scene = [&](std::vector<std::vector<float>> tris,
+                       std::vector<PathTracerInstance> insts) {
+    std::vector<Allocation> geos;
+    std::vector<PathTracerMesh> meshes;
+    for (auto& td : tris) {
+      auto r = alloc.create_buffer(
+          td.size() * sizeof(float),
+          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+      if (!r.is_ok()) return std::vector<float>{};
+      geos.push_back(r.value());
+      std::memcpy(r.value().mapped, td.data(), td.size() * sizeof(float));
+      VkBufferDeviceAddressInfo ai{};
+      ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+      ai.buffer = r.value().buffer;
+      PathTracerMesh m{};
+      m.vertex_buffer_address = vkGetBufferDeviceAddress(ctx.device(), &ai);
+      m.triangle_count = 12U;
+      m.max_vertex = 35U;
+      meshes.push_back(m);
+    }
+    PathTracerConfig cfg{};
+    cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+    cfg.width = kImg;
+    cfg.height = kImg;
+    cfg.max_bounces = 4U;
+    cfg.meshes = meshes;
+    cfg.instances = insts;
+    VulkanPathTracer tracer;
+    const bool created = tracer
+                             .create(ctx.physical_device(), ctx.device(),
+                                     ctx.graphics_queue(), qf, alloc, cfg)
+                             .is_ok();
+    std::vector<float> img;
+    if (created && tracer.ready()) {
+      tracer.set_camera(cam);
+      auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
+          ctx.device(), qf);
+      if (pool_r.is_ok()) {
+        for (std::uint32_t f = 0; f < 8U; ++f) {
+          auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+              ctx.device(), pool_r.value());
+          if (!cb_r.is_ok()) break;
+          VkCommandBufferBeginInfo bi{};
+          bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+          bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+          if (vkBeginCommandBuffer(cb_r.value(), &bi) != VK_SUCCESS) break;
+          tracer.record_round(cb_r.value(), f, f == 0U);
+          if (vkEndCommandBuffer(cb_r.value()) != VK_SUCCESS) break;
+          if (!submit_and_wait(ctx.device(), ctx.graphics_queue(),
+                               cb_r.value())) {
+            break;
+          }
+        }
+        auto img_r = tracer.read_mean();
+        if (img_r.is_ok()) img = img_r.value();
+        vkDestroyCommandPool(ctx.device(), pool_r.value(), nullptr);
+      }
+    }
+    tracer.destroy();
+    for (auto& g : geos) alloc.destroy_allocation(g);
+    return img;
+  };
+
+  // Third mesh through a general transform: Y-rotated 30 degrees and
+  // translated, the mannequin-part shape (object.model * bone), row-major
+  // 3x4 like the rotated-box probe. Explicit mesh_index, not the sentinel.
+  const double kAng = 30.0 * 3.141592653589793 / 180.0;
+  const float c = static_cast<float>(std::cos(kAng));
+  const float s = static_cast<float>(std::sin(kAng));
+  PathTracerInstance posed{};
+  posed.center = {1.5f, -2.5f, -6.0f, 0.0F};
+  posed.albedo = {0.8f, 0.8f, 0.8f, 0.0F};
+  posed.mesh_index = 1U;
+  posed.transform = {c, 0.0f, s, 1.5f,  //
+                     0.0f, 1.0f, 0.0f, -2.5f,  //
+                     -s, 0.0f, c, -6.0f};
+  const std::vector<float> img_full =
+      run_scene({floor_tris, cube_tris},
+                {PathTracerInstance::translated(floor_at, kAlbedo),
+                 PathTracerInstance::translated(cube_at, kAlbedo), posed});
+  ASSERT_FALSE(img_full.empty());
+  ASSERT_EQ(img_full.size(), static_cast<std::size_t>(kImg) * kImg * 4U);
+  for (float v : img_full) {
+    EXPECT_TRUE(std::isfinite(v)) << "non-finite accumulation mean";
+    EXPECT_GE(v, 0.0f);
+    EXPECT_LE(v, 1.0f + 1e-6f);
+  }
+  // Deterministic: an identical second run is bit-identical.
+  const std::vector<float> img_repeat =
+      run_scene({floor_tris, cube_tris},
+                {PathTracerInstance::translated(floor_at, kAlbedo),
+                 PathTracerInstance::translated(cube_at, kAlbedo), posed});
+  ASSERT_EQ(img_repeat.size(), img_full.size());
+  EXPECT_EQ(std::memcmp(img_full.data(), img_repeat.data(),
+                        img_full.size() * sizeof(float)),
+            0)
+      << "identical app-scene config must render bit-identically";
+  // The third mesh contributes: without it the image differs.
+  const std::vector<float> img_pair =
+      run_scene({floor_tris, cube_tris},
+                {PathTracerInstance::translated(floor_at, kAlbedo),
+                 PathTracerInstance::translated(cube_at, kAlbedo)});
+  ASSERT_EQ(img_pair.size(), img_full.size());
+  EXPECT_NE(std::memcmp(img_full.data(), img_pair.data(),
+                        img_full.size() * sizeof(float)),
+            0)
+      << "a third mesh that changes nothing is an unwired mesh";
+  alloc.cleanup();
+  ctx.cleanup();
+#else
+  GTEST_SKIP() << "Vulkan unavailable";
+#endif
+}
+
 //! Geometric rchit normals agree with an independent fp64 reference on a
 //! ROTATED box. The old dominant-axis normal (hit-minus-center) is exact for
 //! axis-aligned boxes, which is why every existing probe passes, but reports
