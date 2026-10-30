@@ -161,7 +161,7 @@ unimplemented.
 | Easing / curves | no |
 | Concurrent record and play tracks | no — both arms are single scalars |
 | Camera, light and render-property tracks | no |
-| Clip strip widget in the app | no — `ClipTimelineView` exists and is unit-tested, and the app has only the W1 scrub strip |
+| Clip strip widget in the app | yes — `ClipTimelineView` rebuild/sync above the W1 scrub strip; block drag commits ClipMove through the session queue, live-proven 60→84 with undo/redo |
 
 ## What closing the gaps means
 
@@ -241,8 +241,12 @@ What remains, in priority order:
    pause, wide clip, record across a mid-take edit, playback): 17/17,
    4 samples head 1.0 / tail 0.75, replay holds 0.75. Baseline A/B without
    the fix: 12/17, empty tracks, `clip_play` rejected. Plus 662/662 unit
-   tests, 6/6 ctest, viewport build warning-free. Remaining: the clip strip
-   is not in the app.
+   tests, 6/6 ctest, viewport build warning-free. The clip strip is now in
+   the app (G3-B, `WARPLOOM_NODE_EDITOR=1` build): `ClipTimelineView`
+   rebuild/sync above the W1 strip, block-grab → pointer-follow →
+   release-commits-ClipMove through the session queue; live-proven on the
+   RTX 2060 under Xvfb (clip 60→84 by xdotool drag, undo→60, redo→84),
+   0 validation diagnostics, 666/666 unit + 39/39 editor tests.
 4. Real physics (D1): broadphase, shapes, joints, deterministic by
    construction, stepped inside the shared tick.
 5. RT sub-toggles (R2: reflections/AO) and GPU-driven skinned scenes (R3);

@@ -24,12 +24,14 @@
 #include "warploom/core/control_server.hpp"
 #include "warploom/core/editor_session.hpp"
 #include "warploom/core/replay_scrubber.hpp"
+#include "warploom/editor/clip_timeline_view.hpp"
 #include "warploom/editor/graph_anim_bridge.hpp"
 #include "warploom/editor/inspector.hpp"
 #include "warploom/core/diagnostics.hpp"
 #include "warploom/core/document.hpp"
 #include "warploom/core/document_projection.hpp"
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <string_view>
@@ -494,6 +496,11 @@ struct ViewportApp {
   std::uint32_t inspector_root{warploom::ui::kInvalidWidget};
   warploom::ui::WidgetTree ui_tree;
   TimelinePanel timeline;  //!< W1: hash-verified scrub strip (bottom edge)
+  //! G3-B clip strip above the W1 scrub strip: pure projection of the
+  //! session document's clips (address-stable: reset_from move-assigns
+  //! into the session member, so the bound pointer survives doc loads).
+  std::optional<omnicpp::editor::ClipTimelineView> clip_strip;
+  std::uint32_t clip_track_parent{warploom::ui::kInvalidWidget};
   warploom::ui::PaintList ui_paint;
   std::uint32_t node_canvas{warploom::ui::kInvalidWidget};
   omnicpp::render::VulkanUiRenderer ui_renderer;
@@ -1722,6 +1729,12 @@ bool poll_events(ViewportApp& app) {
           app.node_view->link_drag_active()) {
         app.node_view->update_link_drag(app.mouse_x, app.mouse_y);
       }
+      // G3-B clip drag: the pending start follows the pointer; commit
+      // happens on release. Pointer-following only, so no gating beyond
+      // the press that started it (same posture as the card/link drags).
+      if (app.clip_strip.has_value() && app.clip_strip->drag_active()) {
+        app.clip_strip->update_clip_drag(app.mouse_x);
+      }
     } else if (type == XCB_BUTTON_PRESS) {
       const auto* button =
           reinterpret_cast<const xcb_button_press_event_t*>(event);
@@ -1744,6 +1757,18 @@ bool poll_events(ViewportApp& app) {
             app.edit_queue.push_back({std::move(cmd)});
           }
           app.node_dirty = true;
+        }
+      }
+      // G3-B: the clip strip consumes block presses first (it sits above
+      // the W1 strip; regions are disjoint). Grab → clip-move drag, commit
+      // on release through the session path like every other mutation.
+      if (app.node_editor && button->detail == 1 &&
+          app.clip_strip.has_value()) {
+        const auto hit =
+            app.clip_strip->clip_at(app.mouse_x, app.mouse_y);
+        if (hit.valid() && app.clip_strip->begin_clip_drag(hit)) {
+          free(event);
+          return true;
         }
       }
       // W1: the timeline strip consumes left presses first (it overlays the
@@ -1894,6 +1919,16 @@ bool poll_events(ViewportApp& app) {
               std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
               app.edit_queue.push_back({std::move(cmd)});
             }
+          }
+        }
+        if (app.clip_strip.has_value() && app.clip_strip->drag_active()) {
+          // Clip drag finished: commit the move as ONE undoable step
+          // through the session (the view already built the exact ClipMove
+          // payload; a no-op drag still ends here and commits nothing).
+          omnicpp::core::ControlCommand cmd;
+          if (app.clip_strip->end_clip_drag(true, cmd)) {
+            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+            app.edit_queue.push_back({std::move(cmd)});
           }
         }
         app.drag_node_id = 0U;
@@ -5574,6 +5609,18 @@ bool setup_node_editor(ViewportApp& app) {
     app.inspector_canvas = insp_canvas;
     // W1: the timeline strip (built once; synced per frame in tick).
     app.timeline.rebuild(app.ui_tree);
+    // G3-B: the clip strip above it (same absolute-panel pattern;
+    // TimelinePanel untouched). Bound to the session document here; the
+    // address survives doc loads (reset_from move-assigns into the member).
+    warploom::ui::Widget clip_parent;
+    clip_parent.kind = warploom::ui::WidgetKind::Panel;
+    clip_parent.layout = warploom::ui::LayoutMode::Absolute;
+    clip_parent.name = "clip_track_parent";
+    clip_parent.color = 0xFF14171C;
+    clip_parent.border_color = 0xFF2A2F38;
+    app.clip_track_parent = app.ui_tree.add(clip_parent, app.ui_tree.root());
+    app.clip_strip.emplace(app.session_document());
+    app.clip_strip->rebuild(app.ui_tree, app.clip_track_parent);
     app.inspector.rebuild(app.ui_tree, insp_canvas, doc,
                           app.editor.registry(), app.editor.selected_id(),
                           app.editor.bindings());
@@ -5667,6 +5714,28 @@ void tick_node_editor(ViewportApp& app) {
   app.timeline.sync(app.ui_tree, app.editor.scrubber(),
                     static_cast<float>(kWidth), static_cast<float>(kHeight),
                     app.frame_index, app.control_paused());
+  // G3-B: the clip strip above it (same frozen-extent convention as the W1
+  // sync until the UI resize freeze is addressed separately). The parent
+  // carries position + width; the strip self-sizes to its rows.
+  if (app.clip_strip.has_value() &&
+      app.clip_track_parent != warploom::ui::kInvalidWidget) {
+    const std::size_t nclips = app.session_document().clips.size();
+    const float strip_h =
+        nclips == 0U
+            ? omnicpp::editor::ClipTimelineView::kEmptyGapH + 8.0F
+            : 4.0F + static_cast<float>(nclips) *
+                         omnicpp::editor::ClipTimelineView::kRowH +
+                 8.0F;
+    const float w1_y = static_cast<float>(kHeight) - TimelinePanel::kBarH -
+                       TimelinePanel::kBottomGap;
+    auto& clip_parent = app.ui_tree.get(app.clip_track_parent);
+    clip_parent.x = TimelinePanel::kMarginX;
+    clip_parent.w =
+        static_cast<float>(kWidth) - 2.0F * TimelinePanel::kMarginX;
+    clip_parent.h = strip_h;
+    clip_parent.y = w1_y - 6.0F - strip_h;
+    app.clip_strip->sync(app.ui_tree, app.frame_index);
+  }
   // M10: graph->scene bridge — bindings write their pin values into object
   // properties every tick (insertion order, deterministic; skipped bindings
   // are non-fatal).
