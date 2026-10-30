@@ -384,6 +384,39 @@ TEST(HiZGraph, ComposeDepthReductionIsValidationClean) {
   EXPECT_EQ(context.validation_error_count(), 0U)
       << "H-Z reduction under compose must sample the composed depth";
   EXPECT_EQ(context.validation_warning_count(), 0U);
+
+  // Functional half: the pyramid must describe the DRAWN frame, not the
+  // untouched legacy attachment. The triangle covers the central tiles at
+  // depth 0.0 against a 1.0 clear, so level 0 cannot be uniform -- a stale
+  // clear-depth reduction would read 1.0 in every tile.
+  const auto& packed = renderer.hiz_packed_pyramid();
+  ASSERT_TRUE(packed.buffer.is_valid()) << "pyramid was never packed";
+  ASSERT_FALSE(packed.level_dims.empty());
+  ASSERT_FALSE(packed.level_offsets.empty());
+  std::size_t total_words = 0U;
+  for (const auto& dim : packed.level_dims) {
+    total_words += static_cast<std::size_t>(dim.first) * dim.second;
+  }
+  ASSERT_GT(total_words, 0U);
+  const auto words = readback_buffer(
+      context.physical_device(), context.device(), context.graphics_queue(),
+      static_cast<std::uint32_t>(context.queue_families().graphics_family),
+      packed.buffer.buffer, static_cast<VkDeviceSize>(total_words * 4U));
+  ASSERT_EQ(words.words.size(), total_words);
+  const std::size_t l0_count =
+      static_cast<std::size_t>(packed.level_dims[0].first) *
+      packed.level_dims[0].second;
+  ASSERT_LE(packed.level_offsets[0] + l0_count, words.words.size());
+  std::uint32_t first =
+      words.words[packed.level_offsets[0]];
+  bool varies = false;
+  for (std::size_t i = 1U; i < l0_count; ++i) {
+    if (words.words[packed.level_offsets[0] + i] != first) {
+      varies = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(varies) << "level 0 is uniform: the pyramid describes no scene";
 #else
   GTEST_SKIP() << "built without Vulkan types or shader dir";
 #endif

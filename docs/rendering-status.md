@@ -64,7 +64,7 @@ Two verification milestones worth knowing when reading the Proof column:
 | Mesh LOD selection (GPU projected-size) | yes | yes | `test_lod_integration`, `test_gpu_driven_cull` |
 | Per-object static/rigged pipeline switch in one pass | yes | yes | `test_pbr_frame_variants` |
 | Mesh simplification (decimation / LOD mesh generation) | no | no | selection exists; nothing generates lower-LOD meshes |
-| H-Z depth pyramid (built every frame) | yes | yes — `RendererConfig::enable_hiz`; contract checked on real frames by `HiZGraph.ContractHoldsOnARealFrame` (headless) and the swapchain golden test; `ComposeDepthReductionIsValidationClean` runs the viewport's compose+H-Z configuration headlessly and pins 0 diagnostics (sabotage-checked: disabling the depth rebind fails it) | tested |
+| H-Z depth pyramid (built every frame) | yes | yes — `RendererConfig::enable_hiz`; contract checked on real frames by `HiZGraph.ContractHoldsOnARealFrame` (headless) and the swapchain golden test; `ComposeDepthReductionIsValidationClean` runs the viewport's compose+H-Z configuration headlessly and pins 0 diagnostics plus a non-uniform level 0 over a drawn triangle (sabotage-checked both halves: disabling the depth rebind fails validation with the exact viewport VUID signature and leaves a uniform pyramid) | tested |
 | H-Z occlusion culling (consumer) | yes | yes — gd mode (`WARPLOOM_GPU_DRIVEN=1`, cubes scene via `WARPLOOM_NO_MANNEQUIN=1`); `WARPLOOM_OCCLUSION=0` disables at the push | `HiZGraph.PackedPyramidMatchesAbi` (packed ABI), `test_gpu_driven_occlusion_frame` (occluder-present/occludee-culled shader proof); live wiring proven by a forced-depth_min probe (74.7% of pixels change). The shipped demo scene is occlusion-sparse — identical frames on/off are correct there |
 | GPU-driven draw: mesh table, vertex pull, compute cull → indirect | yes | yes | `test_lod_integration`, `test_gpu_driven_cull`; app A/B 921,600/921,600 pixels byte-identical |
 | GPU skinning (bone SSBO) | yes | yes | `test_gpu_skinning`, `test_gpu_mannequin` |
@@ -197,7 +197,9 @@ What remains, in priority order:
    sampled a stale attachment the barriers never moved. The bindings now
    track the frame's depth source (`hiz_bound_depth_view_`, zero updates at
    steady state); a default-config viewport validation run reports 0
-   diagnostics where it reported 10, and 0 in no-HDR mode too. Honest
+   diagnostics where it reported 10, and 0 in no-HDR mode too. The packed
+   pyramid now varies across a drawn triangle where it was uniform before.
+   Honest
    remainder: the GPU-driven draw path bypasses `record_pbr_scene`, so gd
    mode still shows the clear colour.
 2. PT scene coverage. The tracer builds its AS from one cube + slab. The

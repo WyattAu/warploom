@@ -197,7 +197,11 @@ declares a slot 3.
       asan-ubsan + tsan 581/581. Regression-guarded by
       `HiZGraph.ComposeDepthReductionIsValidationClean`, which runs compose+H-Z
       headlessly over two frames (both ping-pong indices) and pins zero
-      diagnostics -- sabotage-checked by disabling the rebind, which fails it.
+      diagnostics plus a non-uniform level 0 over a drawn triangle.
+      Sabotage-checked both halves: disabling the rebind fails validation with
+      the exact viewport VUID signature (error count 10, same image in both
+      bindings) and leaves a uniform pyramid, so neither assertion can pass
+      by accident.
       (One full-suite run flagged `JobSystem.DispatchOverheadIsSubMicrosecond`,
       a sub-microsecond wall-clock assertion at load 20; it passes in isolation
       and on re-run, and the diff cannot reach job dispatch timing.)
