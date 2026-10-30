@@ -193,9 +193,14 @@ declares a slot 3.
       (`hiz_bound_depth_view_`, refreshed only on drift, zero updates at steady
       state, and view changes coincide with idle setup/resize points so no
       in-flight set is mutated). Verified: default-config viewport validation
-      run 0 diagnostics (was 10), no-HDR 0, 662/662 unit tests, 6/6 ctest.
-      The pre-fix/post-fix validation A/B is the sabotage pair: the old
-      binding fails it, the tracked binding passes.
+      run 0 diagnostics (was 10), no-HDR 0, 663/663 unit tests, 6/6 ctest,
+      asan-ubsan + tsan 581/581. Regression-guarded by
+      `HiZGraph.ComposeDepthReductionIsValidationClean`, which runs compose+H-Z
+      headlessly over two frames (both ping-pong indices) and pins zero
+      diagnostics -- sabotage-checked by disabling the rebind, which fails it.
+      (One full-suite run flagged `JobSystem.DispatchOverheadIsSubMicrosecond`,
+      a sub-microsecond wall-clock assertion at load 20; it passes in isolation
+      and on re-run, and the diff cannot reach job dispatch timing.)
 
 - [x] **B5b an occlusion consumer** — DONE (increments 1+2 below). Was: the
       pyramid is built and thrown away. There is no occlusion shader that matches the viewport's *split*

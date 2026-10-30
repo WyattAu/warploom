@@ -13,7 +13,7 @@ most important thing on this page: the renderer module's most impressive
 APIs are not used by the application.
 
 Proof runs under the Khronos validation layer. The full suite
-(662 tests, `warploom_unit_tests`) passes on an RTX 2060 with **0
+(663 tests, `warploom_unit_tests`) passes on an RTX 2060 with **0
 validation diagnostics and 0 leaked objects**; on CI's Mesa lavapipe
 software Vulkan, every ray-tracing test skips because the extensions are
 absent. asan-ubsan (581 tests, 0 diagnostics, 0 leaks) and tsan (581
@@ -64,7 +64,7 @@ Two verification milestones worth knowing when reading the Proof column:
 | Mesh LOD selection (GPU projected-size) | yes | yes | `test_lod_integration`, `test_gpu_driven_cull` |
 | Per-object static/rigged pipeline switch in one pass | yes | yes | `test_pbr_frame_variants` |
 | Mesh simplification (decimation / LOD mesh generation) | no | no | selection exists; nothing generates lower-LOD meshes |
-| H-Z depth pyramid (built every frame) | yes | yes — `RendererConfig::enable_hiz`; contract checked on real frames by `HiZGraph.ContractHoldsOnARealFrame` (headless) and the swapchain golden test; a default-config viewport validation run is 0 diagnostics (the reduction sets track the frame's depth source, compose or swapchain, instead of the init-time one) | tested |
+| H-Z depth pyramid (built every frame) | yes | yes — `RendererConfig::enable_hiz`; contract checked on real frames by `HiZGraph.ContractHoldsOnARealFrame` (headless) and the swapchain golden test; `ComposeDepthReductionIsValidationClean` runs the viewport's compose+H-Z configuration headlessly and pins 0 diagnostics (sabotage-checked: disabling the depth rebind fails it) | tested |
 | H-Z occlusion culling (consumer) | yes | yes — gd mode (`WARPLOOM_GPU_DRIVEN=1`, cubes scene via `WARPLOOM_NO_MANNEQUIN=1`); `WARPLOOM_OCCLUSION=0` disables at the push | `HiZGraph.PackedPyramidMatchesAbi` (packed ABI), `test_gpu_driven_occlusion_frame` (occluder-present/occludee-culled shader proof); live wiring proven by a forced-depth_min probe (74.7% of pixels change). The shipped demo scene is occlusion-sparse — identical frames on/off are correct there |
 | GPU-driven draw: mesh table, vertex pull, compute cull → indirect | yes | yes | `test_lod_integration`, `test_gpu_driven_cull`; app A/B 921,600/921,600 pixels byte-identical |
 | GPU skinning (bone SSBO) | yes | yes | `test_gpu_skinning`, `test_gpu_mannequin` |

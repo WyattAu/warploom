@@ -273,6 +273,122 @@ TEST(HiZGraph, ContractHoldsOnARealFrame) {
 #endif
 }
 
+//! The H-Z reduction must sample the frame's depth source under HDR compose.
+//!
+//! Why this exists: the reduction descriptor sets were written once at H-Z
+//! setup with the swapchain depth view, while the per-frame depth source
+//! under compose is the chain's scene depth -- a different image the graph
+//! correctly transitions while the dispatch sampled the stale one. Every
+//! headless H-Z test ran with compose OFF (selection == bound image), so the
+//! suite stayed green while the default viewport reported layout VUIDs on
+//! every level-0 dispatch. This test runs the viewport's configuration
+//! (compose ON + H-Z ON) headlessly and pins zero validation diagnostics --
+//! it fails on the pre-fix binding and passes on the tracked one.
+TEST(HiZGraph, ComposeDepthReductionIsValidationClean) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  constexpr std::uint32_t kSize = 256U;
+  omnicpp::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("OmniCppHiZCompose", true).is_ok());
+  omnicpp::render::VulkanMemoryAllocator allocator;
+  ASSERT_TRUE(
+      allocator.initialize(context.device(), context.physical_device()).is_ok());
+
+  omnicpp::render::VulkanOffscreenTarget ldr;
+  ASSERT_TRUE(ldr
+                  .create(context.device(), context.physical_device(),
+                          VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator,
+                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+                  .is_ok());
+  const VkFormat depth_format =
+      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+          context.physical_device());
+  ASSERT_NE(depth_format, VK_FORMAT_UNDEFINED);
+  omnicpp::render::VulkanRenderPass present_pass;
+  ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
+                                  depth_format)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_depth_resources(context.device(),
+                                          context.physical_device(),
+                                          depth_format, kSize, kSize)
+                  .is_ok());
+  if (!present_pass.depth_is_sampleable()) {
+    GTEST_SKIP() << "depth is not sampleable on this device; H-Z needs it";
+  }
+  ASSERT_TRUE(present_pass
+                  .create_framebuffers(context.device(), {ldr.image_view()},
+                                       kSize, kSize)
+                  .is_ok());
+
+  omnicpp::render::RendererConfig config;
+  config.enable_hiz = true;
+  config.enable_hdr_compose = true;
+  config.enable_bloom = false;
+  config.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  config.hiz_reduction_shader_path =
+      std::string(WARPLOOM_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
+
+  omnicpp::render::VulkanRenderer renderer;
+  const auto init =
+      renderer.initialize_headless(context, present_pass, kSize, kSize, config,
+                                   VK_FORMAT_B8G8R8A8_UNORM);
+  ASSERT_TRUE(init.is_ok()) << "headless compose+hiz init failed: "
+                            << static_cast<std::uint32_t>(init.error());
+  ASSERT_TRUE(renderer.hdr_compose_active());
+  ASSERT_TRUE(renderer.hiz_direct_enabled());
+
+  // Scene content into the HDR intermediate, so the compose depth the
+  // reduction must sample actually describes a drawn frame.
+  omnicpp::render::VulkanPipeline pipeline;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  ASSERT_TRUE(pipeline
+                  .load_shader_file(context.device(),
+                                     shader_dir + "/triangle.vert.spv")
+                  .is_ok());
+  ASSERT_TRUE(pipeline
+                  .load_shader_file(context.device(),
+                                     shader_dir + "/triangle.frag.spv")
+                  .is_ok());
+  ASSERT_TRUE(pipeline
+                  .create_graphics_pipeline(
+                      context.device(), renderer.hdr_render_pass(),
+                      renderer.hdr_format(), VK_NULL_HANDLE, true, true, false)
+                  .is_ok());
+  renderer.set_pipeline(pipeline.pipeline());
+
+  HiZCallbackState state;
+  state.renderer = &renderer;
+  renderer.set_hiz_record_callback(record_hiz_contract, &state);
+
+  // Two frames: the ping-pong pyramid alternates the destination index, so
+  // a first-frame-only check would leave half the bindings unexercised.
+  for (int frame = 0; frame < 2; ++frame) {
+    state.calls = 0U;
+    state.plans = 0U;
+    auto image = renderer.begin_frame();
+    ASSERT_TRUE(image.is_ok());
+    ASSERT_TRUE(renderer
+                    .record_commands(image.value(),
+                                     present_pass.framebuffer(0U), kSize, kSize)
+                    .is_ok());
+    ASSERT_TRUE(renderer.submit_frame().is_ok());
+    ASSERT_TRUE(renderer.present_frame().is_ok());
+    renderer.wait_idle();
+    EXPECT_EQ(state.calls, 1U) << "frame " << frame;
+    EXPECT_TRUE(state.valid) << "frame " << frame;
+  }
+  EXPECT_TRUE(state.saw_previous) << "second frame must see the previous";
+  EXPECT_EQ(context.validation_error_count(), 0U)
+      << "H-Z reduction under compose must sample the composed depth";
+  EXPECT_EQ(context.validation_warning_count(), 0U);
+#else
+  GTEST_SKIP() << "built without Vulkan types or shader dir";
+#endif
+}
+
 //! Golden hash of a COMPOSED frame through the headless renderer.
 //!
 //! Why this exists: initialize_headless + the B3b chain extraction re-plumbed
