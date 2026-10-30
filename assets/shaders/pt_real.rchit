@@ -1,5 +1,6 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_EXT_ray_tracing_position_fetch : require
 
 // pt_real.rchit — real-PT closest hit. SINGLE-payload design: this driver
 // aliases a second payload location onto location 0, so the hit returns
@@ -15,16 +16,20 @@ layout(set = 0, binding = 3, std430) readonly buffer Instances {
 layout(location = 0) rayPayloadInEXT vec4 payload;  // (nx,ny,nz,t) out
 
 void main() {
-  const uint idx = gl_InstanceCustomIndexEXT;
-  const vec3 center = scene_instances.values[idx * 2u + 0u].xyz;
-
-  const vec3 hit_pos = gl_WorldRayOriginEXT + gl_HitTEXT * gl_WorldRayDirectionEXT;
-  const vec3 d = hit_pos - center;
-  const float ax = abs(d.x), ay = abs(d.y), az = abs(d.z);
-  vec3 n;
-  if (ax >= ay && ax >= az)      n = vec3(sign(d.x), 0.0, 0.0);
-  else if (ay >= az)             n = vec3(0.0, sign(d.y), 0.0);
-  else                           n = vec3(0.0, 0.0, sign(d.z));
+  // Geometric face normal, not a dominant-axis guess. The old computation
+  // (dominant axis of hit-minus-center) is exact only for axis-aligned
+  // boxes of equal extent: a thin slab reports side normals over most of
+  // its top face, and any rotated instance shades wrong everywhere. The
+  // repo's box index orders wind outward counter-clockwise, so
+  // cross(B-A, C-A) points out of the solid for every front-facing hit;
+  // the inverse-transpose carries it to world space (exact under rotation
+  // and uniform scale, correct under non-uniform scale too).
+  const vec3 a = gl_HitTriangleVertexPositionsEXT[0];
+  const vec3 b = gl_HitTriangleVertexPositionsEXT[1];
+  const vec3 c = gl_HitTriangleVertexPositionsEXT[2];
+  const vec3 n_obj = cross(b - a, c - a);
+  const vec3 n =
+      normalize(transpose(mat3(gl_WorldToObjectEXT)) * n_obj);
 
   payload = vec4(n, gl_HitTEXT);
 }

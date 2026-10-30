@@ -13,7 +13,7 @@ most important thing on this page: the renderer module's most impressive
 APIs are not used by the application.
 
 Proof runs under the Khronos validation layer. The full suite
-(663 tests, `warploom_unit_tests`) passes on an RTX 2060 with **0
+(664 tests, `warploom_unit_tests`) passes on an RTX 2060 with **0
 validation diagnostics and 0 leaked objects**; on CI's Mesa lavapipe
 software Vulkan, every ray-tracing test skips because the extensions are
 absent. asan-ubsan (581 tests, 0 diagnostics, 0 leaks) and tsan (581
@@ -87,7 +87,7 @@ Genuinely implemented, and the strongest part of the repository.
 | RT pipeline: SBT, `vkCmdTraceRaysKHR`, device-adaptive alignment | yes | no | `test_path_tracing` vs a bit-exact CPU simulator |
 | `VulkanPathTracer` (R1a/R1b): rgba32f accumulation, BLAS/TLAS, SBT, clear-once/add-per-frame, `read_mean` | yes | yes — `set_render_mode("pt")` / `WARPLOOM_PT=1`, renders the cube + ground slab scene | compose exposure — `ensure()` adopts the caller's configured exposure on the first call and preserves the live one afterwards; preserving on the first call too silently discarded the configured value, which only a 20x exposure change producing a byte-identical frame revealed; pinned by `ComposeChainHonoursConfiguredExposure`, configured at 0.37 and 2.75 because a test using the default value passes a broken build | RT dispatch — `rt_for()` resolves entry points per call instead of caching them in a global keyed by `VkDevice` handle value; handle reuse after destruction made stale pointers callable, which surfaced as a SIGSEGV in the NVIDIA driver from `vkGetAccelerationStructureBuildSizesKHR` in ~1 full-suite run in 6 (never in isolation). BLAS build and size query now share one `fill_blas_geometry`, which had drifted to describe vertex data at address 0 | viewport resize — `set_viewport_size` (v1.11) drives the full recreate path on demand: swapchain, depth + framebuffers, `resync_for_swapchain`, capture stack (target AND chain — the chain alone is not sufficient), path tracer accumulation, UI layout; measured across five consecutive resizes with capture on: 0 device losses, 0 VUIDs, PPM headers follow the live extent, and the PT accumulation rebuilds at the new extent | `frame_allocator` — pure frame-graph lifetime planner (no Vulkan): disjoint compatible transients share, overlapping ones never do, and a history resource (H-Z pyramid, PT accumulation) is never aliased in either direction; the rule is enforced by interval arithmetic alone and validated by sabotage, because three redundant guards once made every sabotage a no-op; 200-configuration deterministic sweep; 4 of 10 allocations elided on a compose-shaped frame | `capture_arrangement` — the viewport's capture arrangement (scene pass into the chain's scene target, compose into a different framebuffer) reproduced headlessly and pinned: the scene pass does not leak into the compose output | `path_tracing_real` — CPU-mirrored `EXPECT_FLOAT_EQ` probes + byte-identical repeat through the engine object, viewport-geometry build, resize + sample count; `VulkanHardware.PathTracedFrameConvergesThroughCompose` proves the noise floor falls from 1 to 8 samples; ~~live capture showed 36.6 → 17.5 std-dev over 12 samples~~ — CORRECTED: the capture chain's `using_external_source()` is FALSE in PT mode, so that measured the chain's own intermediate, not the PT accumulation. What is verified is the LINEAR accumulation: flat in situ (0.7336 → 0.7357 over 300–1800 samples inside the running viewport) and headlessly (0.01% drift). The captured PT image is now verified: 0.9994 rank correlation with the accumulation and 0% unwritten pixels, after the `fullscreen.vert` coverage fix (it had been 0.05) |
 | Compose chain tonemap from an external source (PT accumulation, sampled in GENERAL) | yes | yes | `PathTracedFrameConvergesThroughCompose`; two sabotage directions (missing 1/n, stuck frame index) both caught |
-| Loop path tracer (N-bounce, per-pixel PCG streams, temporal accumulation) | yes | no | `test_path_tracing_real`, validated against an independent fp64 MC integrator (262k samples) |
+| Loop path tracer (N-bounce, per-pixel PCG streams, temporal accumulation) | yes | no | `test_path_tracing_real`, validated against an independent fp64 MC integrator (262k samples); `rotated_box_matches_reference` proves the geometric rchit normals on a 30-degree-rotated box (the old dominant-axis normal is exact only for axis-aligned boxes, which is why every earlier probe passed). Honest limit of the old wall probes, measured: the branchless ONB in rgen AND the fp64 reference both degenerate for z-axis normals (zero vector, normalized), so wall-probe agreement is symmetric degeneracy (GPU reads exactly albedo), not bounce correctness; the rotated-box test uses tilted geometry where neither side degenerates |
 | Ray-query shadows vs PCF, A/B | yes | yes | `test_rt_shadows`; app needs `WARPLOOM_RT_MODE=1` |
 | Ray-query reflections | yes | no | `test_rt_reflections` |
 | Animated TLAS for skinned parts | partial | partial | one rigid transform per part from its dominant joint — not vertex-level skinning in the acceleration structure |
@@ -204,7 +204,18 @@ What remains, in priority order:
    mode still shows the clear colour.
 2. PT scene coverage. The tracer builds its AS from one cube + slab. The
    skinned, mannequin and city scenes have no PT geometry path, and bloom does
-   not layer on the PT source.3. The document timeline is decoupled from the UI panel: `tick_session()`
+   not layer on the PT source. First cut landed: the rchit reports true
+   geometric face normals (position fetch + inverse-transpose) instead of
+   the dominant-axis guess, which is exact only for axis-aligned boxes --
+   the prerequisite for any rotated or scaled instance. Verified: 664/664
+   (every pre-existing bit-exact PT probe passes unchanged, as predicted
+   for axis-aligned geometry) plus `rotated_box_matches_reference`, which
+   fails on the old shader. Still open: engine instances are 1:1 with
+   meshes (no shared-geometry instancing yet), the viewport still traces
+   the hardcoded pair, and the rgen/reference branchless ONB degenerates
+   for z-axis normals on both sides (measured: wall probes read exactly
+   albedo) -- a real follow-up, recorded rather than fixed here because it
+   moves every pinned PT value.3. The document timeline is decoupled from the UI panel: `tick_session()`
    runs `editor.tick()` on every rendered frame whether or not the node
    editor is visible (previously it lived inside `tick_node_editor()`, so
    clip playback and recording were inert with the editor off). A

@@ -141,11 +141,18 @@ private:
   VkPhysicalDeviceAccelerationStructureFeaturesKHR as_features_{};
   VkPhysicalDeviceRayQueryFeaturesKHR ray_query_features_{};
   VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt_pipeline_features_{};
+  //! Position fetch (hit-triangle vertex positions in the closest-hit
+  //! shader) backs the path tracer's geometric normals. Probed and enabled
+  //! exactly like the pipeline feature: a device with an RT pipeline almost
+  //! universally has it, and pt_real.rchit requires it.
+  VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR position_fetch_features_{};
 #endif
   //! Probes RT extension + feature availability on `device` (no enabling).
   static bool device_supports_ray_tracing(VkPhysicalDevice device);
   //! Probes VK_KHR_ray_tracing_pipeline extension presence (no enabling).
   static bool device_supports_rt_pipeline_extension(VkPhysicalDevice device);
+  //! Probes VK_KHR_ray_tracing_position_fetch extension presence.
+  static bool device_supports_position_fetch_extension(VkPhysicalDevice device);
 
 #if !defined(OMNICPP_HAS_VULKAN)
   //! Opaque stand-ins keep the header compiling without Vulkan (the members

@@ -165,6 +165,49 @@ RoomHit room_hit_fp64(const double o[3], const double d[3]) {
   return best;
 }
 
+// ---- fp64 triangle soup (rotated-box reference) ----------------------------
+// Möller–Trumbore, two-sided like the opaque GPU trace. The geometric
+// normal is cross(e1, e2), the same orientation the fixed rchit reports,
+// so the reference and the shader agree on tilted faces by construction.
+struct TriSoupHit {
+  bool hit{false};
+  double t{1.0e30};
+  double n[3]{0, 0, 0};
+};
+
+bool ray_tri_fp64(const double o[3], const double d[3], const double v0[3],
+                  const double v1[3], const double v2[3], double& t_hit,
+                  double n_out[3]) {
+  const double e1[3] = {v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]};
+  const double e2[3] = {v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]};
+  const double p[3] = {d[1] * e2[2] - d[2] * e2[1],
+                       d[2] * e2[0] - d[0] * e2[2],
+                       d[0] * e2[1] - d[1] * e2[0]};
+  const double det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
+  if (std::fabs(det) < 1.0e-18) return false;
+  const double inv = 1.0 / det;
+  const double tv[3] = {o[0] - v0[0], o[1] - v0[1], o[2] - v0[2]};
+  const double u = (tv[0] * p[0] + tv[1] * p[1] + tv[2] * p[2]) * inv;
+  if (u < 0.0 || u > 1.0) return false;
+  const double q[3] = {tv[1] * e1[2] - tv[2] * e1[1],
+                       tv[2] * e1[0] - tv[0] * e1[2],
+                       tv[0] * e1[1] - tv[1] * e1[0]};
+  const double v = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) * inv;
+  if (v < 0.0 || u + v > 1.0) return false;
+  const double t = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv;
+  if (t <= 1.0e-9) return false;
+  const double n[3] = {e1[1] * e2[2] - e1[2] * e2[1],
+                       e1[2] * e2[0] - e1[0] * e2[2],
+                       e1[0] * e2[1] - e1[1] * e2[0]};
+  const double l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+  if (l <= 0.0) return false;
+  n_out[0] = n[0] / l;
+  n_out[1] = n[1] / l;
+  n_out[2] = n[2] / l;
+  t_hit = t;
+  return true;
+}
+
 // Cosine-weighted hemisphere sample around +Z rotated into n (same ONB form
 // as the shader), fp64, from an independent mt19937_64 stream.
 void cosine_dir_fp64(const double n[3], std::mt19937_64& rng, double out[3]) {
@@ -712,6 +755,360 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   for (auto& ga : geom_allocs) alloc.destroy_allocation(ga);
   alloc.cleanup();
   ctx.cleanup();
+}
+
+//! Geometric rchit normals agree with an independent fp64 reference on a
+//! ROTATED box. The old dominant-axis normal (hit-minus-center) is exact for
+//! axis-aligned boxes, which is why every existing probe passes, but reports
+//! side normals over most of a thin slab's top face and garbage for any
+//! rotated instance -- the thing roadmap item 2 needs. This test renders a
+//! 30-degree-rotated box over the floor and compares two probes against a
+//! 262144-sample fp64 MC with its own triangle intersection code. It fails
+//! on the dominant-axis shader (biased bounce hemispheres) and passes on
+//! the geometric one; the floor control probe passes on both.
+TEST(path_tracing_real, rotated_box_matches_reference) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("OmniCppPtrRotated", true).is_ok());
+  if (!ctx.has_ray_tracing() || !ctx.has_ray_tracing_pipeline()) {
+    ctx.cleanup();
+    GTEST_SKIP() << "ray tracing pipeline not available on this device";
+  }
+  VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+
+  // ---- Camera basis (fp32, matches the shaders) ---------------------------
+  const std::array<float, 3> world_up{0.0f, 1.0f, 0.0f};
+  std::array<float, 3> right{kCamFwd[1] * world_up[2] - kCamFwd[2] * world_up[1],
+                             kCamFwd[2] * world_up[0] - kCamFwd[0] * world_up[2],
+                             kCamFwd[0] * world_up[1] - kCamFwd[1] * world_up[0]};
+  {
+    const float l =
+        std::sqrt(right[0] * right[0] + right[1] * right[1] + right[2] * right[2]);
+    right = {right[0] / l, right[1] / l, right[2] / l};
+  }
+  const std::array<float, 3> up{right[1] * kCamFwd[2] - right[2] * kCamFwd[1],
+                                right[2] * kCamFwd[0] - right[0] * kCamFwd[2],
+                                right[0] * kCamFwd[1] - right[1] * kCamFwd[0]};
+
+  // ---- Rotated box: 30 degrees about Y, sitting on the floor ---------------
+  // Object space stays axis-aligned; the INSTANCE transform carries the
+  // rotation -- the path the viewport will use, exercising WorldToObject.
+  // (Baking the rotation into the vertices instead would leave the
+  // instance transform identity and test nothing new.)
+  constexpr double kAng = 30.0 * 3.141592653589793 / 180.0;
+  const double ca = std::cos(kAng), sa = std::sin(kAng);
+  constexpr float kBoxH = 1.5f;
+  constexpr std::array<float, 3> kBoxC{2.0f, -3.5f, -2.5f};
+  const std::vector<float> box_tris = make_box_triangles(kBoxH, kBoxH, kBoxH);
+  // fp64 soup for the reference: same rotation in double precision.
+  struct Tri { double v[3][3]; };
+  std::vector<Tri> soup;
+  {
+    std::vector<float> base = make_box_triangles(kBoxH, kBoxH, kBoxH);
+    for (std::size_t t = 0; t < base.size(); t += 9U) {
+      Tri tri{};
+      for (int k = 0; k < 3; ++k) {
+        const double x = base[t + k * 3U], y = base[t + k * 3U + 1U],
+                     z = base[t + k * 3U + 2U];
+        tri.v[k][0] = x * ca + z * sa + kBoxC[0];
+        tri.v[k][1] = y + kBoxC[1];
+        tri.v[k][2] = -x * sa + z * ca + kBoxC[2];
+      }
+      soup.push_back(tri);
+    }
+  }
+
+  // ---- GPU geometry: floor + 4 walls (AABB boxes) + rotated box -----------
+  const std::string sd = WARPLOOM_TEST_SHADER_DIR;
+  std::vector<std::vector<float>> tri_data;
+  tri_data.push_back(make_box_triangles(static_cast<float>(kRoomHx),
+                                        static_cast<float>(kRoomHy),
+                                        static_cast<float>(kRoomHx)));
+  tri_data.push_back(make_box_triangles(static_cast<float>(kRoomHx),
+                                        static_cast<float>(kRoomHy), 0.01f));
+  tri_data.push_back(make_box_triangles(static_cast<float>(kRoomHx),
+                                        static_cast<float>(kRoomHy), 0.01f));
+  tri_data.push_back(make_box_triangles(0.01f, static_cast<float>(kRoomHy),
+                                        static_cast<float>(kRoomHx)));
+  tri_data.push_back(make_box_triangles(0.01f, static_cast<float>(kRoomHy),
+                                        static_cast<float>(kRoomHx)));
+  tri_data.push_back(box_tris);
+  std::vector<Allocation> geom_allocs;
+  std::vector<VkBuffer> geom_buffers;
+  for (auto& td : tri_data) {
+    auto r = alloc.create_buffer(
+        td.size() * sizeof(float),
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    ASSERT_TRUE(r.is_ok());
+    geom_allocs.push_back(r.value());
+    geom_buffers.push_back(r.value().buffer);
+    std::memcpy(r.value().mapped, td.data(), td.size() * sizeof(float));
+  }
+  auto addr_of = [&](VkBuffer b) {
+    VkBufferDeviceAddressInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    info.buffer = b;
+    return vkGetBufferDeviceAddress(ctx.device(), &info);
+  };
+  std::vector<PathTracerMesh> meshes;
+  for (auto b : geom_buffers) {
+    PathTracerMesh m{};
+    m.vertex_buffer_address = addr_of(b);
+    m.triangle_count = 12U;
+    m.max_vertex = 35U;
+    meshes.push_back(m);
+  }
+  const std::array<std::array<float, 3>, 6> centers = {
+      std::array<float, 3>{0.0f, -2 * static_cast<float>(kRoomHy), 0.0f},
+      std::array<float, 3>{0.0f, -static_cast<float>(kRoomHy),
+                           -static_cast<float>(kRoomHx)},
+      std::array<float, 3>{0.0f, -static_cast<float>(kRoomHy),
+                           static_cast<float>(kRoomHx)},
+      std::array<float, 3>{-static_cast<float>(kRoomHx),
+                           -static_cast<float>(kRoomHy), 0.0f},
+      std::array<float, 3>{static_cast<float>(kRoomHx),
+                           -static_cast<float>(kRoomHy), 0.0f},
+      kBoxC};
+  std::vector<PathTracerInstance> instances;
+  for (std::size_t i = 0; i < centers.size(); ++i) {
+    PathTracerInstance inst = PathTracerInstance::translated(centers[i], kAlbedo);
+    inst.custom_index = static_cast<std::uint32_t>(i);
+    instances.push_back(inst);
+  }
+  // Instance 5 carries the Y rotation in its TLAS transform (row-major 3x4:
+  // [cos,0,sin,tx, 0,1,0,ty, -sin,0,cos,tz]).
+  {
+    const float c = static_cast<float>(ca), s = static_cast<float>(sa);
+    instances[5].transform = {c, 0.0f, s, kBoxC[0],  //
+                              0.0f, 1.0f, 0.0f, kBoxC[1],  //
+                              -s, 0.0f, c, kBoxC[2]};
+  }
+
+  PathTracerConfig pt_cfg{};
+  pt_cfg.shader_dir = sd;
+  pt_cfg.width = kImg;
+  pt_cfg.height = kImg;
+  pt_cfg.max_bounces = kBounces;
+  pt_cfg.meshes = meshes;
+  pt_cfg.instances = instances;
+  VulkanPathTracer tracer;
+  ASSERT_TRUE(tracer
+                  .create(ctx.physical_device(), ctx.device(),
+                          ctx.graphics_queue(), qf, alloc, pt_cfg)
+                  .is_ok());
+  ASSERT_TRUE(tracer.ready());
+  PathTracerCamera cam{};
+  cam.position = kCamEye;
+  cam.right = right;
+  cam.up = up;
+  cam.forward = kCamFwd;
+  tracer.set_camera(cam);
+
+  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(ctx.device(), qf);
+  ASSERT_TRUE(pool_r.is_ok());
+  VkCommandPool cmd_pool = pool_r.value();
+  auto record_round = [&](std::uint32_t frame, bool clear_first) {
+    auto r_cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), cmd_pool);
+    ASSERT_TRUE(r_cb_r.is_ok());
+    VkCommandBuffer cb = r_cb_r.value();
+    VkCommandBufferBeginInfo rbi{};
+    rbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    rbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    ASSERT_EQ(vkBeginCommandBuffer(cb, &rbi), VK_SUCCESS);
+    tracer.record_round(cb, frame, clear_first);
+    ASSERT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    EXPECT_TRUE(submit_and_wait(ctx.device(), ctx.graphics_queue(), cb));
+  };
+  for (std::uint32_t f = 0; f < kFrames; ++f) record_round(f, f == 0U);
+  EXPECT_EQ(tracer.sample_count(), kFrames);
+  auto mean = tracer.read_mean();
+  ASSERT_TRUE(mean.is_ok());
+  const std::vector<float>& img = mean.value();
+  auto pixel = [&](int px, int py, int c) {
+    return img[(static_cast<std::size_t>(py) * kImg +
+                static_cast<std::size_t>(px)) * 4U +
+               static_cast<std::size_t>(c)];
+  };
+  auto pixel_for = [&](const std::array<float, 3>& p) {
+    const std::array<float, 3> d = {p[0] - kCamEye[0], p[1] - kCamEye[1],
+                                    p[2] - kCamEye[2]};
+    const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    const float df = (d[0] * kCamFwd[0] + d[1] * kCamFwd[1] + d[2] * kCamFwd[2]) / dl;
+    const float dr = (d[0] * right[0] + d[1] * right[1] + d[2] * right[2]) / dl;
+    const float du = (d[0] * up[0] + d[1] * up[1] + d[2] * up[2]) / dl;
+    const float nx = dr / df, ny = -du / df;
+    return std::make_pair(
+        static_cast<int>((nx + 1.0f) * 0.5f * static_cast<float>(kImg)),
+        static_cast<int>((ny + 1.0f) * 0.5f * static_cast<float>(kImg)));
+  };
+
+  // Robust branchless ONB (Duff et al.), fp64 mirror of pt_real.rgen.
+  // Deliberately NOT cosine_dir_fp64: that helper degenerates for z-axis
+  // normals, which a tilted box produces.
+  auto cosine_duff = [](const double n[3], std::mt19937_64& rng, double out[3]) {
+    std::uniform_real_distribution<double> U(0.0, 1.0);
+    const double r1 = U(rng), r2 = U(rng);
+    const double phi = 6.283185307179586 * r1;
+    const double s = std::sqrt(r2);
+    const double t[3] = {s * std::cos(phi), s * std::sin(phi),
+                         std::sqrt(std::max(0.0, 1.0 - r2))};
+    const double sg = n[2] < 0.0 ? -1.0 : 1.0;
+    const double upv[3] = {0.0, 0.0, sg};
+    const double d = upv[0] * n[0] + upv[1] * n[1] + upv[2] * n[2];
+    double ax[3] = {upv[0] - n[0] * d, upv[1] - n[1] * d, upv[2] - n[2] * d};
+    double txv[3] = {ax[1] * n[2] - ax[2] * n[1], ax[2] * n[0] - ax[0] * n[2],
+                     ax[0] * n[1] - ax[1] * n[0]};
+    double tl = std::sqrt(txv[0] * txv[0] + txv[1] * txv[1] + txv[2] * txv[2]);
+    txv[0] /= tl; txv[1] /= tl; txv[2] /= tl;
+    const double tyv[3] = {n[1] * txv[2] - n[2] * txv[1],
+                           n[2] * txv[0] - n[0] * txv[2],
+                           n[0] * txv[1] - n[1] * txv[0]};
+    for (int k = 0; k < 3; ++k)
+      out[k] = txv[k] * t[0] + tyv[k] * t[1] + n[k] * t[2];
+  };
+
+  // Reference trace: room AABBs plus the rotated triangle soup. Returns
+  // hit status, surface id (1..5 room, 6 box), distance and normal.
+  struct RefHit {
+    bool found{false};
+    int id{0};
+    double t{1.0e30};
+    double n[3]{0, 0, 0};
+  };
+  auto ref_trace = [&](const double o[3], const double d[3]) {
+    RefHit best{};
+    RoomHit b = room_hit_fp64(o, d);
+    if (b.box != 0) {
+      best.found = true;
+      best.id = static_cast<int>(b.box);
+      best.t = b.t;
+      best.n[0] = b.n[0]; best.n[1] = b.n[1]; best.n[2] = b.n[2];
+    }
+    for (const auto& tri : soup) {
+      double t;
+      double n[3];
+      if (ray_tri_fp64(o, d, tri.v[0], tri.v[1], tri.v[2], t, n) && t < best.t) {
+        best.found = true;
+        best.id = 6;
+        best.t = t;
+        best.n[0] = n[0]; best.n[1] = n[1]; best.n[2] = n[2];
+      }
+    }
+    return best;
+  };
+  PtScene sc{};
+  sc.albedo = static_cast<double>(kAlbedo);
+  auto mc_ref = [&](double ndc_x, double ndc_y, const double R[3],
+                    const double Uv[3], const double F[3], std::uint64_t seed) {
+    std::mt19937_64 rng(seed);
+    std::uniform_real_distribution<double> U(-1.0 / kImg, 1.0 / kImg);
+    std::array<double, 3> acc{0.0, 0.0, 0.0};
+    constexpr int kSpp = 262144;
+    for (int s = 0; s < kSpp; ++s) {
+      const double jx = U(rng), jy = U(rng);
+      double d[3] = {(ndc_x + jx) * R[0] - (ndc_y + jy) * Uv[0] + F[0],
+                     (ndc_x + jx) * R[1] - (ndc_y + jy) * Uv[1] + F[1],
+                     (ndc_x + jx) * R[2] - (ndc_y + jy) * Uv[2] + F[2]};
+      const double dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+      d[0] /= dl; d[1] /= dl; d[2] /= dl;
+      double o[3] = {0.0, 0.0, 0.0};
+      double T = 1.0;
+      double L[3] = {0, 0, 0};
+      for (int bix = 0; bix < static_cast<int>(kBounces); ++bix) {
+        const RefHit h = ref_trace(o, d);
+        if (!h.found) { L[0] += T; L[1] += T; L[2] += T; break; }
+        T *= sc.albedo;
+        double nd[3];
+        cosine_duff(h.n, rng, nd);
+        // March: hit point plus a normal offset against self-intersection.
+        // Each line touches only its own component while d is still the
+        // incident direction, so the three updates compose exactly.
+        o[0] += d[0] * h.t + h.n[0] * 1.0e-4;
+        o[1] += d[1] * h.t + h.n[1] * 1.0e-4;
+        o[2] += d[2] * h.t + h.n[2] * 1.0e-4;
+        d[0] = nd[0]; d[1] = nd[1]; d[2] = nd[2];
+      }
+      acc[0] += L[0]; acc[1] += L[1]; acc[2] += L[2];
+    }
+    for (int c = 0; c < 3; ++c) acc[c] /= kSpp;
+    return acc;
+  };
+  const double R[3] = {right[0], right[1], right[2]};
+  const double Uv[3] = {up[0], up[1], up[2]};
+  const double F[3] = {kCamFwd[0], kCamFwd[1], kCamFwd[2]};
+  auto probe_ndc = [&](const std::array<float, 3>& target) {
+    const float dx = target[0] - kCamEye[0], dy = target[1] - kCamEye[1],
+                    dz = target[2] - kCamEye[2];
+    const float dl = std::sqrt(dx * dx + dy * dy + dz * dz);
+    const float df = (dx * kCamFwd[0] + dy * kCamFwd[1] + dz * kCamFwd[2]) / dl;
+    const float dr = (dx * right[0] + dy * right[1] + dz * right[2]) / dl;
+    const float du = (dx * up[0] + dy * up[1] + dz * up[2]) / dl;
+    return std::make_pair(static_cast<double>(dr / df),
+                          static_cast<double>(-du / df));
+  };
+  // Box probe: centre of the face pointing at the camera. The face normal
+  // is Ry(30deg) applied to -z: (-sin30, 0, -cos30); the surface point is
+  // centre + normal * half-extent.
+  const double fn[3] = {-0.5, 0.0, -0.8660254037844386};
+  const std::array<float, 3> box_target{
+      static_cast<float>(kBoxC[0] + fn[0] * kBoxH),
+      static_cast<float>(kBoxC[1]),
+      static_cast<float>(kBoxC[2] + fn[2] * kBoxH)};
+  const std::array<float, 3> floor_target{-3.0f, -5.0f, -2.0f};
+  const auto [box_px, box_py] = pixel_for(box_target);
+  const auto [fl_px, fl_py] = pixel_for(floor_target);
+  ASSERT_GE(box_px, 1); ASSERT_LT(box_px, static_cast<int>(kImg) - 1);
+  ASSERT_GE(box_py, 1); ASSERT_LT(box_py, static_cast<int>(kImg) - 1);
+  ASSERT_GE(fl_px, 1); ASSERT_LT(fl_px, static_cast<int>(kImg) - 1);
+  ASSERT_GE(fl_py, 1); ASSERT_LT(fl_py, static_cast<int>(kImg) - 1);
+  // Anti-vacuity: the reference must first-hit the intended surfaces.
+  {
+    const auto [bx, by] = probe_ndc(box_target);
+    double d[3] = {bx * R[0] - by * Uv[0] + F[0], bx * R[1] - by * Uv[1] + F[1],
+                   bx * R[2] - by * Uv[2] + F[2]};
+    const double dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    d[0] /= dl; d[1] /= dl; d[2] /= dl;
+    const double o[3] = {0.0, 0.0, 0.0};
+    EXPECT_EQ(ref_trace(o, d).id, 6) << "box probe misses the rotated box";
+    const auto [fx, fy] = probe_ndc(floor_target);
+    double fd[3] = {fx * R[0] - fy * Uv[0] + F[0], fx * R[1] - fy * Uv[1] + F[1],
+                    fx * R[2] - fy * Uv[2] + F[2]};
+    const double fl = std::sqrt(fd[0] * fd[0] + fd[1] * fd[1] + fd[2] * fd[2]);
+    fd[0] /= fl; fd[1] /= fl; fd[2] /= fl;
+    EXPECT_EQ(ref_trace(o, fd).id, 1) << "floor probe misses the floor";
+  }
+  const auto [box_nx, box_ny] = probe_ndc(box_target);
+  const auto box_ref = mc_ref(box_nx, box_ny, R, Uv, F, 0x51EDU);
+  const auto [fl_nx, fl_ny] = probe_ndc(floor_target);
+  const auto floor_ref = mc_ref(fl_nx, fl_ny, R, Uv, F, 0xF100D5EEDULL);
+  for (int c = 0; c < 3; ++c) {
+    EXPECT_NEAR(pixel(box_px, box_py, c), box_ref[static_cast<std::size_t>(c)],
+                0.40)
+        << "rotated-box probe channel " << c << " (gpu="
+        << pixel(box_px, box_py, c) << ", fp64mc="
+        << box_ref[static_cast<std::size_t>(c)] << ")";
+    EXPECT_NEAR(pixel(fl_px, fl_py, c), floor_ref[static_cast<std::size_t>(c)],
+                0.40)
+        << "floor control channel " << c;
+  }
+
+  vkDestroyCommandPool(ctx.device(), cmd_pool, nullptr);
+  tracer.destroy();
+  for (auto& ga : geom_allocs) alloc.destroy_allocation(ga);
+  alloc.cleanup();
+  ctx.cleanup();
+#else
+  GTEST_SKIP() << "built without Vulkan types or shader dir";
+#endif
 }
 
 //! R1a: the engine-owned tracer survives a resize, and its sample counter is

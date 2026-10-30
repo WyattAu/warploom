@@ -195,12 +195,15 @@ VulkanContext::~VulkanContext() { cleanup(); }
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
     rt_pipeline_features_.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    position_fetch_features_.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_POSITION_FETCH_FEATURES_KHR;
   }
   if (is_vulkan13 || is_vulkan12) {
     VkPhysicalDeviceFeatures2 features2{};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     features2.features = device_features;
-    // Chain: features2 -> 1.3 -> 1.2 -> 1.1 -> [AS -> rayQuery -> rtPipeline].
+    // Chain: features2 -> 1.3 -> 1.2 -> 1.1 -> [AS -> rayQuery -> rtPipeline
+    // -> positionFetch].
     if (is_vulkan13) {
       features2.pNext = &vulkan13_features;
       if (is_vulkan12) {
@@ -210,6 +213,7 @@ VulkanContext::~VulkanContext() { cleanup(); }
           vulkan11_features.pNext = &as_features_;
           as_features_.pNext = &ray_query_features_;
           ray_query_features_.pNext = &rt_pipeline_features_;
+          rt_pipeline_features_.pNext = &position_fetch_features_;
         }
       }
     }
@@ -245,10 +249,16 @@ VulkanContext::~VulkanContext() { cleanup(); }
         ray_query_features_.rayQuery == VK_TRUE &&
         as_properties_.maxGeometryCount > 0U;
     // Full RT pipelines (vkCmdTraceRaysKHR + SBT) additionally need the
-    // VK_KHR_ray_tracing_pipeline extension and its feature bit.
+    // VK_KHR_ray_tracing_pipeline extension and its feature bit, plus
+    // position fetch: pt_real.rchit reads hit-triangle positions for its
+    // geometric normals, so a pipeline without it cannot run the tracer.
+    // Such a device reports no pipeline and PT tests skip, exactly like a
+    // device with no RT at all.
     rt_pipeline_enabled_ =
         ray_tracing_enabled_ && rt_pipeline_features_.rayTracingPipeline == VK_TRUE &&
-        device_supports_rt_pipeline_extension(physical_device_);
+        device_supports_rt_pipeline_extension(physical_device_) &&
+        position_fetch_features_.rayTracingPositionFetch == VK_TRUE &&
+        device_supports_position_fetch_extension(physical_device_);
     if (ray_tracing_enabled_) {
       as_features_.accelerationStructure = VK_TRUE;
       ray_query_features_.rayQuery = VK_TRUE;
@@ -260,8 +270,11 @@ VulkanContext::~VulkanContext() { cleanup(); }
           VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
       if (rt_pipeline_enabled_) {
         rt_pipeline_features_.rayTracingPipeline = VK_TRUE;
+        position_fetch_features_.rayTracingPositionFetch = VK_TRUE;
         device_extensions.push_back(
             VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+        device_extensions.push_back(
+            VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME);
       }
     }
   }
@@ -308,9 +321,13 @@ VulkanContext::~VulkanContext() { cleanup(); }
   }
   // Enable the negotiated feature structs on the device.
   if (ray_tracing_enabled_) {
-    // Chain order: rt_pipeline -> ray_query -> as_features -> <rest> (built
-    // from the tail so each node's pNext points at the node below it).
+    // Chain order: position_fetch -> rt_pipeline -> ray_query -> as_features
+    // -> <rest> (built from the tail so each node's pNext points at the
+    // node below it).
     if (rt_pipeline_enabled_) {
+      position_fetch_features_.pNext = features_chain;
+      features_chain =
+          reinterpret_cast<VkBaseOutStructure*>(&position_fetch_features_);
       rt_pipeline_features_.pNext = features_chain;
       features_chain = reinterpret_cast<VkBaseOutStructure*>(&rt_pipeline_features_);
     }
@@ -671,6 +688,32 @@ bool VulkanContext::device_supports_rt_pipeline_extension(VkPhysicalDevice devic
   for (const auto& extension : available) {
     if (std::strcmp(extension.extensionName,
                     VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) == 0) {
+      return true;
+    }
+  }
+  return false;
+#else
+  (void)device;
+  return false;
+#endif
+}
+
+bool VulkanContext::device_supports_position_fetch_extension(VkPhysicalDevice device) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!device) return false;
+  std::uint32_t extension_count = 0;
+  if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count,
+                                           nullptr) != VK_SUCCESS) {
+    return false;
+  }
+  std::vector<VkExtensionProperties> available(extension_count);
+  if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count,
+                                           available.data()) != VK_SUCCESS) {
+    return false;
+  }
+  for (const auto& extension : available) {
+    if (std::strcmp(extension.extensionName,
+                    VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME) == 0) {
       return true;
     }
   }
