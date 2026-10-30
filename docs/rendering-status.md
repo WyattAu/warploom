@@ -64,7 +64,7 @@ Two verification milestones worth knowing when reading the Proof column:
 | Mesh LOD selection (GPU projected-size) | yes | yes | `test_lod_integration`, `test_gpu_driven_cull` |
 | Per-object static/rigged pipeline switch in one pass | yes | yes | `test_pbr_frame_variants` |
 | Mesh simplification (decimation / LOD mesh generation) | no | no | selection exists; nothing generates lower-LOD meshes |
-| H-Z depth pyramid (built every frame) | yes | yes — `RendererConfig::enable_hiz`; contract checked on real frames by `HiZGraph.ContractHoldsOnARealFrame` (headless) and the swapchain golden test | tested |
+| H-Z depth pyramid (built every frame) | yes | yes — `RendererConfig::enable_hiz`; contract checked on real frames by `HiZGraph.ContractHoldsOnARealFrame` (headless) and the swapchain golden test; a default-config viewport validation run is 0 diagnostics (the reduction sets track the frame's depth source, compose or swapchain, instead of the init-time one) | tested |
 | H-Z occlusion culling (consumer) | yes | yes — gd mode (`WARPLOOM_GPU_DRIVEN=1`, cubes scene via `WARPLOOM_NO_MANNEQUIN=1`); `WARPLOOM_OCCLUSION=0` disables at the push | `HiZGraph.PackedPyramidMatchesAbi` (packed ABI), `test_gpu_driven_occlusion_frame` (occluder-present/occludee-culled shader proof); live wiring proven by a forced-depth_min probe (74.7% of pixels change). The shipped demo scene is occlusion-sparse — identical frames on/off are correct there |
 | GPU-driven draw: mesh table, vertex pull, compute cull → indirect | yes | yes | `test_lod_integration`, `test_gpu_driven_cull`; app A/B 921,600/921,600 pixels byte-identical |
 | GPU skinning (bone SSBO) | yes | yes | `test_gpu_skinning`, `test_gpu_mannequin` |
@@ -189,10 +189,17 @@ What remains, in priority order:
    and the parity harness's canonical coefficients. Measured live on the
    RTX 2060: 91% blue-dominant raster frame with a bright-zenith-to-horizon
    gradient, PT sky-patch std 0.66 at 120 samples, and cross-path top-band
-   means within 4 counts ((212,227,235) vs (208,225,235)). Validation A/B
-   is identical with and without the change (20 pre-existing HiZ dispatch
-   VUIDs in both arms, 0 new). Honest remainder: the GPU-driven draw path
-   bypasses `record_pbr_scene`, so gd mode still shows the clear colour.
+   means within 4 counts ((212,227,235) vs (208,225,235)). The "20
+   pre-existing HiZ dispatch VUIDs" seen in that A/B were a real bug, not
+   background noise, and are now fixed: the H-Z reduction sets were written
+   once with the swapchain depth while the graph transitioned the compose
+   chain's scene depth (the viewport default), so every level-0 dispatch
+   sampled a stale attachment the barriers never moved. The bindings now
+   track the frame's depth source (`hiz_bound_depth_view_`, zero updates at
+   steady state); a default-config viewport validation run reports 0
+   diagnostics where it reported 10, and 0 in no-HDR mode too. Honest
+   remainder: the GPU-driven draw path bypasses `record_pbr_scene`, so gd
+   mode still shows the clear colour.
 2. PT scene coverage. The tracer builds its AS from one cube + slab. The
    skinned, mannequin and city scenes have no PT geometry path, and bloom does
    not layer on the PT source.3. The document timeline is decoupled from the UI panel: `tick_session()`

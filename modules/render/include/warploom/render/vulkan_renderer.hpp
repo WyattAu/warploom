@@ -689,6 +689,12 @@ private:
   std::unique_ptr<VulkanPipeline> hiz_reduction_pipeline_;
   VkDescriptorSetLayout hiz_reduction_layout_{VK_NULL_HANDLE};
   std::vector<VkDescriptorSet> hiz_reduction_sets_[2];
+  //! Depth view currently bound in each index's reduction sets (binding 0
+  //! every level, binding 2 at level 0). The sets are written once at H-Z
+  //! setup, but the frame's depth source varies -- the compose chain's scene
+  //! depth under HDR compose, the swapchain depth otherwise -- and either is
+  //! rebuilt on resize, so the binding is refreshed when it drifts.
+  VkImageView hiz_bound_depth_view_[2]{VK_NULL_HANDLE, VK_NULL_HANDLE};
   bool hiz_pyramid_initialized_[2]{false, false};
   bool hiz_direct_enabled_{false};
   bool hiz_enabled_{false};

@@ -1772,6 +1772,8 @@ void VulkanRenderer::cleanup_hiz_pipeline_resources() noexcept {
   hiz_reduction_layout_ = VK_NULL_HANDLE;
   hiz_reduction_sets_[0].clear();
   hiz_reduction_sets_[1].clear();
+  hiz_bound_depth_view_[0] = VK_NULL_HANDLE;
+  hiz_bound_depth_view_[1] = VK_NULL_HANDLE;
   hiz_pyramid_initialized_[0] = false;
   hiz_pyramid_initialized_[1] = false;
   hiz_direct_enabled_ = false;
@@ -1828,6 +1830,45 @@ bool VulkanRenderer::record_hiz_reduction(
   if (destination_index >= 2U ||
       hiz_reduction_sets_[destination_index].size() < record.levels) {
     return false;
+  }
+
+  // The reduction sets are written once at H-Z setup with the swapchain
+  // depth, but the frame's depth source is the compose chain's scene depth
+  // whenever HDR compose is on (the viewport default) -- a different image
+  // the graph correctly transitions while the dispatch sampled the stale
+  // one, which the validation layer reports as a layout mismatch on every
+  // level-0 dispatch. Re-point the depth bindings (binding 0 every level,
+  // binding 2 at level 0 where the preceding level IS the depth) when the
+  // frame's view differs from the bound one. Steady state performs zero
+  // updates: the source is stable per run, and view changes coincide with
+  // setup/resize points where the device is idle, so an in-flight set is
+  // never mutated mid-flight.
+  if (record.depth_view != VK_NULL_HANDLE &&
+      record.depth_view != hiz_bound_depth_view_[destination_index] &&
+      hiz_pyramids_[destination_index] != nullptr) {
+    auto& sets = hiz_reduction_sets_[destination_index];
+    const VkSampler sampler = hiz_pyramids_[destination_index]->sampler();
+    for (std::uint32_t level = 0; level < record.levels; ++level) {
+      if (!hiz_descriptor_manager_
+               ->write_image(sets[level], 0U,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, sampler,
+                             record.depth_view,
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+               .is_ok()) {
+        return false;
+      }
+      if (level == 0U) {
+        if (!hiz_descriptor_manager_
+                 ->write_image(sets[0], 2U,
+                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, sampler,
+                               record.depth_view,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+                 .is_ok()) {
+          return false;
+        }
+      }
+    }
+    hiz_bound_depth_view_[destination_index] = record.depth_view;
   }
 
   auto plan = make_hiz_graph_plan(record);

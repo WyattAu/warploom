@@ -182,6 +182,21 @@ declares a slot 3.
       the stale one. Covered by `SelectsTheDepthTheSceneWrote`, which fails if
       the fallback comes back.
 
+      That fix was half the defect. B5 moved which image the graph *transitions*
+      but not which image the dispatch *samples*: the reduction descriptor sets
+      were written once at H-Z setup with the swapchain depth view, while the
+      frame's source under compose is the chain's scene depth. Every level-0
+      dispatch in the default viewport sampled a stale attachment the barriers
+      never moved -- 10 validation errors per run that the test suite could not
+      see, because headless tests run without compose (selection == bound image
+      there). The bindings now track the frame's depth source
+      (`hiz_bound_depth_view_`, refreshed only on drift, zero updates at steady
+      state, and view changes coincide with idle setup/resize points so no
+      in-flight set is mutated). Verified: default-config viewport validation
+      run 0 diagnostics (was 10), no-HDR 0, 662/662 unit tests, 6/6 ctest.
+      The pre-fix/post-fix validation A/B is the sabotage pair: the old
+      binding fails it, the tracked binding passes.
+
 - [x] **B5b an occlusion consumer** — DONE (increments 1+2 below). Was: the
       pyramid is built and thrown away. There is no occlusion shader that matches the viewport's *split*
       cull ABI: `cull_and_draw_lod.comp` (what the app uses, via
