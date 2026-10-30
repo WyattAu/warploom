@@ -63,9 +63,16 @@ struct PathTracerMesh {
 
 //! Per-instance data, in the 2 x vec4 layout the pt_real shaders read:
 //! [center.xyz, _], [albedo.rgb, _], plus the TLAS placement.
+//! The albedo words are bound but currently unread (grey scene, loop25).
 struct PathTracerInstance {
   std::array<float, 4> center{{0.0F, 0.0F, 0.0F, 0.0F}};
   std::array<float, 4> albedo{{0.8F, 0.8F, 0.8F, 0.0F}};
+  //! Which mesh (BLAS) this instance places. 0xFFFFFFFF (the default) means
+  //! identity: instance i places mesh i, which is exactly the old 1:1
+  //! contract, so every existing config behaves bit-for-bit as before. An
+  //! explicit index shares one BLAS across instances (create() refuses a
+  //! value at or above meshes.size()).
+  std::uint32_t mesh_index{0xFFFFFFFFU};
   //! Row-major 3x4 transform (Vulkan's instance layout); see TlasInstance.
   //! Defaults to identity via identity_transform() — deliberately not an
   //! inline default, because a zero matrix is a valid-looking value that
@@ -138,8 +145,10 @@ struct PathTracerConfig {
   std::uint32_t max_bounces{4};
   //! Meshes to build BLASes for at create() time. Geometry is static per
   //! tracer instance; a moving scene re-creates rather than refitting.
+  //! One BLAS per mesh; instances select among them via mesh_index, so a
+  //! repeated prop (two cubes) costs one BLAS and two TLAS entries.
   std::vector<PathTracerMesh> meshes{};
-  //! Initial instance list (one BLAS per mesh, identity transform).
+  //! Instance list (TLAS entries): placement + mesh selection per entry.
   std::vector<PathTracerInstance> instances{};
   //! Sky for the miss branch. Default mode 0 = legacy constant white, so
   //! every existing tracer behaves exactly as before unless opted in.

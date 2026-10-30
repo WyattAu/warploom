@@ -288,18 +288,30 @@ struct TracerGpuParams {
           VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0U, 1U,
           &order, 0U, nullptr, 0U, nullptr);
     }
-    // TLAS instances: one per mesh, placed from the config.
-    std::vector<TlasInstance> instances(config.meshes.size());
-    for (std::size_t i = 0; i < config.meshes.size(); ++i) {
+    // TLAS instances: one per config instance, each selecting its mesh.
+    // mesh_index 0xFFFFFFFF is the identity mapping (instance i -> mesh i);
+    // anything else shares one BLAS across instances. An out-of-range index
+    // refuses cleanly: a TLAS entry naming no BLAS would fault the build
+    // with no validation error to explain it.
+    std::vector<TlasInstance> instances(config.instances.size());
+    for (std::size_t i = 0; i < config.instances.size(); ++i) {
+      const std::uint32_t mesh = config.instances[i].mesh_index == 0xFFFFFFFFU
+                                     ? static_cast<std::uint32_t>(i)
+                                     : config.instances[i].mesh_index;
+      if (mesh >= static_cast<std::uint32_t>(config.meshes.size())) {
+        WARPLOOM_WARN("render", "path tracer: instance %zu names mesh %u of %zu\n", i,
+                      mesh, config.meshes.size());
+        return false;
+      }
       std::memcpy(instances[i].transform, config.instances[i].transform.data(),
                   sizeof(instances[i].transform));
       instances[i].instance_custom_index = config.instances[i].custom_index;
       instances[i].mask = 0xFFU;
       instances[i].sbt_offset = 0U;
       instances[i].flags = 0U;
-      instances[i].blas_device_address = blas_list_[i].device_address;
+      instances[i].blas_device_address = blas_list_[mesh].device_address;
       if (instances[i].blas_device_address == 0U) {
-        WARPLOOM_WARN("render", "path tracer: BLAS %zu has no device address\n", i);
+        WARPLOOM_WARN("render", "path tracer: BLAS %u has no device address\n", mesh);
         return false;
       }
     }

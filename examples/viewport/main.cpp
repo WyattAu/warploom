@@ -3592,8 +3592,9 @@ bool setup_path_tracing(ViewportApp& app) {
   slab.max_vertex = 35U;
   cfg.meshes = {cube, slab};
   cfg.instances = {
-      // pt_real.rchit reads the instance's centre for its dominant-axis
-      // normal and its albedo for the return radiance.
+      // pt_real.rchit reports geometric faceforward normals from position
+      // fetch (identity mesh_index: instance i places mesh i); the albedo
+      // words stay bound but unread -- the raygen shades a grey scene.
       omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F),
       omnicpp::render::PathTracerInstance::translated({0.0F, -2.0F, 0.0F}, 0.75F)};
 

@@ -224,9 +224,12 @@ What remains, in priority order:
    both sabotages fail), plus a committed normal-visualization mode
    (dims.w = 2) with `faceforward_normals_face_outward` pinning orientation
    with no MC tolerance — the negated-flip sabotage fails all three probes
-   (see loop25). Still open: engine instances are 1:1 with meshes (no
-   shared-geometry instancing yet) and the viewport still traces the
-   hardcoded pair.3. The document timeline is decoupled from the UI panel: `tick_session()`
+   (see loop25). Engine 1:1 lifted: instances name their mesh via
+   mesh_index (0xFFFFFFFF = identity, bit-for-bit backward compatible),
+   proven by `shared_mesh_renders_identically` (shared BLAS bit-identical
+   to duplicate BLASes; wrong mapping and out-of-range index both fail).
+   Still open: the viewport still traces the hardcoded pair (app-scene
+   geometry has no PT path yet).3. The document timeline is decoupled from the UI panel: `tick_session()`
    runs `editor.tick()` on every rendered frame whether or not the node
    editor is visible (previously it lived inside `tick_node_editor()`, so
    clip playback and recording were inert with the editor off). A
