@@ -1515,12 +1515,13 @@ session directly; the drift was only visible on the viewport host. All eight
 kinds are now delegated to the embedded `EditorSession`, with the structural
 ones (add/remove/move) flagging a node-view rebuild.
 
-One finding this leaves open rather than papered over: the viewport calls
-`editor.tick()` ONLY inside `tick_node_editor()`, so with the node editor off
-the session's animation frame never advances -- clip playback and recording
-are inert on the visual host. That is an architectural coupling (a document
-timeline tied to a UI panel's visibility), not a wire bug, and it needs its
-own step.
+One finding this left open is now fixed rather than papered over: the viewport
+called `editor.tick()` ONLY inside `tick_node_editor()`, so with the node editor
+off the session's animation frame never advanced. The session tick now lives in
+`tick_session()`, called on every frame whether or not the panel is visible;
+`tick_node_editor()` keeps only the UI work (graph evaluate, widget sync,
+layout, paint). Verified: 662/662 unit tests, 6/6 ctest, viewport build
+warning-free.
 
 The second question above -- "why does the capture show the PT sky AND the
 raster ground?" -- dissolved into the first. There was no second writer and no

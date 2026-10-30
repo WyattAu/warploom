@@ -5669,17 +5669,6 @@ void tick_node_editor(ViewportApp& app) {
   // M10: graph->scene bridge — bindings write their pin values into object
   // properties every tick (insertion order, deterministic; skipped bindings
   // are non-fatal).
-  // C2: one tick, same call the headless host makes. This used to call
-  // sync_graph only, so the viewport never ticked its timeline -- a clip
-  // played in the viewport did nothing while the same document played
-  // correctly under the control host.
-  static constexpr double kTickFixedDt = 1.0 / 60.0;
-  // sub_frame is 0, so playback stays step-hold and identical to every earlier
-  // build. Passing a wall-clock fraction here would look smoother but would
-  // make timeline playback depend on when a frame was drawn, so a replay could
-  // not reproduce the original take until the fraction is in the protocol.
-  (void)app.editor.tick(
-      {app.frame_index, kTickFixedDt, 0.0, app.control_paused()});
   app.node_view->sync_widgets();
   warploom::ui::compute_layout(app.ui_tree, static_cast<float>(kWidth),
                               static_cast<float>(kHeight));
@@ -5704,6 +5693,21 @@ void tick_node_editor(ViewportApp& app) {
     app.node_view->append_binding_wires(app.ui_paint);
     app.node_view->append_param_editor(app.ui_paint);
   }
+}
+
+//! Session tick, same call the headless host makes. C2 used to call
+//! sync_graph only, so the viewport never ticked its timeline -- a clip
+//! played in the viewport did nothing while the same document played
+//! correctly under the control host. Lives outside tick_node_editor() so
+//! the document timeline advances even when the panel is hidden.
+void tick_session(ViewportApp& app) {
+  static constexpr double kTickFixedDt = 1.0 / 60.0;
+  // sub_frame is 0, so playback stays step-hold and identical to every earlier
+  // build. Passing a wall-clock fraction here would look smoother but would
+  // make timeline playback depend on when a frame was drawn, so a replay could
+  // not reproduce the original take until the fraction is in the protocol.
+  (void)app.editor.tick(
+      {app.frame_index, kTickFixedDt, 0.0, app.control_paused()});
 }
 
 //! Pre-pass chain when the node editor is active: the UI atlas one-time
@@ -6376,6 +6380,11 @@ void ViewportApp::run() {
     if (node_editor) {
       tick_node_editor(*this);
     }
+    // Session tick runs on EVERY frame, node editor or not: the document
+    // timeline / physics / projection must advance even when the panel is
+    // hidden. Previously this lived inside tick_node_editor(), so clip
+    // playback and recording were inert with the editor off.
+    tick_session(*this);
     // Input tick: poll drivers (virtual script when present), let the
     // camera respond, and log consumed events for auditability.
     input.begin_tick();

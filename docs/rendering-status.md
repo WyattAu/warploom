@@ -196,9 +196,12 @@ What remains, in priority order:
 2. PT scene coverage. The tracer builds its AS from one cube + slab. The
    skinned, mannequin and city scenes have no PT geometry path, and bloom does
    not layer on the PT source.
-3. The document timeline is still coupled to a UI panel: `editor.tick()` runs
-   only inside `tick_node_editor()`, so clip playback and recording are inert
-   with the node editor off, and the clip strip is not in the app.
+3. The document timeline is decoupled from the UI panel: `tick_session()`
+   runs `editor.tick()` on every frame whether or not the node editor is
+   visible (previously it lived inside `tick_node_editor()`, so clip playback
+   and recording were inert with the editor off). Verified: 662/662 unit
+   tests, 6/6 ctest, viewport build warning-free. Remaining: the clip strip
+   is not in the app.
 4. Real physics (D1): broadphase, shapes, joints, deterministic by
    construction, stepped inside the shared tick.
 5. RT sub-toggles (R2: reflections/AO) and GPU-driven skinned scenes (R3);
