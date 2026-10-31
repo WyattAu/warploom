@@ -6,8 +6,8 @@ recovery path). A clip's track stores **property samples**; recording a
 projection of (document clips, scrubber checkpoints); that is why G3 was
 Frames, not seconds; the engine's clock is deterministic ticks; the
 before the first sample); linear interpolation is a documented v1.1
-| `ClipRecordStop` | `clip_record_stop` | - | yes |
-| `ClipStop` | `clip_stop` | - | yes |
+| `ClipRecordStop` | `clip_record_stop` |; | yes |
+| `ClipStop` | `clip_stop` |; | yes |
 | `ClipsInfo` | `clips_info` |; (query → JSON array) | no (query) |
 they enter the table; the protocol invariant is enforced, not remembered.
 - **`tick_timeline(frame)`**; new host-ticked hook, called once per sim
