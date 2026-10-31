@@ -8,9 +8,9 @@
 | Shadow map: depth pre-pass, PCF, bias | yes | yes; via `record_shadow_pre_pass`, the hand-rolled copy deleted | `test_shadow_mapping`, `test_rt_shadows`; app A/B: identical texel occupancy, uniform bias shift |
 | H-Z depth pyramid (built every frame) | yes | yes; `RendererConfig::enable_hiz`; contract checked on real frames by `HiZGraph.ContractHoldsOnARealFrame` (headless) and the swapchain golden test | tested |
 | H-Z occlusion culling (consumer) | yes | yes; gd mode (`WARPLOOM_GPU_DRIVEN=1`, cubes scene via `WARPLOOM_NO_MANNEQUIN=1`); `WARPLOOM_OCCLUSION=0` disables at the push | `HiZGraph.PackedPyramidMatchesAbi` (packed ABI), `test_gpu_driven_occlusion_frame` (occluder-present/occludee-culled shader proof); live wiring proven by a forced-depth_min probe (74.7% of pixels change). The shipped demo scene is occlusion-sparse; identical frames on/off are correct there |
-| SSAO, SSR, TAA, denoiser, volumetrics | no | no |; |
+| SSAO, SSR, TAA, denoiser, volumetrics | no | no | - |
 | Animated TLAS for skinned parts | partial | partial | one rigid transform per part from its dominant joint; not vertex-level skinning in the acceleration structure |
-| Live socket proof harness  + `e1` (render mode/exposure/bloom wire contract)|; |; | `tools/live_proof.py all` → **64/64 assertions** |
+| Live socket proof harness  + `e1` (render mode/exposure/bloom wire contract)| - | - | `tools/live_proof.py all` → **64/64 assertions** |
 never calls it, and the protocol has no physics commands; so replay
 | Broadphase | no; an O(n²) double loop every step |
 | ECS integration | no; `physics_world.hpp` documents an ECS bridge that does not exist; `test_physics_ecs_bridge.cpp` tests a helper that exists only in that test file |

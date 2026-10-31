@@ -3,7 +3,7 @@ Names stay `omnicpp::render` this phase; S3 is an **include-path and
 | job_system.hpp | vulkan_parallel_recorder header (S2-B: real include replaced the fwd-decl; a real member declaration hides directive-injected types) | (already in core) |
 `modules/core/include/warploom/core/*` post-S2; **no core change
 (never `engine/core/*` forwarders; S4 banked lesson).
-| engine glue TUs (main.cpp, asset) |; | none (link-time only) |
+| engine glue TUs (main.cpp, asset) | - | none (link-time only) |
 `src/engine/asset/*` (6 TUs) stays; asset is render-adjacent but
    `// ====` doc dividers; S2-B lesson; line count must never shrink).
    (CMake resolves plain names at call time; ORDER MATTERS; editor/core
