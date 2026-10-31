@@ -47,12 +47,12 @@ assessment, fit/cost, and what was adopted vs deliberately not.
 - [loop3-joints-broadphase.md](loop3-joints-broadphase.md); XPBD joints
   (Müller tutorial 25), Morton BVH / SAP / spatial-hash comparison. Distance
   joint adopted-after-rotation; Morton BVH recorded with a numeric trigger.
-- [loop4-6-transient-determinism-pt.md](loop4-6-transient-determinism-pt.md) : transient allocation from the graph, the per-step determinism validator
+- [loop4-6-transient-determinism-pt.md](loop4-6-transient-determinism-pt.md): transient allocation from the graph, the per-step determinism validator
   (Jolt's record-rewind-replay check), PT accumulation as a product feature.
   The cross-loop conclusion: pre-allocation beats create-when-enabled, and
   the determinism contract is a FILTER that picks techniques whose state is
   derivable from the snapshot.
-- [loop7-10-scripting-ecs-determinism-pt.md](loop7-10-scripting-ecs-determinism-pt.md) : dataflow vs exec-wire scripting (our pull model is the replay-correct
+- [loop7-10-scripting-ecs-determinism-pt.md](loop7-10-scripting-ecs-determinism-pt.md): dataflow vs exec-wire scripting (our pull model is the replay-correct
   one), ECS scheduling (sparse-set fits; archetype only on measured need),
   -ffp-contract=off (ADOPTED; the most dangerous cross-build
   nondeterminism source), SVGF denoising (v1 PT ships pause-to-converge).
