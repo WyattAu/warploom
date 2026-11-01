@@ -101,6 +101,12 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
   golden-hash tests and the full 693-test green run on the unified path.
 - [ ] **Dynamic rendering for fullscreen passes (Blade stage 1)** so
   passes un-bake; prerequisite for GENERAL-layout PT/bloom layering work.
+  Stage 0 DONE: the device negotiates `dynamicRendering` (1.3 core, no
+  extension) behind `has_dynamic_rendering()`, proven by
+  `DynamicRendering.ClearOnlyPassWritesAttachment` (blue pre-fill +
+  CLEAR-load red read back bit-exact, sabotage-checked: DONT_CARE fails
+  it; 0 validation diagnostics). Nothing records dynamically yet; each
+  pass migrates with its own golden-hash re-proof (see loop27).
 - [x] **Perf budgets as gates (T0).** Per-config frame budgets
   (default, bloom, nohdr, gd, rt, node, pt, scale10k, phys4k, phys8k) in
   docs/perf-budgets.json from real GPU timing; `analyze_telemetry.py

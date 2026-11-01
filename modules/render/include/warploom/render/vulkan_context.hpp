@@ -83,6 +83,10 @@ public:
   //! True when descriptor indexing (bindless: runtime arrays, partially bound,
   //! update-after-bind) was negotiated and enabled on the device.
   [[nodiscard]] bool has_descriptor_indexing() const noexcept { return descriptor_indexing_enabled_; }
+  //! True when Vulkan 1.3 dynamic rendering was negotiated and enabled
+  //! (vkCmdBeginRendering without a render pass object). Blade stage 0:
+  //! the flag only; fullscreen passes migrate in later stages.
+  [[nodiscard]] bool has_dynamic_rendering() const noexcept { return dynamic_rendering_enabled_; }
   //! True when the RT extensions (VK_KHR_acceleration_structure,
   //! VK_KHR_ray_query, VK_KHR_deferred_host_operations) and the
   //! accelerationStructure + rayQuery device features were all negotiated
@@ -133,6 +137,7 @@ private:
   bool synchronization2_enabled_{false};
   bool timeline_semaphores_enabled_{false};
   bool descriptor_indexing_enabled_{false};
+  bool dynamic_rendering_enabled_{false};
   bool ray_tracing_enabled_{false};
   bool rt_pipeline_enabled_{false};
 #if defined(OMNICPP_HAS_VULKAN)

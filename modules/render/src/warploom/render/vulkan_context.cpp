@@ -228,6 +228,18 @@ VulkanContext::~VulkanContext() { cleanup(); }
       device_extensions.push_back(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
     }
   }
+  // Blade stage 0: dynamic rendering (vkCmdBeginRendering with no render
+  // pass object) is core in Vulkan 1.3, so there is no extension to push —
+  // just the feature bit. The flag gates migration of the fullscreen
+  // passes in later stages; nothing records dynamically yet.
+  dynamic_rendering_enabled_ = false;
+  if (is_vulkan13) {
+    dynamic_rendering_enabled_ =
+        vulkan13_features.dynamicRendering == VK_TRUE;
+    if (dynamic_rendering_enabled_) {
+      vulkan13_features.dynamicRendering = VK_TRUE;
+    }
+  }
   // Ray tracing negotiation: the probe above filled the feature structs;
   // enable the extensions only when both features are supported. RT also
   // requires bufferDeviceAddress (scratch/instance/geometry addressing).
