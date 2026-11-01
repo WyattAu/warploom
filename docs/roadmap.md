@@ -999,6 +999,15 @@ declares a slot 3.
       now runs that exact command in CI.
 - [ ] **E6 P1–P4** — WASM leg, native Wayland surface, adoption
       (FetchContent/vcpkg), docs rebrand, GitHub repo rename.
+      Adoption DONE: `cmake --install` ships per-module package configs
+      and an out-of-tree consumer (`find_package(WarploomCore) +
+      find_package(WarploomPhysics)`, links `Warploom::core` +
+      `Warploom::physics`, drives the public API only) configures,
+      builds, and runs against the install tree — verified 2026-11-01.
+      Remaining, each blocked and stated: WASM (no emscripten toolchain on
+      this machine), native Wayland surface (headers present, but no
+      compositor to verify against), docs rebrand + repo rename (owner
+      decisions, not engineering).
 - [x] **E7 estate-shared C++ gates** — DONE (warploom side; the kit
       itself lives in the estate repo). The estate runs one reusable workflow
       per language (rust-kit, go-kit, haskell-kit, node-ci, python-kit); C++
