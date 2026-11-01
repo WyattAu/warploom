@@ -475,6 +475,65 @@ declares a slot 3.
       when cell >= r1+r2, compliance 0 is definitionally the stiff
       projection. Still open: velocity-from-position update, island
       sleeping, capsule — sleeping is the scheduled Loop 2 of 10 item.
+
+      Loop 2 (2026-10-31): island sleeping + restitution threshold DONE.
+      `set_sleep_threshold(v)` (default 0 = never, bit-identical history)
+      rebuilds islands per step by union-find over the frozen pair list +
+      grounded flags; an island sleeps when every dynamic member's
+      PRE-integration speed is below the threshold and it owns a contact
+      edge; sleepers are restored to exact pre-step state and skipped by
+      the solve. `set_restitution_threshold(v)` (default 0 = historical)
+      makes sub-threshold impacts inelastic so piles can reach true rest.
+      Verified: 400-body pile (100 decoupled 4-stacks) all asleep at exact
+      rest pose/zero velocity, frozen bit-identical over 60 steps, fresh
+      replay identical; validator-clean with sleeping on; 680/680 unit,
+      6/6 ctest. Every new test sabotage-checked BOTH directions — and the
+      first flip-sabotage PASSED, which caught a real test hole: freezing
+      mid-air is also asleep+frozen+replay-identical, so the test now pins
+      rest heights and velocities, not just frozenness.
+      Four mechanisms the probes forced (all measured, all in-code):
+      (1) sleepers count as PINNED (full impulse/correction to the awake
+      side) — half-shares leave half the approach behind and jitter the
+      layer above forever (~1 m/s sustained); (2) impulse vel_n uses the
+      sleeper's PRE-step velocity — the integrated snapshot carries one
+      gravity increment of never-real motion that otherwise fixed-points a
+      lone body at exactly -g·dt forever; (3) passes 1+ re-derive RESIDUAL
+      penetration from live positions — re-applying frozen depth pumps
+      energy (4 passes launch bodies at m/s; blinking pairs sustain a
+      2-step ~0.4 m/s cycle); iterations=1 output is untouched; (4) island
+      edges carry a 1e-5 penetration gate — float dust + zero initial
+      velocity otherwise sleeps bodies MID-AIR on step 1. Known limit
+      (stated, not hidden): tall (3-4+) stacks dropped as a clump, and
+      laterally-jammed piles, find a limit cycle the sequential solver
+      cannot leave — measured on the HISTORICAL path too, so a solver-
+      convergence limitation, not a sleeper defect; sleeping engages
+      wherever the solver actually brings bodies to rest. Fixing clump
+      recovery is separate convergence research (cf. Small Steps).
+
+      Loop 3 (2026-10-31): velocity-from-position + capsule + rotation +
+      joints DONE (staged XPBD adoption, R2 spec step 2). `set_velocity_
+      from_position(bool)` (default off = historical impulse path,
+      bit-identical) derives v from corrected positions with restitution
+      re-applied from stored approach speeds; joints become
+      velocity-consistent under it (positional-only in impulse mode —
+      stated limit). Capsule shape (segment narrowphase via Ericson §5.1.8
+      closest-points, ground support from axis |up.y|): upright-capsule rest
+      + crossed-capsule separation. Rotation: exact rotation-vector
+      orientation integration (unit-renormalized) + (r x J)/I contact torque
+      (sphere transverse I exact, capsule volume-weighted composite, twist
+      uses transverse — stated approx); ground friction spins a sliding
+      ball (forward roll measured). Distance joints (insertion-order,
+      per-joint compliance, island edges so jointed piles sleep/wake as
+      units). Spin gates sleep (rad/s under the same threshold). Verified:
+      8 new tests, each sabotage-checked (pair-sphere fallback, ground
+      support fallback, zeroed torque x2, dropped angular gate, skipped
+      joints, skipped VFP derive — every one fails the guard it targets),
+      validator-clean, full suite 688/688, zero warnings. Honest limits in
+      the header: spin omits surface-velocity feedback (friction stays the
+      historical 0.98 damp), no rolling-resistance/angular-damping model.
+      Still open (research-deferred, not regressions): speculative contacts
+      (needs a tunneling proof as trigger), MGPBD (no deformables —
+      explicitly not adopted), warm-start (breaks snapshot replay).
 - [x] **D2a interpolated, eased track evaluation** — `TimelineClip::evaluate_at`
       takes a fractional frame and an `Easing`, and interpolates Number and
       Vec3 between the bracketing samples. Bool and String hold the earlier
@@ -597,8 +656,8 @@ declares a slot 3.
       not statistically conclusive on this loaded machine; the fix is certain
       structurally — the old ordering was undefined by the standard, the new
       one has no window.
-- [ ] **D3 game depth** — ECS as the app's data model, scene management,
-      **G4 script node**, G2 subgraph copy/paste, G5 asset browser.
+- [ ] **D3 game depth** — ECS as the app's data model, scene management
+      (G2 subgraph copy/paste, G4 script node, G5 asset browser landed).
 
       G2 SUBGRAPH COPY/PASTE DONE (engine half): `copy_subgraph(ids)`
       serializes the selection plus every INTERNAL link as a fragment with
@@ -609,10 +668,19 @@ declares a slot 3.
       contract, hand-edits rejected), checks every type before mutating, and
       ROLLS BACK completely on any link failure (cycle, pin mismatch):
       verified by the round-trip test (copy -> paste -> copy is
-      byte-identical) and the rollback test (node count unchanged after both
-      failure shapes). Editor UI wiring remains.
+      byte-identical) and the rollback test (PasteRollsBackOnFailure: node
+      count unchanged after both failure shapes). Editor UI wiring DONE:
+      Ctrl+C builds the nids payload through the tested editor helper
+      `selected_node_nids` (NodeEditorCopy.SelectedNodeNidsJoinsInViewOrder:
+      empty when nothing is selected, view-order join otherwise) and
+      enqueues the session's CopySubgraph; the returned fragment is stashed
+      for Ctrl+V, which enqueues PasteSubgraph — both through the same
+      undoable session path the protocol tests cover (CopyPasteUndoRedo-
+      RoundTrip, SocketDrivenCopyPasteEscapes). Only the XCB keycode
+      mapping stays platform-gated, like all viewport input (stated limit).
 
-      G4 ENGINE HALF DONE: `register_script_node_type`
+      G4 SCRIPT NODE DONE (engine + editor UI + viewport wiring):
+      `register_script_node_type`
       (modules/core/include/warploom/core/script_node.hpp) binds a script
       module to a node type named "script:<module>" — Number in/out pins sized
       by the caller, `context_evaluate` calls the module's
@@ -622,13 +690,48 @@ declares a slot 3.
       a wall clock, so replay re-simulation reproduces the sequence exactly —
       verified by DtFollowsTheTickSequence, which also replays the same
       sequence in a fresh graph and requires byte-identical outputs. Verified
-      without any .so via ScriptModule's builtin path (three tests,
-      ScriptNode.*). Missing inputs evaluate as 0; a module error return
-      leaves outputs 0 — the same failure shape as a math node given garbage.
-      The .so path is verified too: SharedObjectModuleDrivesTheNode binds the
-      node type to the REAL dlopen'd fixture module and checks the tick
+      without any .so via ScriptModule's builtin path (ScriptNode.*) plus
+      NodeScriptNodes dispatch/determinism/degrade/round-trip coverage.
+      Missing inputs evaluate as 0; a module error return leaves outputs 0 —
+      the same failure shape as a math node given garbage. The .so path is
+      verified too: SharedObjectModuleDrivesTheNode binds the      node type to the REAL dlopen'd fixture module and checks the tick
       outputs through the graph — the full path a gameplay module takes.
-      Remaining: editor UI (a row per out-pin) and viewport wiring.
+
+      G5 ASSET BROWSER DONE (engine half + viewport panel):
+      `list_scene_files(dir)` (modules/editor/include/warploom/editor/
+      asset_browser.hpp) scans a directory for loadable scene documents
+      (*.json) and returns byte-deterministic sorted filenames — readdir
+      order is filesystem-dependent so the result is always sorted; a
+      missing/unreadable dir yields empty, never an exception (an empty
+      panel is the honest display of "nothing loadable here"). Verified by
+      AssetBrowser.SuffixGating / ListsSortedJsonOnly /
+      MissingDirIsEmptyNotAnException (3/3 on the current tree). The
+      viewport renders the panel (opt-in via WARPLOOM_SCENE_DIR): one
+      load-button per file, rescanned each frame with buttons rebuilt only
+      when the scan changes, click enqueues the session's LoadDocument
+      command through the same undoable path OMNICPP_DOC uses. The click
+      handler itself is XCB-gated like all viewport input (stated limit);
+      everything else on the path is session- and engine-tested.
+      Remaining in D3: scene management (no spec or exit criteria yet —
+      not started, not claimed). G2/G4/G5 are landed. Editor UI: one
+      value row per output pin ("name = value") after the param rows, so a
+      multi-output node no longer overdraws into one line — verified by
+      NodeEditorValues.ReadoutsAppearAfterEvaluate /
+      ReadoutsHiddenWhenDisabled / MultiOutputNodeGetsOneRowPerPin (pulse
+      on+value get distinct rows) / ScriptNodeGetsOneRowPerDynamicOutput
+      (outputs=3 shows out0..out2, default shows one) /
+      SyncRefreshesAfterReEvaluate (a test that passes without sync_values
+      proves nothing, so the refresh assertion requires the sync) /
+      ValueRowsDoNotDisturbParamHitTest. Dynamic script outputs are
+      readouts, not link sources (only declared pins get sockets — stated
+      limit). Viewport wiring: WARPLOOM_SCRIPT_MODULES="path[:in[:out]];..."
+      preloads native modules and registers their bound types with full pin
+      rows next to the built-ins; the spec parses through
+      ScriptModule::parse_module_spec (ParseModuleSpec: defaults 1-in/1-out,
+      counts 1..9, 7 rejection shapes), a missing .so or bad counts skips
+      that entry logged-not-fatal, duplicates are skipped, and doc-load
+      registers the same type so persisted script nodes parse. Remaining in
+      D3: G2 editor UI wiring, G5 asset browser, scene management.
 
 ## Phase E — release
 
@@ -644,9 +747,9 @@ declares a slot 3.
       mode is rejected with a named error, and the whole exchange runs with 0
       validation diagnostics. R1/R2 are now unblocked: a mode toggle plus its
       pipeline work is all each one needs.
-- [ ] **E2 R1–R4 — exposure, bloom (R4) and path tracing (R1) DONE;
-      remaining: RT reflections/AO toggles (R2), GPU-driven skinned scenes
-      (R3).** Exposure and bloom are DONE:
+- [x] **E2 R1–R4 — exposure, bloom (R4), RT reflections/AO toggles (R2),
+      GPU-driven skinned scenes (R3) and stepped path tracing (R1) DONE.**
+      Exposure and bloom are DONE:
       `set_exposure` (protocol v1.9) is live end-to-end — validated by
       `HeadlessComposeFrameGoldenHash`'s two-exposure probe (2.0 vs 0.25 must
       produce different tonemapped frames; it originally did not, which caught
@@ -654,9 +757,23 @@ declares a slot 3.
       every frame — the preserve is now explicit in the chain), plus a live
       socket check that the chain reports the applied value back. The capture
       chain is synced in the same handler, so captured frames cannot silently
-      disagree with the live frame. Bloom is DONE (v1.10, below). Remaining:
-      path tracing (R1), RT reflections/AO (R2), skinned gd scenes (R3) —
-      spec rewritten from the research pass
+      disagree with the live frame. Bloom is DONE (v1.10, below). R3 is DONE:
+      `pbr_gpu_driven_skinned.vert` (palette join on payload word 23, skin
+      stream at set 0 binding 4, static-first/skinned-second partition — one
+      indirect draw per partition, firstInstance stays global) is proven by
+      `GpuDrivenSkinnedMatchesCpuSkinnedPixels` (byte-identical hash, two
+      sabotage directions, restore check) and live in the viewport as an
+      animated two-segment beam prop (always the last driven object, own
+      2-joint palette, conservative grown sphere). R1 is DONE: stepped PT
+      (protocol v1.13) — `set_pt_sample_target` / `get_pt_samples` /
+      `get_pt_mean`; the tracer holds at the target (further rounds no-op
+      unless a clear restarts), the viewport skips the submit while held,
+      and two stepped 16-sample runs report bitwise-identical mean text
+      live over the wire (e1 visual determinism round-trip, 58/58 e1).
+      `stepped_target_holds_and_repeats_exactly` pins the engine side
+      (hold freezes count + image, reset + re-record reproduces exactly,
+      K=6 differs from K=4, sabotage-checked). The spec below was rewritten
+      from the research pass
       (docs/research/rendering-and-graphs.md): the compose chain pre-allocates
       ALL resources at initialize (idTech's persistent-feature pattern) so
       runtime toggles only change which passes record — landed, and it is
@@ -768,11 +885,17 @@ declares a slot 3.
          The tell was that the captured mean matched the baseline capture to
          three decimals.
 
-      **Known limits, stated rather than hidden:** PT renders at the swapchain
-      extent captured when the stack was built (no resize handling yet); the
-      scene is the cubes-scene cube + ground slab, not the app's full scene;
-      and bloom does not layer on the path-traced source (the external set
-      binds the black slot, because the source is already divided by n).
+      **Known limits, stated rather than hidden:** a resize rebuilds the PT
+      stack at the new extent and correctly re-converges from sample 0
+      (accumulation is sized in pixels, so old samples describe an image
+      that no longer exists); the tracer renders a static snapshot of the
+      live scene (city/mannequin/cube/ground walks, bones read once —
+      animation smears an accumulation, so it is frozen by design) with
+      grey albedo (the albedo words stay bound but unread); and bloom does
+      not layer on the path-traced source (the external set binds the black
+      slot, because the source is already divided by n). Stepped PT
+      (v1.13, above) is the deterministic interface: reset + target K +
+      poll, with wire-level mean equality across runs.
 
       (SetBloom was briefly added and REVERTED: see below. It has since
       RE-LANDED on the pre-allocated design — see the DONE note.)
@@ -817,6 +940,40 @@ declares a slot 3.
       the RTX 2060. Missing bloom shaders now degrade the chain to bloom-off
       instead of refusing the tonemap; `set_bloom_enabled(true)` is refused
       with a named error rather than silently ignored.
+
+      **R2 DONE — RT reflections/AO sub-toggles (protocol v1.12).**
+      `set_rt_reflections` / `set_rt_ao` (+ getters) flip bits 0/1 of the
+      push pad1 word the RT shaders read, so a toggle changes the next
+      recorded frame and nothing else: with both toggles off the gated
+      code does not execute, and the frame matches the pre-R2 render to
+      ±1 LSB (measured A/B, 6 captures x default/nohdr/rt: default and
+      nohdr byte-identical; RT mode 1 rounding-boundary pixel Δ=1 on
+      half the captures — float reassociation from the edit itself,
+      proven by restoring byte-equality with the pre-R2 shader).
+      Non-RT shaders ignore the word. The
+      reflection shades the hit from the instance's material albedo via
+      `instanceCustomIndex` — the host writes the material index as the
+      custom index, the same index the raster draw uses, so the pairing is
+      valid by construction — faded with distance; a miss samples the
+      irradiance environment. AO is 4 fixed Duff-ONB hemisphere taps scaled
+      so a fully open hemisphere returns exactly 1.0 (only the ambient term
+      is scaled; direct light keeps its hard shadow). Verified by
+      `rt_sub_toggles.reflect_and_ao_flags` on the reflection proof's floor
+      + red-cube scene: flags-0 shows floor gray; reflections on turns the
+      mirror red and brightens the miss control; AO darkens the half-blocked
+      contact while a fully-open floor pixel is bit-identical; both flags
+      compose (contact darker than reflections-only, brighter than AO-only,
+      red intact). Three sabotages caught: zeroed albedo, stalled custom
+      index, neutered AO. The viewport enters RT mode at runtime via
+      `set_render_mode rt` (the startup env only chooses the initial mode)
+      and round-trips both toggles live (e1: on, reads back on, off, reads
+      back off, missing-arg rejected, 0 diagnostics on the RTX 2060). One
+      measurement shaped the test: the reflection addition rides through
+      Reinhard + gamma, so the red signal is +6/255 and the thresholds sit at
+      +0.01 — tight enough that a neutered stage (bit-identical pixels)
+      fails, with ~2x margin. A red-dominance threshold written for a linear
+      pipeline (+0.06) fails a CORRECT build here: assert the signal the
+      pipeline can actually carry, the R1b noise-floor lesson again.
 - [ ] **E3 hardware CI runner** — every RT test skips on lavapipe, so the
       best subsystem has the least regression protection.
 - [x] **E4 warning debt, then `-Werror`** — DONE. All four presets build
@@ -832,7 +989,8 @@ declares a slot 3.
       now runs that exact command in CI.
 - [ ] **E6 P1–P4** — WASM leg, native Wayland surface, adoption
       (FetchContent/vcpkg), docs rebrand, GitHub repo rename.
-- [~] **E7 estate-shared C++ gates** — the estate runs one reusable workflow
+- [x] **E7 estate-shared C++ gates** — DONE (warploom side; the kit
+      itself lives in the estate repo). The estate runs one reusable workflow
       per language (rust-kit, go-kit, haskell-kit, node-ci, python-kit); C++
       had none, and warploom's 10-job CI is the only instance. Loop 21
       (2026-10-29, first of the all-directions series): `.github/workflows/

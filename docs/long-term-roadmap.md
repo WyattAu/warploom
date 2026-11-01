@@ -93,12 +93,14 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
   pass framing).
 - [ ] **Dynamic rendering for fullscreen passes (Blade stage 1)** so
   passes un-bake; prerequisite for GENERAL-layout PT/bloom layering work.
-- [ ] **Perf budgets as gates.** Per-config frame budgets (default,
-  bloom, RT, gd, node editor, pt) from real GPU timing (O2 now resolves);
-  `scripts/analyze_telemetry.py` extended, never bypassed. Scale
-  benchmarks: 10k-instance gd path, 4k/8k physics scenes. A perf
-  assertion is a canary, not a gate, on shared/loady machines — record
-  load with the number.
+- [x] **Perf budgets as gates (T0).** Per-config frame budgets
+  (default, bloom, nohdr, gd, rt, node, pt, scale10k, phys4k, phys8k) in
+  docs/perf-budgets.json from real GPU timing; `analyze_telemetry.py
+  --check-budgets <cfg>:docs/perf-budgets.json` is the gate (exit 0 =
+  budgets + correctness checks green). Measured 2026-10-31, all ten
+  analyzer runs green, 0 validation diagnostics; budgets carry ~1.5-2x
+  headroom and record the measure-time load, so a canary firing on a
+  loaded machine means re-run at low load before blaming the change.
 - [ ] **Async-compute evaluation.** Queue family is discovered, never
   used. Spike: H-Z reduce and/or bloom downsample off the graphics
   queue; adopt only on measured win with determinism intact.
@@ -168,9 +170,10 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
 
 ### T6. Games / editor
 
-- G4 script-node UI rows + viewport wiring (.so path already proven
-  through the graph); G2 subgraph UI wiring (engine half done with
-  rollback); G5 asset browser; scene management.
+- G4 script node DONE (engine + UI rows + viewport wiring); G5 asset
+  browser DONE (engine scan + viewport panel + click-load); G2 subgraph
+  copy/paste DONE (engine + protocol + Ctrl+C/V wiring, rollback-tested);
+  scene management (no spec yet).
 - Input already in-tree; no new backends without a consumer.
 
 ### T7. CAD / modelling
