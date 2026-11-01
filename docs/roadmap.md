@@ -8,19 +8,29 @@ milestone is not done until its proof is machine-checked and documented.
 
 The capability list in `rendering-status.md` separates *in the engine*,
 *reachable from the app*, and *what proves it*. Three findings from that
-audit shape everything below, and they were true while every S-track item
-was marked done:
+audit shaped everything below; all three are now resolved (recorded here
+so the shape of the work stays legible — each was true while every
+S-track item was marked done):
 
-1. **The app does not use the renderer module.** `record_pbr_frame`, the
-   render graph, H-Z occlusion, offscreen targets and the whole
-   bloom/tonemap chain are implemented and tested, and have no production
-   caller. `examples/viewport/main.cpp` hand-rolls its own Vulkan.
-2. **There is no single data model.** The ECS has no production consumer;
-   the document, `VulkanScene` and `PhysicsWorld` are three private worlds.
-3. **Determinism stops at physics.** The viewport steps physics in the
-   wall-clock frame loop, so replay cannot reproduce it.
+1. **The app did not use the renderer module — RESOLVED in Phase B.**
+   The viewport records through the module's entry points
+   (`record_pbr_scene`, `record_gpu_driven_cull`/`record_gpu_driven_draw`,
+   `record_shadow_pre_pass`) and composes through `VulkanComposeChain`
+   (live + capture instances). What is still genuinely test-only is
+   named as such in the table: the render-graph single-entry path,
+   `record_pbr_frame`, `VulkanOffscreenTarget`, the parallel recorder.
+2. **There was no single data model — RESOLVED in Phase C/D.**
+   `DocumentProjection` carries the authored document into the ECS every
+   session tick (idempotent, allocation-free steady-state); the viewport
+   builds render objects from the ECS query and physics reads the same
+   store through the ECS bridge. The document stays the authored truth
+   (ids, undo, serialization); the ECS is the runtime store.
+3. **Determinism stopped at physics — RESOLVED.** The viewport and the
+   headless host tick the session with a fixed 1/60 dt, never a wall
+   clock; pause travels into the tick and step control advances
+   identically on both hosts.
 
-Phase A fixes the substrate so those are addressable; Phases B–D use it.
+Phase A fixed the substrate so those were addressable; Phases B–D used it.
 
 ## Phase A — substrate (done)
 

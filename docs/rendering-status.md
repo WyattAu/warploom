@@ -8,16 +8,22 @@ conflating them is how this page used to mislead:
 - **Proof** — what test exercises it, and where does that test run?
 
 A feature can be real, tested and still unreachable from the product.
-Several are, and they are marked **test-only** below. That is the single
-most important thing on this page: the renderer module's most impressive
-APIs are not used by the application.
+The rows that are stay marked **test-only** below — but that set has
+shrunk to the genuinely headless-only pieces (the render-graph
+single-entry path, `record_pbr_frame`, `VulkanOffscreenTarget`, the
+parallel recorder). The viewport records the scene, shadow, GPU-driven
+and compose stages through the module's own entry points; the
+"untested in production" gap this page used to warn about is closed.
 
 Proof runs under the Khronos validation layer. The full suite
-(664 tests, `warploom_unit_tests`) passes on an RTX 2060 with **0
-validation diagnostics and 0 leaked objects**; on CI's Mesa lavapipe
-software Vulkan, every ray-tracing test skips because the extensions are
-absent. asan-ubsan (581 tests, 0 diagnostics, 0 leaks) and tsan (581
-tests, 0 data races) build and run on the Vulkan-off Debug tree.
+(693 tests, `warploom_unit_tests`) passes on an RTX 2060 (default
+preset, measured 2026-11-01); the Vulkan tests enable the layer and
+assert their own validation error/warning counts, so the green run is
+also the 0-diagnostics evidence. On CI's Mesa lavapipe software Vulkan,
+every ray-tracing test skips because the extensions are absent. The
+sanitizer presets (asan-ubsan/tsan, Vulkan-off Debug tree) have NOT
+been re-run on the current tree — their last green numbers predate the
+D1-physics and R1/R2/R3 landings, so they are pending, not passing.
 
 Two verification milestones worth knowing when reading the Proof column:
 
