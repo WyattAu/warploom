@@ -157,6 +157,16 @@ constexpr VkMemoryPropertyFlags VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT = 0x00000001
 constexpr VkMemoryPropertyFlags VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT = 0x00000002;
 constexpr VkMemoryPropertyFlags VK_MEMORY_PROPERTY_HOST_COHERENT_BIT = 0x00000040;
 constexpr VkImageUsageFlags VK_IMAGE_USAGE_SAMPLED_BIT = 0x00000010;
+//! Headless stand-ins for image usage/aspect bits the compose planner names
+//! (Vulkan-off builds never create images; the values only need to be
+//! distinct bit flags, and they stay inside this stub block).
+constexpr VkImageUsageFlags VK_IMAGE_USAGE_TRANSFER_SRC_BIT = 0x00000001;
+constexpr VkImageUsageFlags VK_IMAGE_USAGE_TRANSFER_DST_BIT = 0x00000002;
+constexpr VkImageUsageFlags VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT = 0x00000004;
+constexpr VkImageUsageFlags VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT =
+    0x00000008;
+constexpr std::uint32_t VK_IMAGE_ASPECT_COLOR_BIT = 0x00000001;
+constexpr std::uint32_t VK_IMAGE_ASPECT_DEPTH_BIT = 0x00000002;
 constexpr VkFormat VK_FORMAT_B8G8R8A8_UNORM = 44;
 constexpr VkFormat VK_FORMAT_B8G8R8A8_SRGB = 50;
 constexpr VkFormat VK_FORMAT_D32_SFLOAT = 126;

@@ -397,20 +397,28 @@ public:
     GpuDrivenPush cull_push{};
     //! Buffer holding the GPU-written draw commands (INDIRECT_USAGE).
     VkBuffer indirect_buffer{VK_NULL_HANDLE};
-    //! Main lit pass drawing ONE vkCmdDrawIndexedIndirect over the commands.
+    //! Main lit pass drawing vkCmdDrawIndexedIndirect over the commands.
+    //! Partitioned draws (R3: static commands through the static pipeline,
+    //! skinned commands through the skinned pipeline) share one command
+    //! buffer: draw_first_command selects the first command, and
+    //! draw_command_count == 0 means object_count - draw_first_command.
+    //! Defaults (0, 0) reproduce the historical whole-buffer draw.
+    std::uint32_t draw_first_command{0U};
+    std::uint32_t draw_command_count{0U};
     VkPipeline draw_pipeline{VK_NULL_HANDLE};
     VkPipelineLayout draw_pipeline_layout{VK_NULL_HANDLE};
     //! Six entries: slots 0..5 cover per-object sets, bindless samplers,
-    //! the material SSBO, the bone SSBO (unused by the driven path), the
-    //! shadow map and the IBL resources.
+    //! the material SSBO, the bone SSBO (the skinned partition's palette;
+    //! the static partition leaves slot 3 unbound), the shadow map and
+    //! the IBL resources.
     VkDescriptorSet draw_sets[6]{};
     std::uint32_t draw_set_count{0};
     //! Descriptor-set slot each entry of draw_sets binds to. The pipeline
-    //! layouts in this engine reserve slot 3 for the bone SSBO, which the
-    //! driven path never uses (it draws static geometry only), so the
-    //! binding is not contiguous: a driven frame typically binds 0,1,2 then
-    //! 4,5. vkCmdBindDescriptorSets requires consecutive firstSet/count, so
-    //! the recorder groups consecutive runs rather than assuming one range.
+    //! layouts in this engine reserve slot 3 for the bone SSBO, which only
+    //! the skinned partition binds, so a static-partition frame is not
+    //! contiguous: it binds 0,1,2 then 4,5. vkCmdBindDescriptorSets
+    //! requires consecutive firstSet/count, so the recorder groups
+    //! consecutive runs rather than assuming one range.
     std::uint32_t draw_set_slots[6]{0U, 1U, 2U, 3U, 4U, 5U};
     GpuDrivenPush draw_push{};
     VkBuffer index_buffer{VK_NULL_HANDLE};

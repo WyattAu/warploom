@@ -70,6 +70,7 @@ add_executable(warploom_unit_tests
     unit/test_gpu_driven_cull.cpp
     unit/test_gpu_driven_frame.cpp
     unit/test_gpu_driven_occlusion_frame.cpp
+    unit/test_gpu_driven_skinned.cpp
     unit/test_mesh_table.cpp
     unit/test_scene_submission.cpp
     unit/test_scene_extraction.cpp

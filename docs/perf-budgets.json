@@ -1,7 +1,13 @@
 {
+  "_comment": "Per-config frame budgets, p95 over a telemetry run (RTX 2060, 1280x720). Measured 2026-10-31 at load ~7-15, so every budget carries ~1.5-2x headroom over the measured p95; a canary firing on a loaded machine means re-run at low load before blaming the change. min_coverage: gpu timestamp queries must resolve on >=90% of frames (first two frames never resolve: slot arming). Wall (total_us) is present-bound (~10ms) except physics scenes, where the CPU solver step dominates -- that cost is D1's, budgeted here only as observed.",
   "default": {"gpu_p95_us": 1400, "record_p95_us": 500, "min_coverage": 0.9},
   "bloom": {"gpu_p95_us": 1400, "record_p95_us": 500, "min_coverage": 0.9},
-  "nohdr": {"gpu_p95_us": 1200, "record_p95_us": 200, "min_coverage": 0.9},
+  "nohdr": {"gpu_p95_us": 1200, "record_p95_us": 300, "min_coverage": 0.9},
   "gd": {"gpu_p95_us": 500, "record_p95_us": 100, "min_coverage": 0.9},
-  "scale10k": {"gpu_p95_us": 500, "record_p95_us": 100, "min_coverage": 0.9}
+  "rt": {"gpu_p95_us": 1200, "record_p95_us": 500, "min_coverage": 0.9},
+  "node": {"gpu_p95_us": 1200, "record_p95_us": 500, "min_coverage": 0.9},
+  "pt": {"gpu_p95_us": 12000, "record_p95_us": 500, "min_coverage": 0.9},
+  "scale10k": {"gpu_p95_us": 500, "record_p95_us": 100, "min_coverage": 0.9},
+  "phys4k": {"gpu_p95_us": 1000, "record_p95_us": 100, "min_coverage": 0.9},
+  "phys8k": {"gpu_p95_us": 1000, "record_p95_us": 100, "min_coverage": 0.9}
 }

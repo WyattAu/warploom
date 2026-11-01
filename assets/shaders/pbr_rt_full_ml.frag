@@ -85,6 +85,10 @@ const uint kHasAO       = 0x10u;
 const vec3 kLightDir   = normalize(vec3(0.3, 0.65, 0.7));
 const vec3 kLightColor = vec3(1.0);
 
+// R2 sub-toggles, from the push block's pad1 word (0 = historical path).
+const uint kRtReflect = 1u;
+const uint kRtAo      = 2u;
+
 float D_GGX(float ndoth, float roughness) {
   float a  = roughness * roughness;
   float a2 = a * a;
@@ -141,6 +145,60 @@ float rtShadow(vec3 world_pos, vec3 n) {
                  gl_RayQueryCommittedIntersectionNoneEXT
              ? 1.0
              : 0.0;
+}
+
+// One reflection ray along reflect(-v, n). A hit is shaded by the hit
+// instance's material albedo (mat_buf indexed by instanceCustomIndex, which
+// the host sets to the instance's material index -- the same index the draw
+// itself uses, so it is valid by construction), faded with distance; a miss
+// samples the irradiance environment in the reflected direction. Deterministic
+// per pixel, no extra bindings beyond the TLAS + material SSBO both paths
+// already bind.
+vec3 rtReflection(vec3 world_pos, vec3 n, vec3 v) {
+  const vec3 r = reflect(-v, n);
+  rayQueryEXT rq;
+  rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, 0xFFu,
+                        world_pos + n * 0.01, 0.001, r, 1.0e30);
+  while (rayQueryProceedEXT(rq)) {}
+  if (rayQueryGetIntersectionTypeEXT(rq, true) ==
+      gl_RayQueryCommittedIntersectionNoneEXT) {
+    return texture(env_irradiance, r).rgb;
+  }
+  const uint custom = rayQueryGetIntersectionInstanceCustomIndexEXT(rq, true);
+  const float t = rayQueryGetIntersectionTEXT(rq, true);
+  const vec3 base = mat_buf.materials[custom].base_color_factor.rgb;
+  return base * (1.0 / (1.0 + 0.05 * t));
+}
+
+// One occlusion tap. Returns 1.0 when the ray escapes, 0.0 when blocked.
+float aoTap(vec3 world_pos, vec3 n, vec3 dir) {
+  rayQueryEXT rq;
+  rayQueryInitializeEXT(rq, scene_as, gl_RayFlagsOpaqueEXT, 0xFFu,
+                        world_pos + n * 0.01, 0.001, dir, 1.0e30);
+  while (rayQueryProceedEXT(rq)) {}
+  return rayQueryGetIntersectionTypeEXT(rq, true) ==
+                 gl_RayQueryCommittedIntersectionNoneEXT
+             ? 1.0
+             : 0.0;
+}
+
+// Ray-queried ambient occlusion: 4 fixed hemisphere taps around the shading
+// normal (Duff et al. 2017 branchless ONB, the same form pt_real.rgen uses),
+// scaled so a fully open hemisphere returns exactly 1.0 -- a flat plane is
+// bit-identical with the toggle on or off. Only the ambient term is scaled;
+// direct light keeps its hard shadow.
+float rtAo(vec3 world_pos, vec3 n) {
+  const float sg = n.z < 0.0 ? -1.0 : 1.0;
+  const float a = -1.0 / (sg + n.z);
+  const float b = n.x * n.y * a;
+  const vec3 tx = vec3(1.0 + sg * n.x * n.x * a, sg * b, -sg * n.x);
+  const vec3 ty = vec3(b, sg + n.y * n.y * a, -n.y);
+  const float unocc =
+      aoTap(world_pos, n, normalize(tx * 0.7 + ty * 0.7 + n)) +
+      aoTap(world_pos, n, normalize(tx * -0.7 + ty * 0.7 + n)) +
+      aoTap(world_pos, n, normalize(tx * 0.7 + ty * -0.7 + n)) +
+      aoTap(world_pos, n, normalize(tx * -0.7 + ty * -0.7 + n));
+  return 1.0 - 0.6 * (1.0 - unocc * 0.25);
 }
 
 void main() {
@@ -237,7 +295,16 @@ void main() {
   const vec2 brdf = texture(env_brdf_lut, vec2(ndotv, roughness)).xy;
   const vec3 ibl_specular = prefiltered * (f0 * brdf.x + brdf.y);
 
-  const vec3 ambient = (kd_ambient * ibl_diffuse + ibl_specular) * ao;
+  vec3 ambient = (kd_ambient * ibl_diffuse + ibl_specular) * ao;
+
+  // R2: pc.pad1 carries the sub-toggles; 0 skips both (historical path).
+  if ((pc.pad1 & kRtReflect) != 0u) {
+    const float reflect_w = 0.4 + 0.4 * pow(1.0 - ndotv, 5.0);
+    ambient += rtReflection(v_world_pos, n, v) * reflect_w;
+  }
+  if ((pc.pad1 & kRtAo) != 0u) {
+    ambient *= rtAo(v_world_pos, n);
+  }
 
   vec3 emissive = mat.emissive_factor;
   if ((mat.flags & kHasEmissive) != 0u) {

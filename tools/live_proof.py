@@ -350,6 +350,10 @@ def proof_e1(c):
     # lock), so the reply is "scheduled" and the mode is polled until it lands.
     r = c.cmd(cmd="set_render_mode", id=620, mode="pt")
     check("set_render_mode pt ok", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="get_pt_samples", id=665)
+    check("get_pt_samples ok", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="get_pt_mean", id=666)
+    check("get_pt_mean ok", r.get("ok") is True, str(r))
     if is_visual_host:
         landed = False
         for _ in range(40):
@@ -374,6 +378,68 @@ def proof_e1(c):
         check("re-enter pt ok", r.get("ok") is True, str(r))
         r = c.cmd(cmd="set_render_mode", id=625, mode="forward")
         check("leave pt again ok", r.get("ok") is True, str(r))
+        # R1 stepped PT: deterministic "accumulate K frames". Leaving PT
+        # resets the accumulation (a fresh tracer starts at sample 0), so
+        # two stepped runs must report bitwise-identical mean text — the
+        # record/replay seed contract made observable over the wire.
+        r = c.cmd(cmd="set_render_mode", id=626, mode="pt")
+        check("enter pt for stepped run ok", r.get("ok") is True, str(r))
+        stepped_landed = False
+        for _ in range(40):
+            m = c.cmd(cmd="get_render_mode", id=627)
+            if '"pt"' in m.get("detail", "").replace(" ", ""):
+                stepped_landed = True
+                break
+            time.sleep(0.25)
+        check("pt landed for stepped run", stepped_landed,
+              "pt never landed")
+        r = c.cmd(cmd="set_pt_sample_target", id=628, samples=16)
+        check("set_pt_sample_target ok", r.get("ok") is True, str(r))
+        k1 = False
+        for _ in range(120):
+            m = c.cmd(cmd="get_pt_samples", id=629)
+            if '"samples":16' in m.get("detail", "").replace(" ", ""):
+                k1 = True
+                break
+            time.sleep(0.25)
+        check("pt reaches 16 samples", k1, "target never reached")
+        m1 = c.cmd(cmd="get_pt_mean", id=636).get("detail", "")
+        check("pt mean reads back", '"mean":' in m1, m1)
+        r = c.cmd(cmd="set_render_mode", id=637, mode="forward")
+        check("leave pt for reset ok", r.get("ok") is True, str(r))
+        r = c.cmd(cmd="set_render_mode", id=638, mode="pt")
+        check("re-enter pt for repeat ok", r.get("ok") is True, str(r))
+        stepped_landed2 = False
+        for _ in range(40):
+            m = c.cmd(cmd="get_render_mode", id=639)
+            if '"pt"' in m.get("detail", "").replace(" ", ""):
+                stepped_landed2 = True
+                break
+            time.sleep(0.25)
+        check("pt re-landed for repeat", stepped_landed2,
+              "pt never re-landed")
+        r = c.cmd(cmd="set_pt_sample_target", id=661, samples=16)
+        check("set_pt_sample_target again ok", r.get("ok") is True, str(r))
+        k2 = False
+        for _ in range(120):
+            m = c.cmd(cmd="get_pt_samples", id=662)
+            if '"samples":16' in m.get("detail", "").replace(" ", ""):
+                k2 = True
+                break
+            time.sleep(0.25)
+        check("pt reaches 16 samples again", k2, "target never reached")
+        m2 = c.cmd(cmd="get_pt_mean", id=663).get("detail", "")
+        check("stepped pt repeats exactly", m1 == m2 and '"mean":' in m2,
+              f"{m1} vs {m2}")
+        r = c.cmd(cmd="set_render_mode", id=664, mode="forward")
+        check("leave pt after determinism ok", r.get("ok") is True, str(r))
+        r = c.cmd(cmd="set_pt_sample_target", id=667, samples=16)
+        check("set_pt_sample_target refused outside pt",
+              r.get("ok") is False and "PT mode" in r.get("error", ""),
+              str(r))
+        r = c.cmd(cmd="set_pt_sample_target", id=668)
+        check("pt target without arg rejected",
+              r.get("ok") is False, str(r))
 
     # E2/R4 bloom. Same host-owned class as above; the interesting part is
     # that toggling it must NOT rebuild anything, which the viewport's
@@ -403,6 +469,77 @@ def proof_e1(c):
               str(c.cmd(cmd="get_bloom", id=613)))
         r = c.cmd(cmd="set_bloom", id=614)
         check("bloom without arg rejected", r.get("ok") is False, str(r))
+
+    # R2 ray-query sub-toggles (reflections + AO). Same host-owned class as
+    # bloom: the toggles change what the lit pass records, never what
+    # exists, so a headless host acknowledges without visuals. The viewport
+    # validates payloads, reports the applied value, and refuses outside RT
+    # mode, where there is no TLAS to query. RT mode is enterable at runtime
+    # (unlike the WARPLOOM_RT_MODE=1 startup path, which only chooses the
+    # initial mode), so this section drives the whole round trip and leaves
+    # forward mode behind, whatever the viewport started in.
+    r = c.cmd(cmd="get_rt_reflections", id=640)
+    check("get_rt_reflections ok", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="get_rt_ao", id=641)
+    check("get_rt_ao ok", r.get("ok") is True, str(r))
+    if is_visual_host:
+        r = c.cmd(cmd="set_render_mode", id=642, mode="rt")
+        if r.get("ok") is True:
+            rt_landed = False
+            for _ in range(40):
+                m = c.cmd(cmd="get_render_mode", id=643)
+                if '"rt"' in m.get("detail", "").replace(" ", ""):
+                    rt_landed = True
+                    break
+                time.sleep(0.25)
+            check("rt mode applied on the visual host", rt_landed,
+                  "rt never became the reported render mode")
+            if rt_landed:
+                r = c.cmd(cmd="set_rt_reflections", id=644, enabled=1)
+                check("set_rt_reflections on ok", r.get("ok") is True, str(r))
+                check("rt_reflections reads back on",
+                      '"enabled":true' in c.cmd(cmd="get_rt_reflections",
+                                                  id=645)
+                      .get("detail", "").replace(" ", ""),
+                      str(c.cmd(cmd="get_rt_reflections", id=646)))
+                r = c.cmd(cmd="set_rt_ao", id=647, enabled=1)
+                check("set_rt_ao on ok", r.get("ok") is True, str(r))
+                check("rt_ao reads back on",
+                      '"enabled":true' in c.cmd(cmd="get_rt_ao", id=648)
+                      .get("detail", "").replace(" ", ""),
+                      str(c.cmd(cmd="get_rt_ao", id=649)))
+                r = c.cmd(cmd="set_rt_reflections", id=650, enabled=0)
+                check("set_rt_reflections off ok", r.get("ok") is True,
+                      str(r))
+                check("rt_reflections reads back off",
+                      '"enabled":false' in c.cmd(cmd="get_rt_reflections",
+                                                   id=651)
+                      .get("detail", "").replace(" ", ""),
+                      str(c.cmd(cmd="get_rt_reflections", id=652)))
+                r = c.cmd(cmd="set_rt_ao", id=653, enabled=0)
+                check("set_rt_ao off ok", r.get("ok") is True, str(r))
+                check("rt_ao reads back off",
+                      '"enabled":false' in c.cmd(cmd="get_rt_ao", id=654)
+                      .get("detail", "").replace(" ", ""),
+                      str(c.cmd(cmd="get_rt_ao", id=655)))
+                r = c.cmd(cmd="set_rt_reflections", id=656)
+                check("reflections without arg rejected",
+                      r.get("ok") is False, str(r))
+                r = c.cmd(cmd="set_rt_ao", id=657)
+                check("ao without arg rejected", r.get("ok") is False, str(r))
+            r = c.cmd(cmd="set_render_mode", id=658, mode="forward")
+            check("leave rt ok", r.get("ok") is True, str(r))
+        else:
+            check("rt unavailable refusal names the cause",
+                  "rt stack unavailable" in r.get("error", ""), str(r))
+            r = c.cmd(cmd="set_rt_reflections", id=659, enabled=1)
+            check("reflections refused outside RT mode",
+                  r.get("ok") is False and "RT mode" in r.get("error", ""),
+                  str(r))
+            r = c.cmd(cmd="set_rt_ao", id=660, enabled=1)
+            check("ao refused outside RT mode",
+                  r.get("ok") is False and "RT mode" in r.get("error", ""),
+                  str(r))
 
     # v1.11 viewport resize. The wire contract (both fields required, clamped
     # to [64, 8192]) is provable on ANY host; the window itself only exists on

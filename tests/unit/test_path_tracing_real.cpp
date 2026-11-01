@@ -1740,6 +1740,172 @@ TEST(path_tracing_real, tracer_resize_and_sample_count) {
   ctx.cleanup();
 }
 
+//! R1 stepped PT (v1.13): the sample target makes "accumulate K frames" a
+//! deterministic operation instead of "as many as the wall clock allowed".
+//! Holding at K, recording past K changes nothing (count AND image frozen);
+//! resetting and re-recording K reproduces the image bit-identically (the
+//! seed-stable repeat the record/replay contract needs); and a different K
+//! gives a different image (the equality is not vacuous).
+//!
+//! Sabotage directions, both caught: a neutered hold records past K (the
+//! count overshoots 4 AND the held image differs from the 4-round
+//! reference); a broken reset (not clearing) leaves the previous
+//! accumulation in the repeat run (repeat differs from the reference).
+//! One-box room at 32x32, like the resize test: fast, exact, and every
+//! property here is differential, so no reference model is needed.
+TEST(path_tracing_real, stepped_target_holds_and_repeats_exactly) {
+  VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("path_tracing_stepped", true).is_ok());
+  if (!ctx.has_ray_tracing() || !ctx.has_ray_tracing_pipeline()) {
+    ctx.cleanup();
+    GTEST_SKIP() << "ray tracing pipeline not available on this device";
+  }
+  VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+
+  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
+      ctx.device(), qf);
+  ASSERT_TRUE(pool_r.is_ok());
+  VkCommandPool cmd_pool = pool_r.value();
+  const auto submit_and_wait_local = [&](VkCommandBuffer cb) {
+    VkFence fence{};
+    VkFenceCreateInfo fi{};
+    fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    vkCreateFence(ctx.device(), &fi, nullptr, &fence);
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1U;
+    si.pCommandBuffers = &cb;
+    const VkResult r = vkQueueSubmit(ctx.graphics_queue(), 1, &si, fence);
+    if (r == VK_SUCCESS) {
+      vkWaitForFences(ctx.device(), 1, &fence, VK_TRUE, UINT64_MAX);
+    }
+    vkDestroyFence(ctx.device(), fence, nullptr);
+    return r == VK_SUCCESS;
+  };
+
+  auto tri = make_box_triangles(1.0f, 1.0f, 1.0f);
+  auto geo = alloc.create_buffer(
+      tri.size() * sizeof(float),
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  Allocation geo_alloc = geo.value();
+  std::memcpy(geo_alloc.mapped, tri.data(), tri.size() * sizeof(float));
+  VkBufferDeviceAddressInfo addr_info{};
+  addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  addr_info.buffer = geo_alloc.buffer;
+
+  PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.width = 32U;
+  cfg.height = 32U;
+  cfg.max_bounces = 2U;
+  PathTracerMesh mesh{};
+  mesh.vertex_buffer_address = vkGetBufferDeviceAddress(ctx.device(), &addr_info);
+  mesh.triangle_count = 12U;
+  mesh.max_vertex = 35U;
+  cfg.meshes = {mesh};
+  // Box at the origin, camera at +z looking down -z (the converge test's
+  // proven-varying configuration). NOTE: the resize test this fixture was
+  // copied from parks its box at (0,0,-3) behind a +z-looking camera, so
+  // every ray misses into the constant sky and the image has exactly zero
+  // variance — fine there (it only asserts sizes and counts), fatal here
+  // (every image equality would be vacuous). Do not "simplify" this back.
+  cfg.instances = {PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.8F)};
+  PathTracerCamera cam{};
+  cam.position = {0.0F, 0.0F, 4.0F};
+  cam.forward = {0.0F, 0.0F, -1.0F};
+
+  VulkanPathTracer tracer;
+  ASSERT_TRUE(tracer
+                  .create(ctx.physical_device(), ctx.device(),
+                          ctx.graphics_queue(), qf, alloc, cfg)
+                  .is_ok());
+  ASSERT_TRUE(tracer.ready());
+  tracer.set_camera(cam);
+
+  // Rounds [0, n): frame i seeds sample i, round 0 clears. Failing
+  // round-trips abort the test (ASSERT), so callers see only success.
+  const auto record_rounds = [&](std::uint32_t rounds) {
+    for (std::uint32_t i = 0; i < rounds; ++i) {
+      auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+          ctx.device(), cmd_pool);
+      ASSERT_TRUE(cb_r.is_ok());
+      VkCommandBuffer cb = cb_r.value();
+      VkCommandBufferBeginInfo bi{};
+      bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      ASSERT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+      tracer.record_round(cb, i, /*clear_first=*/i == 0U);
+      ASSERT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+      ASSERT_TRUE(submit_and_wait_local(cb));
+    }
+  };
+  const auto read_image = [&]() {
+    auto mean = tracer.read_mean();
+    EXPECT_TRUE(mean.is_ok());
+    return mean.is_ok() ? mean.value() : std::vector<float>{};
+  };
+  const auto image_bytes = [](const std::vector<float>& img) {
+    return img.size() * sizeof(float);
+  };
+
+  // Unbounded reference: exactly 4 rounds.
+  EXPECT_EQ(tracer.sample_target(), 0U) << "default target is unbounded";
+  record_rounds(4U);
+  const std::vector<float> img4 = read_image();
+  ASSERT_EQ(img4.size(), 32U * 32U * 4U);
+  EXPECT_EQ(tracer.sample_count(), 4U);
+
+  // Target 4, record 10: the hold freezes count AND image at the 4-round
+  // reference. A neutered hold overshoots the count and the image differs.
+  tracer.set_sample_target(4U);
+  EXPECT_EQ(tracer.sample_target(), 4U);
+  tracer.reset_accumulation();
+  record_rounds(10U);
+  const std::vector<float> img_held = read_image();
+  EXPECT_EQ(tracer.sample_count(), 4U) << "rounds past target must not count";
+  ASSERT_EQ(img_held.size(), img4.size());
+  EXPECT_EQ(std::memcmp(img_held.data(), img4.data(), image_bytes(img4)), 0)
+      << "held image must equal the exact-4-round reference";
+
+  // Repeat: reset + 4 rounds reproduces the reference bit-identically. A
+  // reset that failed to clear would leave 8 samples in this image.
+  tracer.reset_accumulation();
+  record_rounds(4U);
+  const std::vector<float> img_repeat = read_image();
+  EXPECT_EQ(tracer.sample_count(), 4U);
+  ASSERT_EQ(img_repeat.size(), img4.size());
+  EXPECT_EQ(std::memcmp(img_repeat.data(), img4.data(), image_bytes(img4)), 0)
+      << "reset + re-accumulate must reproduce the reference";
+
+  // Non-vacuous: a different K converges to a different image.
+  tracer.set_sample_target(6U);
+  tracer.reset_accumulation();
+  record_rounds(6U);
+  const std::vector<float> img6 = read_image();
+  EXPECT_EQ(tracer.sample_count(), 6U);
+  ASSERT_EQ(img6.size(), img4.size());
+  EXPECT_NE(std::memcmp(img6.data(), img4.data(), image_bytes(img4)), 0)
+      << "K=6 must differ from K=4, or the equalities prove nothing";
+
+  // Unbounded again: 0 disables the hold.
+  tracer.set_sample_target(0U);
+  tracer.reset_accumulation();
+  record_rounds(6U);
+  EXPECT_EQ(tracer.sample_count(), 6U);
+
+  vkDestroyCommandPool(ctx.device(), cmd_pool, nullptr);
+  tracer.destroy();
+  alloc.destroy_allocation(geo_alloc);
+  alloc.cleanup();
+  ctx.cleanup();
+}
+
 //! R1b: the viewport's PT stack builds from ITS geometry, and it must build.
 //!
 //! The viewport could not be trusted as the only evidence for this: when the

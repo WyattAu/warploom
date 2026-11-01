@@ -422,6 +422,10 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
   } push{};
   push.view_projection = scene.camera.view_projection;
   push.camera_position = scene.camera_position;
+  // R2: ray-tracing sub-toggles ride the pad1 word the shaders read. The
+  // joint_base word (shader pad0) is untouched; every non-RT shader ignores
+  // pad1, so scenes that never set rt_flags record bit-identically.
+  push.pad[0] = scene.rt_flags;
 
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     scene.pipeline);
@@ -880,8 +884,15 @@ void gpu_driven_render_cb(VkCommandBuffer cb, const GraphPass& pass,
                        0, f.draw_push.size, f.draw_push.data);
   }
   vkCmdBindIndexBuffer(cb, f.index_buffer, 0, VK_INDEX_TYPE_UINT32);
-  vkCmdDrawIndexedIndirect(cb, f.indirect_buffer, 0, f.object_count,
-                           sizeof(VkDrawIndexedIndirectCommand));
+  const std::uint32_t first =
+      f.draw_first_command <= f.object_count ? f.draw_first_command : 0U;
+  const std::uint32_t count =
+      f.draw_command_count != 0U ? f.draw_command_count
+                                 : f.object_count - first;
+  vkCmdDrawIndexedIndirect(
+      cb, f.indirect_buffer,
+      static_cast<VkDeviceSize>(first) * sizeof(VkDrawIndexedIndirectCommand),
+      count, sizeof(VkDrawIndexedIndirectCommand));
 }
 
 }  // namespace
@@ -941,6 +952,15 @@ void gpu_driven_render_cb(VkCommandBuffer cb, const GraphPass& pass,
       frame.draw_set_count == 0U ||
       frame.draw_set_count > std::size(frame.draw_sets) ||
       frame.index_buffer == VK_NULL_HANDLE || width == 0U || height == 0U) {
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
+  }
+  // R3 partition bounds: the draw window must lie inside the command buffer.
+  // draw_command_count == 0 means "to the end" (first..object_count).
+  if (frame.draw_first_command > frame.object_count ||
+      (frame.draw_command_count != 0U &&
+       frame.draw_command_count >
+           frame.object_count - frame.draw_first_command)) {
     return ::warploom::core::Result<void>::error(
         ::warploom::core::RuntimeError::invalid_config);
   }
@@ -1053,11 +1073,20 @@ void VulkanRenderer::record_unified_frame_node(
                          const_cast<ComposeStage*>(node->stage));
     return;
   }
+#ifdef OMNICPP_HAS_VULKAN
   if (!node->renderer->record_scene_node_contents(command_buffer, node->width,
                                                   node->height) &&
       node->failed != nullptr) {
     *node->failed = true;
   }
+#else
+  // Vulkan-off builds never reach this node (record_commands returns early),
+  // but the callback itself must still compile: fail loudly if it ever runs.
+  (void)command_buffer;
+  if (node->failed != nullptr) {
+    *node->failed = true;
+  }
+#endif
 }
 
 #ifdef OMNICPP_HAS_VULKAN

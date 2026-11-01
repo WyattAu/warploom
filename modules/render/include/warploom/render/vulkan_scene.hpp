@@ -381,6 +381,21 @@ struct VulkanPbrScene {
   //! Descriptor-set index the main pass binds rt_set at. Must match the
   //! pipeline's fragment stage; 0 means default (4).
   std::uint32_t rt_set_slot{0U};
+  //! R2 ray-tracing sub-toggles, pushed per draw into the push block's pad1
+  //! word (engine pad[0]; the shaders read pc.pad1). Bit 0 = reflections
+  //! (one ray along reflect(-v,n), hit shaded from the material SSBO by
+  //! instanceCustomIndex), bit 1 = ray-queried ambient occlusion (4 Duff-ONB
+  //! hemisphere taps, ambient term only). 0 is the historical path: the
+  //! gated code does not execute. One measured caveat: the edit itself
+  //! reassociated the common-path ambient math, so flags-0 can differ
+  //! from the pre-R2 frame by 1 LSB on rounding-boundary pixels
+  //! (measured A/B: 1/921600 px, Δ=1; the pre-R2 shader restores
+  //! byte-equality, proving codegen, not behavior). No pipeline rebuild --
+  //! the bloom-toggle lesson (pre-allocated resources, toggles change what
+  //! records, not what exists) applied to ray queries.
+  static constexpr std::uint32_t kRtFlagReflections = 1U;
+  static constexpr std::uint32_t kRtFlagAo = 2U;
+  std::uint32_t rt_flags{0U};
   //! Shadow-map extent for graph-driven recording (0 = target-provided).
   std::uint32_t shadow_width{0U};
   std::uint32_t shadow_height{0U};

@@ -491,6 +491,15 @@ void VulkanPathTracer::record_round([[maybe_unused]] VkCommandBuffer command_buf
 #ifdef OMNICPP_HAS_VULKAN
   if (!ready_ || command_buffer == VK_NULL_HANDLE) return;
 
+  // R1 stepped-PT hold: at target the accumulation is complete, so further
+  // rounds no-op instead of drifting the mean. A clear always restarts the
+  // sequence (viewport wrap-around, deterministic re-runs), and the
+  // viewport additionally skips the submit while held, so this is the
+  // backstop, not the hot path.
+  if (!clear_first && sample_target_ > 0U && samples_ >= sample_target_) {
+    return;
+  }
+
   // The frame index is the sample seed; write it before the trace records so
   // the host upload and the GPU dispatch agree on which sample this is.
   auto* gpu_params = static_cast<TracerGpuParams*>(params_allocation_.mapped);

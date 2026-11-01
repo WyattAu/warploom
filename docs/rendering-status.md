@@ -89,7 +89,8 @@ Genuinely implemented, and the strongest part of the repository.
 | Compose chain tonemap from an external source (PT accumulation, sampled in GENERAL) | yes | yes | `PathTracedFrameConvergesThroughCompose`; two sabotage directions (missing 1/n, stuck frame index) both caught |
 | Loop path tracer (N-bounce, per-pixel PCG streams, temporal accumulation) | yes | no | `test_path_tracing_real`, validated against an independent fp64 MC integrator (262k samples); wall probes 0.585/0.579 vs 0.612/0.562, slab 0.6414 vs 0.6073 (GPU vs fp64, 8 bounces, 64 frames). Two correctness fixes with sabotage-checked guards: (1) the rgen comment claimed Duff 2017 but implemented a naive projection that degenerates for ±Z normals (zero vector, normalized) — both shader and all three CPU mirrors now use true Duff (`rotated_box` uses tilted geometry; walls use the fixed path too); (2) the position-fetch rchit reported INWARD normals (this repo's winding makes the raw cross point into the solid — measured live via normal-as-color: slab top read (0,−1,0)) and is now flipped toward the incident ray (PBRT Faceforward). The old wall agreement (both sides exactly albedo 0.8) was two different physics coinciding in tolerance — GPU rays went straight through the thin wall out the back, CPU rays bounced back into the room — and the old rotated-box pass was consistency-only (both sides shared the inward sign). GPU-side anti-vacuity guards pin the image itself: interior probes > 0.15 (trapping reads exactly 0), z-wall probes < 0.79 (lobe collapse reads exactly 0.8); both sabotages fail. Plus `faceforward_normals_face_outward`: a committed dims.w = 2 normal-visualization mode (`PathTracerConfig::visualize_normals`) pinning orientation with no MC tolerance — the negated-flip sabotage fails all three probes. Closed in `docs/research/loop25-duff-onb-faceforward.md` |
 | Ray-query shadows vs PCF, A/B | yes | yes | `test_rt_shadows`; app needs `WARPLOOM_RT_MODE=1` |
-| Ray-query reflections | yes | no | `test_rt_reflections` |
+| Ray-query reflections | yes | yes — `set_rt_reflections` (protocol v1.12), live in RT mode; TLAS custom index carries the material index, the same index the raster draw uses | `test_rt_reflections` + `rt_sub_toggles.reflect_and_ao_flags` (historical path, red mirror, miss-control brightening, both composes; 3 sabotages caught); live e1 round-trip on/off + missing-arg rejection, 0 diagnostics |
+| Ray-query ambient occlusion | yes | yes — `set_rt_ao` (protocol v1.12); 4 fixed Duff-ONB taps, fully-open hemisphere returns exactly 1.0 | `rt_sub_toggles.reflect_and_ao_flags` (contact darkens, open pixel bit-identical; neutered-AO sabotage caught); live e1 round-trip |
 | Animated TLAS for skinned parts | partial | partial | one rigid transform per part from its dominant joint — not vertex-level skinning in the acceleration structure |
 
 Two honest caveats on the ray tracing:
@@ -103,8 +104,10 @@ Two honest caveats on the ray tracing:
   render-mode SWITCH is a protocol command (`set_render_mode`, v1.9), so an
   RT stack is built on first request and cached, and the viewport can be
   driven into RT and back over a live socket. Path tracing joined it as a
-  third mode (`"pt"`). What still cannot be toggled is *within* the RT stack:
-  there are no RT reflection / AO sub-toggles, which is what R2 is about.
+  third mode (`"pt"`), and R2 added toggles *within* the RT stack
+  (`set_rt_reflections` / `set_rt_ao`, v1.12): push-constant bits that change
+  the next recorded frame, no rebuild. What still cannot be toggled is R3
+  (GPU-driven skinned scenes).
 
 - **Path tracing is a third render mode, and it is narrow.** It traces the
   cubes-scene cube + ground slab at the swapchain extent captured when the
@@ -126,7 +129,7 @@ The one subsystem that needs no caveat.
 | Document save/load, atomic write, undo boundaries | yes | yes | protocol-path test + 16-assertion proof |
 | Protocol record/replay (`warploom-replay-v1`) | yes | yes | `test_command_recorder`, 19-assertion two-instance proof |
 | Timeline clips as document entities | yes | no | 8 tests + 27-assertion proof; the widget has no app caller |
-| Live socket proof harness  + `e1` (render mode/exposure/bloom wire contract)| — | — | `tools/live_proof.py all` → **71/71 assertions** headless; the visual-host half (payload validation + bloom read-back) passed on the RTX 2060 viewport |
+| Live socket proof harness  + `e1` (render mode/exposure/bloom/RT-toggle/PT-stepped wire contract)| — | — | `tools/live_proof.py all` → **80/80 assertions** headless; the visual-host half (payload validation + bloom read-back + RT-sub-toggle round-trip + stepped-PT determinism round-trip: enter pt, target 16, poll to 16, mean M1, leave + re-enter, repeat to 16, M2 == M1 bitwise) passed on the RTX 2060 viewport, 58/58 e1, 0 diagnostics |
 
 **The determinism story stops at physics.** The viewport steps physics in
 the wall-clock frame loop rather than the fixed tick, the headless host
@@ -249,7 +252,7 @@ What remains, in priority order:
    0 validation diagnostics, 666/666 unit + 39/39 editor tests.
 4. Real physics (D1): broadphase, shapes, joints, deterministic by
    construction, stepped inside the shared tick.
-5. RT sub-toggles (R2: reflections/AO) and GPU-driven skinned scenes (R3).
+5. GPU-driven skinned scenes (R3). R2 (RT reflections/AO sub-toggles) is done — shader, test, protocol v1.12, live round-trip; see the roadmap.
 6. Transient store (R6b): `VulkanTransientStore` materializes the plan on-device
    (per-Dedicated owner allocation, Aliased binds owner memory after a
    desc-equality check); the compose chain's hand-written target list is

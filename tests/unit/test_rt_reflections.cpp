@@ -858,4 +858,576 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
   h.cleanup();
 }
 
+//! Solid white cube-compatible image for the IBL dummy set: 1x1 RGBA8 with
+//! 6 layers, uploaded through a staging buffer (the frame arena only does 2D
+//! copies), sampled as a CUBE. The test asserts DIFFERENTIAL properties
+//! (flags on vs off), so a white environment is the right stand-in: it keeps
+//! every IBL tap defined and deterministic without a 300-line bake.
+struct SolidCube {
+  VkImage image{VK_NULL_HANDLE};
+  VkImageView view{VK_NULL_HANDLE};
+  VkSampler sampler{VK_NULL_HANDLE};
+  Allocation allocation{};
+};
+
+bool make_solid_cube(VkDevice dev, VkQueue q, std::uint32_t family,
+                     VulkanMemoryAllocator& alloc,
+                     const std::array<std::uint8_t, 4>& rgba, SolidCube& out) {
+  out = {};
+  SolidCube t{};
+  auto fail = [&]() {
+    if (t.allocation.is_valid()) alloc.destroy_allocation(t.allocation);
+    if (t.view != VK_NULL_HANDLE) vkDestroyImageView(dev, t.view, nullptr);
+    if (t.sampler != VK_NULL_HANDLE) vkDestroySampler(dev, t.sampler, nullptr);
+    if (t.image != VK_NULL_HANDLE) vkDestroyImage(dev, t.image, nullptr);
+    return false;
+  };
+  VkImageCreateInfo ii{};
+  ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  ii.imageType = VK_IMAGE_TYPE_2D;
+  ii.format = VK_FORMAT_R8G8B8A8_UNORM;
+  ii.extent = {1, 1, 1};
+  ii.mipLevels = 1;
+  ii.arrayLayers = 6;
+  ii.samples = VK_SAMPLE_COUNT_1_BIT;
+  ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+  ii.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  ii.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+  if (vkCreateImage(dev, &ii, nullptr, &t.image) != VK_SUCCESS) return fail();
+  auto mem = alloc.bind_image(t.image, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  if (!mem.is_ok()) return fail();
+  t.allocation = mem.value();
+  auto stage = alloc.create_buffer(24U, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (!stage.is_ok()) return fail();
+  Allocation stage_a = stage.value();
+  for (std::uint32_t i = 0; i < 6U; ++i) {
+    std::memcpy(static_cast<std::uint8_t*>(stage_a.mapped) + i * 4U,
+                rgba.data(), 4);
+  }
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(dev, family);
+  if (!pool.is_ok()) {
+    alloc.destroy_allocation(stage_a);
+    return fail();
+  }
+  auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      dev, pool.value());
+  if (!cb_r.is_ok()) {
+    alloc.destroy_allocation(stage_a);
+    vkDestroyCommandPool(dev, pool.value(), nullptr);
+    return fail();
+  }
+  VkCommandBuffer cb = cb_r.value();
+  VkCommandBufferBeginInfo bi{};
+  bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  bool ok = vkBeginCommandBuffer(cb, &bi) == VK_SUCCESS;
+  VkImageMemoryBarrier to_dst{};
+  to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_dst.image = t.image;
+  to_dst.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0U, 1U, 0U, 6U};
+  if (ok) {
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, nullptr, 0U,
+                         nullptr, 1U, &to_dst);
+  }
+  for (int layer = 0; layer < 6 && ok; ++layer) {
+    VkBufferImageCopy region{};
+    region.bufferOffset = static_cast<VkDeviceSize>(layer) * 4U;
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0U,
+                               static_cast<std::uint32_t>(layer), 1U};
+    region.imageExtent = {1U, 1U, 1U};
+    vkCmdCopyBufferToImage(cb, stage_a.buffer, t.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1U, &region);
+  }
+  VkImageMemoryBarrier to_read = to_dst;
+  to_read.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  to_read.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  to_read.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  if (ok) {
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0U, 0U, nullptr,
+                         0U, nullptr, 1U, &to_read);
+    ok = vkEndCommandBuffer(cb) == VK_SUCCESS;
+  }
+  if (ok) ok = submit_and_wait(dev, q, cb);
+  alloc.destroy_allocation(stage_a);
+  vkDestroyCommandPool(dev, pool.value(), nullptr);
+  if (!ok) return fail();
+  VkImageViewCreateInfo vi{};
+  vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  vi.image = t.image;
+  vi.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+  vi.format = VK_FORMAT_R8G8B8A8_UNORM;
+  vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0U, 1U, 0U, 6U};
+  if (vkCreateImageView(dev, &vi, nullptr, &t.view) != VK_SUCCESS) return fail();
+  VkSamplerCreateInfo sp{};
+  sp.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  sp.magFilter = sp.minFilter = VK_FILTER_NEAREST;
+  sp.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+  sp.addressModeU = sp.addressModeV = sp.addressModeW =
+      VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  if (vkCreateSampler(dev, &sp, nullptr, &t.sampler) != VK_SUCCESS) {
+    return fail();
+  }
+  out = t;
+  return true;
+}
+
+void destroy_solid_cube(VkDevice d, VulkanMemoryAllocator& a, SolidCube& t) {
+  if (t.sampler != VK_NULL_HANDLE) vkDestroySampler(d, t.sampler, nullptr);
+  if (t.view != VK_NULL_HANDLE) vkDestroyImageView(d, t.view, nullptr);
+  if (t.allocation.is_valid()) a.destroy_allocation(t.allocation);
+  if (t.image != VK_NULL_HANDLE) vkDestroyImage(d, t.image, nullptr);
+  t = {};
+}
+
+//! R2 sub-toggles through the REAL RT pipeline (pbr_rt_full.frag): the same
+//! floor + red cube scene as the reflection proof, but the TLAS carries
+//! material indices as instanceCustomIndex and the fragment is driven with
+//! pad1 flags 0 / reflect / AO / both through record_pbr_scene.
+//!
+//! Properties (all differential, so the white dummy IBL is exact enough):
+//!   1. Flags 0 renders the historical path: the mirror pixel shows floor
+//!      gray, not the cube (reflection adds nothing when off).
+//!   2. Reflections on: the mirror pixel turns red-dominant (hit shaded from
+//!      the cube's material albedo by custom index) and the miss control
+//!      pixel brightens (environment sample in the reflected direction).
+//!   3. AO on: the cube-base contact patch darkens (hemisphere half-blocked)
+//!      while a far floor pixel -- whose taps all miss -- is bit-identical
+//!      (the fully-open factor is exactly 1.0).
+//!   4. Both flags compose: the R|AO frame shows the red mirror AND a
+//!      contact darker than reflections-only but brighter than AO-only --
+//!      each flag's contribution isolated against the other single-flag
+//!      frame -- and differs from each single-flag frame bitwise.
+TEST(rt_sub_toggles, reflect_and_ao_flags) {
+  ReflectionHarness h;
+  ASSERT_TRUE(h.init("rt_sub_toggles"));
+  if (!h.ctx.has_ray_tracing_pipeline()) {
+    h.cleanup();
+    GTEST_SKIP() << "ray tracing pipeline not available on this device";
+  }
+
+  const std::array<float, 3> cube_center = {0.0f, 0.0f, -3.0f};
+  const std::array<float, 3> cube_half = {0.5f, 0.5f, 0.5f};
+  const std::array<float, 3> floor_center = {0.0f, -0.55f, -3.0f};
+  const std::array<float, 3> floor_half = {3.0f, 0.05f, 3.0f};
+  const std::array<float, 3> cam_eye = {0.0f, 1.2f, 2.2f};
+  const std::array<float, 3> virtual_image = {0.0f, -1.0f, -3.0f};
+  const std::array<float, 3> control_point = {1.2f, -0.5f, -1.0f};
+  // Cube-base contact: front-face bottom edge center, on the red cube with
+  // the floor filling half its hemisphere.
+  const std::array<float, 3> contact_point = {0.0f, -0.48f, -2.5f};
+  // The control point doubles as the AO-open pixel: it is 1.66 units
+  // horizontally from the cube footprint, so the cube subtends ~59 degrees
+  // from the floor normal there -- clear of the +/-35-degree tap cone -- and
+  // every AO tap misses (factor exactly 1.0).
+
+  // Geometry claim stands on the reflection proof's CPU check: the mirror
+  // construction hits the cube AABB and the control misses it.
+  {
+    std::array<float, 3> d = {virtual_image[0] - cam_eye[0],
+                              virtual_image[1] - cam_eye[1],
+                              virtual_image[2] - cam_eye[2]};
+    const float t = (-0.5f - cam_eye[1]) / d[1];
+    const std::array<float, 3> P = {cam_eye[0] + t * d[0], -0.5f,
+                                    cam_eye[2] + t * d[2]};
+    std::array<float, 3> r = {d[0], -d[1], d[2]};
+    EXPECT_TRUE(segment_hits_box(P, r, cube_center, cube_half));
+    std::array<float, 3> dq = {control_point[0] - cam_eye[0],
+                               control_point[1] - cam_eye[1],
+                               control_point[2] - cam_eye[2]};
+    std::array<float, 3> rq = {dq[0], -dq[1], dq[2]};
+    EXPECT_FALSE(segment_hits_box({control_point[0], -0.5f, control_point[2]},
+                                  rq, cube_center, cube_half));
+  }
+
+  const SceneMatrix cam_vp =
+      mat4_multiply(make_perspective(45.0f, 1.0f, 0.1f, 100.0f),
+                    make_look_at(cam_eye, {0.0f, -0.2f, -3.0f}, {0, 1, 0}));
+
+  omnicpp::render::PbrMaterialData mats[2]{};
+  mats[0].base_color_factor = {0.75f, 0.75f, 0.75f, 1.0f};
+  mats[0].roughness_factor = 0.2f;
+  mats[0].metallic_factor = 0.0f;
+  mats[1].base_color_factor = {0.9f, 0.1f, 0.1f, 1.0f};
+  mats[1].roughness_factor = 0.5f;
+  mats[1].metallic_factor = 0.0f;
+  h.write_materials(mats, 2);
+
+  const std::vector<float> slab =
+      make_box_triangles(floor_half[0], floor_half[1], floor_half[2]);
+  const std::vector<float> box =
+      make_box_triangles(cube_half[0], cube_half[1], cube_half[2]);
+  auto geom_floor = h.alloc.create_buffer(
+      slab.size() * sizeof(float),
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  auto geom_cube = h.alloc.create_buffer(
+      box.size() * sizeof(float),
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geom_floor.is_ok());
+  ASSERT_TRUE(geom_cube.is_ok());
+  std::memcpy(geom_floor.value().mapped, slab.data(), slab.size() * sizeof(float));
+  std::memcpy(geom_cube.value().mapped, box.data(), box.size() * sizeof(float));
+  auto address_of = [&](VkBuffer buffer) -> std::uint64_t {
+    VkBufferDeviceAddressInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    info.buffer = buffer;
+    return static_cast<std::uint64_t>(vkGetBufferDeviceAddress(h.ctx.device(), &info));
+  };
+  BlasBuildInput in_floor{};
+  in_floor.vertex_buffer_address = address_of(geom_floor.value().buffer);
+  in_floor.triangle_count = 12U;
+  in_floor.max_vertex = 12U * 3U - 1U;
+  BlasBuildInput in_cube{};
+  in_cube.vertex_buffer_address = address_of(geom_cube.value().buffer);
+  in_cube.triangle_count = 12U;
+  in_cube.max_vertex = 12U * 3U - 1U;
+  VulkanAccelerationStructureBuilder builder;
+  auto blas_floor = builder.create_blas(h.ctx.device(), h.alloc, in_floor);
+  auto blas_cube = builder.create_blas(h.ctx.device(), h.alloc, in_cube);
+  ASSERT_TRUE(blas_floor.is_ok());
+  ASSERT_TRUE(blas_cube.is_ok());
+  auto tlas = builder.create_tlas(h.ctx.device(), h.alloc, 2U);
+  ASSERT_TRUE(tlas.is_ok());
+  // R2 contract: custom index IS the material index (floor 0, cube 1), the
+  // same index the raster draw uses -- the reflection shader reads the hit
+  // albedo through it.
+  std::array<TlasInstance, 2> instances{};
+  std::memcpy(instances[0].transform,
+              translated_instance(floor_center[0], floor_center[1],
+                                  floor_center[2]).data(),
+              sizeof(instances[0].transform));
+  instances[0].instance_custom_index = 0U;
+  instances[0].blas_device_address = blas_floor.value().device_address;
+  std::memcpy(instances[1].transform,
+              translated_instance(cube_center[0], cube_center[1],
+                                  cube_center[2]).data(),
+              sizeof(instances[1].transform));
+  instances[1].instance_custom_index = 1U;
+  instances[1].blas_device_address = blas_cube.value().device_address;
+  for (auto& inst : instances) {
+    inst.mask = 0xFFu;
+    inst.sbt_offset = 0U;
+    inst.flags = VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
+  }
+  const auto sizes_floor =
+      VulkanAccelerationStructureBuilder::query_blas_sizes(h.ctx.device(), in_floor);
+  const auto sizes_cube =
+      VulkanAccelerationStructureBuilder::query_blas_sizes(h.ctx.device(), in_cube);
+  const auto tlas_sizes =
+      VulkanAccelerationStructureBuilder::query_tlas_sizes(h.ctx.device(), 2U);
+  const std::uint64_t scratch_bytes =
+      std::max({sizes_floor.buildScratchSize, sizes_cube.buildScratchSize,
+                tlas_sizes.buildScratchSize});
+  VulkanScratchPool scratch_pool;
+  auto scratch_addr = scratch_pool.acquire(h.alloc, h.ctx.device(), scratch_bytes);
+  ASSERT_TRUE(scratch_addr.is_ok());
+  {
+    auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+        h.ctx.device(), h.qf);
+    ASSERT_TRUE(pool.is_ok());
+    auto cb = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        h.ctx.device(), pool.value());
+    ASSERT_TRUE(cb.is_ok());
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    ASSERT_EQ(vkBeginCommandBuffer(cb.value(), &bi), VK_SUCCESS);
+    ASSERT_TRUE(builder.cmd_build_blas(cb.value(), h.ctx.device(),
+                                       blas_floor.value(), in_floor,
+                                       scratch_addr.value()).is_ok());
+    VkMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    vkCmdPipelineBarrier(cb.value(),
+                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+    ASSERT_TRUE(builder.cmd_build_blas(cb.value(), h.ctx.device(),
+                                       blas_cube.value(), in_cube,
+                                       scratch_addr.value()).is_ok());
+    vkCmdPipelineBarrier(cb.value(),
+                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+    ASSERT_TRUE(builder.cmd_build_tlas(cb.value(), h.ctx.device(),
+                                       tlas.value(), instances.data(), 2U,
+                                       scratch_addr.value()).is_ok());
+    ASSERT_EQ(vkEndCommandBuffer(cb.value()), VK_SUCCESS);
+    ASSERT_TRUE(submit_and_wait(h.ctx.device(), h.ctx.graphics_queue(), cb.value()));
+    vkDestroyCommandPool(h.ctx.device(), pool.value(), nullptr);
+  }
+
+  // Dummy IBL: white 1x1 cube (prefilter + irradiance share the view) and a
+  // white 2D LUT. Differential assertions only need defined taps.
+  SolidCube env{};
+  ASSERT_TRUE(make_solid_cube(h.ctx.device(), h.ctx.graphics_queue(), h.qf,
+                              h.alloc, {255, 255, 255, 255}, env));
+  SolidTexture lut{};
+  ASSERT_TRUE(make_solid_texture(h.ctx.device(), h.ctx.physical_device(),
+                                 h.ctx.graphics_queue(), h.qf, h.alloc,
+                                 {255, 255, 255, 255}, lut));
+  auto ibl_layout = h.desc.create_layout(
+      {{5, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_SHADER_STAGE_FRAGMENT_BIT},
+       {5, 1, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_SHADER_STAGE_FRAGMENT_BIT},
+       {5, 2, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_SHADER_STAGE_FRAGMENT_BIT}},
+      1);
+  ASSERT_TRUE(ibl_layout.is_ok());
+  auto ibl_set = h.desc.allocate_set(ibl_layout.value());
+  ASSERT_TRUE(ibl_set.is_ok());
+  ASSERT_TRUE(h.desc.write_image(ibl_set.value(), 0,
+                                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                 env.sampler, env.view,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL).is_ok());
+  ASSERT_TRUE(h.desc.write_image(ibl_set.value(), 1,
+                                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                 env.sampler, env.view,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL).is_ok());
+  ASSERT_TRUE(h.desc.write_image(ibl_set.value(), 2,
+                                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                 lut.sampler, lut.view,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL).is_ok());
+
+  // RT pipeline: pbr_scene vertex + pbr_rt_full fragment (set 4 = TLAS).
+  VulkanPipeline pipe;
+  const std::string sd = WARPLOOM_TEST_SHADER_DIR;
+  ASSERT_TRUE(pipe.load_shader_stage_file(h.ctx.device(),
+      sd + "/pbr_scene.vert.spv", "vertex").is_ok());
+  ASSERT_TRUE(pipe.load_shader_stage_file(h.ctx.device(),
+      sd + "/pbr_rt_full.frag.spv", "fragment").is_ok());
+  auto rt_layout = h.desc.create_layout(
+      {{4, 0, 1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
+        VK_SHADER_STAGE_FRAGMENT_BIT}}, 1);
+  ASSERT_TRUE(rt_layout.is_ok());
+  auto rt_set = h.desc.allocate_set(rt_layout.value());
+  ASSERT_TRUE(rt_set.is_ok());
+  ASSERT_TRUE(h.desc.write_acceleration_structure(
+      rt_set.value(), 0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
+      tlas.value().handle, 0).is_ok());
+  // Pipeline layout sets mirror the shader: 0 mesh, 1 tex, 2 mat, 4 TLAS,
+  // 5 IBL. Set 3 is unused by this fragment (NULL set layouts are illegal
+  // without graphicsPipelineLibrary, so a never-bound dummy holds the slot
+  // and the indices line up with the viewport's).
+  auto dummy_layout = h.desc.create_layout(
+      {{3, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_SHADER_STAGE_FRAGMENT_BIT}}, 1);
+  ASSERT_TRUE(dummy_layout.is_ok());
+  VkDescriptorSetLayout layouts[6] = {h.mesh_layout, h.tex_layout,
+                                      h.mat_layout, dummy_layout.value(),
+                                      rt_layout.value(), ibl_layout.value()};
+  VkPushConstantRange push{
+      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 160};
+  ASSERT_TRUE(pipe.create_pipeline_layout(h.ctx.device(), layouts, 6, &push).is_ok());
+  ASSERT_TRUE(pipe.create_graphics_pipeline(h.ctx.device(),
+      h.target.render_pass(), h.target.format(), pipe.pipeline_layout(),
+      true, true, true).is_ok());
+
+  auto project = [&](const std::array<float, 3>& p) -> std::pair<int, int> {
+    const auto& m = cam_vp;
+    const float cx = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
+    const float cy = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+    const float cw = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+    const float x = cx / cw;
+    const float y = cy / cw;
+    return {static_cast<int>((x * 0.5f + 0.5f) * float(kImg)),
+            static_cast<int>((y * 0.5f + 0.5f) * float(kImg))};
+  };
+  auto channels = [&](const omnicpp_test::ReadbackResult& r, int px, int py) {
+    const std::uint32_t packed =
+        r.pixels[static_cast<std::size_t>(py) * static_cast<std::size_t>(kImg) +
+                 static_cast<std::size_t>(px)];
+    return std::array<float, 3>{static_cast<float>(packed & 0xffU) / 255.0f,
+                                static_cast<float>((packed >> 8) & 0xffU) / 255.0f,
+                                static_cast<float>((packed >> 16) & 0xffU) / 255.0f};
+  };
+  const auto [mx, my] = project(virtual_image);
+  const auto [qx, qy] = project(control_point);
+  const auto [tx, ty] = project(contact_point);
+  // Projections are pure math on cam_vp, so validate them before the render
+  // loop: on failure clean up first (ASSERT_* would return past cleanup).
+  if (mx < 1 || mx >= static_cast<int>(kImg) - 1 || my < 1 ||
+      my >= static_cast<int>(kImg) - 1 || qx < 1 ||
+      qx >= static_cast<int>(kImg) - 1 || qy < 1 ||
+      qy >= static_cast<int>(kImg) - 1 || tx < 2 ||
+      tx >= static_cast<int>(kImg) - 2 || ty < 2 ||
+      ty >= static_cast<int>(kImg) - 2) {
+    destroy_solid(h.ctx.device(), h.alloc, lut);
+    destroy_solid_cube(h.ctx.device(), h.alloc, env);
+    pipe.cleanup(h.ctx.device());
+    h.cleanup();
+    FAIL() << "stale projection: a probe pixel projects outside the image";
+  }
+
+  auto render = [&](std::uint32_t flags) -> omnicpp_test::ReadbackResult {
+    omnicpp::render::VulkanPbrScene scene{};
+    scene.pipeline = pipe.pipeline();
+    scene.pipeline_layout = pipe.pipeline_layout();
+    scene.camera.view_projection = cam_vp;
+    scene.camera_position = {cam_eye[0], cam_eye[1], cam_eye[2], 1.0f};
+    scene.texture_set = h.tex_set;
+    scene.material_set = h.mat_set;
+    scene.rt_set = rt_set.value();
+    scene.rt_set_slot = 4U;
+    scene.ibl_set = ibl_set.value();
+    scene.ibl_set_slot = 5U;
+    scene.rt_flags = flags;
+    ScenePbrObject floor_obj{};
+    floor_obj.mesh = &h.cube.mesh;
+    floor_obj.model = mat4_multiply(
+        make_translation(floor_center[0], floor_center[1], floor_center[2]),
+        make_scale(floor_half[0] * 2.0f, floor_half[1] * 2.0f,
+                   floor_half[2] * 2.0f));
+    floor_obj.material_index = 0;
+    ScenePbrObject cube_obj{};
+    cube_obj.mesh = &h.cube.mesh;
+    cube_obj.model = make_translation(cube_center[0], cube_center[1],
+                                      cube_center[2]);
+    cube_obj.material_index = 1;
+    scene.objects = {floor_obj, cube_obj};
+    auto pr = omnicpp::render::VulkanRenderer::create_command_pool(
+        h.ctx.device(), h.qf);
+    EXPECT_TRUE(pr.is_ok());
+    auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        h.ctx.device(), pr.value());
+    EXPECT_TRUE(cr.is_ok());
+    VkCommandBuffer rcb = cr.value();
+    VkCommandBufferBeginInfo rbi{};
+    rbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    rbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    EXPECT_EQ(vkBeginCommandBuffer(rcb, &rbi), VK_SUCCESS);
+    omnicpp::render::VulkanRenderer renderer;
+    omnicpp::render::VulkanRenderer::PbrFrameTargets targets{};
+    targets.render_pass = h.target.render_pass();
+    targets.framebuffer = h.target.framebuffer();
+    targets.width = kImg;
+    targets.height = kImg;
+    VkClearValue frame_clears[2]{};
+    frame_clears[0].color = {{0, 0, 0, 1}};
+    frame_clears[1].depthStencil = {1.0f, 0};
+    targets.clear_values = frame_clears;
+    targets.clear_value_count = 2;
+    const auto frame_r = renderer.record_pbr_frame(rcb, scene, targets);
+    EXPECT_TRUE(frame_r.is_ok());
+    EXPECT_EQ(vkEndCommandBuffer(rcb), VK_SUCCESS);
+    EXPECT_TRUE(submit_and_wait(h.ctx.device(), h.ctx.graphics_queue(), rcb));
+    vkDestroyCommandPool(h.ctx.device(), pr.value(), nullptr);
+    return omnicpp_test::readback_swapchain_image(
+        h.ctx.physical_device(), h.ctx.device(), h.ctx.graphics_queue(), h.qf,
+        h.target.image(), h.target.format(), kImg, kImg,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, true);
+  };
+  constexpr std::uint32_t kReflect =
+      omnicpp::render::VulkanPbrScene::kRtFlagReflections;
+  constexpr std::uint32_t kAo = omnicpp::render::VulkanPbrScene::kRtFlagAo;
+
+  const auto base = render(0U);
+  ASSERT_GT(base.non_clear_pixels, 800U) << "flags-0 frame rendered nothing";
+  (void)0;
+  const auto mirror0 = channels(base, mx, my);
+  // Historical path: the mirror shows floor gray, not the cube.
+  EXPECT_LT(mirror0[0], mirror0[1] + 0.06f)
+      << "flags-0 mirror shows red without reflections on";
+
+  const auto refl = render(kReflect);
+  const auto mirror_r = channels(refl, mx, my);
+  const auto control_r = channels(refl, qx, qy);
+  const auto control_0 = channels(base, qx, qy);
+  // Hit shaded from the cube's red albedo by custom index. The addition
+  // rides through Reinhard + gamma, so +6/255 is the full signal: the
+  // thresholds sit at +0.01, tight enough to catch a neutered stage (a
+  // zeroed albedo or custom index leaves the pixels bit-identical) with
+  // ~2x margin over the measured deltas.
+  EXPECT_GT(mirror_r[0], mirror_r[1] + 0.01f)
+      << "mirror pixel not red with reflections on";
+  EXPECT_GT(mirror_r[0], mirror0[0] + 0.01f)
+      << "reflections added no red to the mirror";
+  // Miss samples the white environment: the control brightens.
+  EXPECT_GT(0.299f * control_r[0] + 0.587f * control_r[1] +
+                0.114f * control_r[2],
+            0.299f * control_0[0] + 0.587f * control_0[1] +
+                0.114f * control_0[2] + 0.01f)
+      << "miss reflection did not brighten the control pixel";
+
+  const auto ao = render(kAo);
+  auto patch_mean = [&](const omnicpp_test::ReadbackResult& r, int cx, int cy) {
+    double sum = 0.0;
+    for (int dy = -2; dy <= 2; ++dy) {
+      for (int dx = -2; dx <= 2; ++dx) {
+        const auto c = channels(r, cx + dx, cy + dy);
+        sum += 0.299 * dbl(c[0]) + 0.587 * dbl(c[1]) + 0.114 * dbl(c[2]);
+      }
+    }
+    return sum / 25.0;
+  };
+  // Hemisphere half-blocked at the contact: AO darkens it.
+  EXPECT_LT(patch_mean(ao, tx, ty), patch_mean(base, tx, ty) - 0.03)
+      << "AO did not darken the contact patch";
+  // Fully open hemisphere at the control pixel: factor exactly 1.0, so the
+  // AO-only frame is bit-identical to baseline there.
+  EXPECT_EQ(ao.pixels[static_cast<std::size_t>(qy) *
+                       static_cast<std::size_t>(kImg) +
+                       static_cast<std::size_t>(qx)],
+            base.pixels[static_cast<std::size_t>(qy) *
+                         static_cast<std::size_t>(kImg) +
+                         static_cast<std::size_t>(qx)])
+      << "AO changed a fully-open floor pixel";
+
+  // Both flags compose: the red mirror AND a darkened contact in one
+  // frame. At the contact pixel the white-environment reflection adds more
+  // than AO removes, so the composition asserts against the single-flag
+  // frames, not the baseline: darker than reflections-only (AO works),
+  // brighter than AO-only (reflections work), red mirror intact.
+  const auto both = render(kReflect | kAo);
+  const auto mirror_b = channels(both, mx, my);
+  const auto contact_b = channels(both, tx, ty);
+  const auto contact_r = channels(refl, tx, ty);
+  const auto contact_a = channels(ao, tx, ty);
+  EXPECT_GT(mirror_b[0], mirror_b[1] + 0.01f) << "both: mirror lost its red";
+  EXPECT_LT(contact_b[0], contact_r[0] - 0.02f)
+      << "both: contact lost its AO darkening";
+  EXPECT_GT(contact_b[0], contact_a[0] + 0.005f)
+      << "both: contact lost its reflection brightening";
+  EXPECT_NE(std::memcmp(both.pixels.data(), refl.pixels.data(),
+                        both.pixels.size() * sizeof(std::uint32_t)),
+            0)
+      << "both == reflections-only: AO contributed nothing";
+  EXPECT_NE(std::memcmp(both.pixels.data(), ao.pixels.data(),
+                        both.pixels.size() * sizeof(std::uint32_t)),
+            0)
+      << "both == AO-only: reflections contributed nothing";
+
+  BottomLevelAS out_floor = blas_floor.value();
+  BottomLevelAS out_cube = blas_cube.value();
+  TopLevelAS out_t = tlas.value();
+  Allocation out_gf = geom_floor.value();
+  Allocation out_gc = geom_cube.value();
+  builder.destroy_blas(h.ctx.device(), h.alloc, out_floor);
+  builder.destroy_blas(h.ctx.device(), h.alloc, out_cube);
+  builder.destroy_tlas(h.ctx.device(), h.alloc, out_t);
+  h.alloc.destroy_allocation(out_gf);
+  h.alloc.destroy_allocation(out_gc);
+  scratch_pool.cleanup(h.alloc);
+  destroy_solid_cube(h.ctx.device(), h.alloc, env);
+  destroy_solid(h.ctx.device(), h.alloc, lut);
+  pipe.cleanup(h.ctx.device());
+  h.cleanup();
+}
+
 }  // namespace

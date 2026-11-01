@@ -185,6 +185,8 @@ class VulkanPathTracer final {
   //! thereafter. `frame` is the value written to Params::cam_pos_frame.w and
   //! therefore part of the sample seed: replaying the same frame index
   //! replays the same samples. Not const because it advances sample_count().
+  //! No-ops (without touching the count) once a set_sample_target() is
+  //! reached, unless clear_first restarts the sequence.
   void record_round(VkCommandBuffer command_buffer, std::uint32_t frame,
                     bool clear_first) noexcept;
 
@@ -194,6 +196,19 @@ class VulkanPathTracer final {
   //! Accumulation rounds recorded since the last clear. `read_mean` divides by
   //! this, so it is the count the pixels on screen correspond to.
   [[nodiscard]] std::uint32_t sample_count() const noexcept { return samples_; }
+  //! Stepped-PT target (R1): once sample_count() reaches the target,
+  //! record_round() holds (no-ops unless clear_first) instead of adding
+  //! more samples, so "accumulate K frames" is a deterministic operation
+  //! rather than "as many as the wall clock allowed". 0 (default) means
+  //! unbounded: every round records, exactly the historical behaviour.
+  //! The target survives reset_accumulation (it is a setting, not state);
+  //! clear_first always restarts the sequence even while held.
+  void set_sample_target(std::uint32_t target) noexcept {
+    sample_target_ = target;
+  }
+  [[nodiscard]] std::uint32_t sample_target() const noexcept {
+    return sample_target_;
+  }
   //! Forget the accumulation: the next round with clear_first=true starts a
   //! new sequence and the count returns to 1.
   void reset_accumulation() noexcept { samples_ = 0U; }
@@ -242,6 +257,8 @@ class VulkanPathTracer final {
   std::uint32_t height_{0};
   std::uint32_t max_bounces_{4};
   std::uint32_t samples_{0};
+  //! R1 stepped-PT target, 0 = unbounded. See set_sample_target().
+  std::uint32_t sample_target_{0};
 
   VkImage accum_image_{VK_NULL_HANDLE};
   VkImageView accum_view_{VK_NULL_HANDLE};

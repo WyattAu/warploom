@@ -38,6 +38,14 @@ struct MeshTableEntry {
 struct MeshTableBuild {
   std::vector<float> vertex_data;        //!< All vertex blocks concatenated.
   std::vector<std::uint32_t> index_data; //!< Rewritten global indices.
+  //! Parallel skin stream (R3): 8 floats per vertex — joints-as-float x4 +
+  //! weights x4 — in the same vertex order as vertex_data, so the driven
+  //! skinned shader addresses it as (global_vertex * 8). Meshes added
+  //! without skin carry identity skin (joints 0, weights 1,0,0,0): one
+  //! shader for static and skinned draws, the CPU path's trick. The
+  //! invariant skin_data.size() == vertex_count * 8 always holds, so the
+  //! table format (and the cull shader) never mentions skin.
+  std::vector<float> skin_data;
   std::vector<MeshTableEntry> entries;   //!< One per added mesh, in order.
   std::size_t dedup_count{0};            //!< How many adds were dedup hits.
 
@@ -47,6 +55,9 @@ struct MeshTableBuild {
   }
   [[nodiscard]] VkDeviceSize index_bytes() const noexcept {
     return index_data.size() * sizeof(std::uint32_t);
+  }
+  [[nodiscard]] VkDeviceSize skin_bytes() const noexcept {
+    return skin_data.size() * sizeof(float);
   }
 };
 
@@ -67,6 +78,16 @@ public:
   [[nodiscard]] std::uint32_t add(const SceneMesh& mesh,
                                   const std::vector<float>& vertices,
                                   const std::vector<std::uint32_t>& indices);
+
+  //! Skinned overload (R3): `skin` carries 8 floats per vertex
+  //! (joint indices as floats x4, weights x4) in vertex order. An empty
+  //! vector means identity skin. Skin participates in dedup: identical
+  //! verts+indices with different skin are different slots (a static cube
+  //! and a skinned cube must not alias one skin stream).
+  [[nodiscard]] std::uint32_t add(const SceneMesh& mesh,
+                                  const std::vector<float>& vertices,
+                                  const std::vector<std::uint32_t>& indices,
+                                  const std::vector<float>& skin);
 
   //! Finish: returns the merged payloads + table. The builder keeps its
   //! state (builds are additive until clear()).

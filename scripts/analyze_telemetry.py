@@ -77,7 +77,7 @@ def read_depth32(path, expected_count):
 
 
 def analyze(manifest, frames, events, telemetry_dir, expect_skinned,
-            walk_duration=1.0, allow_zoom=False):
+            walk_duration=1.0, allow_zoom=False, expect_pt=False):
     print("== Manifest ==")
     check(manifest is not None, "manifest line present")
     if manifest is None:
@@ -134,18 +134,31 @@ def analyze(manifest, frames, events, telemetry_dir, expect_skinned,
                 a += 2 * math.pi
         unwrapped.append(a)
     total_sweep = unwrapped[-1] - unwrapped[0]
-    check(total_sweep > 0.0, "camera orbit advances monotonically",
-          f"sweep {total_sweep:.3f} rad")
-    # omega = 0.25 rad/s in the viewport scene.
-    expected_sweep = 0.25 * sim_times[-1]
-    check(abs(total_sweep - expected_sweep) < 0.05 * max(expected_sweep, 1e-6),
-          "orbit angular rate matches 0.25 rad/s",
-          f"sweep {total_sweep:.3f} vs expected {expected_sweep:.3f}")
+    if expect_pt:
+        # PT holds the camera (pt_hold_camera): the orbit must NOT advance.
+        # A sweeping camera under PT would smear every accumulation.
+        check(abs(total_sweep) < 1e-3, "PT holds the camera (orbit static)",
+              f"sweep {total_sweep:.4f} rad")
+    else:
+        check(total_sweep > 0.0, "camera orbit advances monotonically",
+              f"sweep {total_sweep:.3f} rad")
+        # omega = 0.25 rad/s in the viewport scene.
+        expected_sweep = 0.25 * sim_times[-1]
+        check(abs(total_sweep - expected_sweep) < 0.05 * max(expected_sweep, 1e-6),
+              "orbit angular rate matches 0.25 rad/s",
+              f"sweep {total_sweep:.3f} vs expected {expected_sweep:.3f}")
 
     print("== Animation ==")
     walk_times = [f["walk_t"] for f in frames]
     blends = [f.get("blend", 0.0) for f in frames]
-    if manifest["has_mannequin"]:
+    if expect_pt:
+        # PT is a static snapshot (long-term roadmap T2): the tracer builds
+        # from the frame's scene and accumulation assumes a frozen subject.
+        # walk_t must be bit-constant, or the capture is a smear, not a proof.
+        check(all(w == walk_times[0] for w in walk_times),
+              "PT freezes animation (walk_t constant)",
+              f"range {min(walk_times):.4f}..{max(walk_times):.4f}")
+    if manifest["has_mannequin"] and not expect_pt:
         if any(abs(b) > 1e-6 for b in blends):
             # Cross-fade run: weight must reach both extremes (full walk and
             # full idle) and stay within [0, 1].
@@ -252,6 +265,8 @@ def main():
                         help="walk-cycle duration of the loaded model")
     parser.add_argument("--allow-zoom", action="store_true",
                         help="scripted zoom changes camera radius by design")
+    parser.add_argument("--expect-pt", action="store_true",
+                        help="path-tracing run: camera held, animation frozen")
     parser.add_argument("--check-budgets", default=None,
                         help="compare p95 GPU/record times against a budget "
                              "file, e.g. --check-budgets default:" \
@@ -266,7 +281,7 @@ def main():
         print("no frame records found")
         return 2
     analyze(manifest, frames, events, telemetry_dir, args.expect_skinned,
-            args.walk_duration, args.allow_zoom)
+            args.walk_duration, args.allow_zoom, args.expect_pt)
 
     # Scene-structure assertions (Phase B1 data).
     print("== Scene structure ==")
@@ -287,16 +302,24 @@ def main():
                 if abs(f["walk_t"] - p["walk_phase"]) > 1e-4)
             check(mismatched == 0, "pose walk_phase matches frame walk_t",
                   f"{mismatched} mismatches")
-            # The largest swing joint is named once the pose moves (the
-            # bind pose has zero deviation, so early frames may be empty).
-            check(any(p["swing_joint"] for p in poses),
-                  "pose lines name a swing joint after warm-up")
-            check(sum(1 for p in poses if p["swing_joint"]) >=
-                  len(poses) // 2,
-                  "a majority of pose lines name a swing joint")
-            degs = [p["swing_deg"] for p in poses]
-            check(max(degs) > 1.0, "swing angle moves during the run",
-                  f"max {max(degs):.1f} deg")
+            if args.expect_pt:
+                # Frozen mid-stride: poses exist (one per frame) but must
+                # not move -- accumulation assumes a static subject.
+                degs = [p["swing_deg"] for p in poses]
+                check(max(degs) - min(degs) < 1e-6,
+                      "PT pose static across frames",
+                      f"swing range {min(degs):.3f}..{max(degs):.3f} deg")
+            else:
+                # The largest swing joint is named once the pose moves (the
+                # bind pose has zero deviation, so early frames may be empty).
+                check(any(p["swing_joint"] for p in poses),
+                      "pose lines name a swing joint after warm-up")
+                check(sum(1 for p in poses if p["swing_joint"]) >=
+                      len(poses) // 2,
+                      "a majority of pose lines name a swing joint")
+                degs = [p["swing_deg"] for p in poses]
+                check(max(degs) > 1.0, "swing angle moves during the run",
+                      f"max {max(degs):.1f} deg")
             # Allocator stats are stable and nonzero.
             check(all(p["allocator_reserved"] > 0 for p in poses),
                   "allocator telemetry populated")

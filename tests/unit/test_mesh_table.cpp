@@ -100,6 +100,67 @@ TEST(MeshTable, RejectsInvalidGeometry) {
   EXPECT_EQ(builder.mesh_count(), 0U);
 }
 
+TEST(MeshTable, SkinStreamParallelsVerticesWithIdentityDefault) {
+  omnicpp::render::SceneMeshTableBuilder builder;
+  std::vector<float> v;
+  std::vector<std::uint32_t> i;
+  make_variant(-1.0f, v, i);
+  const auto slot = builder.add(shell_mesh(), v, i);
+  ASSERT_NE(slot, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
+  const auto& build = builder.build();
+  // One skin record (8 floats) per vertex, identity: joints 0, weights 1,0,0,0.
+  ASSERT_EQ(build.skin_data.size(), 24U * 8U);
+  for (std::uint32_t vert = 0; vert < 24U; ++vert) {
+    for (std::uint32_t k = 0; k < 4U; ++k) {
+      EXPECT_EQ(build.skin_data[vert * 8U + k], 0.0f);
+    }
+    EXPECT_EQ(build.skin_data[vert * 8U + 4U], 1.0f);
+    EXPECT_EQ(build.skin_data[vert * 8U + 5U], 0.0f);
+    EXPECT_EQ(build.skin_data[vert * 8U + 6U], 0.0f);
+    EXPECT_EQ(build.skin_data[vert * 8U + 7U], 0.0f);
+  }
+}
+
+TEST(MeshTable, SkinParticipatesInDedup) {
+  std::vector<float> v;
+  std::vector<std::uint32_t> i;
+  make_variant(-1.0f, v, i);
+  std::vector<float> skin_a(24U * 8U, 0.0f);
+  std::vector<float> skin_b(24U * 8U, 0.0f);
+  for (std::uint32_t vert = 0; vert < 24U; ++vert) {
+    skin_a[vert * 8U + 0U] = 0.0f;
+    skin_a[vert * 8U + 4U] = 1.0f;
+    skin_b[vert * 8U + 0U] = 1.0f;  // different joint -> different skin
+    skin_b[vert * 8U + 4U] = 1.0f;
+  }
+  omnicpp::render::SceneMeshTableBuilder builder;
+  const auto s0 = builder.add(shell_mesh(), v, i, skin_a);
+  const auto s1 = builder.add(shell_mesh(), v, i, skin_b);
+  ASSERT_NE(s0, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
+  ASSERT_NE(s1, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
+  // Same verts+indices but different skin: NOT a dedup — aliasing one
+  // skin stream would shade the second mesh with the first mesh's joints.
+  EXPECT_NE(s1, s0);
+  EXPECT_EQ(builder.build().dedup_count, 0U);
+  EXPECT_EQ(builder.build().entries.size(), 2U);
+  // Same verts AND same skin: dedup holds, one copy of each stream.
+  const auto s2 = builder.add(shell_mesh(), v, i, skin_a);
+  EXPECT_EQ(builder.build().dedup_count, 1U);
+  EXPECT_EQ(builder.build().entries[s2].dedup_of, s0);
+  EXPECT_EQ(builder.build().skin_data.size(), 2U * 24U * 8U);
+}
+
+TEST(MeshTable, RejectsMismatchedSkin) {
+  omnicpp::render::SceneMeshTableBuilder builder;
+  std::vector<float> v;
+  std::vector<std::uint32_t> i;
+  make_variant(-1.0f, v, i);
+  const std::vector<float> bad_skin(10U, 0.0f);  // not 24*8
+  EXPECT_EQ(builder.add(shell_mesh(), v, i, bad_skin),
+            omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
+  EXPECT_EQ(builder.mesh_count(), 0U);
+}
+
 TEST(MeshTable, ClearResetsState) {
   omnicpp::render::SceneMeshTableBuilder builder;
   std::vector<float> v;
@@ -110,6 +171,7 @@ TEST(MeshTable, ClearResetsState) {
   EXPECT_EQ(builder.mesh_count(), 0U);
   EXPECT_TRUE(builder.build().vertex_data.empty());
   EXPECT_TRUE(builder.build().index_data.empty());
+  EXPECT_TRUE(builder.build().skin_data.empty());
 
   // After clear, the same geometry is a fresh slot 0 (not a dedup hit).
   const auto slot = builder.add(shell_mesh(), v, i);

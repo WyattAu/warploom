@@ -20,22 +20,66 @@ namespace {
 
 }  // namespace
 
+namespace {
+
+//! Identity skin for one vertex: joints 0, weights (1,0,0,0).
+void append_identity_skin(std::vector<float>& skin_data, std::size_t vertex_count) {
+  for (std::size_t v = 0; v < vertex_count; ++v) {
+    skin_data.insert(skin_data.end(), {0.0f, 0.0f, 0.0f, 0.0f,
+                                       1.0f, 0.0f, 0.0f, 0.0f});
+  }
+}
+
+}  // namespace
+
 std::uint32_t SceneMeshTableBuilder::add(const SceneMesh& mesh,
                                          const float* vertex_data,
                                          std::size_t vertex_float_count,
                                          const std::uint32_t* index_data,
                                          std::size_t index_count) {
-  (void)mesh;  // descriptor_set/buffers are the legacy draw path's concern.
-  if (vertex_data == nullptr || index_data == nullptr ||
-      vertex_float_count == 0U || index_count == 0U ||
-      vertex_float_count % 11U != 0U) {
+  if (vertex_data == nullptr || index_data == nullptr) {
     return SceneMeshTableBuilder::kInvalidSlot;
   }
+  return add(mesh, std::vector<float>(vertex_data, vertex_data + vertex_float_count),
+             std::vector<std::uint32_t>(index_data, index_data + index_count),
+             std::vector<float>{});
+}
+
+std::uint32_t SceneMeshTableBuilder::add(
+    const SceneMesh& mesh, const std::vector<float>& vertices,
+    const std::vector<std::uint32_t>& indices,
+    const std::vector<float>& skin) {
+  (void)mesh;  // descriptor_set/buffers are the legacy draw path's concern.
+  if (vertices.empty() || indices.empty() || vertices.size() % 11U != 0U) {
+    return SceneMeshTableBuilder::kInvalidSlot;
+  }
+  const std::size_t vertex_count = vertices.size() / 11U;
+  // Empty skin = identity for every vertex; otherwise exactly 8 floats
+  // per vertex. A wrong-sized skin is a caller bug: refuse loudly rather
+  // than uploading a misaligned stream the shader would read silently.
+  if (!skin.empty() && skin.size() != vertex_count * 8U) {
+    return SceneMeshTableBuilder::kInvalidSlot;
+  }
+  const float* vertex_data = vertices.data();
+  const std::size_t vertex_float_count = vertices.size();
+  const std::uint32_t* index_data = indices.data();
+  const std::size_t index_count = indices.size();
 
   const std::size_t vertex_bytes = vertex_float_count * sizeof(float);
   const std::size_t index_bytes = index_count * sizeof(std::uint32_t);
+  // Skin participates in dedup: identical verts+indices with different
+  // skin are different slots. Identity skin hashes as its expanded bytes,
+  // so static/static dedup is unaffected.
+  std::vector<float> skin_expanded;
+  const std::vector<float>* skin_ptr = &skin;
+  if (skin.empty()) {
+    append_identity_skin(skin_expanded, vertex_count);
+    skin_ptr = &skin_expanded;
+  }
+  const std::size_t skin_bytes = skin_ptr->size() * sizeof(float);
   const std::uint64_t hash =
-      fnv1a64(vertex_data, vertex_bytes) ^ fnv1a64(index_data, index_bytes);
+      fnv1a64(vertex_data, vertex_bytes) ^ fnv1a64(index_data, index_bytes) ^
+      fnv1a64(skin_ptr->data(), skin_bytes);
 
   // Dedup prefilter by hash, confirmed by exact byte comparison.
   for (const Accepted& prior : accepted_) {
@@ -44,10 +88,13 @@ std::uint32_t SceneMeshTableBuilder::add(const SceneMesh& mesh,
         prior.index_count != index_count) {
       continue;
     }
+    const float* prior_skin =
+        build_.skin_data.data() + (prior.vertex_first / 11U) * 8U;
     if (std::memcmp(build_.vertex_data.data() + prior.vertex_first,
                     vertex_data, vertex_bytes) == 0 &&
         std::memcmp(build_.index_data.data() + prior.index_first,
-                    index_data, index_bytes) == 0) {
+                    index_data, index_bytes) == 0 &&
+        std::memcmp(prior_skin, skin_ptr->data(), skin_bytes) == 0) {
       // Exact duplicate: alias the first slot's ranges.
       const MeshTableEntry first = build_.entries[prior.slot];
       MeshTableEntry entry = first;
@@ -68,6 +115,8 @@ std::uint32_t SceneMeshTableBuilder::add(const SceneMesh& mesh,
   const std::size_t index_first = build_.index_data.size();
   build_.vertex_data.insert(build_.vertex_data.end(), vertex_data,
                             vertex_data + vertex_float_count);
+  build_.skin_data.insert(build_.skin_data.end(), skin_ptr->begin(),
+                          skin_ptr->end());
   // Rewrite local indices into the shared global VERTEX space: a global
   // index addresses global vertices; the draw command's firstIndex covers
   // the index-buffer offset separately.
