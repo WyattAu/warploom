@@ -38,7 +38,7 @@ This architecture creates a mathematical guarantee of ABI compatibility, elimina
 
 ## Bootstrapping (Zero-Dependency Setup)
 
-CPM.cmake is distributed as a single CMake script. The standard practice is to "bootstrap" it—downloading it automatically during the CMake configure phase if it does not exist. This ensures the project is self-contained.
+CPM.cmake is distributed as a single CMake script. The standard practice is to "bootstrap" it-downloading it automatically during the CMake configure phase if it does not exist. This ensures the project is self-contained.
 
 Create `cmake/CPM.cmake` or include this block in your root `CMakeLists.txt`:
 

@@ -1,4 +1,4 @@
-# warploom-core — S2 dependency analysis and migration plan
+# warploom-core: S2 dependency analysis and migration plan
 
 Status: **plan** (docs/roadmap.md track S). This document is the gate the
 roadmap requires before any target moves: what `warploom-core` owns, what it
@@ -33,7 +33,7 @@ part of warploom-core:
 - `include/engine/render/vulkan_parallel_recorder.hpp` (one render header
   declares `namespace omnicpp::editor`).
   *Correction (S4 re-audit, docs/warploom-editor-plan.md):* this header
-  declares `omnicpp::core` then `omnicpp::render` — never `omnicpp::editor`.
+  declares `omnicpp::core` then `omnicpp::render`; never `omnicpp::editor`.
   The conservative S2 claim was wrong in the safe direction; the truthful
   split is 7 core headers vs 3 widget headers, nothing else.
 
@@ -59,15 +59,15 @@ warploom-ui-free):
 - Namespace ownership moves with the files: `omnicpp::core` and the
   document/session parts of `omnicpp::editor` become `warploom::core` /
   `warploom::editor` as defined by warploom-core's headers. The engine-side
-  editor widgets and the render recorder keep their current home — they will
+  editor widgets and the render recorder keep their current home; they will
   alias/consume core under S4/S3.
 
-**warploom-core does NOT take**: `node_editor`/`inspector` (widget layer —
+**warploom-core does NOT take**: `node_editor`/`inspector` (widget layer -
 S4 `warploom-editor`), anything under `render/` or `asset/` (S3), the
 viewport/examples/tests (stay superproject-side), the software rasterizer
 interface target.
 
-## Strategy: phase A (this session) — the package, zero churn
+## Strategy: phase A (this session): the package, zero churn
 
 S1's lesson: the *package boundary* is the risky part; identifier churn is
 mechanical and late-bound. So S2 phase A extracts the boundary WITHOUT
@@ -104,7 +104,7 @@ renaming identifiers:
    - the S1 standalone ui-consumer proof still passes (no regression in the
      module family).
 
-## Strategy: phase B (later session) — identifier migration
+## Strategy: phase B (later session): identifier migration
 
 Mechanical, gated by phase A's green matrix: `warploom::core` /
 `warploom::editor` namespace adoption in core headers + compat
@@ -124,10 +124,10 @@ there.
    `warploom/core/x.hpp`); installed package exposes ONLY
    `warploom/core/*` (allowlist enforces).
 3. **`tests/CMakeLists.txt` include paths**: tests include
-   `engine/core/...` via the superproject include root — forwarders keep
+   `engine/core/...` via the superproject include root; forwarders keep
    this valid; no test churn in phase A.
 4. **Benchmark/determinism sentinel**: the deterministic-runtime benchmark
-   is the canary for "extraction changed behavior" — it must stay green and
+   is the canary for "extraction changed behavior"; it must stay green and
    byte-stable.
 5. **Library ordering**: `warploom_core` must not link `Warploom::ui`
    (verified: no ui includes in core). `omnicpp_runtime` links both.
@@ -145,7 +145,7 @@ there.
 
 # Phase B: identifier migration (S2-B gate)
 
-Status: **DONE** (verified per the gate below) — the contract is the
+Status: **DONE** (verified per the gate below); the contract is the
 acceptance authority that was
 authority for S2-B, appended per the design-first discipline. The phase-A
 blocker (an `omnicpp::editor` collision across not-yet-split widget code)
@@ -159,7 +159,7 @@ module header, so the namespace move is mechanical.
    blocks: `omnicpp::core` → `warploom::core`, `omnicpp::editor` →
    `warploom::editor`, `omnicpp::anim` → `warploom::anim`,
    `omnicpp::physics` → `warploom::physics`, `omnicpp::contract` →
-   `warploom::contract`. File-scoped, mechanical openers + closers —
+   `warploom::contract`. File-scoped, mechanical openers + closers -
    exactly the S1 ui move, now for core.
 2. **Compat footers in every public header.** The legacy spellings must
    name the SAME types, so the footer uses a using-directive in a
@@ -167,7 +167,7 @@ module header, so the namespace move is mechanical.
    ::warploom::core; }` (all five re-badged namespaces, every public
    header). *Correction during implementation (compile-model probe):*
    the type-alias syntax (`namespace omnicpp { using core =
-   warploom::core; }`) is ill-formed for namespaces — `using X = ...`
+   warploom::core; }`) is ill-formed for namespaces; `using X = ...`
    names types only. The using-directive form is the legal mechanism and
    additionally coexists with real `omnicpp::core` extension blocks (the
    render recorder header): extension blocks merge, and a struct tag in
@@ -178,9 +178,9 @@ module header, so the namespace move is mechanical.
    outside modules/core (`omnicpp::core::X`, `omnicpp::editor::X`,
    `omnicpp::anim::X`) resolve through the aliases: 113 files across
    `modules/editor`, `src/`, `include/`, `tools/`, `examples/`, `tests/`.
-   Include roots do NOT change — only namespace spelling moves.
+   Include roots do NOT change; only namespace spelling moves.
 4. **S-decision split.** Repo-wide external identity (`OMNICPP_*` flags,
-   repo rename, binary names) stays OUT — it rides with S5 so adopters
+   repo rename, binary names) stays OUT; it rides with S5 so adopters
    see one coherent identity change. This phase changes namespaces only.
 5. **Verification gate (S2-B exit)**:
    - `warploom_core_tests` + `warploom_editor_tests` + full 6/6 suites on
@@ -188,7 +188,7 @@ module header, so the namespace move is mechanical.
      using the old spelling);
    - standalone consumers re-proofed against a fresh install
      (`CORE_CONSUMER_OK`, `UI_CONSUMER_OK`, `EDITOR_CONSUMER_OK` +
-     `G3B_CONSUMER_OK` — the last two now exercise the alias path, since
+     `G3B_CONSUMER_OK`; the last two now exercise the alias path, since
      their sources still spell `omnicpp::editor`);
    - 64/64 live proofs on hardware (the headless host + proof harness
      are alias consumers);

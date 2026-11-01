@@ -1,4 +1,4 @@
-# warploom timeline — G3 dependency analysis and design (gate doc)
+# warploom timeline: G3 dependency analysis and design (gate doc)
 
 Status: **plan** (docs/roadmap.md track G). Gate document for G3, same
 discipline as the S-track plans: what the timeline owns, how it composes
@@ -19,7 +19,7 @@ with W1/W2/G1, what breaks, and the order of operations. Counts measured.
 - **W2's recorder is protocol-only**: `CommandRecorder` observes commands;
   headless sessions advance logical frames via `step` (`record_external`
   for host-handled pause/resume/step). The headless host
-  (`tools/headless_host.cpp`) has no sim loop — properties change only
+  (`tools/headless_host.cpp`) has no sim loop; properties change only
   through `set_property` commands.
 
 ## Boundary decision
@@ -31,22 +31,22 @@ composition story, and it is free:
   section).
 - W1: `scrub_start` checkpoints capture them; `scrub_to` restores them
   (clip definitions return to the warp point; session-side armed states
-  disarm — see interplay below).
+  disarm; see interplay below).
 - W2: clip edit commands join the recorded-kinds set and replay
   re-applies them; recorded track content rides the closing checkpoint
   (see "Replay interplay").
 - Undo: clip add/remove/move are normal `Command` classes.
 
-**Recording/playback is session-side, host-ticked, deterministic** — direct
+**Recording/playback is session-side, host-ticked, deterministic**; direct
 application, NOT commands (same model as graph→scene bindings: driven
 values are not undoable; the graph/clip owns them, and W1 scrubbing is the
-recovery path). A clip's track stores **property samples** — recording a
+recovery path). A clip's track stores **property samples**; recording a
 bound property IS recording a graph signal as it lands in the scene
 (roadmap wording "recorded graph signals" satisfied without a parallel
 pin-sampling store; raw pin sampling is a future item, not v1).
 
 **The panel widget lands in `warploom-editor`** (G3 phase B) as a
-projection of (document clips, scrubber checkpoints) — that is why G3 was
+projection of (document clips, scrubber checkpoints); that is why G3 was
 held until after S4. Phase A (this session) is the core + protocol +
 proof; the viewport's existing `TimelinePanel` stays as-is until the
 module widget replaces it.
@@ -70,11 +70,11 @@ struct TimelineClip final {
 // documents stay byte-stable).
 ```
 
-Frames, not seconds — the engine's clock is deterministic ticks; the
+Frames, not seconds; the engine's clock is deterministic ticks; the
 scrubber and recorder are already frame-indexed. Samples are
 `frame_offset` relative to `start_frame` (clips stay movable without
 rewriting samples). Step-hold interpolation (last sample ≤ offset; nothing
-before the first sample) — linear interpolation is a documented v1.1
+before the first sample); linear interpolation is a documented v1.1
 candidate, not v1.
 
 ## Protocol v1.8
@@ -85,23 +85,23 @@ candidate, not v1.
 | `ClipRemove` | `clip_remove` | `n0`=clip id | yes |
 | `ClipMove` | `clip_move` | `n0`=clip id, `n1`=start | yes |
 | `ClipRecord` | `clip_record` | `n0`=clip id, `n1`=object id, `text`=property | yes |
-| `ClipRecordStop` | `clip_record_stop` | — | yes |
+| `ClipRecordStop` | `clip_record_stop` | - | yes |
 | `ClipPlay` | `clip_play` | `n0`=clip id, `n1`=start frame (optional) | yes |
-| `ClipStop` | `clip_stop` | — | yes |
-| `ClipsInfo` | `clips_info` | — (query → JSON array) | no (query) |
+| `ClipStop` | `clip_stop` | - | yes |
+| `ClipsInfo` | `clips_info` |; (query → JSON array) | no (query) |
 
 Undo/redo stay generic (`undo`/`redo` already recorded). The wire-parity
 test walks `kind_names()`, so the new kinds are parser-covered the moment
-they enter the table — the protocol invariant is enforced, not remembered.
+they enter the table; the protocol invariant is enforced, not remembered.
 
 ## Session semantics (the decisions)
 
 - **Arming**: at most one armed record target and one armed playback clip
   at a time (v1; documented). `clip_record` validates clip, object,
   property exist; `clip_play` validates the clip has at least one track.
-- **`tick_timeline(frame)`** — new host-ticked hook, called once per sim
+- **`tick_timeline(frame)`**; new host-ticked hook, called once per sim
   tick AFTER `sync_graph` (bindings write first; the clip wins that frame
-  if both drive the same property — documented order):
+  if both drive the same property; documented order):
   1. Recording armed and `frame ∈ [start, start+length)`: append
      `{frame - start, current property value}` to the target track;
      auto-disarm at clip end (deterministic end, no host bookkeeping).
@@ -113,14 +113,14 @@ they enter the table — the protocol invariant is enforced, not remembered.
   wholesale replace invalidates the frame context it was armed against.
 - **Undo across recording**: samples recorded into a track are document
   mutations made OUTSIDE the command stack (driven values). A subsequent
-  undo restores the pre-edit document INCLUDING the track as captured —
+  undo restores the pre-edit document INCLUDING the track as captured -
   documented honestly: recording is not undoable; W1 scrubbing is the
   recovery path (same answer as bindings).
 
 ## Replay interplay (W2)
 
 Clip edit commands replay normally. Sample capture is sim-side and is NOT
-re-simulated by `load_replay` (a headless re-applier has no sim loop) —
+re-simulated by `load_replay` (a headless re-applier has no sim loop) -
 but the closing checkpoint embedded at `stop_capture` is a whole-document
 snapshot INCLUDING tracks recorded up to that point, so a replayed session
 lands with the recorded content intact. Documented in
@@ -136,7 +136,7 @@ promise holding: new editor features land in the module, not in main.cpp.
 
 ## G3 phase B (next session, scoped here so phase A doesn't drift)
 
-**DONE** — `ClipTimelineView` landed in `warploom-editor`; the contract
+**DONE**; `ClipTimelineView` landed in `warploom-editor`; the contract
 above is now authoritative in `docs/warploom-clip-timeline-view-plan.md`
 (pure projection, host-owned frame window, `clip_at` hit-test, drag
 commits the session's `clip_move`). Module tests prove geometry +
@@ -146,13 +146,13 @@ above the W1 scrub strip).
 ## Risks / open questions
 
 1. **Serializer churn**: schema bump touches the most sensitive code in
-   the engine (byte-determinism). Mitigation: the hash sentinel — the
+   the engine (byte-determinism). Mitigation: the hash sentinel; the
    deterministic-runtime benchmark and the W1/W2/G1 round-trip tests must
    stay green; clips are written only when non-empty so existing byte
    fixtures do not move.
 2. **Recording growth**: unbounded samples on a long armed record. v1
    bound: a clip records only within `[start, start+length)` and
-   auto-disarms at the end — the clip's own length is the bound.
+   auto-disarms at the end; the clip's own length is the bound.
 3. **Wire-parity test**: new kinds must appear in `kind_names()` AND have
    parse cases; the existing test fails otherwise (by design).
 4. **Headless proof**: `omnicpp_headless_host` must call

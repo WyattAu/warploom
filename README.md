@@ -1,7 +1,7 @@
 # Warploom
 
 A data-oriented C++ engine with deterministic simulation, Vulkan rendering,
-an ECS foundation, and a time-warp editor — shipped as six installable
+an ECS foundation, and a time-warp editor; shipped as six installable
 CMake packages (`warploom_asset`, `warploom_core`, `warploom_editor`,
 `warploom_engine`, `warploom_render`, `warploom_ui`).
 
@@ -31,14 +31,14 @@ glslang-tools`.
 | Preset | Purpose |
 |---|---|
 | `default` | modules + tests + viewport, with whatever toolchain CMake finds |
-| `headless-debug` / `headless-release` | no Vulkan, no window — the fast inner loop |
+| `headless-debug` / `headless-release` | no Vulkan, no window; the fast inner loop |
 | `headless-debug-clang` | the same under Clang |
 | `asan-ubsan` / `tsan` | sanitizer legs |
 | `vulkan-validation` | Khronos validation layer on Mesa lavapipe |
 | `release` | optimised build |
 
 Each has a matching `--build` and `ctest --preset` entry. About 60 more
-(compiler, cross and Nix combinations) are `hidden` — reachable with
+(compiler, cross and Nix combinations) are `hidden`; reachable with
 `--preset=<name>`, absent from `--list-presets`.
 
 ## Architecture
@@ -76,7 +76,7 @@ superproject-wide include path.
 
 Read [`docs/rendering-status.md`](docs/rendering-status.md) before trusting
 any capability list, including this one. It separates three questions that
-are easy to conflate — is it in the engine, can the app reach it, and what
+are easy to conflate; is it in the engine, can the app reach it, and what
 proves it.
 
 The short version:
@@ -92,7 +92,7 @@ that it does not:
 
 - **Physics is 204 lines.** Semi-implicit Euler, spheres only, an O(n²)
   broadphase, no shapes, no joints, and it is stepped outside the
-  deterministic tick — so replay cannot reproduce it.
+  deterministic tick; so replay cannot reproduce it.
 - **The app does not use the renderer module.** The viewport hand-rolls its
   own Vulkan. `record_pbr_frame`, the render graph, H-Z occlusion, offscreen
   targets and the whole bloom/tonemap chain are real and tested but have no
@@ -110,7 +110,7 @@ that it does not:
 | `ctest` | 6/6 suites |
 | Full suite on hardware (RTX 2060) under `VK_LAYER_KHRONOS_validation` | 0 diagnostics, 0 leaks |
 | `default` preset, under `VK_LAYER_KHRONOS_validation` | 580 tests, 0 diagnostics, 0 leaks |
-| `headless-debug`, `asan-ubsan`, `tsan` | **do not build** — see below |
+| `headless-debug`, `asan-ubsan`, `tsan` | **do not build**; see below |
 | `live_proof.py all` over real sockets | 64/64 |
 | `cpack` | 353-file package: modules, headers, package configs, shaders, viewport |
 
@@ -160,4 +160,4 @@ docs/               architecture, roadmap, capability status
 
 ## Licence
 
-MIT — see [`LICENSE`](LICENSE).
+MIT; see [`LICENSE`](LICENSE).

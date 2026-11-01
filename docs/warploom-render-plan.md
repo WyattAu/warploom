@@ -1,4 +1,4 @@
-# warploom-render — S3 gate
+# warploom-render: S3 gate
 
 Status: GATE (extraction not started; this document is the audit + contract)
 
@@ -18,7 +18,7 @@ package `WarploomRender`), exactly mirroring the S1/S2/S4 module pattern:
 - compat forwarders `include/engine/render/X.hpp` → one-line include of
   `warploom/render/X.hpp`
 
-Names stay `omnicpp::render` this phase — S3 is an **include-path and
+Names stay `omnicpp::render` this phase; S3 is an **include-path and
 packaging extraction only**. The `render` → `warploom::render` identifier
 migration is S5/S-decision scope (the S2-B scheme needs a real first-class
 module first; this is that module). `vulkan_ui_renderer.hpp`'s existing
@@ -34,7 +34,7 @@ left untouched.
 |---|---|---|
 | deterministic_runtime.hpp | 18 of 27 headers | `Warploom::core` PUBLIC |
 | ecs.hpp | scene_camera, vulkan_scene | (already in core) |
-| job_system.hpp | vulkan_parallel_recorder header (S2-B: real include replaced the fwd-decl — a real member declaration hides directive-injected types) | (already in core) |
+| job_system.hpp | vulkan_parallel_recorder header (S2-B: real include replaced the fwd-decl; a real member declaration hides directive-injected types) | (already in core) |
 | latency_telemetry.hpp | vulkan_renderer header | (already in core) |
 | clock.hpp, contract.hpp | TUs only | PRIVATE via core |
 | warploom/ui/widget.hpp | vulkan_ui_renderer.hpp (S1 alias) | `Warploom::ui` PUBLIC |
@@ -42,9 +42,9 @@ left untouched.
 
 All five core headers render needs (`deterministic_runtime`, `ecs`,
 `job_system`, `latency_telemetry`, `clock`/`contract`) are already
-`modules/core/include/warploom/core/*` post-S2 — **no core change
+`modules/core/include/warploom/core/*` post-S2; **no core change
 required**. Render headers must include `warploom/core/*` roots directly
-(never `engine/core/*` forwarders — S4 banked lesson).
+(never `engine/core/*` forwarders; S4 banked lesson).
 
 ### 2.2 Vulkan plumbing (the S3-specific risk)
 
@@ -73,7 +73,7 @@ without extra plumbing.
 | `examples/viewport/main.cpp`, `telemetry.hpp` | renderer/graph/etc | forwarders (unchanged spellings) |
 | 42 `tests/unit/test_*.cpp` TUs | full surface | forwarders |
 | `modules/editor/tests/test_node_editor.cpp` | software_rasterizer.hpp | forwarder + superproject include seam (in-tree only, already guarded) |
-| engine glue TUs (main.cpp, asset) | — | none (link-time only) |
+| engine glue TUs (main.cpp, asset) | - | none (link-time only) |
 
 Grep across `src include examples tests modules tools` finds **no other
 engine-layer includes** of `engine/render/*` (e.g. nothing in
@@ -82,7 +82,7 @@ forwarders with zero source edits.
 
 ### 2.4 What stays in the monolith
 
-`src/engine/asset/*` (6 TUs) stays — asset is render-adjacent but
+`src/engine/asset/*` (6 TUs) stays; asset is render-adjacent but
 consumed only by glue today; its extraction is not S3 scope.
 `omnicpp_runtime` keeps: asset TUs + glue, and links `Warploom::render`
 PUBLIC (public headers of the glue include render forwarders → module
@@ -95,7 +95,7 @@ carries render code, so link order/symbols stay correct for the
 1. `git mv` 27 headers → `modules/render/include/warploom/render/`;
    rewrite `engine/render/X.hpp` self-includes → `warploom/render/X.hpp`
    (from `git show HEAD:` content, **never** find-surgery on files with
-   `// ====` doc dividers — S2-B lesson; line count must never shrink).
+   `// ====` doc dividers; S2-B lesson; line count must never shrink).
 2. `git mv` 22 TUs → `modules/render/src/warploom/render/`; rewrite
    self-includes same way. TU includes of forwarders
    (`engine/core/*`) → `warploom/core/*` roots.
@@ -115,7 +115,7 @@ carries render code, so link order/symbols stay correct for the
    alias is forbidden, so it becomes a plain INTERFACE library that
    links `Warploom::render`).
    Root `add_subdirectory(modules/render)` **before** `src/engine`
-   (CMake resolves plain names at call time; ORDER MATTERS — editor/core
+   (CMake resolves plain names at call time; ORDER MATTERS; editor/core
    precede src/engine today for the same reason).
 6. Vulkan plumbing moves with the module; superproject keeps its
    `OMNICPP_USE_VULKAN` option forwarded as
@@ -124,46 +124,46 @@ carries render code, so link order/symbols stay correct for the
    (render tests are the 42-TU GPU/runtime suite, which already covers
    the full surface; per S1/S2/S4 the module keeps in-tree tests
    guarded, but a separate Vulkan-heavy gtest target would double-build
-   22 TUs for zero assertion gain — decision recorded, revisit if the
+   22 TUs for zero assertion gain; decision recorded, revisit if the
    module gains headless-only logic). Superproject suites unchanged:
    all 42 test TUs keep compiling via forwarders and link the runtime
    which now pulls the render DSO transitively.
 
 ## 4. Correctness risks and mitigations
 
-1. **PUBLIC compile definition loss** — `OMNICPP_HAS_VULKAN` gates
+1. **PUBLIC compile definition loss**; `OMNICPP_HAS_VULKAN` gates
    declarations in 3 public headers. If it becomes PRIVATE, every
    consumer TU compiling those headers sees a different class layout →
    ODR. Mitigation: it is PUBLIC on the module target and flows to
    every consumer via the exported target; verified by the full suite
    compiling + `OMNICPP_HAS_VULKAN` grep from a consumer TU perspective
    (any miss fails at compile/link time, not silently).
-2. **Vulkan optional** — headless-debug-clang leg is the canary: if
+2. **Vulkan optional**; headless-debug-clang leg is the canary: if
    Vulkan plumbing is mis-scoped, that leg fails first. Graceful
    degrade preserved (`WARPLOOM_RENDER_NO_VULKAN` state must still
-   compile — the graceful path lives in TUs that already guard on
+   compile; the graceful path lives in TUs that already guard on
    `OMNICPP_HAS_VULKAN`).
-3. **Link topology change** — render symbols move from
+3. **Link topology change**; render symbols move from
    `libomnicpp_runtime.so` to `libwarploom_render.so`. The runtime DSO
    links render PUBLIC so transitive link works for all 42 test TUs.
    `dlopen` surface unchanged (single-ABI contract, one DSO per module,
    no cross-DSO RTTI/dynamic_cast anywhere in the surface).
-4. **Namespace stays** — no `warploom::render` identifiers yet; zero
+4. **Namespace stays**; no `warploom::render` identifiers yet; zero
    chance of the S2-B doubled-name trap (`warploom::editor::warploom::…`)
    this phase. ui alias inside `omnicpp::render` untouched.
-5. **Forwarder-only consumer churn** — 44 include sites keep their
+5. **Forwarder-only consumer churn**; 44 include sites keep their
    spellings; the only text edits are *inside* the moved module.
 
 ## 5. Verification plan (machine-checked)
 
 1. Four-leg matrix: `vulkan-validation`, `headless-debug-clang`, `tsan`,
-   `asan-ubsan` — full 6-suite ctest (`timeout 850 ctest … -j4`).
+   `asan-ubsan`; full 6-suite ctest (`timeout 850 ctest … -j4`).
 2. Fresh install tree: `cmake --install build/vulkan-validation --prefix
-   /tmp/editor_install` (rm -rf the old one first — headers change).
+   /tmp/editor_install` (rm -rf the old one first; headers change).
 3. Consumers re-proofed fresh against the new install:
    `/tmp/core_consumer` (CORE_CONSUMER_OK), `/tmp/ui_consumer`
    (UI_CONSUMER_OK), `/tmp/editor_consumer` (EDITOR_CONSUMER_OK +
-   G3B_CONSUMER_OK) — rebuild clean (`rm -rf` their build dirs first)
+   G3B_CONSUMER_OK); rebuild clean (`rm -rf` their build dirs first)
    since headers move. A new `/tmp/render_consumer` (RENDER_CONSUMER_OK)
    proves `find_package(WarploomRender CONFIG REQUIRED)` standalone with
    an `omnicpp::render` spelling (exercise the compat path).

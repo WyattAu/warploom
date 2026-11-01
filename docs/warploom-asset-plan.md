@@ -1,9 +1,9 @@
-# warploom-asset — S3.5 gate
+# warploom-asset: S3.5 gate
 
 Status: DONE (as extracted; one probe-driven correction below).
 
 > **Correction (build probe):** §4.1's SHARED-with-no-sources fallback was
-> needed immediately — CMake rejects `add_library(omnicpp_runtime SHARED)`
+> needed immediately; CMake rejects `add_library(omnicpp_runtime SHARED)`
 > with no sources ("No SOURCES given to target"). The runtime shell is
 > INTERFACE with INTERFACE link libraries; usage requirements flow
 > identically and no consumer dlopens the runtime artifact by name.
@@ -29,11 +29,11 @@ version file, GLOB header allowlist, compat forwarders
 | jpeg_decoder.hpp | strict self-contained JPEG decoder |
 | ktx2_decoder.hpp | KTX2 transcode-safe container decode |
 
-Plus `src/…/gltf_json.hpp` — internal (strict RFC 8259 parser, base64/
+Plus `src/…/gltf_json.hpp`; internal (strict RFC 8259 parser, base64/
 data-URI, accessor decoding), included by relative path from TUs only;
 moves with the module, NOT installed, not part of the frozen surface.
 
-Names stay `omnicpp::asset` this phase — S3.5 is an include-path and
+Names stay `omnicpp::asset` this phase; S3.5 is an include-path and
 packaging extraction only (same policy as S3; identifier migration is
 S5-B scope, decided in the roadmap amendment).
 
@@ -43,14 +43,14 @@ S5-B scope, decided in the roadmap amendment).
 
 - `engine/core/deterministic_runtime.hpp` ×4 in public headers (→
   `warploom/core/deterministic_runtime.hpp` after the move; core is the
-  ONLY module dependency — zero render/ui/editor leakage, grep-verified).
+  ONLY module dependency; zero render/ui/editor leakage, grep-verified).
 - `RuntimeError` (core) in TUs.
 - Cross-includes inside the layer: image_decode ← png/jpeg/ktx2 TUs,
   gltf_importer ← glf_animation header. All internal.
 - External codec libraries: **none**. PNG/JPEG/KTX2 decoders are strict,
   self-contained, written in-tree ("Strict self-contained PNG decoder",
   see file headers). No find_package / pkg_check / vendored-third-party
-  surface — the module has no Vulkan-style plumbing problem at all.
+  surface; the module has no Vulkan-style plumbing problem at all.
 - `OMNICPP_HAS_VULKAN` etc.: not referenced by any asset header/TU.
 
 ### 2.2 What consumes asset (include sites)
@@ -61,13 +61,13 @@ S5-B scope, decided in the roadmap amendment).
 | 8 `tests/unit/test_*.cpp` TUs (gltf_animation, gltf_importer, gltf_scene, gpu_mannequin, jpeg, ktx2, png_decoder, png_texture) | decoders + importers | forwarders (zero edits) |
 
 Grep across `src include examples tests modules tools`: **no other
-consumers** — no module includes asset headers, no engine-layer TU does.
+consumers**; no module includes asset headers, no engine-layer TU does.
 9 total external include sites, all kept compiling via forwarders.
 
 ### 2.3 Test placement decision (recorded)
 
 The 8 asset test TUs **stay in the root suite** (via forwarders), and the
-module gets **no standalone gtest target** this phase — same decision as
+module gets **no standalone gtest target** this phase; same decision as
 render. Rationale: the tests are fixture-driven
 (`OMNICPP_TEST_ASSET_DIR` → `assets/models`, superproject-side define +
 files; gpu_mannequin additionally exercises the GPU path), so in-module
@@ -78,7 +78,7 @@ gains headless-only logic.
 
 ### 2.4 What stays in the monolith
 
-After S3.5, `src/engine/` contains **no TUs at all** — `omnicpp_runtime`
+After S3.5, `src/engine/` contains **no TUs at all**; `omnicpp_runtime`
 becomes an empty shell. Its disposition is S5-A scope (delete it when
 the aggregate lands); S3.5 keeps the target existing but with zero
 sources, linking the five modules PUBLIC so every existing consumer
@@ -90,7 +90,7 @@ target keeps linking unchanged.
    gltf_json.hpp → `modules/asset/src/warploom/asset/`. Rewrite
    `engine/asset/X.hpp` → `warploom/asset/X.hpp` and
    `engine/core/Y.hpp` → `warploom/core/Y.hpp` via sed (line-oriented;
-   per-file line counts asserted unchanged against HEAD — the S2-B/S3
+   per-file line counts asserted unchanged against HEAD; the S2-B/S3
    discipline). gltf_json.hpp keeps its relative include.
 2. `modules/asset/CMakeLists.txt` per the module pattern: SHARED + PIE +
    cxx_std_23, `target_link_libraries(warploom_asset PUBLIC
@@ -104,24 +104,24 @@ target keeps linking unchanged.
    `Warploom::ui Warploom::core Warploom::editor Warploom::render
    Warploom::asset` PUBLIC, alias block extended with
    `omnicpp_asset ALIAS warploom_asset`. Root CMakeLists adds
-   `add_subdirectory(modules/asset)` — **before** `src/engine`
-   (plain-name resolution; ORDER MATTERS — same as S3).
+   `add_subdirectory(modules/asset)`; **before** `src/engine`
+   (plain-name resolution; ORDER MATTERS; same as S3).
 
 ## 4. Correctness risks and mitigations
 
-1. **Empty SHARED library** — CMake may warn/refuse a SHARED target with
+1. **Empty SHARED library**; CMake may warn/refuse a SHARED target with
    no sources. Mitigation: pass at least the target's link interface
    through `$<BUILD_INTERFACE:…>`-free plain sources-free form
    (`add_library(omnicpp_runtime SHARED)` with no sources is legal since
    CMake 3.11 for imported-style stubs; if the linker dislikes it, fall
-   back to INTERFACE — S5-A deletes the target anyway, and no consumer
+   back to INTERFACE; S5-A deletes the target anyway, and no consumer
    links `omnicpp_runtime` by artifact name in a way INTERFACE breaks).
-2. **Fixture paths in tests** — `OMNICPP_TEST_ASSET_DIR` is
+2. **Fixture paths in tests**; `OMNICPP_TEST_ASSET_DIR` is
    superproject-side; unaffected by the move (tests keep compiling via
    forwarders; §2.3).
-3. **Namespace stays** — no `warploom::asset` identifiers yet; zero
+3. **Namespace stays**; no `warploom::asset` identifiers yet; zero
    S2-B doubled-name risk. `omnicpp::asset` spellings untouched.
-4. **Link topology** — asset symbols move from `libomnicpp_runtime.so`
+4. **Link topology**; asset symbols move from `libomnicpp_runtime.so`
    to `libwarploom_asset.so`; runtime links it PUBLIC, so the 42-TU
    suite and viewport keep resolving symbols transitively. Single-ABI
    contract unchanged (one DSO per module).
@@ -130,13 +130,13 @@ target keeps linking unchanged.
 
 1. Four-leg matrix (vulkan-validation, headless-debug-clang, tsan,
    asan-ubsan): full 6-suite ctest each.
-2. Fresh install tree (`rm -rf /tmp/editor_install` first — headers
+2. Fresh install tree (`rm -rf /tmp/editor_install` first; headers
    move); `WarploomAsset` package config present.
 3. Consumers re-proofed fresh (clean build dirs): CORE/UI/EDITOR/RENDER
    consumers + new `/tmp/asset_consumer` (ASSET_CONSUMER_OK) proving
    `find_package(WarploomAsset CONFIG REQUIRED)` standalone with an
    `omnicpp::asset` spelling (exercises the compat path; decodes a tiny
-   in-source PNG byte string and asserts dimensions — no fixture files
+   in-source PNG byte string and asserts dimensions; no fixture files
    needed).
 4. 64/64 live proofs (systemd hosts, positional socket path).
 5. `python3 scripts/check_docs_links.py` before doc commits.
@@ -145,7 +145,7 @@ target keeps linking unchanged.
 ## 6. Non-goals
 
 - No `warploom::asset` identifier migration (S5-B).
-- No new codecs, no external library adoption (stb_image etc. — the
+- No new codecs, no external library adoption (stb_image etc.; the
   self-contained decoders are a determinism feature, not a gap).
 - No module-internal gtest suite (§2.3).
 - No `omnicpp_runtime` deletion (S5-A; the target survives as a shell).

@@ -1,4 +1,4 @@
-# llvmpipe JIT segfault — viewport + 2 tests (environment issue, not engine)
+# llvmpipe JIT segfault: viewport + 2 tests (environment issue, not engine)
 
 ## Status (2026-09-25, updated)
 
@@ -13,7 +13,7 @@ The NVIDIA driver was broken at the time (kernel module 610.57.04 in memory vs
 reboot, all verification moved to lavapipe (Mesa software Vulkan). Result:
 
 - **Full test suite on lavapipe: 560 tests, 555 pass, 5 documented skips, 0 failures.**
-- Two tests and the live viewport crash inside Mesa's raster JIT — the only
+- Two tests and the live viewport crash inside Mesa's raster JIT; the only
   paths in the project that exercise llvmpipe's fragment rasterization on
   real (JIT-compiled) shaders at scale.
 
@@ -36,12 +36,12 @@ Thread N "llvmpipe-N" received signal SIGSEGV
 | Configuration | Result |
 |---|---|
 | mesa 3:26.2.3-1 (current) | segfault |
-| mesa 3:26.2.2-2 (pre-Sept-19 downgrade, local pacman cache) | segfault — **not a recent regression** |
+| mesa 3:26.2.2-2 (pre-Sept-19 downgrade, local pacman cache) | segfault; **not a recent regression** |
 | `LP_NUM_THREADS=1` (single-threaded JIT/raster) | segfault |
 | `LP_NATIVE_VECTOR_WIDTH=128` (different SIMD codegen) | segfault |
 | `GALLIUM_DRIVER=softpipe` (softpipe is GL-only; Vulkan still llvmpipe) | segfault |
-| `DISPLAY=:0` (Xwayland) vs `DISPLAY=:99` (Xvfb, no GPU compositor) | segfault — display server irrelevant |
-| `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` on/off | segfault — validation not involved |
+| `DISPLAY=:0` (Xwayland) vs `DISPLAY=:99` (Xvfb, no GPU compositor) | segfault; display server irrelevant |
+| `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` on/off | segfault; validation not involved |
 | `OMNICPP_LEGACY_LIGHTING=1 OMNICPP_NO_SHADOW=1` (minimal shader stack) | segfault |
 | `OMNICPP_NODE_EDITOR=0` (UI overlay off) | segfault |
 | lavapipe compute/cull/IBL/RT path tests (46/46 VulkanHardware compute-side) | **pass** |
@@ -54,9 +54,9 @@ CPU, bounded from every side we can control. Engine-side code validates clean
 
 ## Practical workarounds
 
-1. ~~Reboot~~ **DONE** — real NVIDIA driver verified (563/563 on hardware).
+1. ~~Reboot~~ **DONE**; real NVIDIA driver verified (563/563 on hardware).
 2. On machines without a working hardware driver: **headless verification is
-   fully sufficient** — the lavapipe suite, control-protocol E2E over unix
+   fully sufficient**; the lavapipe suite, control-protocol E2E over unix
    sockets, and byte-level readback tests exercise everything except live
    windowed presentation (the viewport + 2 raster tests hit the JIT bug).
 3. Optionally report upstream to CachyOS/Mesa with the isolation matrix above.

@@ -1,4 +1,4 @@
-# warploom-engine — S5-A gate
+# warploom-engine: S5-A gate
 
 Status: DONE (as implemented; one probe-driven correction below).
 
@@ -8,7 +8,7 @@ Status: DONE (as implemented; one probe-driven correction below).
 > ENGINE_CONSUMER configure failed on the `Warploom::engine` link. The
 > consumer probe caught it immediately (exactly what it exists for);
 > fixed, re-installed, re-proved. Same EXPORT_NAME discipline as every
-> other module — S5-A just proved it applies to INTERFACE aggregates
+> other module; S5-A just proved it applies to INTERFACE aggregates
 > too.
 
 ## 1. What S5-A is
@@ -19,7 +19,7 @@ real modules (core, ui, editor, render, asset). With it in place:
 
 - the viewport links `Warploom::engine` instead of `omnicpp_runtime`;
 - the root test targets and the headless host do the same;
-- the zero-source `omnicpp_runtime` shell (S3.5) is **deleted** — the
+- the zero-source `omnicpp_runtime` shell (S3.5) is **deleted**; the
   moment the monolith stops being load-bearing (0.1 gate criterion #2);
 - standalone consumers do `find_package(WarploomEngine CONFIG REQUIRED)`
   and get every module's usage requirements transitively.
@@ -45,7 +45,7 @@ needs that an INTERFACE target doesn't:
   warploom-engine as the aggregate with deps on all of the above);
 - `cmake/WarploomEngineConfig.cmake.in`: `find_dependency` ×5
   (WarploomCore, WarploomUI, WarploomEditor, WarploomRender,
-  WarploomAsset) — Threads flows transitively from core/asset/ui.
+  WarploomAsset); Threads flows transitively from core/asset/ui.
 - Editor module standalone note: WarploomEditorConfig already
   find_dependencies WarploomCore+UI, and the editor tests' rasterizer
   seam is in-tree-only, so the aggregate adds nothing the modules don't
@@ -61,7 +61,7 @@ needs that an INTERFACE target doesn't:
 | runtime-only tests | `tests/CMakeLists.txt:836` | include dir already explicit (line 837) |
 | runtime benchmark | `tests/CMakeLists.txt:842` | include dir already explicit (line 843) |
 | headless host | `tools/CMakeLists.txt:12` | include dir already explicit (lines 9–10) |
-| legacy/integration | `tests/CMakeLists.txt:853,859` | guarded by `OMNICPP_LEGACY_ENGINE` (OFF) — reference `omnicpp_engine`, not the runtime; untouched |
+| legacy/integration | `tests/CMakeLists.txt:853,859` | guarded by `OMNICPP_LEGACY_ENGINE` (OFF); reference `omnicpp_engine`, not the runtime; untouched |
 
 The 42 render/asset/etc test TUs keep compiling through the same
 forwarder spellings; only the link target name changes.
@@ -69,15 +69,15 @@ forwarder spellings; only the link target name changes.
 ### 2.3 What gets deleted / kept
 
 - **Deleted:** the `omnicpp_runtime` target (S3.5 left it a zero-source
-  INTERFACE shell — deletion is mechanical; nothing references the
+  INTERFACE shell; deletion is mechanical; nothing references the
   artifact name, no dlopen surface).
 - **Kept:** the `omnicpp_*` ALIAS block as compatibility aliases of the
-  real module targets (`omnicpp_core/ui/editor/render_lib/asset` —
+  real module targets (`omnicpp_core/ui/editor/render_lib/asset` -
   already real-target aliases) plus a new
   `add_library(omnicpp_runtime ALIAS warploom_engine)` so any straggler
   spelling keeps configuring; `omnicpp_render` INTERFACE rasterizer shim
   (links Warploom::render) stays for the editor seam.
-- **Kept:** `include/engine/*` forwarders verbatim — they are the S5-B
+- **Kept:** `include/engine/*` forwarders verbatim; they are the S5-B
   migration surface, not S5-A's.
 
 ## 3. Mechanical plan
@@ -92,27 +92,27 @@ forwarder spellings; only the link target name changes.
    superproject include dir where the runtime used to supply it.
 4. Install/export: `cmake --install` now lays six package configs
    (WarploomEngine added); the runtime DSO disappears from the install
-   tree (it was already absent — the shell installed no artifact since
+   tree (it was already absent; the shell installed no artifact since
    S3.5's INTERFACE conversion; verify install log shrinks accordingly).
 
 ## 4. Correctness risks and mitigations
 
-1. **Include-dir regression** — the runtime shell carried
+1. **Include-dir regression**; the runtime shell carried
    `${CMAKE_SOURCE_DIR}/include` PUBLIC; consumers relying on it
    transitively lose it. Mitigation: every consumer site audited
    (§2.2); explicit include dirs added where missing; the 4-leg matrix
    is the compile-time proof (any miss fails the build, not silently).
-2. **Link-order/topology** — INTERFACE aggregate changes nothing about
+2. **Link-order/topology**; INTERFACE aggregate changes nothing about
    the five DSOs or their inter-dependencies (core ← ui/editor/render/
-   asset — unchanged since S3.5). The suite's link lines are built by
+   asset; unchanged since S3.5). The suite's link lines are built by
    CMake from the same module targets as before.
-3. **Standalone consumer parity** — the four existing consumers +
+3. **Standalone consumer parity**; the four existing consumers +
    asset/render proofs must still pass against a fresh install that now
    also ships WarploomEngine; a new `/tmp/engine_consumer` proves
    `find_package(WarploomEngine CONFIG REQUIRED)` + one
    `Warploom::engine` link reaching a core type AND an asset function
    (proves transitive find_dependency wiring end to end).
-4. **0.1 gate wording** — criterion #2 says "viewport and tests consume
+4. **0.1 gate wording**; criterion #2 says "viewport and tests consume
    `find_package(Warploom …)`". In-tree, CMake subdirectories consume
    the target directly (aliases), which is the same dependency shape;
    the standalone `find_package` path is proven by the consumers (§4.3)

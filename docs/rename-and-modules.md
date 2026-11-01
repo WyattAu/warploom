@@ -34,10 +34,10 @@ registries (crates.io / npm / PyPI APIs, GitHub org API, DNS). Evidence:
 | Candidate | Result |
 |---|---|
 | **Warploom** | **CHOSEN.** Zero software hits in search (page one is 1940s textile ads); free on crates.io, npm, and PyPI; `warploom.com` unregistered; only blemish is a dormant, empty GitHub `WarpLoom` org (use a suffixed org name if desired). Loom = weaving node graphs into behavior; warp = weaving warp *and* controllable time (fixed-step, replayable determinism). |
-| Escapement | Rejected — taken on all three registries; crates.io `escapement` is a deterministic virtual clock crate (direct conceptual collision, Jul 2026). |
-| Axisflow | Rejected — GitHub org taken; AxisFlow FreeCAD add-on is active (2026 releases). Best of the original five; second choice. |
-| Weftline, Loomwright, Loomforge, Warpforge, Heddle, Tactus, Selvage, Warpwright, Jacquard | Rejected — each has active software users in search. |
-| Verdant, Loomline, Tessera, Kestrel (original shortlist) | Rejected — all taken; Tessera and Kestrel heavily (UI framework / ASP.NET Core server). |
+| Escapement | Rejected; taken on all three registries; crates.io `escapement` is a deterministic virtual clock crate (direct conceptual collision, Jul 2026). |
+| Axisflow | Rejected; GitHub org taken; AxisFlow FreeCAD add-on is active (2026 releases). Best of the original five; second choice. |
+| Weftline, Loomwright, Loomforge, Warpforge, Heddle, Tactus, Selvage, Warpwright, Jacquard | Rejected; each has active software users in search. |
+| Verdant, Loomline, Tessera, Kestrel (original shortlist) | Rejected; all taken; Tessera and Kestrel heavily (UI framework / ASP.NET Core server). |
 
 ## Module split (dependency order)
 
@@ -45,19 +45,19 @@ Each module becomes a CMake package (add_subdirectory + find_package)
 with its own tests and docs. Order = strictly increasing dependencies.
 
 1. **`warploom-core`** (no deps)
-   - content: `core/` minus editor pieces — Result, contracts, clocks,
+   - content: `core/` minus editor pieces; Result, contracts, clocks,
      job system, ECS, physics, input, animation state machine, telemetry,
      script-module C ABI, node graph, document/commands
    - the determinism substrate; everything links this
 2. **`warploom-ui`** (deps: core)
-   - content: `ui/` + `editor/glyphs` — widget tree, layout, paint list,
+   - content: `ui/` + `editor/glyphs`; widget tree, layout, paint list,
      bitmap font
    - standalone immediate-mode-free retained UI; golden-image tested
 3. **`warploom-render`** (deps: core)
-   - content: `render/` — Vulkan context/swapchain/renderer, scene
+   - content: `render/`; Vulkan context/swapchain/renderer, scene
      structures, render graph, RT pipeline, IBL, offscreen targets
 4. **`warploom-editor`** (deps: core, ui)
-   - content: `editor/` — session, control server/protocol, node editor
+   - content: `editor/`; session, control server/protocol, node editor
      view, inspector, graph-anim bridge, toolbars
    - the protocol surface for remote/AI driving lives here
 5. **`warploom-engine`** (deps: all of the above; the aggregate)
@@ -75,15 +75,14 @@ with its own tests and docs. Order = strictly increasing dependencies.
 
 1. Land the rename (repo + CMake project name + include roots stay
    `engine/` internally to keep churn low)
-2. Extract `warploom-ui` first (smallest, fewest dependents) as the pilot
-   — **DONE**: lives in `modules/ui` as package `WarploomUI`, exported
+2. Extract `warploom-ui` first (smallest, fewest dependents) as the pilot: **DONE**: lives in `modules/ui` as package `WarploomUI`, exported
    target `Warploom::ui`, namespace `warploom::ui`; standalone
    find_package consumption proven.
-3. Then core — **phase A DONE**: lives in `modules/core` as package
+3. Then core; **phase A DONE**: lives in `modules/core` as package
    `WarploomCore`, exported target `Warploom::core`, 22-header allowlist,
    compat forwarders keep `include/engine/core/*` valid (zero churn at
    84 include sites); namespaces stay `omnicpp::*` until phase B (the
-   identifier migration, wired to the S-decision pass — the
+   identifier migration, wired to the S-decision pass; the
    `omnicpp::editor` namespace spans non-core widget code, so the
    namespace split waits for S4; see `docs/warploom-core-plan.md`).
    Then render, editor in dependency order
@@ -92,5 +91,5 @@ with its own tests and docs. Order = strictly increasing dependencies.
 ## Non-goals
 
 - No ABI stability promises until step 4 completes.
-- No header shuffling beyond what the seams already dictate — the split
+- No header shuffling beyond what the seams already dictate; the split
   is packaging, not refactoring.

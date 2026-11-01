@@ -1,4 +1,4 @@
-# Research loop 4 — render-graph transient allocation, loop 5 — determinism validator, loop 6 — PT accumulation
+# Research loop 4: render-graph transient allocation, loop 5: determinism validator, loop 6: PT accumulation
 
 Status: notes, 2026-10-08. Three tightly-coupled loops around the compose
 chain and its rebuild problem.
@@ -6,7 +6,7 @@ chain and its rebuild problem.
 ## Loop 4: transient resource allocation from the graph
 
 **Source.** The frame-graph canon (Thibieroz/Yong; AMD FrameGraph sample;
-BGFX transient buffers — the cleanest public description: transient resources
+BGFX transient buffers; the cleanest public description: transient resources
 live for one frame, the graph computes their lifetimes, and an allocator
 packs them into arena memory with reuse across non-overlapping lifetimes).
 The DOOM study (adriancourreges.com 2016) shows the shipped result: ~50
@@ -14,7 +14,7 @@ render targets per frame, most transient, packed into atlases.
 
 **Claim.** When the graph owns resource LIFETIMES, allocation becomes derived
 state: sort intervals, pack into an arena, reuse after last use. Resource
-creation/destruction code disappears from feature code — the class of
+creation/destruction code disappears from feature code; the class of
 plumbing that made the capture chain and bloom toggle complex.
 
 **Fit/cost.** Our compile_graph already computes edges; GraphPass already
@@ -22,7 +22,7 @@ declares attachments and sampled images with layouts. The missing piece is
 an `outputs` declaration with format+size so compile can compute intervals.
 Bounded: an interval-packing allocator over ~10 resources, allocated from the
 existing VulkanMemoryAllocator. No aliasing in v1 (allocate distinct; alias
-later — the arena reuse gives most of the win). ADOPTED as R6.
+later; the arena reuse gives most of the win). ADOPTED as R6.
 
 ## Loop 5: the per-step determinism validator
 
@@ -34,12 +34,12 @@ runs deterministically."
 **Claim.** A double-step-and-compare check built INTO the engine catches
 nondeterminism the moment it is introduced, rather than when a test happens
 to run. It is structurally the same record-rewind-replay proof our W2 track
-ships — applied per-step instead of per-session.
+ships; applied per-step instead of per-session.
 
 **Fit/cost.** PhysicsWorld already has `position_fingerprint()`. A
 `WARPLOOM_PHYSICS_DETERMINISM_CHECK` debug flag: after each step_single,
 snapshot the fingerprint, step the same dt again from the pre-step state, and
-assert equal fingerprints — 2x physics cost in debug builds only, zero in
+assert equal fingerprints; 2x physics cost in debug builds only, zero in
 release. This would have caught the scheduler race class, the all_ok bug, and
 any future float-contract violation the day it lands. ADOPTED as a D1 debug
 flag with an escape hatch (replay tests need the flag off to measure single
@@ -55,15 +55,15 @@ record/replay machinery for determinism.
 accumulation + denoiser. Our replay contract adds something the others do not
 have: PAUSED ACCUMULATION. The viewport can pause time, step the same frame
 repeatedly (the protocol already does this), accumulate K samples into the
-rgba32f image, and display the converged mean — offline-quality converged PT
+rgba32f image, and display the converged mean; offline-quality converged PT
 as an interactive product capability.
 
 **Fit/cost.** Missing pieces: (a) the PT shaders exist but the compose chain
-has no storage-image stage — spec: the tonemap pass gains an alternatesource
+has no storage-image stage; spec: the tonemap pass gains an alternatesource
 descriptor (accum image vs HDR target); (b) the accumulation clear/add is
 already the shaders' design; (c) the viewport protocol gains
 `set_render_mode path_trace` + the accumulation happens while paused.
-Denoising: SVGF is a real arc — v1 ships un-denoised (converged-by-pausing
+Denoising: SVGF is a real arc; v1 ships un-denoised (converged-by-pausing
 is the product story; live mode stays forward). ADOPTED as the R1 spec,
 already written into the roadmap.
 

@@ -20,8 +20,8 @@ Archetype-based SoA layout with deterministic entity iteration.
 - **Entity migration**: Automatic archetype transitions with correct swap-remove bookkeeping
 - **Query API**: `query<T1,T2>(f)`, `query_if<T>(pred, action)`, `count_if<T>(pred)`
 - **Change tracking**: `mark_dirty<T>()`, `set_component<T>()`, `is_dirty<T>()`, `clear_dirties()`
-- **Parallel execution**: `run_parallel()` — independent systems run concurrently via ThreadPool
-- **Component pools**: `ComponentPool<T>` — pre-allocated slots, zero steady-state allocation
+- **Parallel execution**: `run_parallel()`; independent systems run concurrently via ThreadPool
+- **Component pools**: `ComponentPool<T>`; pre-allocated slots, zero steady-state allocation
 - **System scheduler**: Topological sort with wave-based parallel partitioning
 
 ### Vulkan Rendering Pipeline

@@ -1,4 +1,4 @@
-# warploom identity — S5-B gate
+# warploom identity: S5-B gate
 
 Status: GATE (migration not started; this document is the audit + contract)
 
@@ -22,13 +22,13 @@ anyone standing on any commit of this repo.
 
 Target: `warploom::render` / `warploom::editor` / `warploom::asset`.
 **Editor is a merge, not a move**: `warploom::editor` already exists
-(core's session types, S2-B). Extension blocks merge — verified twice
+(core's session types, S2-B). Extension blocks merge; verified twice
 (core's real `omnicpp::core` extension block pre-S2-B; the S2-B
 using-directive scheme). The editor module's types join the same
 namespace; the existing core compat footer
 (`namespace omnicpp::editor { using namespace ::warploom::editor; }`,
 guard `OMNICPP_COMPAT_EDITOR_NS`) remains THE compat directive for both
-families — editor module headers repeat the identical guarded block so
+families; editor module headers repeat the identical guarded block so
 each header is self-sufficient (same guard + same statement is safe:
 include-once).
 
@@ -38,7 +38,7 @@ Cross-module spellings inside modules re-badge to **rooted**
 ### 1.2 Build surface (code-visible defines + CMake + env)
 
 - Compile definitions: `OMNICPP_HAS_VULKAN` (225), `OMNICPP_CONTRACT`
-  (66 — the contract macro), `OMNICPP_VULKAN_TYPES_AVAILABLE` (45),
+  (66; the contract macro), `OMNICPP_VULKAN_TYPES_AVAILABLE` (45),
   `OMNICPP_HAS_QT_VULKAN` (19), test/app feature defines
   (`OMNICPP_TEST_*`, `OMNICPP_NO_SHADOW`, `OMNICPP_RT_MODE`,
   `OMNICPP_SCENE`, `OMNICPP_GPU_DRIVEN`, `OMNICPP_SPONZA`,
@@ -69,10 +69,10 @@ Cross-module spellings inside modules re-badge to **rooted**
 
 ## 2. Phases (each ends machine-verified; one commit per step)
 
-### Phase 1a — `warploom::render` + `warploom::asset`
+### Phase 1a: `warploom::render` + `warploom::asset`
 
 > **DONE.** One probe-driven correction: `vulkan_types.hpp` declares its
-> Vk* surface at GLOBAL scope — it never had a namespace block (its two
+> Vk* surface at GLOBAL scope; it never had a namespace block (its two
 > `omnicpp::render` hits were prose). The blanket "footer every public
 > header" rule put a `using namespace ::warploom::render` there before
 > anything declared the namespace (`'render' is not a namespace-name`).
@@ -89,14 +89,14 @@ Cross-module spellings inside modules re-badge to **rooted**
    `::warploom::core::`.
 2. Footers appended at EOF of all 27 render + 6 asset public headers:
    per-namespace guarded using-directive
-   (`OMNICPP_COMPAT_RENDER_NS` / `OMNICPP_COMPAT_ASSET_NS` — DISTINCT
+   (`OMNICPP_COMPAT_RENDER_NS` / `OMNICPP_COMPAT_ASSET_NS`; DISTINCT
    from core's guards; one shared guard would suppress later headers'
    directives). Depth: the render directive covers qualified lookup of
    `omnicpp::render::depth` ([namespace.qual]); no separate guard.
 3. Zero consumer edits: 42 root-suite TUs + viewport + 8 asset TUs keep
    `omnicpp::` spellings and exercise the footers.
 
-### Phase 1b — editor merge into `warploom::editor`
+### Phase 1b: editor merge into `warploom::editor`
 
 > **DONE.** Widgets joined core's session types in one
 > `warploom::editor` namespace (extension blocks merged, as predicted);
@@ -111,11 +111,11 @@ Same mechanics; the footers repeat core's exact guarded statement
 directive. 14 self-spellings → `warploom::editor`; module tests
 (in-tree, 39/39) re-badge with the module.
 
-### Phase 2 — build surface
+### Phase 2: build surface
 
 > **DONE.** CMake: all options/vars renamed to `WARPLOOM_*` primaries
 > with a `_warploom_compat_option` shim block (22 legacy names mirror to
-> the new when the new is unset — proven by configure: BOTH
+> the new when the new is unset; proven by configure: BOTH
 > `-DOMNICPP_USE_VULKAN=OFF` and `-DWARPLOOM_USE_VULKAN=OFF` produce
 > `WARPLOOM_RENDER_USE_VULKAN=OFF`); presets swept; root package name
 > now installs as `Warploom` on fresh configures. Defines:
@@ -127,15 +127,15 @@ directive. 14 self-spellings → `warploom::editor`; module tests
 > (`warploom_unit_tests`, `warploom_headless_host`, `warploom_viewport`,
 > `warploom_contract_violator`, `warploom_runtime_only_tests`,
 > `warploom_deterministic_runtime_benchmark`; ctest names
-> `Warploom*`); CI + scripts + README/living docs updated — old binary
+> `Warploom*`); CI + scripts + README/living docs updated; old binary
 > names are NOT aliased on disk (pre-publish, references updated in
 > repo; deviation from the planned one-window copies recorded). Footer
 > guards → `WARPLOOM_COMPAT_*_NS` (57 headers). conan recipe +
 > config/project.json re-identified. Probe corrections: (1) the
-> repo-internal test helpers gate on the define name — re-badged with
+> repo-internal test helpers gate on the define name; re-badged with
 > the CMake sweep, dual-gate kept where both spellings are legitimate;
 > (2) sed `&` in the replacement expanded the match and mangled
-> test_contract's command line — repaired, lesson banked (never put a
+> test_contract's command line; repaired, lesson banked (never put a
 > bare `&` in a sed replacement). Verified: 4 legs × 6 suites, six
 > consumer proofs, fresh-configure install under the new name, 64 live
 > proofs.
@@ -157,7 +157,7 @@ directive. 14 self-spellings → `warploom::editor`; module tests
 6. Footer guards → `WARPLOOM_COMPAT_*_NS` (header-internal scaffolding;
    not consumer surface).
 
-### Phase 3 — ABI + strings + repo rename
+### Phase 3: ABI + strings + repo rename
 
 1. Script-module loader accepts BOTH symbol families: tries
    `warploom_module_*` first, falls back to `omnicpp_module_*`; new
@@ -165,35 +165,35 @@ directive. 14 self-spellings → `warploom::editor`; module tests
    (the shim). Contract string → `"warploom contract violation"`
    (test updated; the old string was never parsed by anything).
 2. GitHub repo rename `OmniCPP-template` → `warploom`: **manual step**
-   (owner action in GitHub UI) — local prep: remote URL update,
+   (owner action in GitHub UI); local prep: remote URL update,
    badge/docs sweep, CI trigger paths. Last, after everything else
    passes with the new identity.
 
 ## 3. Risks
 
-1. **Editor merge name capture** — after the merge, unqualified names
+1. **Editor merge name capture**; after the merge, unqualified names
    in the two `warploom::editor` families could collide (core session
    vs widgets). Census: no identifier collisions found (distinct type
-   names; the two families already cross-reference cleanly —
+   names; the two families already cross-reference cleanly -
    ClipTimelineView consumes session types rooted today).
 2. **Directive-injection hides real decls** (S2-B lesson #4): no real
    `namespace omnicpp::editor/render/asset` member declarations exist
    outside the modules being re-badged (grep-verified census §1.1).
 3. **`using namespace` ambiguity in root-suite TUs**: consumers include
    core + render/editor/asset headers simultaneously; the compat
-   directives nominate DISTINCT target namespaces — same shape as
+   directives nominate DISTINCT target namespaces; same shape as
    today (core+ui already coexist).
 4. **CI/proof scripts referencing old names**: live_proof.py spawns
    hosts by path (updated in phase 2 with the binary renames); CI
-   workflow likewise — both are repo files, in scope.
+   workflow likewise; both are repo files, in scope.
 
 ## 4. Verification (per phase, machine-checked)
 
 Four-leg matrix × 6 suites; fresh install; ALL consumer proofs
-(CORE/UI/EDITOR/RENDER/ASSET/ENGINE — they spell `omnicpp::*` and
+(CORE/UI/EDITOR/RENDER/ASSET/ENGINE; they spell `omnicpp::*` and
 therefore exercise the compat path by design); 64/64 live proofs;
 `check_docs_links.py`. Phase 2 additionally: configure with ONLY old
-names (`-DOMNICPP_USE_VULKAN=ON`) and ONLY new names — both must work.
+names (`-DOMNICPP_USE_VULKAN=ON`) and ONLY new names; both must work.
 
 ## 5. Non-goals
 

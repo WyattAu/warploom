@@ -28,16 +28,16 @@ Khronos validation layer with zero diagnostics, and exercised in CI on Mesa lava
 `VulkanContext` requests the highest instance API the loader supports (up to 1.3), then
 computes the **effective API** as `min(instance version, device version)`. Feature structs
 (`VkPhysicalDeviceVulkan13Features`, `VkPhysicalDeviceVulkan12Features`) are chained into
-`vkCreateDevice` only when the *effective* API covers them — chaining a 1.3 struct under an
+`vkCreateDevice` only when the *effective* API covers them; chaining a 1.3 struct under an
 effective 1.2 API is a spec violation (`VUID-VkDeviceCreateInfo-pNext-pNext`) that some
 drivers tolerate and others (correctly) reject.
 
 The context queries both feature structs in one chained `vkGetPhysicalDeviceFeatures2` call
 and enables, only when the device advertises them:
 
-- **Synchronization 2** (1.3) — unlocks `vkQueueSubmit2` and stage/access-scoped submit infos
-- **Timeline semaphores** (1.2) — unlocks fence-free CPU/GPU frame pacing
-- **Descriptor indexing** (1.2) — the full bindless combination: runtime-sized arrays,
+- **Synchronization 2** (1.3); unlocks `vkQueueSubmit2` and stage/access-scoped submit infos
+- **Timeline semaphores** (1.2); unlocks fence-free CPU/GPU frame pacing
+- **Descriptor indexing** (1.2); the full bindless combination: runtime-sized arrays,
   partially-bound sets, update-after-bind for sampled images and storage buffers, and
   non-uniform array indexing
 
@@ -65,7 +65,7 @@ The renderer records one CPU frame-time sample per successfully presented frame
 (`begin_frame()` → present completion) into a fixed-capacity ring buffer
 (`engine/core/latency_telemetry.hpp`, 4096-sample window, no allocation on the
 record path). `frame_latency_stats()` returns nearest-rank **p50 / p90 / p99 /
-p99.9 / max** over the most recent window — tail latency, not averages.
+p99.9 / max** over the most recent window; tail latency, not averages.
 Recording can be disabled with `record_frame_latency(false)`.
 
 ### Timeline Frame Pacing
@@ -93,7 +93,7 @@ via `timestampPeriod`. On the RTX 2060 the 640×480 triangle pass measures ~6 µ
   first-fit with alignment-aware free ranges, leading-pad reuse, and neighbor coalescing.
 - **Memory-type selection**: best-match against `VkPhysicalDeviceMemoryProperties`, with
   block selection filtered by each resource's required `memoryTypeBits` (multi-heap GPUs).
-- **Persistent mapping**: host-visible blocks return a stable `mapped` pointer — no
+- **Persistent mapping**: host-visible blocks return a stable `mapped` pointer; no
   per-object `vkMapMemory`.
 - **API**: `create_buffer()`, `bind_image()`, `destroy_allocation()`, `stats()`.
 
@@ -150,11 +150,11 @@ execute via `vkCmdExecuteCommands` inside one primary render pass.
 
 Two execution backends, selected with `set_job_system`:
 
-- **Job system (default for the engine frame path)** — band jobs fork onto the
+- **Job system (default for the engine frame path)**; band jobs fork onto the
   prioritized `JobSystem`'s persistent workers as allocation-free function pointers
   (`submit_raw`), joined with a `JobCounter`. No thread creation and no heap allocation
   per frame. Band 0 records on the calling thread while the rest run on workers.
-- **Ad-hoc threads (fallback)** — original behavior; a thread per band per frame.
+- **Ad-hoc threads (fallback)**; original behavior; a thread per band per frame.
   Kept for embedders that do not run a job system.
 
 The contention stress test exercises both backends in alternating waves.
@@ -222,7 +222,7 @@ does not retain snapshot pointers or destroy mesh resources. Resource registries
 GPU resource destruction until the relevant frame/timeline value has completed.
 
 All scene meshes share one canonical vertex layout: **eleven floats per vertex**
-(`kSceneVertexFloats`) — position.xyz, linear color.rgb, normal.xyz, uv.xy — fetched by
+(`kSceneVertexFloats`); position.xyz, linear color.rgb, normal.xyz, uv.xy; fetched by
 `gl_VertexIndex` from a mesh storage buffer, with one descriptor set per mesh, indexed
 `uint32` draws, opaque depth-tested geometry, and a single graphics pipeline per snapshot.
 
@@ -250,8 +250,8 @@ microfacet BRDF (GGX NDF, Smith geometry, Schlick Fresnel). A PBR snapshot is a
 (view-projection plus a world-space eye position for the specular view vector), the
 bindless set-1 sampler array, a set-2 material storage buffer, and `ScenePbrObject`s
 (each: mesh + model + `material_index`). `VulkanRenderer::record_pbr_scene()` binds
-sets 0/1/2 and pushes a **160-byte PBR ABI** — `view_projection` (64) + `model` (64) +
-`camera_position` (16) + `material_index` (4) + padding — with
+sets 0/1/2 and pushes a **160-byte PBR ABI**; `view_projection` (64) + `model` (64) +
+`camera_position` (16) + `material_index` (4) + padding; with
 `assets/shaders/pbr_scene.{vert,frag}.spv`.
 
 Materials live in a CPU-uploaded SSBO (`PbrMaterialData`, one exactly-64-byte slot per
@@ -259,26 +259,26 @@ material, layout-identical to the shader's `PbrMaterial` std430 struct so array 
 == `sizeof`): `base_color_factor`, `emissive_factor`, `metallic_factor`,
 `roughness_factor`, `ao_strength`, a `PbrMaterialFlags` bitmask, and the five bindless
 set-1 texture indices (albedo, normal, metallic-roughness, emissive, AO). Texture
-indices travel inside the material record rather than the push block — objects sharing
+indices travel inside the material record rather than the push block; objects sharing
 one material slot share its maps. The fragment stage samples the base-color map
 unconditionally (element 0 of the bindless array is the opaque-white fallback),
 modulates metallic/roughness per-texel from the MR map (G = roughness, B = metallic),
 perturbs the normal with a derivative-based TBN from UV/world-position gradients,
 multiplies the ambient term by the AO map, adds the emissive factor × map, and shades
-with one fixed directional key light plus a small ambient — no IBL yet (an environment
+with one fixed directional key light plus a small ambient; no IBL yet (an environment
 cubemap + split-sum BRDF LUT on a later set is the natural next layer). The BRDF
 numerics are readback-proven on the GPU (`tests/unit/test_pbr_scene.cpp`):
 
-- `VulkanHardware.PbrMetallicRoughnessDiscrimination` — a smooth metallic cube
+- `VulkanHardware.PbrMetallicRoughnessDiscrimination`; a smooth metallic cube
   concentrates a bright near-white specular highlight where an identical rough
   diffuse cube produces none; two SSBO slots populated and selected by
   `material_index` also prove slot addressing and the 64-byte stride (a stride or
   offset bug reads the neighbour slot's factors and breaks the expected shading)
-- `VulkanHardware.PbrEmissiveAddsUnlitColor` — a black base factor with a red
+- `VulkanHardware.PbrEmissiveAddsUnlitColor`; a black base factor with a red
   emissive factor renders a pure-red cube (ambient and diffuse vanish; the
   additive emissive term is the only light), against a poisoned second SSBO slot
   to catch mis-addressing
-- `VulkanHardware.PbrAlbedoTextureTintsLitCube` — a 1×1 red base-colour texture at
+- `VulkanHardware.PbrAlbedoTextureTintsLitCube`; a 1×1 red base-colour texture at
   bindless set-1 element 1, referenced by the material slot's `albedo_index`,
   tints the lit cube red, proving set-1 sampling under the PBR ABI
 
@@ -298,7 +298,7 @@ Cameras are first-class deterministic systems: `engine/render/scene_camera.hpp`
 provides `scene_camera_look_at()` / `scene_camera_projection()` /
 `scene_camera_view_projection()` (right-handed look-at view space looking down -Z at
 rest, fov_y-over-vertical projection, column-major, matching every hardware scene
-test), plus `update_orbit_cameras()` — a pure-arithmetic ECS system that ticks every
+test), plus `update_orbit_cameras()`; a pure-arithmetic ECS system that ticks every
 entity carrying an active `SceneCameraComponent` and an `OrbitCameraController`
 component from a deterministic `OrbitCameraInput` (yaw/pitch look, exponential zoom,
 and frame-aligned target panning whose right/up axes match the look-at basis exactly)
@@ -307,7 +307,7 @@ Vulkan, no clock, no randomness, so the same inputs always produce the same matr
 and the module runs in headless builds; feeding it real mouse/keyboard state is an
 application-layer concern. What remains for a complete asset-driven renderer is
 window/input plumbing to those controls and the standard GPU-driven culling path
-(multi-material glTF assets are now captured per-primitive at import — see below —
+(multi-material glTF assets are now captured per-primitive at import; see below -
 and the scene path already renders one material per object, so splitting a mesh into
 per-material draws is render-layer plumbing).
 
@@ -324,14 +324,14 @@ texture reference into the import's shared `images`), so multi-material meshes i
 completely and a render layer can split them into per-material draws without re-reading
 the document. The mesh-level `base_color`/`albedo` fields alias the first primitive
 that binds a material (the historical single-material convenience). Optional
-attributes default deterministically — color (1,1,1), normal (0,0,1), uv (0,0) — so
+attributes default deterministically; color (1,1,1), normal (0,0,1), uv (0,0); so
 positions-only geometry imports cleanly.
 
 The importer is dependency-free, deterministic, and strict: a self-contained RFC 8259
 JSON parser feeds a spec-conformant decoder that validates every reference against its
 declared buffer before reading. Supported input is `POSITION` (VEC3 float32), `COLOR_0`
-(VEC3/VEC4 float32), `NORMAL` (VEC3 float32), `TEXCOORD_0` (VEC2 float32) — optional
-attributes must match the POSITION vertex count — `SCALAR` indices as uint16 or uint32
+(VEC3/VEC4 float32), `NORMAL` (VEC3 float32), `TEXCOORD_0` (VEC2 float32); optional
+attributes must match the POSITION vertex count; `SCALAR` indices as uint16 or uint32
 (non-indexed primitives become sequential indices), tightly packed or
 `byteStride`-interleaved buffer views, and multi-primitive meshes merged into one draw
 with re-based indices. Malformed documents are rejected with
@@ -346,7 +346,7 @@ arrays are validated eagerly (types, ranges, sampler filter/wrap enums, image so
 rules), and a material's `pbrMetallicRoughness.baseColorTexture` on `TEXCOORD_0` is
 decoded **lazily** into RGBA8 `GltfImage`s carried on the import, with the
 declared sampler state in glTF enum numbers. Bytes stay in the payload's *encoded*
-form — decoding never colour-transforms on the CPU — and each binding's
+form; decoding never colour-transforms on the CPU; and each binding's
 `encoded_srgb` flag records that glTF `baseColorTexture` is an sRGB colour texture
 to be sampled through an sRGB image format (hardware linearisation; see the colour
 section below). Every primitive's material is processed: a texture shared by several
@@ -367,7 +367,7 @@ Whole scenes import through `import_gltf_scene()` (same inputs as
 `import_gltf_mesh`, plus the `scenes`/`nodes` arrays): the hierarchy is parsed
 (`matrix` XOR TRS transforms, shared-subtree DAGs, mesh references), validated
 (node/child/mesh/scene ranges, cycles, skinned nodes, matrix+TRS conflicts), and
-depth-first flattened into `GltfSceneImport` — one `Node` per mesh-bearing
+depth-first flattened into `GltfSceneImport`; one `Node` per mesh-bearing
 instance carrying its absolute column-major `model` (pure group nodes contribute
 transforms only, shared meshes import once and instantiate per path). Those
 world models drop straight into `SceneTransformComponent`, so a whole `.gltf`
@@ -376,7 +376,7 @@ scene becomes a set of drawables with no manual transform math.
 Ingestion is covered two ways. `GltfImporter.*` unit tests exercise valid fixtures
 (all four attributes, interleaving, merging, base64, mesh selection, data-URI and
 bufferView texture decode, sampler round-trip/defaults), encoding variants,
-and malformed-input rejections — pure CPU, so they run in every build flavor. The
+and malformed-input rejections; pure CPU, so they run in every build flavor. The
 end-to-end `VulkanHardware.GltfImportedSceneWithRegistryMaterials` test builds two cubes
 as glTF in memory with real per-vertex normals, imports them, uploads the streams,
 registers mesh + material handles, and renders through the 160-byte lit material ABI
@@ -387,7 +387,7 @@ verified by pixel readback, and the run is clean under Khronos validation. The c
 `VulkanHardware.AlbedoTextureTintsLitMaterialScene` test proves the albedo texture path
 itself: two cubes share one white-vertex mesh, and switching one cube's material to a
 registry texture record pointing at a solid-red 1x1 (bindless element 1) turns that cube
-red under lambert on the GPU while its untextured neighbour stays neutral — verified by
+red under lambert on the GPU while its untextured neighbour stays neutral; verified by
 readback with zero validation diagnostics. `VulkanHardware.GltfSceneGraphRendersInstances`
 proves the scene import on the GPU: one cube mesh shared by a two-node hierarchy renders
 as two world-space instances (left green root, right red child whose model inherits the
@@ -397,17 +397,17 @@ root translation), verified by readback with zero validation diagnostics.
 `VulkanHardware.GltfJpegBaseColorTextureEndToEnd` close the loop for real glTF files:
 the in-memory glTF embeds a solid red PNG / JPEG behind `baseColorTexture`, the
 importer decodes it through the magic-dispatched codecs (CPU assertions on
-dimensions/pixels/sampler — the JPEG's constant colour decodes bit-exactly), those
+dimensions/pixels/sampler; the JPEG's constant colour decodes bit-exactly), those
 exact bytes upload through the arena into a registry texture record, and switching the
-cube's material to it turns the lit scene red on the GPU — while the plain material
-stays neutral — under Khronos validation.
+cube's material to it turns the lit scene red on the GPU; while the plain material
+stays neutral; under Khronos validation.
 
 Multi-material meshes are proven on the GPU two ways.
 `VulkanHardware.MultiMaterialGltfMeshRendersBothPrimitiveTextures` imports one glTF
 mesh whose two primitives each bind their own solid-colour baseColorTexture (red,
 green data URIs), asserts every primitive record's material/texture wiring at the
 asset layer, uploads each primitive's vertex/index slice as its own mesh, and renders
-both through the lit scene path — readback shows red *and* green regions in one frame
+both through the lit scene path; readback shows red *and* green regions in one frame
 under zero validation diagnostics.
 `VulkanHardware.MultiMaterialMeshSplitsIntoSharedBufferDraws` proves the shared-buffer
 form of the same split: the external-file loader feeds a red PNG and a green PNG to the
@@ -416,13 +416,13 @@ import, both primitives' slices are drawn from one merged vertex/index buffer vi
 
 ## Image Decoding + GPU Texture Upload
 
-PNG images decode on the CPU in `engine/asset/png_decoder.hpp` — a deterministic,
+PNG images decode on the CPU in `engine/asset/png_decoder.hpp`; a deterministic,
 dependency-free decoder (self-contained RFC 1951 DEFLATE plus the PNG chunk layer)
 that turns file bytes into tightly packed 8-bit RGBA (`DecodedImage`, straight alpha).
 Supported input is the spec-relevant surface: colour types 0/2/3/4/6 at 8-bit, all five
 scanline filters, PLTE + tRNS (palette alpha and grey/truecolour keys), one or many
 consecutive IDAT chunks, and stored / fixed-Huffman / dynamic-Huffman DEFLATE blocks.
-Malformed data is rejected with `RuntimeError::malformed_asset` and a diagnostic — bad
+Malformed data is rejected with `RuntimeError::malformed_asset` and a diagnostic; bad
 signatures, per-chunk CRC failures, unknown *critical* chunks, truncated framing,
 interlaced (Adam7) or non-8-bit images, palette-index overruns, invalid zlib headers
 (preset dictionaries included), over-subscribed Huffman tables, and matches beyond the
@@ -431,7 +431,7 @@ Coverage runs everywhere (`PngDecoder.*`, 33 CPU tests): golden streams produced
 independent encoder (Python zlib: stored, fixed-Huffman, dynamic-Huffman) plus
 real-world Pillow files, with exact pixel comparisons.
 
-JPEG images decode on the CPU in `engine/asset/jpeg_decoder.hpp` — a deterministic,
+JPEG images decode on the CPU in `engine/asset/jpeg_decoder.hpp`; a deterministic,
 dependency-free **baseline sequential** decoder (self-contained Huffman decode,
 0xFF00 byte-stuffing, zigzag + dequantisation, float IDCT, BT.601 YCbCr→RGB, and
 triangle "fancy" chroma upsampling for 2x ratios with edge replication, matching
@@ -442,16 +442,16 @@ restart intervals (DRI/RSTn), and APPn/COM segments. Progressive (SOF2), extende
 sequential / 12-bit (SOF1), arithmetic-coded frames, non-8-bit samples, fractional
 upsampling ratios, out-of-range table/component references, truncated entropy data,
 and a missing EOI are all rejected with `RuntimeError::malformed_asset` and a
-diagnostic — nothing unsupported is ever mis-decoded. A 256 MiB decoded-size cap
+diagnostic; nothing unsupported is ever mis-decoded. A 256 MiB decoded-size cap
 bounds hostile dimensions. Coverage runs everywhere (`JpegDecoder.*`, 12 CPU tests):
-golden blobs from an independent encoder (Pillow over libjpeg — constant-grey exact,
+golden blobs from an independent encoder (Pillow over libjpeg; constant-grey exact,
 a 4:4:4 colour ramp and a 4:2:0 two-colour image bounded against the analytic source)
 plus strict malformed-input rejection; importer-level tests prove
 `data:image/jpeg;base64` payloads decode through the glTF pipeline.
 
 **Colour space:** glTF `baseColorTexture` bytes are sRGB-encoded and lighting must
 happen in linear space, so colour textures are uploaded as
-`VK_FORMAT_R8G8B8A8_SRGB` images — the hardware decodes to linear at sample time and
+`VK_FORMAT_R8G8B8A8_SRGB` images; the hardware decodes to linear at sample time and
 no CPU colour transform is ever applied (an 8-bit CPU linearisation would quantise).
 Non-colour data textures (normal/ORM) will use plain UNORM. The importer marks each
 binding's colour role (`GltfMaterialTexture::encoded_srgb`) so uploaders choose the
@@ -459,7 +459,7 @@ format; sampling an encoded value as raw-linear is the bug this convention preve
 `VulkanHardware.SrgbBaseColorTextureLinearisesAtSample` proves it on the GPU: an
 encoded grey 186 decodes to linear 0.491021, and the lit scene's frame-centre pixel
 reads ~104 whether that linear value arrives as a material factor or as an
-sRGB-format texture — while sampling the raw 186 as linear would read ~155.
+sRGB-format texture; while sampling the raw 186 as linear would read ~155.
 
 The decoded RGBA then travels the GPU path through the frame upload arena:
 `VulkanFrameUploadArena::record_copy_image_rgba8()` stages the span into a fresh
@@ -473,13 +473,13 @@ quad; every one of the 64 texels is verified 1:1 (RGBA, alpha included) at its o
 location by readback.
 
 Packaging note: the repository's dependency manifests advertise an `stb` image feature
-(`vcpkg.json` "image", `OMNICPP_USE_STB`), but no build target links or uses stb — the
+(`vcpkg.json` "image", `OMNICPP_USE_STB`), but no build target links or uses stb; the
 image pipeline above is the engine's own decoder and is what the tests exercise. Registry
 textures are already sampled by the lit scene material path (bindless set 1, verified on
 the GPU), glTF `images`/`textures`/samplers (`baseColorTexture`) are decoded and wired
 into registry texture records, and whole `scenes`/`nodes` hierarchies flatten into
 world-space instances (see the glTF section). Real-world glTF assets now load
-texture payloads in all three supported forms — embedded PNG/JPEG data URIs,
+texture payloads in all three supported forms; embedded PNG/JPEG data URIs,
 bufferView images, and external files through the loader callback. Colour textures
 are sampled through sRGB image formats so lighting happens in linear space (below).
 The per-primitive *splitting* of a multi-material mesh into separate draws is
@@ -487,7 +487,7 @@ already GPU-proven (see the two `MultiMaterial*` tests in the glTF section: slic
 draws and shared-buffer submesh records over one vertex/index buffer); what remains
 for real-world assets is engine plumbing that performs that split automatically
 from a single import instead of test-side records, the output side of the pipeline
-(an sRGB swapchain / final write encode — today rendering targets are UNORM and
+(an sRGB swapchain / final write encode; today rendering targets are UNORM and
 shaders write linear values straight), and the GPU-driven culling path.
 
 ## Swapchain Recreation
@@ -518,16 +518,16 @@ Key hardware tests (`tests/unit/test_rendering.cpp`):
 - `VulkanHardware.PbrMetallicRoughnessDiscrimination`
 - `VulkanHardware.PbrEmissiveAddsUnlitColor`
 - `VulkanHardware.PbrAlbedoTextureTintsLitCube`
-- `VulkanHardware.ParallelRecorderContentionStress` — repeated multithreaded
+- `VulkanHardware.ParallelRecorderContentionStress`; repeated multithreaded
   recording waves with band count above core count (TSan pressure test)
 - Allocator/upload-ring sub-allocation and byte-verification tests
 
 Robustness suites (`tests/unit/test_reflector_and_allocator_robustness.cpp`):
 
-- `SpirvReflector.*` — the reflector survives truncation, lying instruction
+- `SpirvReflector.*`; the reflector survives truncation, lying instruction
   word counts, and 2000 iterations of random byte corruption of a real shader
   without out-of-bounds reads
-- `VulkanAllocator.RandomizedAllocFreePreservesDisjointness` — randomized
+- `VulkanAllocator.RandomizedAllocFreePreservesDisjointness`; randomized
   alloc/free sequences (fixed seed) verified for non-overlap and full
   reclamation
 
@@ -547,14 +547,14 @@ Shader compilation prefers `glslc` (shaderc) and falls back to
 `glslangValidator -V` where glslc is not packaged.
 
 CI runs this exact preset on Mesa lavapipe (software GPU) with the validation layer
-enabled — see `.github/workflows/test.yml`.
+enabled; see `.github/workflows/test.yml`.
 
 ## Compute
 
 `VulkanCompute` (`engine/render/vulkan_compute.hpp`) dispatches compute pipelines on the
 compute-capable queue with event-based synchronization: record a dispatch, signal an
 `VkEvent`, then have graphics waits consume it (`wait_events`) for a compute-to-graphics
-handoff inside one submission — no queue round-trip. Pipelines load through
+handoff inside one submission; no queue round-trip. Pipelines load through
 `VulkanPipeline::load_shader_stage_file(..., "compute")` and
 `create_compute_pipeline`. Covered by `VulkanHardware.ComputeToGraphicsEventHandoff`
 (compute fills a storage buffer; a graphics pipeline renders it; the result is verified
@@ -576,7 +576,7 @@ data validated against the analytic rotation.
 
 The `cull_and_draw.comp` + `gpu_objects` pipeline implements a CPU-independent draw path:
 compute culls each instance's bounding sphere against view-frustum planes, compacts
-accepted indices into a list, and **atomically maintains the indirect draw command** —
+accepted indices into a list, and **atomically maintains the indirect draw command** -
 graphics executes `vkCmdDrawIndirect` and the vertex shader resolves
 `compacted[gl_InstanceIndex]`. The CPU never touches per-instance draw data; it only
 publishes instance state. `VulkanHardware.GpuDrivenCullIndirectDraw` verifies both
@@ -631,7 +631,7 @@ are tested against coarser, cheaper texels.
 ## Real-Depth Occlusion: End-to-End Pyramid
 
 `VulkanHardware.RealDepthPyramidOcclusion` closes the loop with no CPU depth
-knowledge: render a wall+cube scene (D32 depth stored — `VulkanOffscreenTarget`
+knowledge: render a wall+cube scene (D32 depth stored; `VulkanOffscreenTarget`
 depth attachments use `STORE` so the pyramid path can copy them), copy the actual
 depth attachment to a buffer (`vkCmdCopyImageToBuffer`), reduce it on the GPU, then
 cull against that pyramid. The cube behind the wall is occlusion-culled by real
@@ -643,7 +643,7 @@ projection mapping.
 `depth_reduce_mips.comp` builds a 4-level MAX pyramid from the copied depth
 buffer: 8x8 tiles of 32px texels, then 4x4 @ 64px, 2x2 @ 128px, and a 1x1 whole-
 frame max (85 words total). One level per dispatch with a buffer barrier between
-levels — a single dispatch cannot synchronize across workgroups, so inter-level
+levels; a single dispatch cannot synchronize across workgroups, so inter-level
 visibility must come from explicit barriers. Level 0 verifies analytically
 against the projection mapping; level 3 equals the nearest rendered depth in the
 frame.
@@ -659,9 +659,9 @@ pipeline the async-compute primitives were built for: the compute queue produces
 NEXT frame's GPU-driven draw state (per-frame ring generation, then GPU-side
 frustum culling that maintains the indirect draw's instanceCount), while the
 graphics queue renders frame N's already-culled state. Ordering is one frame of
-latency — compute for frame N+1 is submitted before graphics for frame N, and
+latency; compute for frame N+1 is submitted before graphics for frame N, and
 graphics waits on compute N's timeline value (`VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT`
-included in the wait mask) — no CPU round-trip, no CPU touch of per-frame draw
+included in the wait mask); no CPU round-trip, no CPU touch of per-frame draw
 data after setup. Per-frame command buffers + fences are required: re-recording
 or fence-resetting while frame N is still pending violates
 VUID-vkQueueSubmit-pCommandBuffers-00071 / VUID-vkResetFences-pFences-01123.
@@ -713,7 +713,7 @@ verifies three cycles under Khronos validation with zero diagnostics.
 
 ## Remaining Roadmap
 
-1. **Cross-vendor hardware runs** (AMD/Intel/mobile) — requires physical hardware or a
+1. **Cross-vendor hardware runs** (AMD/Intel/mobile); requires physical hardware or a
    GPU CI service; the lavapipe CI job covers driver-independent correctness.
 2. Integrate the runtime-sized resource into the production render graph and
    descriptor-backed per-frame resource tables.

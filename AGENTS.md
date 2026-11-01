@@ -82,14 +82,14 @@ involved, say so and skip the research section rather than padding it.
 - **core does not depend on render, and neither depends on the application's
   headers.** A type in the wrong layer is a design error, not a convenience.
 - **Public headers must compile without Vulkan present.** Use `#ifdef`, never
-  `#if OMNICPP_HAS_VULKAN` — that macro is defined with no value, so `#if`
+  `#if OMNICPP_HAS_VULKAN`; that macro is defined with no value, so `#if`
   silently evaluates false and the Vulkan include vanishes. This has cost real
   build cycles.
 - **Floating-point determinism contract.** `-ffp-contract=off` is set on every
 compiler that supports it: FMA contraction under -O2 is the most dangerous
 cross-build nondeterminism source (two compiles of the same source can produce
 different physics fingerprints). Do not add `-march=native`-style flags or
-platform libm calls (sin/cos/tan) reachable from a tick — the replay contract
+platform libm calls (sin/cos/tan) reachable from a tick; the replay contract
 depends on the op sequence being a pure function of source + flags.
 
 **Determinism is a product feature.** Anything reachable from a tick must not
@@ -105,7 +105,7 @@ depends on the op sequence being a pure function of source + flags.
 
 When a capability needs a substantial consumer, that consumer does **not** grow
 in this repository. The engine stays a library; consumers live in their own
-repos that depend on it — the pattern used for rust-in-cpp.
+repos that depend on it; the pattern used for rust-in-cpp.
 
 Put something in `examples/` only when it is small enough to read in one sitting
 *and* is needed to prove an engine feature. A full application, editor front

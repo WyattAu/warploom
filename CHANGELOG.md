@@ -64,8 +64,8 @@ the compatibility surface decays on the schedule in
 - **Shadow depth bias was inert.** `vkCmdSetDepthBias` was recorded against
   pipelines that never declared `VK_DYNAMIC_STATE_DEPTH_BIAS`, so it was both
   a validation error and a no-op. The static slope factor and the dynamic
-  bias are now separate parameters, and the viewport's shadow pass — which had
-  no bias at all — records one.
+  bias are now separate parameters, and the viewport's shadow pass; which had
+  no bias at all; records one.
 - `shadow.frag` wrote a colour output to a render pass with no colour
   attachment.
 - `VulkanOffscreenTarget`'s destructor called `cleanup(VK_NULL_HANDLE)`, and
@@ -76,8 +76,8 @@ the compatibility surface decays on the schedule in
   shader build failed on that leg.
 - `clang-tidy` was passed literal `**` globs (CMake does not glob) over
   directories that no longer contain code, so lint checked nothing.
-- `.clang-format` could not be parsed — `[[nodiscard]]` was unquoted, which
-  YAML reads as a nested sequence — so `format-check` had never run.
+- `.clang-format` could not be parsed; `[[nodiscard]]` was unquoted, which
+  YAML reads as a nested sequence; so `format-check` had never run.
 - `.clangd` pointed at a build directory that does not exist and declared
   `-std=c++17` against a C++26 build, leaving new contributors with no
   IntelliSense.

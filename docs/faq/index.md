@@ -23,7 +23,7 @@ OmniCPP-template is a comprehensive C++23 project template that demonstrates mod
 - Code quality tools (clang-format, clang-tidy, pylint, mypy)
 
 **The Analogy:**
-Think of OmniCPP-template as a "starter kit" for C++ game development—like a pre-assembled LEGO set where all the pieces are designed to work together, but you can still customize and extend it however you want.
+Think of OmniCPP-template as a "starter kit" for C++ game development-like a pre-assembled LEGO set where all the pieces are designed to work together, but you can still customize and extend it however you want.
 
 ### How do I get started?
 
