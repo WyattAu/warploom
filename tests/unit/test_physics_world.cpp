@@ -419,6 +419,360 @@ TEST(PhysicsWorld, Loop12ComplianceZeroIsBitIdentical) {
   EXPECT_EQ(omnicpp::physics::PhysicsWorld(-9.81F).contact_compliance(), 0.0F);
 }
 
+TEST(PhysicsWorld, RestitutionThresholdKillsMicroBounce) {
+  PhysicsWorld w(-9.81F);
+  w.set_restitution_threshold(0.5F);  // below any real impact here
+  PhysicsBody b;
+  b.position[1] = 1.0F;
+  b.radius = 0.5F;
+  b.restitution = 0.8F;
+  (void)w.add_body(b);
+
+  // First impact at ~3.1 m/s >> threshold: must still bounce. The threshold
+  // gates micro-bounces only, never real impacts.
+  bool contacted = false;
+  for (std::size_t i = 0; i < 240U && !contacted; ++i) {
+    w.step(kDt);
+    contacted = !w.contacts().empty();
+  }
+  ASSERT_TRUE(contacted);
+  EXPECT_GT(w.body(0).velocity[1], 0.0F);  // reflected upward
+
+  // ...but the decay ends in exact rest instead of oscillating forever.
+  for (std::size_t i = 0; i < 600U; ++i) {
+    w.step(kDt);
+  }
+  // Bit-exact: the clamp writes radius, the threshold writes 0.0f.
+  EXPECT_FLOAT_EQ(w.body(0).position[1], 0.5F);
+  EXPECT_FLOAT_EQ(w.body(0).velocity[1], 0.0F);
+}
+
+TEST(PhysicsWorld, IslandSleepingFreezesSettledPile) {
+  // 10x10 columns, 4 high, spawned exactly at rest (the compliance-tower
+  // convention): symmetric, so tangential velocities stay near zero and
+  // every island can satisfy the rest test. Lateral spacing 1.5 keeps
+  // columns decoupled — at 1.02 the falling columns lean into lateral
+  // force chains that jam the whole pile into one rattling island (one
+  // fast body vetoes all 400; measured 0 asleep at 1500 steps). A dropped
+  // (1cm) spawn likewise never settles: the impact clump finds a limit
+  // cycle the sequential solver cannot leave (measured on the historical
+  // path too — a solver-convergence limitation, not a sleeper defect — so
+  // the acceptance geometry spawns clean, like every other settle test).
+  // (Deliberately NOT the default path: thresholds opt in, and the
+  // exposure-bug lesson says the tested values must differ from defaults.)
+  auto build = [] {
+    PhysicsWorld w(-9.81F);
+    w.set_restitution_threshold(0.5F);
+    w.set_sleep_threshold(0.05F);
+    w.set_solver_iterations(4U);
+    for (std::uint32_t ix = 0; ix < 10U; ++ix) {
+      for (std::uint32_t iz = 0; iz < 10U; ++iz) {
+        for (std::uint32_t k = 0; k < 4U; ++k) {
+          PhysicsBody b;
+          b.position[0] = static_cast<float>(ix) * 1.5F;
+          b.position[1] = 0.5F + static_cast<float>(k) * 1.0F;
+          b.position[2] = static_cast<float>(iz) * 1.5F;
+          b.restitution = 0.0F;
+          (void)w.add_body(b);
+        }
+      }
+    }
+    return w;
+  };
+  PhysicsWorld w = build();
+  std::size_t settle_steps = 0;
+  while (w.sleeping_bodies() != 400U) {
+    w.step(kDt);
+    ++settle_steps;
+    ASSERT_LT(settle_steps, 1500U) << "pile never fully slept";
+  }
+  const std::uint64_t frozen = w.position_fingerprint();
+  for (std::size_t i = 0; i < 60U; ++i) {
+    w.step(kDt);
+  }
+  // Frozen: sleeping restores the exact pre-step state, so the fingerprint
+  // is bit-identical across steps and every body stays asleep — while
+  // contacts still emit (telemetry sees the pile, the solver skips it).
+  EXPECT_EQ(w.position_fingerprint(), frozen);
+  EXPECT_EQ(w.sleeping_bodies(), 400U);
+  EXPECT_FALSE(w.contacts().empty());
+  // At REST, not merely frozen: every body sits at its column rest height
+  // (0.5 + layer; ids are column-major so layer = id % 4) with ~zero
+  // velocity. This is what pins the rest-test DIRECTION: a flipped
+  // comparison freezes all 400 bodies mid-fall on first contact — asleep,
+  // frozen, replay-identical, but metres from rest — and these fail it.
+  float max_speed = 0.0F;
+  for (std::uint32_t id = 0; id < 400U; ++id) {
+    const float rest_y = 0.5F + static_cast<float>(id % 4U);
+    EXPECT_NEAR(w.body(id).position[1], rest_y, 0.02F) << "id " << id;
+    const auto& v = w.body(id).velocity;
+    const float s = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+    if (s > max_speed) max_speed = s;
+  }
+  EXPECT_LT(std::sqrt(max_speed), 1e-4F);
+  // Replay: a fresh identical run reaches the same frozen fingerprint —
+  // sleep decisions are derived state, so they reproduce exactly.
+  PhysicsWorld replay = build();
+  for (std::size_t i = 0; i < settle_steps + 60U; ++i) {
+    replay.step(kDt);
+  }
+  EXPECT_EQ(replay.position_fingerprint(), frozen);
+  EXPECT_EQ(replay.sleeping_bodies(), 400U);
+}
+
+TEST(PhysicsWorld, SleepingPreservesDoubleStepContract) {
+  // Compositional check: the Loop-12 validator double-steps every step,
+  // so any nondeterminism the sleeper introduced (stale flags, order-
+  // dependent union, unrestored state) surfaces as violations.
+  PhysicsWorld w(-9.81F);
+  w.set_restitution_threshold(0.5F);
+  w.set_sleep_threshold(0.05F);
+  w.set_determinism_check(true);
+  for (std::uint32_t i = 0; i < 6U; ++i) {
+    PhysicsBody b;
+    b.position[1] = 0.5F + 1.0F * static_cast<float>(i);
+    b.restitution = 0.2F;
+    (void)w.add_body(b);
+  }
+  for (std::size_t i = 0; i < 300U; ++i) {
+    w.step(kDt);
+  }
+  EXPECT_EQ(w.determinism_violations(), 0ULL);
+  EXPECT_FALSE(w.contacts().empty());  // the check ran over real contacts
+}
+
+TEST(PhysicsWorld, VelocityFromPositionIsOptInAndSettles) {
+  // Default off: the knob exists but changes nothing unless set (history
+  // bit-identical — the full suite above already pins that path).
+  EXPECT_FALSE(PhysicsWorld(-9.81F).velocity_from_position());
+  auto run = [](bool vfp) {
+    PhysicsWorld w(-9.81F);
+    w.set_velocity_from_position(vfp);
+    w.set_substeps(2U);
+    w.set_solver_iterations(4U);
+    for (std::uint32_t i = 0; i < 6U; ++i) {
+      PhysicsBody b;
+      b.position[0] = (i % 2U == 0U) ? -0.4F : 0.4F;
+      b.position[1] = 0.5F + 1.0F * static_cast<float>(i);
+      b.restitution = 0.0F;
+      (void)w.add_body(b);
+    }
+    for (std::size_t i = 0; i < static_cast<std::size_t>(300); ++i) {
+      w.step(kDt);
+    }
+    return w.state_fingerprint();
+  };
+  // The flag does something (tested value differs from default path), and
+  // what it does is deterministic: same flag, same bits.
+  EXPECT_NE(run(true), run(false));
+  EXPECT_EQ(run(true), run(true));
+}
+
+TEST(PhysicsWorld, VelocityFromPositionBounceAndValidator) {
+  PhysicsWorld w(-9.81F);
+  w.set_velocity_from_position(true);
+  w.set_determinism_check(true);
+  PhysicsBody b;
+  b.position[1] = 1.0F;
+  b.radius = 0.5F;
+  b.restitution = 0.8F;
+  (void)w.add_body(b);
+  const float v_in = std::sqrt(2.0F * 9.81F * 0.5F);
+  bool contacted = false;
+  for (std::size_t i = 0; i < 240U && !contacted; ++i) {
+    w.step(kDt);
+    contacted = !w.contacts().empty();
+  }
+  ASSERT_TRUE(contacted);
+  // Bounce survives the velocity rewrite: the approach speed is stored
+  // pre-solve and re-applied on top of the derived velocity.
+  EXPECT_NEAR(w.body(0).velocity[1], 0.8F * v_in, 0.15F);
+  EXPECT_GT(w.body(0).velocity[1], 0.0F);
+  // Settle-out ends in exact rest (derived velocity of a clamped body).
+  w.body(0).restitution = 0.0F;
+  for (std::size_t i = 0; i < 600U; ++i) {
+    w.step(kDt);
+  }
+  EXPECT_FLOAT_EQ(w.body(0).position[1], 0.5F);
+  EXPECT_FLOAT_EQ(w.body(0).velocity[1], 0.0F);
+  EXPECT_EQ(w.determinism_violations(), 0ULL);
+}
+
+TEST(PhysicsWorld, CapsuleFallsAndRestsUpright) {
+  // Upright capsule: support = half_height + radius. If the capsule path
+  // silently treated bodies as spheres, this would rest at 0.25 instead.
+  auto build = [] {
+    PhysicsWorld w(-9.81F);
+    w.set_restitution_threshold(0.5F);
+    w.set_solver_iterations(4U);
+    PhysicsBody b;
+    b.shape = omnicpp::physics::BodyShape::Capsule;
+    b.half_height = 0.5F;
+    b.radius = 0.25F;
+    b.position[1] = 2.0F;
+    b.restitution = 0.0F;
+    (void)w.add_body(b);
+    return w;
+  };
+  PhysicsWorld w = build();
+  for (std::size_t i = 0; i < 600U; ++i) {
+    w.step(kDt);
+  }
+  EXPECT_NEAR(w.body(0).position[1], 0.75F, 0.02F);
+  EXPECT_FALSE(std::isnan(w.body(0).position[1]));
+  EXPECT_LT(std::abs(w.body(0).velocity[1]), 1e-3F);
+  PhysicsWorld replay = build();
+  for (std::size_t i = 0; i < 600U; ++i) {
+    replay.step(kDt);
+  }
+  EXPECT_EQ(replay.position_fingerprint(), w.position_fingerprint());
+}
+
+TEST(PhysicsWorld, CapsuleCapsuleNarrowphaseSeparates) {
+  // Crossed capsules whose CENTERS are 0.6 apart (spheres of r=0.25 would
+  // see no contact) but whose segments overlap by 0.4. A sphere-only
+  // narrowphase leaves them frozen at 0.6; the segment path separates them.
+  PhysicsWorld w(0.0F);  // no gravity: pure separation test
+  w.set_determinism_check(true);
+  PhysicsBody a;
+  a.shape = omnicpp::physics::BodyShape::Capsule;
+  a.half_height = 0.5F;
+  a.radius = 0.25F;
+  a.position[1] = 5.0F;
+  // 90 degrees about Z: capsule axis Y -> X.
+  a.orientation[0] = 0.0F;
+  a.orientation[1] = 0.0F;
+  a.orientation[2] = 0.70710678F;
+  a.orientation[3] = 0.70710678F;
+  PhysicsBody b;
+  b.shape = omnicpp::physics::BodyShape::Capsule;
+  b.half_height = 0.5F;
+  b.radius = 0.25F;
+  b.position[0] = 0.6F;
+  b.position[1] = 5.0F;
+  (void)w.add_body(a);
+  (void)w.add_body(b);
+  w.step(kDt);
+  // A sphere-only narrowphase emits no contact here at all (centers 0.6
+  // apart with r-sum 0.5), so a first-step contact pins the segment path
+  // directly — not just its after-effects. contacts() holds the last
+  // step only, so this is asserted before the bodies separate.
+  EXPECT_FALSE(w.contacts().empty());
+  for (std::size_t i = 0; i < 59U; ++i) {
+    w.step(kDt);
+  }
+  const float dx = w.body(1).position[0] - w.body(0).position[0];
+  EXPECT_FALSE(std::isnan(dx));
+  EXPECT_GT(std::abs(dx), 0.65F);  // driven apart, not frozen at 0.6
+  // Untouched run agrees bit-for-bit (segment closest-points are pure).
+  PhysicsWorld replay(0.0F);
+  PhysicsBody ra = a;
+  PhysicsBody rb = b;
+  (void)replay.add_body(ra);
+  (void)replay.add_body(rb);
+  for (std::size_t i = 0; i < 60U; ++i) {
+    replay.step(kDt);
+  }
+  EXPECT_EQ(replay.position_fingerprint(), w.position_fingerprint());
+  EXPECT_EQ(w.determinism_violations(), 0ULL);
+}
+
+TEST(PhysicsWorld, RotationIntegratesHalfTurn) {
+  // Zero gravity, no contacts: pure orientation integration. 1 rev/s about
+  // Y for 0.5 s must be a half turn: |qy| ~ 1, qw ~ 0.
+  PhysicsWorld w(0.0F);
+  w.set_determinism_check(true);
+  PhysicsBody b;
+  b.position[1] = 5.0F;
+  b.angular_velocity[1] = 2.0F * 3.14159265F;
+  (void)w.add_body(b);
+  for (std::size_t i = 0; i < 60U; ++i) {
+    w.step(kDt);  // 60/120 s = 0.5 s
+  }
+  EXPECT_NEAR(std::abs(w.body(0).orientation[1]), 1.0F, 0.02F);
+  EXPECT_NEAR(w.body(0).orientation[3], 0.0F, 0.02F);
+  // Renormalized every step: still a unit quaternion.
+  const float* q = w.body(0).orientation;
+  EXPECT_NEAR(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3], 1.0F,
+              1e-5F);
+  // Spin persists without contacts (no damping invented here).
+  EXPECT_NEAR(w.body(0).angular_velocity[1], 2.0F * 3.14159265F, 1e-4F);
+  EXPECT_EQ(w.determinism_violations(), 0ULL);
+}
+
+TEST(PhysicsWorld, GroundFrictionSpinsSlidingBall) {
+  // A ball sliding on the ground must gain forward roll from the friction
+  // impulse torque. Zero torque would leave spin at exactly 0 — the test
+  // pins the direction the physics requires.
+  PhysicsWorld w(-9.81F);
+  PhysicsBody b;
+  b.position[1] = 0.5F;
+  b.velocity[0] = 3.0F;
+  b.restitution = 0.0F;
+  (void)w.add_body(b);
+  for (std::size_t i = 0; i < 120U; ++i) {
+    w.step(kDt);
+  }
+  EXPECT_LT(w.body(0).angular_velocity[2], -0.5F);  // forward roll
+  EXPECT_GE(w.body(0).position[1], 0.5F - 1e-4F);   // never sinks
+  // Linear path untouched by the spin side effect: replay bit-identical.
+  PhysicsWorld replay;
+  replay = PhysicsWorld(-9.81F);
+  PhysicsBody c = b;
+  c.angular_velocity[2] = 0.0F;
+  (void)replay.add_body(c);
+  for (std::size_t i = 0; i < 120U; ++i) {
+    replay.step(kDt);
+  }
+  EXPECT_EQ(replay.position_fingerprint(), w.position_fingerprint());
+}
+
+TEST(PhysicsWorld, DistanceJointHoldsTwoBodies) {
+  EXPECT_EQ(PhysicsWorld(0.0F).joint_count(), 0U);  // empty by default
+  auto build = [] {
+    PhysicsWorld w(0.0F);
+    w.set_solver_iterations(4U);
+    PhysicsBody a;
+    a.position[1] = 5.0F;
+    PhysicsBody b;
+    b.position[0] = 3.0F;
+    b.position[1] = 5.0F;
+    const auto ia = w.add_body(a);
+    const auto ib = w.add_body(b);
+    (void)w.add_distance_joint(ia, ib, 1.0F);
+    return w;
+  };
+  PhysicsWorld w = build();
+  for (std::size_t i = 0; i < 120U; ++i) {
+    w.step(kDt);
+  }
+  const float dx = w.body(1).position[0] - w.body(0).position[0];
+  const float dy = w.body(1).position[1] - w.body(0).position[1];
+  const float dz = w.body(1).position[2] - w.body(0).position[2];
+  EXPECT_NEAR(std::sqrt(dx * dx + dy * dy + dz * dz), 1.0F, 0.02F);
+  PhysicsWorld replay = build();
+  for (std::size_t i = 0; i < 120U; ++i) {
+    replay.step(kDt);
+  }
+  EXPECT_EQ(replay.position_fingerprint(), w.position_fingerprint());
+}
+
+TEST(PhysicsWorld, SleepingKeepsSpinningBodiesAwake) {
+  // The rest test gates on spin too: a body at rest linearly but spinning
+  // in place must not sleep. Without the angular gate this reports 1.
+  PhysicsWorld w(-9.81F);
+  w.set_sleep_threshold(0.05F);
+  PhysicsBody b;
+  b.position[1] = 0.5F;
+  b.restitution = 0.0F;
+  b.angular_velocity[1] = 1.0F;  // 1 rad/s >> 0.05 gate
+  (void)w.add_body(b);
+  for (std::size_t i = 0; i < 60U; ++i) {
+    w.step(kDt);
+  }
+  EXPECT_EQ(w.sleeping_bodies(), 0U);
+}
+
 TEST(PhysicsWorld, Loop12ComplianceSoftensAndStaysDeterministic) {
   auto settle_top = [](float alpha) {
     omnicpp::physics::PhysicsWorld w(-9.81F);

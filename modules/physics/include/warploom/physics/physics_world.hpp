@@ -3,7 +3,9 @@
 /**
  * @file physics_world.hpp
  * @brief Deterministic fixed-step physics: semi-implicit Euler integration,
- *        sphere-plane and sphere-sphere contacts.
+ *        sphere/capsule-plane and sphere/capsule contacts, orientation
+ *        integration with contact torque, distance joints, and an opt-in
+ *        XPBD velocity-from-position update.
  *
  * This header is the solver only. It knows nothing about the ECS; the bridge
  * that copies body poses into projected transforms lives on EditorSession
@@ -28,13 +30,78 @@
 
 namespace warploom::physics {
 
+//! Collider shape. SPHERE is the historical shape; CAPSULE adds a segment
+//! collider. All new fields default to a zero-length segment with identity
+//! orientation and zero spin, which narrows to exactly the sphere path — so
+//! existing scenes (shape untouched) integrate bit-identically.
+enum class BodyShape : std::uint8_t { Sphere = 0, Capsule = 1 };
+
 struct PhysicsBody {
   float position[3]{0.0f, 0.0f, 0.0f};
   float velocity[3]{0.0f, 0.0f, 0.0f};
-  float radius{0.5f};      //!< Sphere collider (and render scale reference).
+  float radius{0.5f};      //!< Sphere radius / capsule cap radius.
   float inverse_mass{1.0f};  //!< 0 = static (immovable).
   float restitution{0.4f};   //!< Bounce coefficient [0, 1].
+  BodyShape shape{BodyShape::Sphere};
+  float half_height{0.0f};  //!< Capsule half-length (center to cap center).
+                            //!< 0 = sphere-equivalent regardless of `shape`.
+  float orientation[4]{0.0f, 0.0f, 0.0f, 1.0f};  //!< Unit quaternion (x,y,z,w).
+  float angular_velocity[3]{0.0f, 0.0f, 0.0f};   //!< Rad/s, world frame.
+  //!< Rotation scope (honest limits): orientation integrates spin exactly
+  //!< and contact impulses apply (r x J)/I torque, so impacts genuinely
+  //!< rotate capsules. What is NOT modeled: spin does not feed back into
+  //!< the friction surface velocity (friction stays the historical 0.98
+  //!< tangential damp), there is no rolling-resistance or angular damping
+  //!< model, and twist uses the transverse inertia (documented approx).
+  //!< Zero spin therefore leaves every linear trajectory bit-identical.
 };
+
+//! Rotate (x,y,z) by unit quaternion q (x,y,z,w). Deterministic, branchless.
+inline void quat_rotate_vector(const float q[4], float x, float y, float z,
+                               float& out_x, float& out_y, float& out_z) noexcept {
+  // t = 2 * cross(q.xyz, v); out = v + q.w * t + cross(q.xyz, t).
+  const float tx = 2.0F * (q[1] * z - q[2] * y);
+  const float ty = 2.0F * (q[2] * x - q[0] * z);
+  const float tz = 2.0F * (q[0] * y - q[1] * x);
+  out_x = x + q[3] * tx + (q[1] * tz - q[2] * ty);
+  out_y = y + q[3] * ty + (q[2] * tx - q[0] * tz);
+  out_z = z + q[3] * tz + (q[0] * ty - q[1] * tx);
+}
+
+//! Bounding radius: sphere radius, plus capsule half-length. The broadphase
+//! sizes cells from this, so bounding spheres provably contain every
+//! overlapping pair (same conservative argument as the sphere path).
+inline float body_bounding_radius(const PhysicsBody& b) noexcept {
+  const float extra =
+      (b.shape == BodyShape::Capsule && b.half_height > 0.0F) ? b.half_height : 0.0F;
+  return b.radius + extra;
+}
+
+//! Transverse moment of inertia about the body center (uniform density).
+//! Sphere: (2/5) m r^2. Capsule: exact volume-weighted composite of a
+//! cylinder (length 2h) plus two hemispheres at +/-h (parallel-axis terms
+//! included). Twist about the capsule axis uses the same scalar — a
+//! documented approximation (twist inertia is smaller); contacts rarely
+//! torque about the axis, and the error direction (under-rotation of pure
+//! twist) is stable, never an energy source.
+inline float body_inertia(const PhysicsBody& b) noexcept {
+  if (b.inverse_mass <= 0.0F) return 0.0F;
+  const float m = 1.0F / b.inverse_mass;
+  const float r = b.radius;
+  if (b.shape != BodyShape::Capsule || b.half_height <= 0.0F) {
+    return 0.4F * m * r * r;
+  }
+  const float h = b.half_height;
+  const float vc = 2.0F * h * r * r;         // cylinder volume / pi
+  const float vs = 4.0F / 3.0F * r * r * r;  // sphere volume / pi
+  const float total = vc + vs;
+  if (total <= 0.0F) return 0.4F * m * r * r;
+  const float mc = m * vc / total;
+  const float ms = m * vs / total;
+  const float i_cyl = mc * (3.0F * r * r + 4.0F * h * h) / 12.0F;
+  const float i_sph = ms * (0.4F * r * r + h * h);
+  return i_cyl + i_sph;
+}
 
 //! One resolved contact (exposed for tests/telemetry).
 struct ContactEvent {
@@ -105,6 +172,56 @@ class PhysicsWorld final {
     return contact_compliance_;
   }
 
+  //! Restitution velocity threshold (D1 island sleeping, staged after the
+  //! research pass). Restitution applies only when the approach speed
+  //! exceeds the threshold; slower contacts resolve inelastically (approach
+  //! velocity removed, no bounce). Real impacts (m/s) bounce exactly as
+  //! before; micro-bounces below the threshold decay to true rest instead
+  //! of oscillating forever, which is what lets a settled pile satisfy the
+  //! sleep criterion. Default 0 = the historical always-bounce response, so
+  //! existing replays reproduce bit-identically unless the caller opts in.
+  void set_restitution_threshold(float v) noexcept {
+    restitution_threshold_ = v >= 0.0F ? v : 0.0F;
+  }
+  [[nodiscard]] float restitution_threshold() const noexcept {
+    return restitution_threshold_;
+  }
+
+  //! Island sleep speed threshold in m/s (D1, Jolt's per-step rebuild
+  //! pattern). Each step_single rebuilds islands by union-find over the
+  //! frozen contact graph and puts an island to sleep when every dynamic
+  //! member's pre-integration speed is below the threshold AND the island
+  //! owns at least one contact edge (a slow body in free flight stays
+  //! awake). Sleeping members are restored to their pre-integration state
+  //! and skipped by the solver that step — a settled pile costs
+  //! integration + detection only. No sleep state is stored: islands are
+  //! re-derived every step, so waking is automatic (a fast body joining the
+  //! island through a new contact fails the rest test) and replay
+  //! reproduces every sleep decision bit-identically. Default 0 = never
+  //! sleep: the sleep set is always empty and the step is bit-identical to
+  //! the historical solver.
+  //!
+  //! Boundary semantics: a pair with one sleeping endpoint treats the
+  //! sleeper as PINNED (infinite mass for this step) — the awake endpoint
+  //! takes the full correction and impulse. The alternative (the pair's
+  //! usual share) leaves half the approach velocity behind every step and
+  //! jitters awake bodies on sleeping ones forever. Small, bounded,
+  //! deterministic discontinuity at the sleep/wake boundary.
+  void set_sleep_threshold(float v) noexcept {
+    sleep_threshold_ = v >= 0.0F ? v : 0.0F;
+  }
+  [[nodiscard]] float sleep_threshold() const noexcept {
+    return sleep_threshold_;
+  }
+  //! Bodies asleep after the last step_single (derived scratch, exposed for
+  //! tests/telemetry — never part of snapshots, which carry bodies only).
+  [[nodiscard]] std::uint32_t sleeping_bodies() const noexcept {
+    return sleeping_count_;
+  }
+  [[nodiscard]] bool is_asleep(std::uint32_t id) const noexcept {
+    return id < sleeping_flags_.size() && sleeping_flags_[id] != 0U;
+  }
+
   //! Jolt-style record-rewind-replay validator (Loop 12). When enabled,
   //! every step runs the substep sequence TWICE from the same saved state
   //! and compares position fingerprints; a mismatch increments
@@ -124,6 +241,59 @@ class PhysicsWorld final {
     return determinism_violations_;
   }
 
+  //! XPBD velocity-from-position update (research: XPBD MIG 2016, Small
+  //! Steps SIGGRAPH 2021 — staged adoption, step 2 of the R2 spec). When
+  //! enabled, linear velocities are derived from the corrected positions
+  //! (v = (x_new - x_pre) / dt) instead of the separate impulse pass, so
+  //! velocities are consistent with the positions the solver actually
+  //! produced; restitution is then applied as a bounce on top using the
+  //! stored pre-solve approach speeds. Joints are positional-only in
+  //! impulse mode but become velocity-consistent under this flag, which is
+  //! the reason to prefer it for jointed scenes. Default OFF: the impulse
+  //! path runs exactly the historical instruction sequence (pinned by the
+  //! full existing suite), so current replays reproduce bit-identically.
+  void set_velocity_from_position(bool on) noexcept {
+    velocity_from_position_ = on;
+  }
+  [[nodiscard]] bool velocity_from_position() const noexcept {
+    return velocity_from_position_;
+  }
+
+  //! A positional distance constraint between two bodies (D1 joints, first
+  //! shape: point-to-point rest length). Solved in insertion order inside
+  //! every solver pass, alongside contacts; empty by default, so scenes
+  //! without joints execute the historical path untouched. Compliance
+  //! defaults to 0 (stiff); XPBD compliance scales exactly like contact
+  //! compliance. In impulse mode joints move positions only (velocities
+  //! stay as the contact solve left them — a documented limit); under
+  //! velocity-from-position the derived velocities include joint motion
+  //! by construction.
+  struct DistanceJoint {
+    std::uint32_t a{0};
+    std::uint32_t b{0};
+    float rest_length{1.0f};
+    float compliance{0.0f};
+  };
+  [[nodiscard]] std::uint32_t add_distance_joint(std::uint32_t a,
+                                                 std::uint32_t b,
+                                                 float rest_length,
+                                                 float compliance = 0.0f) noexcept {
+    DistanceJoint j;
+    j.a = a;
+    j.b = b;
+    j.rest_length = rest_length >= 0.0f ? rest_length : 0.0f;
+    j.compliance = compliance >= 0.0f ? compliance : 0.0f;
+    joints_.push_back(j);
+    return static_cast<std::uint32_t>(joints_.size() - 1U);
+  }
+  void clear_joints() noexcept { joints_.clear(); }
+  [[nodiscard]] std::size_t joint_count() const noexcept {
+    return joints_.size();
+  }
+  [[nodiscard]] const DistanceJoint& joint(std::uint32_t id) const noexcept {
+    return joints_[id];
+  }
+
   void step(float dt) noexcept {
     if (!determinism_check_) {
       run_substeps(dt);
@@ -132,10 +302,10 @@ class PhysicsWorld final {
     check_saved_ = bodies_;  // member scratch: steady-state no-alloc,
                               // same policy as the other step scratch members
     run_substeps(dt);
-    const std::uint64_t fp1 = position_fingerprint();
+    const std::uint64_t fp1 = state_fingerprint();
     bodies_ = check_saved_;
     run_substeps(dt);
-    if (position_fingerprint() != fp1) ++determinism_violations_;
+    if (state_fingerprint() != fp1) ++determinism_violations_;
   }
 
   //! One full solve at the given increment (integration + detect + resolve).
@@ -145,28 +315,147 @@ class PhysicsWorld final {
     contacts_.clear();
     const float g = gravity_;
 
+    // Pre-step state for the island sleeper: sleeping members are restored
+    // to exactly this. Analytic undo is NOT bitwise identity in floating
+    // point ((p+v·dt)−v·dt != p in general), and a 1-ULP drift per step is
+    // a slow sink — so the pose is stored. Reused scratch, no steady alloc.
+    pre_step_.resize(bodies_.size());
+    for (std::size_t i = 0; i < bodies_.size(); ++i) {
+      const PhysicsBody& saved = bodies_[i];
+      PreStep& pre = pre_step_[i];
+      pre.px = saved.position[0];
+      pre.py = saved.position[1];
+      pre.pz = saved.position[2];
+      pre.vx = saved.velocity[0];
+      pre.vy = saved.velocity[1];
+      pre.vz = saved.velocity[2];
+      pre.qx = saved.orientation[0];
+      pre.qy = saved.orientation[1];
+      pre.qz = saved.orientation[2];
+      pre.qw = saved.orientation[3];
+      pre.wx = saved.angular_velocity[0];
+      pre.wy = saved.angular_velocity[1];
+      pre.wz = saved.angular_velocity[2];
+    }
+
     // --- 1. Integration -------------------------------------------------
+    // Unconditional for every dynamic body: sleep is applied by restoring
+    // the pre-step state below, never by skipping, so the awake path
+    // executes the historical instruction sequence bit-identically.
+    // Orientation integrates angular velocity (exact rotation-vector step,
+    // renormalized): bodies with zero spin keep the identity quaternion
+    // bit-identically, so sphere scenes are untouched.
     for (PhysicsBody& b : bodies_) {
       if (b.inverse_mass <= 0.0F) continue;  // 0 == static
       b.velocity[1] += g * dt;
       b.position[0] += b.velocity[0] * dt;
       b.position[1] += b.velocity[1] * dt;
       b.position[2] += b.velocity[2] * dt;
+      const float wx = b.angular_velocity[0];
+      const float wy = b.angular_velocity[1];
+      const float wz = b.angular_velocity[2];
+      const float wmag_sq = wx * wx + wy * wy + wz * wz;
+      if (wmag_sq > 0.0F) {
+        const float wmag = std::sqrt(wmag_sq);
+        const float half = 0.5F * wmag * dt;
+        const float s = std::sin(half) / wmag;
+        const float dq_x = wx * s;
+        const float dq_y = wy * s;
+        const float dq_z = wz * s;
+        const float dq_w = std::cos(half);
+        const float qx = b.orientation[0];
+        const float qy = b.orientation[1];
+        const float qz = b.orientation[2];
+        const float qw = b.orientation[3];
+        float nx = dq_w * qx + dq_x * qw + dq_y * qz - dq_z * qy;
+        float ny = dq_w * qy - dq_x * qz + dq_y * qw + dq_z * qx;
+        float nz = dq_w * qz + dq_x * qy - dq_y * qx + dq_z * qw;
+        float nw = dq_w * qw - dq_x * qx - dq_y * qy - dq_z * qz;
+        const float nrm =
+            std::sqrt(nx * nx + ny * ny + nz * nz + nw * nw);
+        if (nrm > 0.0F) {
+          nx /= nrm;
+          ny /= nrm;
+          nz /= nrm;
+          nw /= nrm;
+        }
+        b.orientation[0] = nx;
+        b.orientation[1] = ny;
+        b.orientation[2] = nz;
+        b.orientation[3] = nw;
+      }
     }
 
     // --- 2. Ground plane contacts (y = 0) -------------------------------
-    for (PhysicsBody& b : bodies_) {
+    // Grounded membership is recorded for the island builder (phase 3b):
+    // post-clamp positions compare == radius, so the contact is no longer
+    // re-derivable after this loop. Depth is recorded too, for the
+    // penetration gate (dust must not ground an island).
+    grounded_.assign(bodies_.size(), 0U);
+    grounded_depth_.assign(bodies_.size(), 0.0F);
+    grounded_approach_.assign(bodies_.size(), 0.0F);
+    for (std::size_t gi = 0; gi < bodies_.size(); ++gi) {
+      PhysicsBody& b = bodies_[gi];
       if (b.inverse_mass <= 0.0F) continue;  // 0 == static
-      if (b.position[1] - b.radius < 0.0f) {
-        const float depth = b.radius - b.position[1];
-        b.position[1] = b.radius;
-        if (b.velocity[1] < 0.0f) {
-          b.velocity[1] = -b.velocity[1] * b.restitution;
+      // Support offset: sphere radius, or capsule lowest point
+      // (axis * |up.y| plus cap radius). Spheres take the historical path
+      // exactly: support == radius, contact at (x, 0, z).
+      float support = b.radius;
+      float upx = 0.0F, upy = 1.0F, upz = 0.0F;
+      if (b.shape == BodyShape::Capsule && b.half_height > 0.0F) {
+        quat_rotate_vector(b.orientation, 0.0F, 1.0F, 0.0F, upx, upy, upz);
+        float aupx = upy >= 0.0F ? upy : -upy;
+        support = aupx * b.half_height + b.radius;
+      }
+      if (b.position[1] - support < 0.0f) {
+        const float depth = support - b.position[1];
+        b.position[1] = support;
+      // Contact point and lever arm for torque (side effect on spin only:
+      // linear updates below are the historical ones, bit-identical).
+      // cp=(pos.x, 0, pos.z), so r=(0, -support, 0).
+      const float rx = 0.0F;
+      const float ry = 0.0F - support;
+      const float rz = 0.0F;
+        const float inv_m = b.inverse_mass;
+        const float mass = inv_m > 0.0F ? 1.0F / inv_m : 0.0F;
+        if (!velocity_from_position_) {
+          const float old_vx = b.velocity[0];
+          const float old_vy = b.velocity[1];
+          const float old_vz = b.velocity[2];
+          if (b.velocity[1] < 0.0f) {
+            // Restitution threshold (opt-in): impacts slower than the
+            // threshold resolve inelastically instead of micro-bouncing.
+            // Default 0 keeps the historical always-bounce response: vy < 0
+            // implies -vy > 0, so the condition is exactly the old branch.
+            b.velocity[1] = -b.velocity[1] > restitution_threshold_
+                                  ? -b.velocity[1] * b.restitution
+                                  : 0.0f;
+          }
+          // Ground friction damps tangential motion while contacting.
+          b.velocity[0] *= 0.98f;
+          b.velocity[2] *= 0.98f;
+          // Torque from the ground impulse (spin side effect only).
+          if (mass > 0.0F) {
+            const float jx = mass * (b.velocity[0] - old_vx);
+            const float jy = mass * (b.velocity[1] - old_vy);
+            const float jz = mass * (b.velocity[2] - old_vz);
+            const float inertia = body_inertia(b);
+            if (inertia > 0.0F) {
+              // dW = (r x J) / I, r = (0, -support, 0).
+              b.angular_velocity[0] += (ry * jz - rz * jy) / inertia;
+              b.angular_velocity[1] += (rz * jx - rx * jz) / inertia;
+              b.angular_velocity[2] += (rx * jy - ry * jx) / inertia;
+            }
+          }
+        } else {
+          // VFP mode: positions only here; velocities are derived after the
+          // solve. Record the approach speed for the bounce stage.
+          grounded_approach_[gi] =
+              b.velocity[1] < 0.0F ? -b.velocity[1] : 0.0F;
         }
-        // Ground friction damps tangential motion while contacting.
-        b.velocity[0] *= 0.98f;
-        b.velocity[2] *= 0.98f;
         contacts_.push_back(ContactEvent{0U, kWorldContact, depth});
+        grounded_[gi] = 1U;
+        grounded_depth_[gi] = depth;
       }
     }
 
@@ -197,95 +486,327 @@ class PhysicsWorld final {
         snap.radius = body.radius;
         snap.inverse_mass = body.inverse_mass;
         snap.restitution = body.restitution;
+        snap.shape = body.shape;
+        snap.half_height =
+            (body.shape == BodyShape::Capsule && body.half_height > 0.0F)
+                ? body.half_height
+                : 0.0F;
+        snap.qx = body.orientation[0];
+        snap.qy = body.orientation[1];
+        snap.qz = body.orientation[2];
+        snap.qw = body.orientation[3];
+        snap.bound = snap.radius + snap.half_height;
       }
 
       solve_contacts_.clear();
       rebuild_candidate_pairs();
       for (const std::pair<std::uint32_t, std::uint32_t>& pair :
            candidate_pairs_) {
-        {
-          const std::size_t i = pair.first;
-          const std::size_t j = pair.second;
-          const SolveSnapshot& a = solve_snapshot_[i];
-          const SolveSnapshot& b = solve_snapshot_[j];
-          const float dx = b.px - a.px;
-          const float dy = b.py - a.py;
-          const float dz = b.pz - a.pz;
-          const float dist_sq = dx * dx + dy * dy + dz * dz;
-          const float min_dist = a.radius + b.radius;
-          if (dist_sq >= min_dist * min_dist) continue;
-
-          const float inv_sum = a.inverse_mass + b.inverse_mass;
-          if (inv_sum <= 0.0f) continue;  // both static
-
-          ContactSolve solve{};
-          solve.a = static_cast<std::uint32_t>(i);
-          solve.b = static_cast<std::uint32_t>(j);
-          const float dist = std::sqrt(dist_sq);
-          // Degenerate: coincident centers -> separate along +Y.
-          solve.nx = dist > 1e-8f ? dx / dist : 0.0f;
-          solve.ny = dist > 1e-8f ? dy / dist : 1.0f;
-          solve.nz = dist > 1e-8f ? dz / dist : 0.0f;
-          solve.penetration = min_dist - dist;
-          solve.inv_sum = inv_sum;
-          solve.restitution = 0.5f * (a.restitution + b.restitution);
-          solve.vel_n = (b.vx - a.vx) * solve.nx + (b.vy - a.vy) * solve.ny +
-                        (b.vz - a.vz) * solve.nz;
+        ContactSolve solve{};
+        if (narrowphase_pair(pair.first, pair.second, solve)) {
           solve_contacts_.push_back(solve);
         }
       }
 
+      // Islands are derived from the frozen pair list plus the grounded
+      // flags BEFORE any correction lands, so both the positional passes
+      // and the impulse loop below read this step's sleep set.
+      build_islands();
+
       // Positional correction: `solver_iterations_` Gauss-Seidel passes over
-      // the frozen contact list. Passes after the first re-read live
-      // positions, which is the point — residual overlap created by pass k
-      // is pushed out by pass k+1. The impulse below stays single-shot on
-      // the snapshot's relative velocity.
+      // the frozen contact list (the SET of pairs is frozen; the impulse
+      // below stays single-shot on the snapshot's relative velocity).
+      // Pass 0 applies the snapshot penetration. Passes 1+ re-derive the
+      // RESIDUAL overlap from live positions along the frozen normal and
+      // skip separated pairs. Re-applying the frozen depth instead is an
+      // energy pump: measured, a blinking pair (detected every other step)
+      // over-separates 4x per contact step and sustains a 2-step limit
+      // cycle at ~0.4 m/s on a sleeping base forever — and the same
+      // mechanism launches bodies off pinned endpoints at metres per
+      // second. Iterations=1 (the default) executes pass 0 only, so the
+      // default path is untouched by this. No sleeper exception is needed:
+      // residual corrections vanish as pairs separate, so later passes
+      // cannot pump (an earlier pass-0-only guard for sleeper pairs was
+      // tried and REMOVED — it starved exactly the pairs that needed
+      // re-convergence, sinking the layer above a sleeper by millimetres).
+      // Joints are solved inside every pass, before contacts, in insertion
+      // order (deterministic). With no joints this loop is empty and the
+      // pass is the historical one.
       for (std::uint32_t pass = 0; pass < solver_iterations_; ++pass) {
+        for (const DistanceJoint& joint : joints_) {
+          if (joint.a == joint.b || joint.a >= bodies_.size() ||
+              joint.b >= bodies_.size()) {
+            continue;
+          }
+          PhysicsBody& ja = bodies_[joint.a];
+          PhysicsBody& jb = bodies_[joint.b];
+          const float jdx = jb.position[0] - ja.position[0];
+          const float jdy = jb.position[1] - ja.position[1];
+          const float jdz = jb.position[2] - ja.position[2];
+          const float jdist_sq = jdx * jdx + jdy * jdy + jdz * jdz;
+          if (jdist_sq <= 1e-16F) continue;  // coincident: no direction
+          const float jdist = std::sqrt(jdist_sq);
+          const float jnx = jdx / jdist;
+          const float jny = jdy / jdist;
+          const float jnz = jdz / jdist;
+          const float j_inv_a =
+              is_asleep(joint.a) ? 0.0f : ja.inverse_mass;
+          const float j_inv_b =
+              is_asleep(joint.b) ? 0.0f : jb.inverse_mass;
+          const float j_inv_eff = j_inv_a + j_inv_b;
+          if (j_inv_eff <= 0.0f) continue;  // both pinned
+          const float jcorr =
+              (jdist - joint.rest_length) / (j_inv_eff + joint.compliance);
+          if (j_inv_a > 0.0f) {
+            ja.position[0] += jnx * jcorr * j_inv_a;
+            ja.position[1] += jny * jcorr * j_inv_a;
+            ja.position[2] += jnz * jcorr * j_inv_a;
+          }
+          if (j_inv_b > 0.0f) {
+            jb.position[0] -= jnx * jcorr * j_inv_b;
+            jb.position[1] -= jny * jcorr * j_inv_b;
+            jb.position[2] -= jnz * jcorr * j_inv_b;
+          }
+        }
         for (const ContactSolve& solve : solve_contacts_) {
+          float pen = solve.penetration;
+          if (pass > 0U) {
+            const PhysicsBody& la = bodies_[solve.a];
+            const PhysicsBody& lb = bodies_[solve.b];
+            const float dx = lb.position[0] - la.position[0];
+            const float dy = lb.position[1] - la.position[1];
+            const float dz = lb.position[2] - la.position[2];
+            pen = (la.radius + lb.radius) -
+                  (dx * solve.nx + dy * solve.ny + dz * solve.nz);
+            if (pen <= 0.0f) continue;  // separated: nothing to do
+          }
           PhysicsBody& a = bodies_[solve.a];
           PhysicsBody& b = bodies_[solve.b];
           // Positional correction proportional to inverse mass. The
           // compliance term is 0 by default, i.e. the historical stiff
           // projection; XPBD staging (Loop 12) opts in via
-          // set_contact_compliance().
-          const float corr =
-              solve.penetration / (solve.inv_sum + contact_compliance_);
-          if (a.inverse_mass > 0.0f) {
-            a.position[0] -= solve.nx * corr * a.inverse_mass;
-            a.position[1] -= solve.ny * corr * a.inverse_mass;
-            a.position[2] -= solve.nz * corr * a.inverse_mass;
+          // set_contact_compliance(). Sleeping endpoints count as PINNED
+          // (effective inverse mass 0): the awake side takes the full
+          // correction. The alternative — the pair's usual half-share —
+          // leaves residual overlap AND half the approach velocity behind
+          // every step, which jitters the layer above a sleeper forever
+          // and nothing ever sleeps (measured: top layers sustained ~1 m/s
+          // on a sleeping base). A woken body is corrected normally
+          // because it is not in this step's sleep set.
+          const float inv_a =
+              is_asleep(solve.a) ? 0.0f : a.inverse_mass;
+          const float inv_b =
+              is_asleep(solve.b) ? 0.0f : b.inverse_mass;
+          const float inv_eff = inv_a + inv_b;
+          if (inv_eff <= 0.0f) continue;  // both pinned: restore keeps them
+          const float corr = pen / (inv_eff + contact_compliance_);
+          if (inv_a > 0.0f) {
+            a.position[0] -= solve.nx * corr * inv_a;
+            a.position[1] -= solve.ny * corr * inv_a;
+            a.position[2] -= solve.nz * corr * inv_a;
           }
-          if (b.inverse_mass > 0.0f) {
-            b.position[0] += solve.nx * corr * b.inverse_mass;
-            b.position[1] += solve.ny * corr * b.inverse_mass;
-            b.position[2] += solve.nz * corr * b.inverse_mass;
+          if (inv_b > 0.0f) {
+            b.position[0] += solve.nx * corr * inv_b;
+            b.position[1] += solve.ny * corr * inv_b;
+            b.position[2] += solve.nz * corr * inv_b;
           }
         }
       }
-      for (const ContactSolve& solve : solve_contacts_) {
-        PhysicsBody& a = bodies_[solve.a];
-        PhysicsBody& b = bodies_[solve.b];
+      if (!velocity_from_position_) {
+        for (const ContactSolve& solve : solve_contacts_) {
+          PhysicsBody& a = bodies_[solve.a];
+          PhysicsBody& b = bodies_[solve.b];
 
-        // Impulse along the normal. vel_n comes from the snapshot, so this
-        // does not depend on corrections applied earlier in this loop.
-        if (solve.vel_n < 0.0f) {
-          const float impulse = -(1.0f + solve.restitution) * solve.vel_n /
-                                solve.inv_sum;
-          if (a.inverse_mass > 0.0f) {
-            a.velocity[0] -= impulse * solve.nx * a.inverse_mass;
-            a.velocity[1] -= impulse * solve.ny * a.inverse_mass;
-            a.velocity[2] -= impulse * solve.nz * a.inverse_mass;
+          // Impulse along the normal. vel_n comes from the snapshot, so this
+          // does not depend on corrections applied earlier in this loop —
+          // with one exception: a SLEEPING endpoint contributes its PRE-step
+          // (rest) velocity, not its integrated snapshot velocity. The
+          // sleeper integrated gravity this step and is restored afterwards,
+          // so the snapshot carries one gravity increment that was never
+          // real motion; measuring approach against it leaves exactly that
+          // increment behind every step (a lone body on a sleeping base
+          // hard-fixed-points at -g·dt = -0.082, forever above any sane
+          // sleep threshold). The ground clamp already works this way — it
+          // sets absolute velocity, never relative — so this makes a pinned
+          // base behave exactly like the ground. All-awake pairs use the
+          // snapshot for both sides, i.e. the historical computation.
+          // Sleeping endpoints are pinned (see above): the impulse is
+          // computed against the awake side's mass alone, so an inelastic
+          // contact fully removes the approach velocity instead of half of
+          // it. Events emit for every detected pair either way, so
+          // contacts_ stays a pure function of detection.
+          float vel_n = solve.vel_n;
+          if (is_asleep(solve.a) || is_asleep(solve.b)) {
+            const SolveSnapshot& sa = solve_snapshot_[solve.a];
+            const SolveSnapshot& sb = solve_snapshot_[solve.b];
+            const PreStep& pa = pre_step_[solve.a];
+            const PreStep& pb = pre_step_[solve.b];
+            const float vax = is_asleep(solve.a) ? pa.vx : sa.vx;
+            const float vay = is_asleep(solve.a) ? pa.vy : sa.vy;
+            const float vaz = is_asleep(solve.a) ? pa.vz : sa.vz;
+            const float vbx = is_asleep(solve.b) ? pb.vx : sb.vx;
+            const float vby = is_asleep(solve.b) ? pb.vy : sb.vy;
+            const float vbz = is_asleep(solve.b) ? pb.vz : sb.vz;
+            vel_n = (vbx - vax) * solve.nx + (vby - vay) * solve.ny +
+                    (vbz - vaz) * solve.nz;
           }
-          if (b.inverse_mass > 0.0f) {
-            b.velocity[0] += impulse * solve.nx * b.inverse_mass;
-            b.velocity[1] += impulse * solve.ny * b.inverse_mass;
-            b.velocity[2] += impulse * solve.nz * b.inverse_mass;
+          if (vel_n < 0.0f) {
+            // Restitution threshold (opt-in): see the ground phase. Default
+            // 0 reduces to the historical always-bounce impulse.
+            const float eff_e = -vel_n > restitution_threshold_
+                                    ? solve.restitution
+                                    : 0.0f;
+            const float inv_a =
+                is_asleep(solve.a) ? 0.0f : a.inverse_mass;
+            const float inv_b =
+                is_asleep(solve.b) ? 0.0f : b.inverse_mass;
+            const float inv_eff = inv_a + inv_b;
+            if (inv_eff <= 0.0f) {
+              contacts_.push_back(ContactEvent{
+                  solve.a, solve.b, solve.penetration});
+              continue;  // both pinned: nothing to move, event still emitted
+            }
+            const float impulse =
+                -(1.0f + eff_e) * vel_n / inv_eff;
+            if (inv_a > 0.0f) {
+              a.velocity[0] -= impulse * solve.nx * inv_a;
+              a.velocity[1] -= impulse * solve.ny * inv_a;
+              a.velocity[2] -= impulse * solve.nz * inv_a;
+            }
+            if (inv_b > 0.0f) {
+              b.velocity[0] += impulse * solve.nx * inv_b;
+              b.velocity[1] += impulse * solve.ny * inv_b;
+              b.velocity[2] += impulse * solve.nz * inv_b;
+            }
+            // Torque side effect on spin only (linear updates above are the
+            // historical ones). J on b is +impulse*n, on a is -impulse*n.
+            apply_torque(solve.b, impulse * solve.nx, impulse * solve.ny,
+                         impulse * solve.nz, solve.rbx, solve.rby, solve.rbz);
+            apply_torque(solve.a, -impulse * solve.nx, -impulse * solve.ny,
+                         -impulse * solve.nz, solve.rax, solve.ray, solve.raz);
+          }
+          contacts_.push_back(ContactEvent{
+              solve.a, solve.b, solve.penetration});
+        }
+      } else {
+        solve_velocities_vfp(dt);
+      }
+      apply_sleep_restore();
+    } else {
+      // Fewer than two bodies: no pairs possible, but a lone body resting
+      // on the ground still forms a single-body island that may sleep.
+      solve_contacts_.clear();
+      build_islands();
+      if (velocity_from_position_) {
+        solve_velocities_vfp(dt);
+      }
+      apply_sleep_restore();
+    }
+  }
+
+  //! XPBD velocity-from-position stage (VFP mode only): every awake dynamic
+  //! velocity is the corrected-position delta over the increment, so
+  //! velocities agree with the positions the solver produced (joints
+  //! included). The impulse pass does not run in this mode. Shared by the
+  //! pair path and the single-body path (a lone grounded body still needs
+  //! derived velocities, or gravity would accumulate in vy under a clamp).
+  void solve_velocities_vfp(float dt) noexcept {
+        // XPBD velocity-from-position: every awake dynamic velocity is the
+        // corrected-position delta over the increment, so velocities agree
+        // with the positions the solver produced (joints included). The
+        // impulse pass above does not run in this mode.
+        const float inv_dt = dt > 0.0F ? 1.0F / dt : 0.0F;
+        for (std::size_t vi = 0; vi < bodies_.size(); ++vi) {
+          if (bodies_[vi].inverse_mass <= 0.0F) continue;
+          if (is_asleep(static_cast<std::uint32_t>(vi))) continue;
+          const PreStep& pre = pre_step_[vi];
+          PhysicsBody& b = bodies_[vi];
+          b.velocity[0] = (b.position[0] - pre.px) * inv_dt;
+          b.velocity[1] = (b.position[1] - pre.py) * inv_dt;
+          b.velocity[2] = (b.position[2] - pre.pz) * inv_dt;
+        }
+        // Restitution bounce on top, from the stored pre-solve approach
+        // speeds (the derived normal velocity is ~0 after projection, so
+        // this sets the post-bounce separation without double-counting).
+        for (const ContactSolve& solve : solve_contacts_) {
+          float vel_n = solve.vel_n;
+          if (is_asleep(solve.a) || is_asleep(solve.b)) {
+            const SolveSnapshot& sa = solve_snapshot_[solve.a];
+            const SolveSnapshot& sb = solve_snapshot_[solve.b];
+            const PreStep& pa = pre_step_[solve.a];
+            const PreStep& pb = pre_step_[solve.b];
+            const float vax = is_asleep(solve.a) ? pa.vx : sa.vx;
+            const float vay = is_asleep(solve.a) ? pa.vy : sa.vy;
+            const float vaz = is_asleep(solve.a) ? pa.vz : sa.vz;
+            const float vbx = is_asleep(solve.b) ? pb.vx : sb.vx;
+            const float vby = is_asleep(solve.b) ? pb.vy : sb.vy;
+            const float vbz = is_asleep(solve.b) ? pb.vz : sb.vz;
+            vel_n = (vbx - vax) * solve.nx + (vby - vay) * solve.ny +
+                    (vbz - vaz) * solve.nz;
+          }
+          if (vel_n < 0.0f && -vel_n > restitution_threshold_) {
+            PhysicsBody& a = bodies_[solve.a];
+            PhysicsBody& b = bodies_[solve.b];
+            const float inv_a =
+                is_asleep(solve.a) ? 0.0f : a.inverse_mass;
+            const float inv_b =
+                is_asleep(solve.b) ? 0.0f : b.inverse_mass;
+            const float inv_eff = inv_a + inv_b;
+            if (inv_eff <= 0.0f) {
+              contacts_.push_back(ContactEvent{
+                  solve.a, solve.b, solve.penetration});
+              continue;
+            }
+            const float bounce = -solve.restitution * vel_n / inv_eff;
+            if (inv_a > 0.0f) {
+              a.velocity[0] -= bounce * solve.nx * inv_a;
+              a.velocity[1] -= bounce * solve.ny * inv_a;
+              a.velocity[2] -= bounce * solve.nz * inv_a;
+            }
+            if (inv_b > 0.0f) {
+              b.velocity[0] += bounce * solve.nx * inv_b;
+              b.velocity[1] += bounce * solve.ny * inv_b;
+              b.velocity[2] += bounce * solve.nz * inv_b;
+            }
+            apply_torque(solve.b, bounce * solve.nx, bounce * solve.ny,
+                         bounce * solve.nz, solve.rbx, solve.rby, solve.rbz);
+            apply_torque(solve.a, -bounce * solve.nx, -bounce * solve.ny,
+                         -bounce * solve.nz, solve.rax, solve.ray, solve.raz);
+          }
+          contacts_.push_back(ContactEvent{
+              solve.a, solve.b, solve.penetration});
+        }
+        // Ground bounce + friction on the derived velocities.
+        for (std::size_t gi = 0; gi < bodies_.size(); ++gi) {
+          if (grounded_[gi] == 0U) continue;
+          if (bodies_[gi].inverse_mass <= 0.0F) continue;
+          if (is_asleep(static_cast<std::uint32_t>(gi))) continue;
+          PhysicsBody& b = bodies_[gi];
+          const float approach = grounded_approach_[gi];
+          const float old_vx = b.velocity[0];
+          const float old_vz = b.velocity[2];
+          b.velocity[0] *= 0.98F;
+          b.velocity[2] *= 0.98F;
+          const float old_vy = b.velocity[1];
+          b.velocity[1] =
+              approach > restitution_threshold_ ? approach * b.restitution : 0.0F;
+          const float inv_m = b.inverse_mass;
+          if (inv_m > 0.0F) {
+            const float mass = 1.0F / inv_m;
+            const float jx = mass * (b.velocity[0] - old_vx);
+            const float jy = mass * (b.velocity[1] - old_vy);
+            const float jz = mass * (b.velocity[2] - old_vz);
+            float support = b.radius;
+            if (b.shape == BodyShape::Capsule && b.half_height > 0.0F) {
+              float ux = 0.0F, uy = 1.0F, uz = 0.0F;
+              quat_rotate_vector(b.orientation, 0.0F, 1.0F, 0.0F, ux, uy, uz);
+              float auy = uy >= 0.0F ? uy : -uy;
+              support = auy * b.half_height + b.radius;
+            }
+            apply_torque(static_cast<std::uint32_t>(gi), jx, jy, jz, 0.0F,
+                         -support, 0.0F);
           }
         }
-        contacts_.push_back(ContactEvent{
-            solve.a, solve.b, solve.penetration});
-      }
-    }
   }
 
   //! Disable the spatial grid and solve every pair. Slower, but the reference
@@ -315,6 +836,199 @@ class PhysicsWorld final {
   //! past this the full pair list is built instead -- slower, but correct.
   static constexpr std::size_t kBroadphaseMaxCandidates = 1U << 18U;
 
+  //! One frozen body state for contact detection. Detection must not read live
+  //! positions: see the step-3 comment.
+  struct SolveSnapshot {
+    float px{0.0f}, py{0.0f}, pz{0.0f};
+    float vx{0.0f}, vy{0.0f}, vz{0.0f};
+    float radius{0.0f};
+    float inverse_mass{0.0f};
+    float restitution{0.0f};
+    BodyShape shape{BodyShape::Sphere};
+    float half_height{0.0f};
+    float qx{0.0f}, qy{0.0f}, qz{0.0f}, qw{1.0f};
+    float bound{0.0f};  //!< bounding radius (broadphase + precheck)
+  };
+  //! One resolved contact, computed from the snapshot and then applied.
+  //! r_a/r_b are the contact-point lever arms (world frame) for the torque
+  //! side effect on spin; the linear solve is unchanged by them.
+  struct ContactSolve {
+    std::uint32_t a{0};
+    std::uint32_t b{0};
+    float nx{0.0f}, ny{0.0f}, nz{0.0f};
+    float penetration{0.0f};
+    float inv_sum{0.0f};
+    float restitution{0.0f};
+    float vel_n{0.0f};
+    float rax{0.0f}, ray{0.0f}, raz{0.0f};
+    float rbx{0.0f}, rby{0.0f}, rbz{0.0f};
+  };
+  //! Exact pre-integration pose+velocity of one body (the sleeper restore
+  //! source and the rest-test input). Radii/masses/shapes are immutable
+  //! mid-run, so only the integrated quantities are stored.
+  struct PreStep {
+    float px{0.0f}, py{0.0f}, pz{0.0f};
+    float vx{0.0f}, vy{0.0f}, vz{0.0f};
+    float qx{0.0f}, qy{0.0f}, qz{0.0f}, qw{1.0f};
+    float wx{0.0f}, wy{0.0f}, wz{0.0f};
+  };
+
+  //! Capsule axis (unit local Y in world frame) from a snapshot orientation.
+  void snapshot_axis(const SolveSnapshot& s, float& ux, float& uy,
+                     float& uz) const noexcept {
+    float q[4] = {s.qx, s.qy, s.qz, s.qw};
+    quat_rotate_vector(q, 0.0F, 1.0F, 0.0F, ux, uy, uz);
+  }
+
+  //! Closest points between segments p1-q1 and p2-q2 (Ericson,
+  //! Real-Time Collision Detection §5.1.8 — standard, cited not novel).
+  //! Deterministic: fixed branch structure, no iteration, float32 throughout.
+  static void segment_segment_closest(float p1x, float p1y, float p1z,
+                                      float q1x, float q1y, float q1z,
+                                      float p2x, float p2y, float p2z,
+                                      float q2x, float q2y, float q2z,
+                                      float& c1x, float& c1y, float& c1z,
+                                      float& c2x, float& c2y, float& c2z) noexcept {
+    const float d1x = q1x - p1x, d1y = q1y - p1y, d1z = q1z - p1z;
+    const float d2x = q2x - p2x, d2y = q2y - p2y, d2z = q2z - p2z;
+    const float rx = p1x - p2x, ry = p1y - p2y, rz = p1z - p2z;
+    const float a = d1x * d1x + d1y * d1y + d1z * d1z;
+    const float e = d2x * d2x + d2y * d2y + d2z * d2z;
+    const float f = d2x * rx + d2y * ry + d2z * rz;
+    float s = 0.0F, t = 0.0F;
+    if (a <= 1e-8F && e <= 1e-8F) {
+      s = 0.0F;
+      t = 0.0F;
+    } else if (a <= 1e-8F) {
+      s = 0.0F;
+      t = f / e;
+      t = t < 0.0F ? 0.0F : (t > 1.0F ? 1.0F : t);
+    } else {
+      const float c = d1x * rx + d1y * ry + d1z * rz;
+      if (e <= 1e-8F) {
+        t = 0.0F;
+        s = -c / a;
+        s = s < 0.0F ? 0.0F : (s > 1.0F ? 1.0F : s);
+      } else {
+        const float b = d1x * d2x + d1y * d2y + d1z * d2z;
+        const float denom = a * e - b * b;
+        s = denom > 1e-8F ? (b * f - c * e) / denom : 0.0F;
+        s = s < 0.0F ? 0.0F : (s > 1.0F ? 1.0F : s);
+        t = (b * s + f) / e;
+        if (t < 0.0F) {
+          t = 0.0F;
+          s = -c / a;
+          s = s < 0.0F ? 0.0F : (s > 1.0F ? 1.0F : s);
+        } else if (t > 1.0F) {
+          t = 1.0F;
+          s = (b - c) / a;
+          s = s < 0.0F ? 0.0F : (s > 1.0F ? 1.0F : s);
+        }
+      }
+    }
+    c1x = p1x + d1x * s;
+    c1y = p1y + d1y * s;
+    c1z = p1z + d1z * s;
+    c2x = p2x + d2x * t;
+    c2y = p2y + d2y * t;
+    c2z = p2z + d2z * t;
+  }
+
+  //! Shape-aware narrowphase on the frozen snapshot. Sphere-sphere is the
+  //! historical computation exactly (same degenerate branch, same order);
+  //! any pair involving a capsule reduces to sphere-vs-sphere at the closest
+  //! segment points. Returns false when separated or both static. A
+  //! bounding-sphere precheck (centers vs bound sum) runs first — it can
+  //! only reject pairs the exact test would reject.
+  bool narrowphase_pair(std::size_t i, std::size_t j,
+                        ContactSolve& solve) noexcept {
+    const SolveSnapshot& a = solve_snapshot_[i];
+    const SolveSnapshot& b = solve_snapshot_[j];
+    const float inv_sum = a.inverse_mass + b.inverse_mass;
+    if (inv_sum <= 0.0f) return false;  // both static
+    const bool cap_a = a.shape == BodyShape::Capsule && a.half_height > 0.0F;
+    const bool cap_b = b.shape == BodyShape::Capsule && b.half_height > 0.0F;
+    if (!cap_a && !cap_b) {
+      const float dx = b.px - a.px;
+      const float dy = b.py - a.py;
+      const float dz = b.pz - a.pz;
+      const float dist_sq = dx * dx + dy * dy + dz * dz;
+      const float min_dist = a.radius + b.radius;
+      if (dist_sq >= min_dist * min_dist) return false;
+      solve.a = static_cast<std::uint32_t>(i);
+      solve.b = static_cast<std::uint32_t>(j);
+      const float dist = std::sqrt(dist_sq);
+      // Degenerate: coincident centers -> separate along +Y.
+      solve.nx = dist > 1e-8f ? dx / dist : 0.0f;
+      solve.ny = dist > 1e-8f ? dy / dist : 1.0f;
+      solve.nz = dist > 1e-8f ? dz / dist : 0.0f;
+      solve.penetration = min_dist - dist;
+      solve.inv_sum = inv_sum;
+      solve.restitution = 0.5f * (a.restitution + b.restitution);
+      solve.vel_n = (b.vx - a.vx) * solve.nx + (b.vy - a.vy) * solve.ny +
+                    (b.vz - a.vz) * solve.nz;
+      // Lever arms: contact point on a's surface along +n.
+      solve.rax = solve.nx * a.radius;
+      solve.ray = solve.ny * a.radius;
+      solve.raz = solve.nz * a.radius;
+      solve.rbx = solve.nx * -b.radius;
+      solve.rby = solve.ny * -b.radius;
+      solve.rbz = solve.nz * -b.radius;
+      return true;
+    }
+    // Capsule-involved: endpoints in world frame, then closest points.
+    float aux = 0.0F, auy = 1.0F, auz = 0.0F;
+    float bux = 0.0F, buy = 1.0F, buz = 0.0F;
+    if (cap_a) snapshot_axis(a, aux, auy, auz);
+    if (cap_b) snapshot_axis(b, bux, buy, buz);
+    const float a0x = a.px - aux * a.half_height;
+    const float a0y = a.py - auy * a.half_height;
+    const float a0z = a.pz - auz * a.half_height;
+    const float a1x = a.px + aux * a.half_height;
+    const float a1y = a.py + auy * a.half_height;
+    const float a1z = a.pz + auz * a.half_height;
+    const float b0x = b.px - bux * b.half_height;
+    const float b0y = b.py - buy * b.half_height;
+    const float b0z = b.pz - buz * b.half_height;
+    const float b1x = b.px + bux * b.half_height;
+    const float b1y = b.py + buy * b.half_height;
+    const float b1z = b.pz + buz * b.half_height;
+    float cax = a.px, cay = a.py, caz = a.pz;
+    float cbx = b.px, cby = b.py, cbz = b.pz;
+    if (cap_a || cap_b) {
+      segment_segment_closest(a0x, a0y, a0z, a1x, a1y, a1z, b0x, b0y, b0z,
+                              b1x, b1y, b1z, cax, cay, caz, cbx, cby, cbz);
+    }
+    const float dx = cbx - cax;
+    const float dy = cby - cay;
+    const float dz = cbz - caz;
+    const float dist_sq = dx * dx + dy * dy + dz * dz;
+    const float min_dist = a.radius + b.radius;
+    if (dist_sq >= min_dist * min_dist) return false;
+    solve.a = static_cast<std::uint32_t>(i);
+    solve.b = static_cast<std::uint32_t>(j);
+    const float dist = std::sqrt(dist_sq);
+    solve.nx = dist > 1e-8f ? dx / dist : 0.0f;
+    solve.ny = dist > 1e-8f ? dy / dist : 1.0f;
+    solve.nz = dist > 1e-8f ? dz / dist : 0.0f;
+    solve.penetration = min_dist - dist;
+    solve.inv_sum = inv_sum;
+    solve.restitution = 0.5f * (a.restitution + b.restitution);
+    solve.vel_n = (b.vx - a.vx) * solve.nx + (b.vy - a.vy) * solve.ny +
+                  (b.vz - a.vz) * solve.nz;
+    // Contact point on a's surface; lever arms from body centers.
+    const float cpx = cax + solve.nx * a.radius;
+    const float cpy = cay + solve.ny * a.radius;
+    const float cpz = caz + solve.nz * a.radius;
+    solve.rax = cpx - a.px;
+    solve.ray = cpy - a.py;
+    solve.raz = cpz - a.pz;
+    solve.rbx = cpx - b.px;
+    solve.rby = cpy - b.py;
+    solve.rbz = cpz - b.pz;
+    return true;
+  }
+
   //! Fill candidate_pairs_ with (i, j), i < j, in exactly the order the nested
   //! all-pairs loop would visit them, containing every pair that can overlap.
   //!
@@ -333,11 +1047,12 @@ class PhysicsWorld final {
     const std::size_t count = solve_snapshot_.size();
     if (count < 2U) return;
 
-    // Cell size at least two maximum radii, so any two overlapping spheres are
-    // in the same or an adjacent cell.
+    // Cell size at least two maximum bounding radii, so any two overlapping
+    // bounding spheres are in the same or an adjacent cell (capsules use
+    // radius + half-height; spheres are unchanged).
     float max_radius = 0.0f;
     for (const SolveSnapshot& body : solve_snapshot_) {
-      if (body.radius > max_radius) max_radius = body.radius;
+      if (body.bound > max_radius) max_radius = body.bound;
     }
     if (max_radius <= 0.0f) return;  // nothing can overlap
 
@@ -417,6 +1132,8 @@ class PhysicsWorld final {
 
   //! 64-bit FNV-1a over all body positions: the determinism fingerprint
   //! (identical runs must hash identically; also used as a telemetry field).
+  //! Unchanged by rotation state: orientation/omega ride in the extended
+  //! fingerprint below, so historical position pins still hold.
   [[nodiscard]] std::uint64_t position_fingerprint() const noexcept {
     std::uint64_t hash = 1469598103934665603ULL;
     for (const PhysicsBody& b : bodies_) {
@@ -433,29 +1150,39 @@ class PhysicsWorld final {
     return hash;
   }
 
+  //! Extended fingerprint: positions plus orientation and spin. The
+  //! determinism-check validator compares this (a velocity-only divergence
+  //! with identical positions still surfaces, one step later at most, via
+  //! position integration — and spin diverges positions only through
+  //! capsule geometry, so spin is hashed directly).
+  [[nodiscard]] std::uint64_t state_fingerprint() const noexcept {
+    std::uint64_t hash = position_fingerprint();
+    for (const PhysicsBody& b : bodies_) {
+      for (const float c : b.orientation) {
+        std::uint32_t bits;
+        static_assert(sizeof(bits) == sizeof(float));
+        __builtin_memcpy(&bits, &c, sizeof(bits));
+        for (int k = 0; k < 4; ++k) {
+          hash ^= static_cast<std::uint64_t>((bits >> (8 * k)) & 0xFFu);
+          hash *= 1099511628211ULL;
+        }
+      }
+      for (const float c : b.angular_velocity) {
+        std::uint32_t bits;
+        static_assert(sizeof(bits) == sizeof(float));
+        __builtin_memcpy(&bits, &c, sizeof(bits));
+        for (int k = 0; k < 4; ++k) {
+          hash ^= static_cast<std::uint64_t>((bits >> (8 * k)) & 0xFFu);
+          hash *= 1099511628211ULL;
+        }
+      }
+    }
+    return hash;
+  }
+
   static constexpr std::uint32_t kWorldContact = 0xFFFFFFFFu;
 
  private:
-  //! One frozen body state for contact detection. Detection must not read live
-  //! positions: see the step-3 comment.
-  struct SolveSnapshot {
-    float px{0.0f}, py{0.0f}, pz{0.0f};
-    float vx{0.0f}, vy{0.0f}, vz{0.0f};
-    float radius{0.0f};
-    float inverse_mass{0.0f};
-    float restitution{0.0f};
-  };
-  //! One resolved contact, computed from the snapshot and then applied.
-  struct ContactSolve {
-    std::uint32_t a{0};
-    std::uint32_t b{0};
-    float nx{0.0f}, ny{0.0f}, nz{0.0f};
-    float penetration{0.0f};
-    float inv_sum{0.0f};
-    float restitution{0.0f};
-    float vel_n{0.0f};
-  };
-
   //! The substep loop behind step(). Split out so the determinism-check
   //! path can run the identical sequence twice from a saved state.
   void run_substeps(float dt) noexcept {
@@ -463,6 +1190,144 @@ class PhysicsWorld final {
     const float sub_dt = dt / static_cast<float>(n);
     for (std::uint32_t sub = 0; sub < n; ++sub) {
       step_single(sub_dt);
+    }
+  }
+
+  //! Island rebuild (D1, Jolt's per-step pattern): union-find over the
+  //! frozen contact graph — every solve pair plus one edge per grounded
+  //! body to a synthetic world node. An island sleeps when every dynamic
+  //! member's PRE-integration speed (pre_step_) is below sleep_threshold_
+  //! and the island owns at least one contact edge. Union by min-index
+  //! with path halving: the result depends only on the edge SET, never on
+  //! insertion order, and both inputs (solve_contacts_ order, grounded_
+  //! index order) are fixed — so the sleep set is a pure deterministic
+  //! function of the step's inputs. Gated on sleep_threshold_ > 0: with
+  //! the default 0 the sleep set stays empty and the step is untouched.
+  //!
+  //! Edges carry a penetration gate (kSleepEdgeMinPenetration): float32
+  //! dust creates phantom ~1e-8 contacts between bodies spawned exactly
+  //! touching, and a motionless spawn has pre-V speed 0 — without the gate
+  //! the two combine to pin bodies MID-AIR on step 1 (measured: a column
+  //! asleep at its initial 0.51/1.51 poses, floating 1cm up, with the layers
+  //! above bouncing on it in a 2-step limit cycle forever). A genuine
+  //! resting contact penetrates ~1e-4 per step; the gate sits two orders
+  //! of magnitude on either side of the two regimes.
+  //! Known limit: a body spawned motionless AND deeply overlapping sleeps
+  //! in place instead of resolving first — spawns should be clean (as in
+  //! the tests). Fixing that needs a sleep timer, which is stored state;
+  //! see the roadmap note.
+  void build_islands() noexcept {
+    sleeping_flags_.assign(bodies_.size(), 0U);
+    sleeping_count_ = 0;
+    if (sleep_threshold_ <= 0.0f) return;
+    const std::uint32_t n = static_cast<std::uint32_t>(bodies_.size());
+    // Extra node N = the static world (ground plane). Grounded bodies
+    // union with it, so a pile on the floor is one island.
+    island_parent_.resize(static_cast<std::size_t>(n) + 1U);
+    island_has_edge_.assign(static_cast<std::size_t>(n) + 1U, 0U);
+    for (std::uint32_t i = 0; i <= n; ++i) island_parent_[i] = i;
+    const auto find_root = [this](std::uint32_t x) {
+      std::uint32_t r = x;
+      while (island_parent_[r] != r) r = island_parent_[r];
+      while (island_parent_[x] != r) {  // path halving
+        const std::uint32_t next = island_parent_[x];
+        island_parent_[x] = r;
+        x = next;
+      }
+      return r;
+    };
+    const auto unite = [&](std::uint32_t a, std::uint32_t b) {
+      const std::uint32_t ra = find_root(a);
+      const std::uint32_t rb = find_root(b);
+      // Union by min-index: order-independent, deterministic.
+      if (ra < rb) {
+        island_parent_[rb] = ra;
+      } else if (rb < ra) {
+        island_parent_[ra] = rb;
+      }
+      island_has_edge_[find_root(a)] = 1U;
+    };
+    for (const ContactSolve& solve : solve_contacts_) {
+      // Penetration gate: dust contacts never form island edges (see above).
+      // The SOLVE still resolves them; only sleep membership is gated.
+      if (solve.penetration > kSleepEdgeMinPenetration) {
+        unite(solve.a, solve.b);
+      }
+    }
+    for (std::uint32_t i = 0; i < n; ++i) {
+      if (grounded_depth_[i] > kSleepEdgeMinPenetration) unite(i, n);
+    }
+    // Joints are island edges too (no penetration gate: a joint is a
+    // persistent connection, not a transient touch). A pendulum hanging
+    // from a static anchor is one island with the world node only when it
+    // also touches; otherwise the pair still sleeps/wakes as a unit.
+    for (const DistanceJoint& joint : joints_) {
+      if (joint.a >= n || joint.b >= n || joint.a == joint.b) continue;
+      unite(joint.a, joint.b);
+    }
+    const float thr_sq = sleep_threshold_ * sleep_threshold_;
+    // An island sleeps iff it has an edge and every dynamic member is slow
+    // (pre-integration speed — the gravity kick of THIS step must not keep
+    // a settled pile awake; the snapshot speeds already include it).
+    for (std::uint32_t i = 0; i < n; ++i) {
+      if (bodies_[i].inverse_mass <= 0.0f) continue;  // static: no state
+      if (island_has_edge_[find_root(i)] == 0U) continue;  // free flight
+      const PreStep& pre = pre_step_[i];
+      const float speed_sq =
+          pre.vx * pre.vx + pre.vy * pre.vy + pre.vz * pre.vz;
+      // The same threshold doubles as the spin gate (rad/s): a body
+      // spinning in place must not sleep. Zero-spin bodies (all history)
+      // evaluate 0 < thr exactly as before.
+      const float spin_sq = pre.wx * pre.wx + pre.wy * pre.wy + pre.wz * pre.wz;
+      if (speed_sq < thr_sq && spin_sq < thr_sq) {
+
+        sleeping_flags_[i] = 1U;
+        ++sleeping_count_;
+      }
+    }
+  }
+
+  //! Freeze sleeping members at their pre-integration state (exact stored
+  //! pose, never analytic undo). Runs after the solve loops, so any work
+  //! the passes applied to a sleeper is discarded, and events already
+  //! emitted stay a pure function of detection.
+  //! Spin side effect of an applied impulse: dW = (r x J) / I. Linear
+  //! motion is never touched here, so the historical v/p instruction
+  //! sequence is bit-identical with or without torque. Sleepers skip:
+  //! they are restored to pre-step spin below.
+  void apply_torque(std::uint32_t id, float jx, float jy, float jz, float rx,
+                    float ry, float rz) noexcept {
+    if (id >= bodies_.size()) return;
+    PhysicsBody& b = bodies_[id];
+    if (b.inverse_mass <= 0.0F) return;
+    if (is_asleep(id)) return;
+    const float inertia = body_inertia(b);
+    if (inertia <= 0.0F) return;
+    b.angular_velocity[0] += (ry * jz - rz * jy) / inertia;
+    b.angular_velocity[1] += (rz * jx - rx * jz) / inertia;
+    b.angular_velocity[2] += (rx * jy - ry * jx) / inertia;
+  }
+
+  void apply_sleep_restore() noexcept {
+    if (sleeping_count_ == 0) return;
+    for (std::size_t i = 0; i < bodies_.size(); ++i) {
+      if (sleeping_flags_[i] == 0U) continue;
+      if (bodies_[i].inverse_mass <= 0.0f) continue;  // static: untouched
+      const PreStep& pre = pre_step_[i];
+      PhysicsBody& b = bodies_[i];
+      b.position[0] = pre.px;
+      b.position[1] = pre.py;
+      b.position[2] = pre.pz;
+      b.velocity[0] = pre.vx;
+      b.velocity[1] = pre.vy;
+      b.velocity[2] = pre.vz;
+      b.orientation[0] = pre.qx;
+      b.orientation[1] = pre.qy;
+      b.orientation[2] = pre.qz;
+      b.orientation[3] = pre.qw;
+      b.angular_velocity[0] = pre.wx;
+      b.angular_velocity[1] = pre.wy;
+      b.angular_velocity[2] = pre.wz;
     }
   }
 
@@ -505,6 +1370,22 @@ class PhysicsWorld final {
   float contact_compliance_{0.0f};      //!< XPBD alpha, 0 = stiff (default).
   bool determinism_check_{false};       //!< Double-step validator (debug).
   std::uint64_t determinism_violations_{0};  //!< Mismatches seen while on.
+  float restitution_threshold_{0.0f};   //!< Bounce cutoff speed, 0 = always.
+  float sleep_threshold_{0.0f};         //!< Island sleep speed, 0 = never.
+  //! Minimum penetration for a contact to join islands. Dust is ~1e-8,
+  //! genuine rest ~1e-4; see the build_islands comment.
+  static constexpr float kSleepEdgeMinPenetration = 1e-5F;
+  //! Island/sleeper scratch (derived per step, never snapshotted).
+  std::vector<PreStep> pre_step_{};
+  std::vector<std::uint8_t> grounded_{};
+  std::vector<float> grounded_depth_{};
+  std::vector<float> grounded_approach_{};  //!< VFP ground approach speeds
+  bool velocity_from_position_{false};      //!< XPBD velocity update (opt-in)
+  std::vector<DistanceJoint> joints_{};     //!< insertion-order constraints
+  std::vector<std::uint32_t> island_parent_{};
+  std::vector<std::uint8_t> island_has_edge_{};
+  std::vector<std::uint8_t> sleeping_flags_{};
+  std::uint32_t sleeping_count_{0};
 };
 
 }  // namespace warploom::physics
