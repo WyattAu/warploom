@@ -23,7 +23,10 @@
 #include <iterator>
 #include "warploom/core/control_server.hpp"
 #include "warploom/core/editor_session.hpp"
+#include "warploom/core/script_module.hpp"
+#include "warploom/core/script_node.hpp"
 #include "warploom/core/replay_scrubber.hpp"
+#include "warploom/editor/asset_browser.hpp"
 #include "warploom/editor/clip_timeline_view.hpp"
 #include "warploom/editor/graph_anim_bridge.hpp"
 #include "warploom/editor/inspector.hpp"
@@ -165,6 +168,94 @@ SceneMatrix rotation_y_matrix(float radians) {
   return m;
 }
 
+//! Column-major rotation about +Z (the beam prop's bend axis: joint 1
+//! rotates the top half in the XY plane about the y=1 pivot).
+SceneMatrix rotation_z_matrix(float radians) {
+  SceneMatrix m = omnicpp::render::scene_identity_matrix();
+  const float c = std::cos(radians);
+  const float s = std::sin(radians);
+  m[0] = c;
+  m[1] = s;
+  m[4] = -s;
+  m[5] = c;
+  return m;
+}
+
+//! Two-segment box-column prop for the driven skinned path (R3): 0.3 x 2.0
+//! x 0.3 about the origin, base at y=0, split at the y=1 joint pivot.
+//! Bottom segment + top segment (16 verts each, outward faces only) + top
+//! cap (4 verts): 36 verts, 11 floats each, same layout as build_unit_cube
+//! (white, per-face normals). Every quad is wound CCW seen from outside
+//! (cross(c1-c0, c2-c0) == outward normal), the backface-cull convention
+//! build_unit_cube documents. A box, not crossed quads: the orbit camera
+//! sees it from every side, and single-sided quads vanish from behind.
+void build_beam_column(std::vector<float>& vertices,
+                       std::vector<std::uint32_t>& indices) {
+  vertices.clear();
+  indices.clear();
+  constexpr float h = 0.15f;
+  struct Quad {
+    float normal[3];
+    float corners[4][3];
+  };
+  const auto segment = [&](float y0, float y1) {
+    const Quad sides[4] = {
+        {{1, 0, 0}, {{h, y0, h}, {h, y0, -h}, {h, y1, -h}, {h, y1, h}}},
+        {{-1, 0, 0}, {{-h, y0, -h}, {-h, y0, h}, {-h, y1, h}, {-h, y1, -h}}},
+        {{0, 0, 1}, {{-h, y0, h}, {h, y0, h}, {h, y1, h}, {-h, y1, h}}},
+        {{0, 0, -1}, {{h, y0, -h}, {-h, y0, -h}, {-h, y1, -h}, {h, y1, -h}}},
+    };
+    for (const Quad& q : sides) {
+      const std::uint32_t base =
+          static_cast<std::uint32_t>(vertices.size() / 11U);
+      for (std::size_t i = 0; i < 4U; ++i) {
+        const float* p = q.corners[i];
+        vertices.insert(vertices.end(),
+                        {p[0], p[1], p[2], 1.0f, 1.0f, 1.0f, q.normal[0],
+                         q.normal[1], q.normal[2], 0.0f, 0.0f});
+      }
+      indices.insert(indices.end(),
+                     {base + 0U, base + 1U, base + 2U, base + 0U, base + 2U,
+                      base + 3U});
+    }
+  };
+  segment(0.0f, 1.0f);  // bottom half: joint 0 (identity)
+  segment(1.0f, 2.0f);  // top half: joint 1 (animated bend)
+  // Top cap (joint 1; the open bottom sits inside the ground slab).
+  const std::uint32_t cap =
+      static_cast<std::uint32_t>(vertices.size() / 11U);
+  const float cap_corners[4][3] = {{-h, 2.0f, -h},
+                                   {-h, 2.0f, h},
+                                   {h, 2.0f, h},
+                                   {h, 2.0f, -h}};
+  for (std::size_t i = 0; i < 4U; ++i) {
+    const float* p = cap_corners[i];
+    vertices.insert(vertices.end(),
+                    {p[0], p[1], p[2], 1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 0.0f,
+                     0.0f, 0.0f});
+  }
+  indices.insert(indices.end(), {cap + 0U, cap + 1U, cap + 2U, cap + 0U,
+                                 cap + 2U, cap + 3U});
+}
+
+//! Skin stream for the beam column: 8 floats/vertex, verts below the y=1
+//! pivot bind joint 0, verts at/above it bind joint 1, weights (1,0,0,0).
+//! A rigid step, not a bend: any palette/indexing bug moves whole quads,
+//! which pixels cannot hide (the unit test's sabotage contract). The joint
+//! is read back from each vertex's own y (float 1 of the 11-float vertex),
+//! not reconstructed from segment order, so a builder reorder cannot
+//! silently misbind a vertex.
+void build_beam_column_skin(const std::vector<float>& vertices,
+                            std::vector<float>& skin) {
+  const std::size_t vertex_count = vertices.size() / 11U;
+  skin.assign(vertex_count * 8U, 0.0f);
+  for (std::size_t v = 0; v < vertex_count; ++v) {
+    const float y = vertices[v * 11U + 1U];
+    skin[v * 8U + 0U] = y < 1.0f ? 0.0f : 1.0f;
+    skin[v * 8U + 4U] = 1.0f;
+  }
+}
+
 //! Property-registry type id for document-authoritative cubes (resolved once
 //! at startup; the mirror skips objects whose type_id does not match).
 std::uint32_t kDocumentCubeTypeId{0xFFFFFFFFU};
@@ -202,10 +293,14 @@ SceneMatrix make_ortho(float l, float r, float b, float t, float zn,
 // Viewport state
 // ============================================================================
 
-//! GPU-driven scene: ground slab + two cubes (payload/cull/dispatch count).
-constexpr std::uint32_t kGdObjectCount = 3U;
+//! GPU-driven scene: ground slab + two cubes + the skinned beam prop (R3),
+//! always last (payload/cull/dispatch count).
+constexpr std::uint32_t kGdObjectCount = 4U;
 //! Maximum GPU-driven instances (physics-scene cap; payload sized once).
-constexpr std::uint32_t kGdMaxInstances = 4096U;
+//! 16k: the T0 scale benchmarks need the 10k-instance gd path and 8k-body
+//! physics scenes (payload (2+24N)*4 = 1.6 MB host-visible, draw buffer
+//! 320 KB — the cap is address arithmetic, not memory pressure).
+constexpr std::uint32_t kGdMaxInstances = 16384U;
 
 struct ViewportApp;
 bool setup_rt_shadows(ViewportApp& app);
@@ -451,10 +546,29 @@ struct ViewportApp {
   omnicpp::render::MeshTableBuild gd_table;
   std::uint32_t gd_slot_cube{0};
   std::uint32_t gd_slot_ground{0};
+  //! R3: skinned beam prop (two-segment box column, own table slot + skin
+  //! stream, palette joint_base 0, always the last driven object).
+  std::uint32_t gd_slot_beam{0};
   VkBuffer gd_shared_vertex_buffer{VK_NULL_HANDLE};
   omnicpp::render::Allocation gd_shared_vertex_allocation{};
   VkBuffer gd_shared_index_buffer{VK_NULL_HANDLE};
   omnicpp::render::Allocation gd_shared_index_allocation{};
+  //! R3: parallel skin stream (8 floats/vertex, global-vertex order),
+  //! bound at set 0 binding 4 for the skinned draw. Static slots carry
+  //! identity skin from the builder, so one set serves both pipelines.
+  VkBuffer gd_skin_buffer{VK_NULL_HANDLE};
+  omnicpp::render::Allocation gd_skin_allocation{};
+  //! R3: beam bone palette (2 joints: identity + animated bend) and its
+  //! set, allocated from the shared bone_layout and bound at slot 3 for
+  //! the skinned draw only. Dedicated to the prop: the mannequin arena
+  //! (absent in driven mode) is never touched.
+  VkBuffer gd_beam_bone_buffer{VK_NULL_HANDLE};
+  omnicpp::render::Allocation gd_beam_bone_allocation{};
+  VkDescriptorSet gd_beam_bone_set{VK_NULL_HANDLE};
+  //! R3: skinned draw pipeline (pbr_gpu_driven_skinned.vert + the same
+  //! full fragment). Same 6-set layout + 160-byte push as the static draw;
+  //! the partition is by command range, not by state.
+  omnicpp::render::VulkanPipeline gd_draw_skinned_pipeline;
   //! Per-frame payload (2 header words + 3 objects x 24 words), one copy
   //! per swapchain image so CPU writes never race in-flight GPU reads.
   std::vector<VkBuffer> gd_payload_buffers;
@@ -464,7 +578,8 @@ struct ViewportApp {
   VkBuffer gd_table_buffer{VK_NULL_HANDLE};
   omnicpp::render::Allocation gd_table_allocation{};
   //! Set 0 for the cull pass and the draw pass (vertices + payload +
-  //! mesh table + draw commands; per-image payload copy -> per-image set).
+  //! mesh table + draw commands + skin stream on the draw sets;
+  //! per-image payload copy -> per-image set).
   VkDescriptorSetLayout gd_set0_layout{VK_NULL_HANDLE};
   std::vector<VkDescriptorSet> gd_cull_sets;
   std::vector<VkDescriptorSet> gd_draw_sets;
@@ -507,6 +622,14 @@ struct ViewportApp {
   //! Toolbar buttons (per registered type, then undo/redo) + their handles.
   std::vector<std::uint32_t> node_toolbar_buttons{};
   std::uint32_t node_toolbar{warploom::ui::kInvalidWidget};
+  //! G5 scene browser: one load-button per *.json file in browser_dir_.
+  //! Opt-in via WARPLOOM_SCENE_DIR (no dir, no panel). Rebuilt only when the
+  //! scan changes; clicks queue LoadDocument through the session path.
+  bool browser_enabled{false};
+  std::string browser_dir{};
+  std::vector<std::string> browser_files{};
+  std::vector<std::pair<std::uint32_t, std::string>> browser_buttons{};
+  std::uint32_t browser_root{warploom::ui::kInvalidWidget};
   // Mouse tracking (view-space pixels) for node select/drag.
   float mouse_x{0.0f};
   float mouse_y{0.0f};
@@ -529,7 +652,12 @@ struct ViewportApp {
   //! editor.on_control, so every mutation crosses the single session stack.
   struct QueuedEdit {
     omnicpp::core::ControlCommand command;
+    //! G2: a copy whose reply fragment lands in clipboard_fragment_.
+    bool is_copy{false};
   };
+  //! G2: last copy_subgraph fragment (frame thread owns it; the event
+  //! thread only enqueues). Pasted verbatim by Ctrl+V.
+  std::string clipboard_fragment_{};
   std::vector<QueuedEdit> edit_queue;
   std::mutex edit_queue_mutex;
   //! Optional document loaded at startup via OMNICPP_DOC=<path>.
@@ -683,7 +811,16 @@ struct ViewportApp {
   bool rt_mode{false};
   //! E1: the RT stack is built on first use and cached, so runtime mode
   //! switches cannot leave a half-built stack behind.
-  bool rt_stack_built{false};
+  bool rt_stack_built{false};    //! R2 sub-toggles (v1.12): ray-queried reflections + ambient occlusion.
+    //! Push-constant flags (no pipeline rebuild); default off so RT mode
+    //! without them renders exactly as before.
+    bool rt_reflections{false};
+    bool rt_ao{false};
+    //! R1 stepped-PT target (v1.13): hold the accumulation once the tracer
+    //! reaches this many samples (0 = unbounded, historical behaviour).
+    //! Forwarded to the tracer; the pre-pass additionally skips the submit
+    //! while held so a converged image costs no GPU work.
+    std::uint32_t pt_sample_target{0U};
   // --- R1b: path tracing -------------------------------------------------
   //! Path-tracing mode ("pt"). Same build-once/cache discipline as the RT
   //! stack, for the same reason: a mode switch must never leave a half-built
@@ -1134,6 +1271,109 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
             ",\"available\":" +
             (app_.renderer.compose_bloom_available() ? "true" : "false") + "}";
         break;
+      case CK::SetRtReflections: {
+        // R2 (v1.12): push-constant flag, lands on the next recorded frame.
+        // RT mode is NOT required to accept it (the flag is inert without
+        // the RT pipelines), but applying it outside RT mode would be a
+        // silent no-op, so refuse loudly like the bloom handler does.
+        if (command.number_count < 1U) {
+          reply.ok = false;
+          reply.error = "set_rt_reflections needs enabled=0|1";
+          break;
+        }
+        if (!app_.rt_mode) {
+          reply.ok = false;
+          reply.error = "set_rt_reflections needs RT mode (WARPLOOM_RT_MODE=1)";
+          break;
+        }
+        app_.rt_reflections = command.numbers[0] != 0.0;
+        reply.detail = std::string("rt_reflections ") +
+                       (app_.rt_reflections ? "on" : "off");
+        break;
+      }
+      case CK::GetRtReflections:
+        reply.detail = std::string("{\"enabled\":") +
+                       (app_.rt_reflections ? "true" : "false") + "}";
+        break;
+      case CK::SetRtAo: {
+        if (command.number_count < 1U) {
+          reply.ok = false;
+          reply.error = "set_rt_ao needs enabled=0|1";
+          break;
+        }
+        if (!app_.rt_mode) {
+          reply.ok = false;
+          reply.error = "set_rt_ao needs RT mode (WARPLOOM_RT_MODE=1)";
+          break;
+        }
+        app_.rt_ao = command.numbers[0] != 0.0;
+        reply.detail = std::string("rt_ao ") + (app_.rt_ao ? "on" : "off");
+        break;
+      }
+      case CK::GetRtAo:
+        reply.detail = std::string("{\"enabled\":") + (app_.rt_ao ? "true" : "false") +
+                       "}";
+        break;
+      case CK::SetPtSampleTarget: {
+        // R1 (v1.13): stepped-PT target, lands on the next recorded frame.
+        // PT mode is required: outside it there is no accumulation to
+        // hold, so accepting would be a silent no-op — refuse loudly like
+        // the R2 toggles do.
+        if (command.number_count < 1U) {
+          reply.ok = false;
+          reply.error = "set_pt_sample_target needs samples=K (0 = unbounded)";
+          break;
+        }
+        const double want = command.numbers[0];
+        if (!(want >= 0.0) || want > 1000000.0) {
+          reply.ok = false;
+          reply.error = "set_pt_sample_target needs samples=K (0 = unbounded)";
+          break;
+        }
+        if (!app_.pt_mode) {
+          reply.ok = false;
+          reply.error = "set_pt_sample_target needs PT mode (WARPLOOM_PT=1)";
+          break;
+        }
+        app_.pt_sample_target = static_cast<std::uint32_t>(want);
+        if (app_.pt_tracer != nullptr) {
+          app_.pt_tracer->set_sample_target(app_.pt_sample_target);
+        }
+        reply.detail = std::string("pt_sample_target ") +
+                       std::to_string(app_.pt_sample_target);
+        break;
+      }
+      case CK::GetPtSamples:
+        reply.detail =
+            std::string("{\"samples\":") +
+            std::to_string(app_.pt_tracer != nullptr
+                               ? app_.pt_tracer->sample_count()
+                               : 0U) +
+            "}";
+        break;
+      case CK::GetPtMean: {
+        // Overall mean luma of the accumulation (fixed summation order, so
+        // two identical stepped runs report bitwise-identical text).
+        double sum = 0.0;
+        std::uint64_t n = 0U;
+        if (app_.pt_tracer != nullptr && app_.pt_tracer->ready()) {
+          const auto mean = app_.pt_tracer->read_mean();
+          if (mean.is_ok()) {
+            const auto& v = mean.value();
+            for (std::size_t i = 0U; i + 2U < v.size(); i += 4U) {
+              sum += (static_cast<double>(v[i]) + static_cast<double>(v[i + 1U]) +
+                      static_cast<double>(v[i + 2U])) /
+                     3.0;
+              ++n;
+            }
+          }
+        }
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "{\"mean\":%.9g}",
+                      n > 0U ? sum / static_cast<double>(n) : 0.0);
+        reply.detail = buf;
+        break;
+      }
       // W1: scrub commands ride the session (single mutation authority);
       // the host mirrors the resulting state change so the frame loop
       // rebuilds the scene + node view.
@@ -1679,6 +1919,49 @@ bool poll_events(ViewportApp& app) {
         free(event);
         return false;
       }
+      // G2: Ctrl+C copies the view selection, Ctrl+V pastes it. Keycodes
+      // 54/55 are the PHYSICAL C/V positions on pc105 (stable across
+      // QWERTY/AZERTY/QWERTZ); the Control modifier gates the chord.
+      const bool ctrl_held =
+          (key->state & XCB_MOD_MASK_CONTROL) != 0U;
+      if (app.node_editor && ctrl_held && key->detail == 54 &&
+          app.node_view != nullptr) {
+        // G2: the nids payload is the tested editor helper; only the
+        // keycode mapping above is platform-specific.
+        const std::string nids =
+            omnicpp::editor::selected_node_nids(app.node_view->views());
+        if (!nids.empty()) {
+          omnicpp::core::ControlCommand cmd;
+          cmd.kind = omnicpp::core::ControlCommand::Kind::CopySubgraph;
+          cmd.text = nids;
+          {
+            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+            app.edit_queue.push_back({std::move(cmd), true});
+          }
+        }
+        free(event);
+        return true;
+      }
+      if (app.node_editor && ctrl_held && key->detail == 55 &&
+          app.node_view != nullptr) {
+        std::string frag;
+        {
+          std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+          frag = app.clipboard_fragment_;
+        }
+        if (!frag.empty()) {
+          omnicpp::core::ControlCommand cmd;
+          cmd.kind = omnicpp::core::ControlCommand::Kind::PasteSubgraph;
+          cmd.text = std::move(frag);
+          {
+            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+            app.edit_queue.push_back({std::move(cmd), false});
+          }
+          app.node_dirty = true;
+        }
+        free(event);
+        return true;
+      }
       // Delete (119) / BackSpace (22) with a selected node: remove it
       // through the session's undoable command.
       if (app.node_editor && (key->detail == 119 || key->detail == 22) &&
@@ -1820,6 +2103,28 @@ bool poll_events(ViewportApp& app) {
           if (tb.action != TA::None) {
             free(event);
             return true;  // toolbar consumed the click
+          }
+        }
+        // G5: scene-browser load buttons (absolute right-edge column).
+        if (app.browser_enabled && !app.browser_buttons.empty()) {
+          for (const auto& [handle, file] : app.browser_buttons) {
+            if (handle >= app.ui_tree.size()) {
+              continue;
+            }
+            const auto& w = app.ui_tree.get(handle);
+            if (app.mouse_x >= w.x && app.mouse_x <= w.x + w.w &&
+                app.mouse_y >= w.y && app.mouse_y <= w.y + w.h) {
+              omnicpp::core::ControlCommand cmd;
+              cmd.kind = omnicpp::core::ControlCommand::Kind::LoadDocument;
+              cmd.text = app.browser_dir + "/" + file;
+              {
+                std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+                app.edit_queue.push_back({std::move(cmd), false});
+              }
+              app.node_dirty = true;  // cards + inspector re-derive
+              free(event);
+              return true;
+            }
           }
         }
         // M12: param rows next — click begins editing (one at a time).
@@ -2541,9 +2846,23 @@ bool setup_gpu_driven(ViewportApp& app) {
       omnicpp::render::SceneMesh{}, cube_verts, cube_idx);
   app.gd_slot_ground = app.gd_table_builder.add(
       omnicpp::render::SceneMesh{}, cube_verts, cube_idx);
+  // R3: the beam prop joins the same shared streams with its skin payload
+  // (8 floats/vertex, joint split at the y=1 pivot). Appended AFTER the
+  // cubes, so their slots/bytes are untouched and the static A/B is exact;
+  // the skinned shader addresses skin as global_vertex * 8, which is
+  // exactly the builder's concatenation order.
+  std::vector<float> beam_verts;
+  std::vector<std::uint32_t> beam_idx;
+  std::vector<float> beam_skin;
+  build_beam_column(beam_verts, beam_idx);
+  build_beam_column_skin(beam_verts, beam_skin);
+  app.gd_slot_beam = app.gd_table_builder.add(
+      omnicpp::render::SceneMesh{}, beam_verts, beam_idx, beam_skin);
   if (app.gd_slot_cube ==
           omnicpp::render::SceneMeshTableBuilder::kInvalidSlot ||
       app.gd_slot_ground ==
+          omnicpp::render::SceneMeshTableBuilder::kInvalidSlot ||
+      app.gd_slot_beam ==
           omnicpp::render::SceneMeshTableBuilder::kInvalidSlot) {
     std::fprintf(stderr, "viewport: gd mesh table add failed\n");
     return false;
@@ -2571,6 +2890,22 @@ bool setup_gpu_driven(ViewportApp& app) {
               app.gd_table.vertex_data.data(), app.gd_table.vertex_bytes());
   std::memcpy(app.gd_shared_index_allocation.mapped,
               app.gd_table.index_data.data(), app.gd_table.index_bytes());
+
+  // --- Skin stream (R3): parallel to the vertex stream, uploaded once --
+  // Static slots carry builder-synthesized identity skin, so the buffer is
+  // complete without per-frame work; only the bone palette animates.
+  auto sbuf = app.allocator.create_buffer(
+      app.gd_table.skin_bytes(), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (!sbuf.is_ok()) {
+    std::fprintf(stderr, "viewport: gd skin buffer failed\n");
+    return false;
+  }
+  app.gd_skin_allocation = sbuf.value();
+  app.gd_skin_buffer = app.gd_skin_allocation.buffer;
+  std::memcpy(app.gd_skin_allocation.mapped, app.gd_table.skin_data.data(),
+              app.gd_table.skin_bytes());
 
   // --- Payload (per-image) + indirect buffers -----------------------------
   constexpr VkDeviceSize kPayloadBytes =
@@ -2619,6 +2954,9 @@ bool setup_gpu_driven(ViewportApp& app) {
               static_cast<std::size_t>(table_bytes));
 
   // --- Set-0 layout (shared by cull + draw): vertices/payload/table/cmds --
+  // R3: binding 4 is the skin stream. The cull compute shader and the
+  // static vertex shader never declare it (extra bindings in a bound set
+  // are legal), so one layout serves all three pipelines.
   const std::vector<omnicpp::render::ReflectedBinding> gd_bindings = {
       {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT},
@@ -2627,7 +2965,9 @@ bool setup_gpu_driven(ViewportApp& app) {
       {0U, 2U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT},
       {0U, 3U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT}};
+       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT},
+      {0U, 4U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+       VK_SHADER_STAGE_VERTEX_BIT}};
   auto gd_layout = app.descriptors.create_layout(gd_bindings, 16U);
   if (!gd_layout.is_ok()) {
     std::fprintf(stderr, "viewport: gd set0 layout failed\n");
@@ -2665,6 +3005,16 @@ bool setup_gpu_driven(ViewportApp& app) {
         std::fprintf(stderr, "viewport: gd set writes failed\n");
         return false;
       }
+    }
+    // R3: skin stream on the DRAW sets only. The cull shader never
+    // declares binding 4, so its sets stay three-writes-clean.
+    if (!app.descriptors
+             .write_buffer(app.gd_draw_sets[i], 4U,
+                           VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                           app.gd_skin_buffer, 0U, VK_WHOLE_SIZE)
+             .is_ok()) {
+      std::fprintf(stderr, "viewport: gd skin set write failed\n");
+      return false;
     }
   }
 
@@ -2822,6 +3172,66 @@ bool setup_gpu_driven(ViewportApp& app) {
     return false;
   }
   app.gd_draw_pipeline_layout = app.gd_draw_pipeline.pipeline_layout();
+
+  // --- R3: beam bone palette (2 joints) + skinned draw pipeline ----------
+  // Slot 0 is the arena identity the static objects' joint_base 0 expects;
+  // slot 1 is the animated bend, rewritten every frame. Two matrices,
+  // host-visible, no staging: 128 bytes per frame is not worth a copy.
+  auto bonebuf = app.allocator.create_buffer(
+      2U * 64U, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (!bonebuf.is_ok()) {
+    std::fprintf(stderr, "viewport: gd beam bone buffer failed\n");
+    return false;
+  }
+  app.gd_beam_bone_allocation = bonebuf.value();
+  app.gd_beam_bone_buffer = app.gd_beam_bone_allocation.buffer;
+  {
+    auto* joints = static_cast<SceneMatrix*>(app.gd_beam_bone_allocation.mapped);
+    joints[0] = omnicpp::render::scene_identity_matrix();
+    joints[1] = omnicpp::render::scene_identity_matrix();
+  }
+  auto beam_bone_set = app.descriptors.allocate_set(app.bone_layout);
+  if (!beam_bone_set.is_ok()) {
+    std::fprintf(stderr, "viewport: gd beam bone set failed\n");
+    return false;
+  }
+  app.gd_beam_bone_set = beam_bone_set.value();
+  if (!app.descriptors
+           .write_buffer(app.gd_beam_bone_set, 0U,
+                         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                         app.gd_beam_bone_buffer, 0U, VK_WHOLE_SIZE)
+           .is_ok()) {
+    std::fprintf(stderr, "viewport: gd beam bone set write failed\n");
+    return false;
+  }
+
+  // Skinned draw: same six-set layout and 160-byte push as the static
+  // draw (only the vertex stage differs), so the partition is two draws
+  // over one command buffer, not two states.
+  if (!app.gd_draw_skinned_pipeline
+           .load_shader_stage_file(dev,
+                                   shader_dir + "/pbr_gpu_driven_skinned.vert.spv",
+                                   "vertex")
+           .is_ok() ||
+      !app.gd_draw_skinned_pipeline
+           .load_shader_stage_file(
+               dev, shader_dir + "/pbr_gpu_driven_full.frag.spv", "fragment")
+           .is_ok() ||
+      !app.gd_draw_skinned_pipeline
+           .create_pipeline_layout(dev, draw_layouts, 6U, &draw_push)
+           .is_ok() ||
+      !app.gd_draw_skinned_pipeline
+           .create_graphics_pipeline(dev, app.scene_render_pass(),
+                                     app.scene_color_format(),
+                                     app.gd_draw_skinned_pipeline.pipeline_layout(),
+                                     /*depth_test=*/true,
+                                     /*depth_write=*/true, /*cull=*/true)
+           .is_ok()) {
+    std::fprintf(stderr, "viewport: gd skinned draw pipeline failed\n");
+    return false;
+  }
   return true;
 }
 
@@ -2840,7 +3250,7 @@ void write_gpu_driven_payload(ViewportApp& app, std::uint32_t frame_slot,
   const auto write_obj = [&](std::uint32_t obj, const SceneMatrix& model,
                              std::uint32_t material, std::uint32_t slot,
                              const std::array<float, 3>& center,
-                             float radius) {
+                             float radius, std::uint32_t joint_base = 0U) {
     auto* u = words + 2U + 24U * obj;
     std::memcpy(u, model.data(), 64U);
     u[16] = material;
@@ -2849,7 +3259,7 @@ void write_gpu_driven_payload(ViewportApp& app, std::uint32_t frame_slot,
     sph[0] = center[0]; sph[1] = center[1]; sph[2] = center[2];
     sph[3] = radius;
     u[22] = 1U;  // lod_count
-    u[23] = 0U;
+    u[23] = joint_base;  // R3: beam palette base (static: arena identity)
   };
 
   // Same transforms AND geometry as record_scene_into's cubes branch: the
@@ -2864,10 +3274,12 @@ void write_gpu_driven_payload(ViewportApp& app, std::uint32_t frame_slot,
   // slab, or the static spinner + rough cube. Physics transforms come straight
   // from the stepped bodies; spheres render as scaled cubes at body positions.
   if (!app.physics_bodies.empty()) {
+    // Reserve the beam's slot: bodies + ground + beam must fit the sized
+    // payload (an off-by-one here writes past the allocation).
     const std::uint32_t n =
         std::min<std::uint32_t>(
             static_cast<std::uint32_t>(app.physics_bodies.size()),
-            kGdMaxInstances - 1U);
+            kGdMaxInstances - 2U);
     for (std::uint32_t i = 0; i < n; ++i) {
       const auto& b = app.physics_bodies[i];
       write_obj(1U + i,
@@ -2891,6 +3303,32 @@ void write_gpu_driven_payload(ViewportApp& app, std::uint32_t frame_slot,
                                 scale_matrix(0.7f, 0.7f, 0.7f))),
               1U, app.gd_slot_cube, {-2.4f, 1.0f, 0.6f},
               0.8660254f * 0.7f);
+  }
+
+  // R3: the skinned prop, ALWAYS last (index kObjectCount - 1). A 2 m box
+  // column on the slab at (2.4, -0.8); the skin stream (uploaded once)
+  // binds the top half to palette joint 1. The sphere covers the bend
+  // range, not the rest pose: center y=1.05, radius 1.5 (half-diag ~1.02
+  // + 0.4 bend travel + margin). Blue (material 1): distinct from the
+  // ground and the spinner, no new material slot.
+  const std::uint32_t beam_obj = kObjectCount - 1U;
+  write_obj(beam_obj, translation_matrix(2.4f, 0.05f, -0.8f), 1U,
+            app.gd_slot_beam, {2.4f, 1.05f, -0.8f}, 1.5f,
+            /*joint_base=*/0U);
+
+  // Beam palette: joint 0 stays the arena identity; joint 1 rotates the
+  // top half about the y=1 pivot (local): T(p) * Rz(a) * T(-p) with
+  // a = 0.35 * sin(0.9 * t). Pure function of sim time, like every other
+  // payload write here — deterministic, replayable, no wall clock.
+  if (app.gd_beam_bone_allocation.mapped != nullptr) {
+    const float a = 0.35f * std::sin(t * 0.9f);
+    const SceneMatrix bend = multiply(
+        translation_matrix(0.0f, 1.0f, 0.0f),
+        multiply(rotation_z_matrix(a), translation_matrix(0.0f, -1.0f, 0.0f)));
+    auto* joints =
+        static_cast<SceneMatrix*>(app.gd_beam_bone_allocation.mapped);
+    joints[0] = omnicpp::render::scene_identity_matrix();
+    joints[1] = bend;
   }
 
   // Cull push (144 bytes): word indices + 6 planes + LOD params.
@@ -3433,11 +3871,14 @@ void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
   };
   std::uint32_t count = 0;
   auto push_instance = [&](const ViewportApp::RtBlas& blas,
-                           const SceneMatrix& model) {
+                           const SceneMatrix& model, std::uint32_t custom) {
     if (count >= app.rt_instances.size()) return;
     auto& inst = app.rt_instances[count++];
     model_to_rows(model, inst.transform);
-    inst.instance_custom_index = count - 1U;
+    // R2: the reflection shader reads the hit instance's material albedo by
+    // instanceCustomIndex, so it carries the instance's MATERIAL index --
+    // the same index the raster draw uses, valid by construction.
+    inst.instance_custom_index = custom;
     inst.mask = 0xFFu;
     inst.sbt_offset = 0U;
     inst.flags =
@@ -3448,9 +3889,9 @@ void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
   for (const auto& object : app.scene.objects) {
     if (object.mesh == nullptr || !object.mesh->is_drawable()) continue;
     if (object.mesh == &app.ground.mesh) {
-      push_instance(app.rt_blas_ground[0], object.model);
+      push_instance(app.rt_blas_ground[0], object.model, object.material_index);
     } else if (object.mesh == &app.cube.mesh) {
-      push_instance(app.rt_blas_cube[0], object.model);
+      push_instance(app.rt_blas_cube[0], object.model, object.material_index);
     } else {
       // Skinned parts (E5 animated TLAS): authored skinned vertices are
       // already in world bind pose, and the bone matrix B_j(t) =
@@ -3471,9 +3912,11 @@ void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
                 app.bone_allocation.mapped != nullptr &&
                 slot * 64U < app.bone_allocation.size) {
               push_instance(app.rt_blas_mannequin[i],
-                            multiply(object.model, bones[slot]));
+                            multiply(object.model, bones[slot]),
+                            object.material_index);
             } else {
-              push_instance(app.rt_blas_mannequin[i], object.model);
+              push_instance(app.rt_blas_mannequin[i], object.model,
+                            object.material_index);
             }
             matched = true;
             break;
@@ -3489,7 +3932,8 @@ void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
           if (object.mesh == &app.city_parts[c].buffers.mesh) {
             if (c < app.rt_blas_city.size()) {
               push_instance(app.rt_blas_city[c],
-                            omnicpp::render::scene_identity_matrix());
+                            omnicpp::render::scene_identity_matrix(),
+                            object.material_index);
             }
             matched = true;
             break;
@@ -3503,7 +3947,8 @@ void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
         // instance capacity (verified: instances truncated at 96).
         if (!sponza_pushed && !app.rt_blas_sponza.empty()) {
           push_instance(app.rt_blas_sponza[0],
-                        omnicpp::render::scene_identity_matrix());
+                        omnicpp::render::scene_identity_matrix(),
+                        object.material_index);
           sponza_pushed = true;
         }
       }
@@ -3762,6 +4207,9 @@ bool setup_path_tracing(ViewportApp& app) {
     destroy_pt_geometry(app);
     return false;
   }
+  // A re-entered PT mode rebuilds the tracer: re-apply the live target so
+  // a stepped session survives the round trip (the tracer default is 0).
+  app.pt_tracer->set_sample_target(app.pt_sample_target);
   app.pt_frame = 0U;
   return true;
 }
@@ -3845,14 +4293,23 @@ bool record_pt_round_cb(VkCommandBuffer command_buffer, std::uint32_t,
   // that never actually accumulated anything. The symptom is subtle because
   // it looks correct -- a stable, non-black picture.
   //
-  // Past the cap the counter wraps and the next round clears, so the mean
-  // tracks a bounded sample window instead of drifting forever.
-  if (app.pt_frame >= ViewportApp::kPtMaxSamples) {
-    app.pt_frame = 0U;
+  // R1 stepped-PT hold (v1.13): at target the image is converged — record
+  // nothing so the mean cannot drift (and the wrap below cannot wipe a
+  // held image), but keep the tonemap divisor current. The tracer holds
+  // too (backstop); this skip avoids the pointless submit.
+  const bool held =
+      app.pt_sample_target > 0U &&
+      app.pt_tracer->sample_count() >= app.pt_sample_target;
+  if (!held) {
+    // Past the cap the counter wraps and the next round clears, so the mean
+    // tracks a bounded sample window instead of drifting forever.
+    if (app.pt_frame >= ViewportApp::kPtMaxSamples) {
+      app.pt_frame = 0U;
+    }
+    const bool clear = app.pt_frame == 0U;
+    app.pt_tracer->record_round(command_buffer, app.pt_frame, clear);
+    ++app.pt_frame;
   }
-  const bool clear = app.pt_frame == 0U;
-  app.pt_tracer->record_round(command_buffer, app.pt_frame, clear);
-  ++app.pt_frame;
   // read_mean divides by the sample count; the tonemap needs the same 1/n, on
   // BOTH compose instances (the live chain and the capture chain), or a
   // captured frame would show the raw growing sum.
@@ -5488,6 +5945,14 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
                 : app.rt_full_pipeline.pipeline_layout();
     app.scene.rt_set = app.rt_set;
     app.scene.rt_set_slot = 4U;
+    // R2: push-constant sub-toggles, no rebuild. Set every frame from the
+    // live toggles (not only in RT mode): non-RT shaders ignore pad1, and
+    // RT mode without them is the historical path bit-for-bit.
+    app.scene.rt_flags =
+        (app.rt_reflections
+             ? omnicpp::render::VulkanPbrScene::kRtFlagReflections
+             : 0U) |
+        (app.rt_ao ? omnicpp::render::VulkanPbrScene::kRtFlagAo : 0U);
     // No shadow-map pre-pass: the TLAS replaces the depth map.
     app.scene.shadow_pipeline = VK_NULL_HANDLE;
     app.scene.shadow_pipeline_layout = VK_NULL_HANDLE;
@@ -5497,22 +5962,37 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
   }
 
   // GPU-driven mode: the scene description above only feeds the shadow
-  // pre-pass and telemetry. The lit draw itself is ONE indirect command over
+  // pre-pass and telemetry. The lit draw itself is indirect commands over
   // the mesh table — the cull/LOD compute pass (recorded in the pre-pass
   // hook) already wrote every draw command and the visibility counter, so
   // the CPU never computes visibility, LOD, or per-draw submission.
   if (app.gpu_driven) {
-    // ONE vkCmdDrawIndexedIndirect over the GPU-written commands, recorded
+    // TWO vkCmdDrawIndexedIndirect over the GPU-written commands, recorded
     // by the engine inside this already-begun render pass. The shadow
     // pre-pass left a 2048^2 viewport/scissor bound; the engine re-sets
-    // dynamic state from the width and height passed here.
+    // dynamic state from the width and height passed here. R3 partition:
+    // static commands [0, beam) through the static pipeline, the beam's
+    // command through the skinned pipeline. firstInstance stays the
+    // GLOBAL object index, so the payload addressing is unchanged; the
+    // degenerate tail past the last object is never drawn.
+    //
+    // The beam does not cast shadows (the shadow pre-pass draws the
+    // CPU-built scene, which has no beam mesh); it still receives them
+    // through the composed fragment shader. Shadow parity between the
+    // CPU-skinned and driven-skinned paths is pinned shadowless by the
+    // unit test, not here.
+    const std::uint32_t beam_obj = app.gd_instance_count - 1U;
+    GdPush push{app.scene.camera.view_projection,
+                {}, app.scene.camera_position, {}};
     omnicpp::render::VulkanRenderer::GpuDrivenFrame frame{};
-    frame.draw_pipeline = app.gd_draw_pipeline.pipeline();
-    frame.draw_pipeline_layout = app.gd_draw_pipeline_layout;
-    // Five sets at slots 0,1,2,4,5 -- slot 3 is the bone SSBO, unused by the
-    // driven path (cubes scene, no skinning). The engine recorder groups
-    // these into the two vkCmdBindDescriptorSets ranges this needs.
-    frame.draw_set_count = 5U;
+    frame.draw_push.data = &push;
+    frame.draw_push.size = sizeof(push);
+    frame.index_buffer = app.gd_shared_index_buffer;
+    // The buffer the compute pass wrote the commands into: the recorder
+    // reads it from the frame description, so it must be named on both
+    // halves, not just the cull side.
+    frame.indirect_buffer = app.gd_indirect_buffer;
+    frame.object_count = app.gd_instance_count;
     frame.draw_sets[0] = app.gd_draw_sets[app.renderer.current_frame()];
     frame.draw_set_slots[0] = 0U;  // per-object sets
     frame.draw_sets[1] = app.scene.texture_set;
@@ -5523,22 +6003,40 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     frame.draw_set_slots[3] = 4U;  // shadow map
     frame.draw_sets[4] = app.scene.ibl_set;
     frame.draw_set_slots[4] = 5U;  // IBL
-    {
-      GdPush push{app.scene.camera.view_projection,
-                  {}, app.scene.camera_position, {}};
-      frame.draw_push.data = &push;
-      frame.draw_push.size = sizeof(push);
-    }
-    frame.index_buffer = app.gd_shared_index_buffer;
-    // The buffer the compute pass wrote the commands into: the recorder
-    // reads it from the frame description, so it must be named on both
-    // halves, not just the cull side.
-    frame.indirect_buffer = app.gd_indirect_buffer;
-    frame.object_count = app.gd_instance_count;
-    const auto gd = omnicpp::render::VulkanRenderer{}.record_gpu_driven_draw(
-        command_buffer, width, height, frame);
-    if (!gd.is_ok()) {
+    // Static partition: five sets at slots 0,1,2,4,5 -- slot 3 is the
+    // bone SSBO, unused by the static vertex shader. The engine recorder
+    // groups these into the two vkCmdBindDescriptorSets ranges this needs.
+    frame.draw_pipeline = app.gd_draw_pipeline.pipeline();
+    frame.draw_pipeline_layout = app.gd_draw_pipeline_layout;
+    frame.draw_set_count = 5U;
+    frame.draw_first_command = 0U;
+    frame.draw_command_count = beam_obj;
+    if (const auto gd = omnicpp::render::VulkanRenderer{}.record_gpu_driven_draw(
+            command_buffer, width, height, frame);
+        !gd.is_ok()) {
       std::fprintf(stderr, "viewport: record_gpu_driven_draw failed (%d)\n",
+                   static_cast<int>(gd.error()));
+      return false;
+    }
+    // Skinned partition: same sets plus the beam palette at slot 3, kept
+    // consecutive (0..5) so the recorder binds one range.
+    frame.draw_pipeline = app.gd_draw_skinned_pipeline.pipeline();
+    frame.draw_pipeline_layout =
+        app.gd_draw_skinned_pipeline.pipeline_layout();
+    frame.draw_sets[3] = app.gd_beam_bone_set;
+    frame.draw_set_slots[3] = 3U;  // bone palette
+    frame.draw_sets[4] = app.scene.shadow_set;
+    frame.draw_set_slots[4] = 4U;
+    frame.draw_sets[5] = app.scene.ibl_set;
+    frame.draw_set_slots[5] = 5U;
+    frame.draw_set_count = 6U;
+    frame.draw_first_command = beam_obj;
+    frame.draw_command_count = 1U;
+    if (const auto gd = omnicpp::render::VulkanRenderer{}.record_gpu_driven_draw(
+            command_buffer, width, height, frame);
+        !gd.is_ok()) {
+      std::fprintf(stderr,
+                   "viewport: record_gpu_driven_draw (skinned) failed (%d)\n",
                    static_cast<int>(gd.error()));
       return false;
     }
@@ -5619,6 +6117,47 @@ void mirror_document_objects(ViewportApp& app) {
 // over the scene through the engine UI paint path.
 // ============================================================================
 
+//! G5: (re)builds the scene-browser buttons from browser_dir_. Absolute
+//! container on the right edge; one load-button per file, top-down.
+//! Buttons are only rebuilt when the scan changes (tick compares), so
+//! widget churn is zero at steady state.
+void rebuild_browser_buttons(ViewportApp& app) {
+  namespace ui = warploom::ui;
+  if (!app.browser_enabled || app.browser_root == ui::kInvalidWidget) {
+    return;
+  }
+  for (std::uint32_t c = app.ui_tree.get(app.browser_root).first_child;
+       c != ui::kInvalidWidget;) {
+    const std::uint32_t next = app.ui_tree.get(c).next_sibling;
+    (void)app.ui_tree.remove(c);
+    c = next;
+  }
+  app.browser_buttons.clear();
+  constexpr float kPanelX = 1052.0F;  // right-edge column, 1280 canvas
+  constexpr float kTopY = 64.0F;
+  constexpr float kRowH = 26.0F;
+  float y = kTopY;
+  for (const auto& file : app.browser_files) {
+    ui::Widget btn;
+    btn.kind = ui::WidgetKind::Button;
+    btn.name = "browser_load_" + file;
+    std::string label = file;
+    if (label.size() > 28U) {
+      label = label.substr(0U, 25U) + "...";  // full name loads on click
+    }
+    btn.text = "open " + label;
+    btn.fixed_w = 212.0F;
+    btn.fixed_h = 22.0F;
+    const auto handle = app.ui_tree.add(btn, app.browser_root);
+    app.ui_tree.get(handle).x = kPanelX;
+    app.ui_tree.get(handle).y = y;
+    app.ui_tree.get(handle).w = 212.0F;
+    app.ui_tree.get(handle).h = 22.0F;
+    app.browser_buttons.emplace_back(handle, file);
+    y += kRowH;
+  }
+}
+
 //! Builds the demo graph (const -> add), the widget tree, and the UI
 //! renderer. False (non-fatal for the scene; overlay just stays off) when
 //! the ui_quad shaders are unavailable.
@@ -5684,6 +6223,25 @@ bool setup_node_editor(ViewportApp& app) {
     app.node_toolbar = toolbar;
     app.node_toolbar_buttons = omnicpp::editor::build_node_toolbar(
         app.ui_tree, toolbar, *app.node_graph);
+  }
+
+  // G5 scene browser (WARPLOOM_SCENE_DIR): absolute container on the
+  // right edge; buttons (re)built from the scan whenever it changes.
+  // Opt-in: no env dir, no panel. A bad dir scans empty, not fatal.
+  if (const char* scene_dir =
+          warploom_env("WARPLOOM_SCENE_DIR", "OMNICPP_SCENE_DIR")) {
+    app.browser_enabled = true;
+    app.browser_dir = scene_dir;
+    warploom::ui::Widget panel;
+    panel.kind = warploom::ui::WidgetKind::Container;
+    panel.name = "scene_browser";
+    panel.layout = warploom::ui::LayoutMode::Absolute;
+    app.browser_root = app.ui_tree.add(panel, app.ui_tree.root());
+    app.browser_files =
+        omnicpp::editor::list_scene_files(app.browser_dir);
+    rebuild_browser_buttons(app);
+    std::printf("viewport: scene browser on %s (%zu files)\n",
+                app.browser_dir.c_str(), app.browser_files.size());
   }
 
   // M13 fusion: when enabled, seed a pulse node mapped to "graph_move" so
@@ -5773,6 +6331,11 @@ void tick_node_editor(ViewportApp& app) {
       if (!reply.ok) {
         std::fprintf(stderr, "viewport: edit rejected: %s\n",
                      reply.error.c_str());
+      } else if (queued.is_copy) {
+        // G2: stash the fragment for Ctrl+V (paste is a separate edit).
+        // Locked: the event thread reads it on Ctrl+V.
+        std::lock_guard<std::mutex> clip_lock(app.edit_queue_mutex);
+        app.clipboard_fragment_ = reply.detail;
       }
     }
   }
@@ -5815,6 +6378,17 @@ void tick_node_editor(ViewportApp& app) {
     app.inspector_root = app.inspector.panel_handle();
   }
 
+  // G5: rescan the scene dir; rebuild buttons only when the scan changes.
+  if (app.browser_enabled) {
+    const auto files =
+        omnicpp::editor::list_scene_files(app.browser_dir);
+    if (files != app.browser_files) {
+      app.browser_files = files;
+      rebuild_browser_buttons(app);
+      app.node_dirty = true;  // new buttons need layout + paint
+    }
+  }
+
   std::string error;
   // M13: context-driven nodes (time/oscillators/noise) use the sim clock +
   // frame counter — deterministic, host-driven, never wall clocks.
@@ -5822,6 +6396,11 @@ void tick_node_editor(ViewportApp& app) {
   ctx.time = static_cast<double>(app.time);
   ctx.tick = static_cast<std::uint64_t>(app.frame_index);
   (void)app.node_graph->evaluate_with(ctx, error);
+  // G4: refresh the per-output value rows from the just-evaluated graph.
+  // evaluate() alone leaves the rows showing last frame's values.
+  if (app.node_view != nullptr) {
+    app.node_view->sync_values();
+  }
   // W1: keep the timeline strip in sync with the live scrubber + clock.
   app.timeline.sync(app.ui_tree, app.editor.scrubber(),
                     static_cast<float>(kWidth), static_cast<float>(kHeight),
@@ -6141,11 +6720,13 @@ bool ViewportApp::initialize() {
         !rt_mode &&  // GPU-driven fragment is the PCF variant; exclusive
         setup_gpu_driven(*this)) {
       gpu_driven = true;
-      // Instance-count override: grows the payload past the static trio
-      // (benchmarks; requires WARPLOOM_GPU_DRIVEN=1).
+      // Instance-count override: grows the payload past the static trio +
+      // beam (benchmarks; requires WARPLOOM_GPU_DRIVEN=1). The count is the
+      // TOTAL including the beam (always last), so the floor is 2
+      // (ground + beam); below that the knob is ignored.
       if (const char* count_env = warploom_env("WARPLOOM_INSTANCE_COUNT", "OMNICPP_INSTANCE_COUNT")) {
         const long parsed = std::strtol(count_env, nullptr, 10);
-        if (parsed >= 1L &&
+        if (parsed >= 2L &&
             parsed <= static_cast<long>(kGdMaxInstances) - 1L) {
           gd_instance_count = static_cast<std::uint32_t>(parsed);
         }
@@ -6157,8 +6738,10 @@ bool ViewportApp::initialize() {
         // D1: 8 positional-correction passes — the gd pile is deep-stacked
         // bodies, exactly where single-pass sink shows.
         physics_world.set_solver_iterations(8);
+        // Bodies fill indices 1..count-2; the beam always takes the last
+        // slot. Default scene is unchanged: 4 total -> the same 2 bodies.
         const std::uint32_t body_count =
-            gd_instance_count > 1U ? gd_instance_count - 1U : 3U;
+            gd_instance_count >= 3U ? gd_instance_count - 2U : 0U;
         physics_bodies.reserve(body_count);
         for (std::uint32_t i = 0; i < body_count; ++i) {
           omnicpp::physics::PhysicsBody b;
@@ -6171,7 +6754,7 @@ bool ViewportApp::initialize() {
           physics_bodies.push_back(b);
           (void)physics_world.add_body(b);  // body id is not needed here
         }
-        gd_instance_count = body_count + 1U;
+        gd_instance_count = body_count + 2U;  // ground + bodies + beam
       }
     }
   }
@@ -6192,6 +6775,9 @@ bool ViewportApp::initialize() {
     if (!doc_path.empty()) {
       omnicpp::editor::SceneDocument loaded;
       omnicpp::editor::register_builtin_node_types(loaded.node_graph);
+      // G4: the same script-type registration the session owns, so a
+      // persisted script node parses here instead of failing as unknown.
+      omnicpp::editor::register_script_node_type(loaded.node_graph);
       std::string err;
       if (omnicpp::editor::SceneDocument::load_from_file(doc_path, loaded,
                                                          err)) {
@@ -6205,12 +6791,64 @@ bool ViewportApp::initialize() {
                      err.c_str());
       }
     }
+    // G4: WARPLOOM_SCRIPT_MODULES="<path>[:in[:out]];..." preloads native
+    // gameplay modules and registers their bound types (script:<name>) with
+    // full pin rows, so they appear in the add-toolbar next to built-ins.
+    // A missing .so or bad counts skips that entry (logged, not fatal);
+    // the overlay never goes down for a module. Counts are per-instance
+    // pins 1..9 (same contract the dispatch "script" node enforces).
+    if (const char* mods_env = warploom_env("WARPLOOM_SCRIPT_MODULES",
+                                            "OMNICPP_SCRIPT_MODULES")) {
+      const std::string spec(mods_env);
+      std::size_t pos = 0;
+      while (pos <= spec.size()) {
+        const std::size_t end = spec.find(';', pos);
+        const std::string entry =
+            spec.substr(pos, end == std::string::npos ? end : end - pos);
+        pos = end == std::string::npos ? spec.size() + 1U : end + 1U;
+        if (entry.empty()) {
+          continue;
+        }
+        std::string mod_path;
+        std::uint32_t n_in = 1U;
+        std::uint32_t n_out = 1U;
+        if (!omnicpp::core::ScriptModule::parse_module_spec(entry, mod_path,
+                                                           n_in, n_out)) {
+          std::fprintf(stderr,
+                       "viewport: bad script module spec \"%s\" "
+                       "(want path[:in[:out]], 1..9)\n",
+                       entry.c_str());
+          continue;
+        }
+        std::string load_error;
+        auto module = omnicpp::core::ScriptModule::load_shared(mod_path,
+                                                              load_error);
+        if (module == nullptr) {
+          std::fprintf(stderr, "viewport: script module load failed: %s\n",
+                       load_error.c_str());
+          continue;
+        }
+        const std::string type_name =
+            std::string("script:") + std::string(module->module_name());
+        if (node_graph != nullptr &&
+            node_graph->find_type(type_name) != nullptr) {
+          continue;  // already registered (duplicate spec entry)
+        }
+        std::shared_ptr<omnicpp::core::ScriptModule> shared(std::move(module));
+        omnicpp::editor::register_script_node_type(*node_graph, shared,
+                                                   n_in, n_out);
+        std::printf("viewport: script module %s (%llu in, %llu out)\n",
+                    type_name.c_str(),
+                    static_cast<unsigned long long>(n_in),
+                    static_cast<unsigned long long>(n_out));
+      }
+    }
     if (setup_node_editor(*this)) {
       node_editor = true;
       renderer.set_frame_pre_pass_callback(node_editor_pre_pass_cb, this);
       std::printf("viewport: node editor overlay active (drag cards, drag "
                   "pin-to-pin to link, right-click a wire to unlink, "
-                  "Delete removes the selection)\n");
+                  "Delete removes the selection, Ctrl+C/V copies/pastes)\n");
     } else {
       std::fprintf(stderr, "viewport: node editor unavailable "
                            "(missing ui_quad shaders?)\n");

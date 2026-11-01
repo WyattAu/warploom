@@ -68,6 +68,16 @@ class ScriptModule final {
   [[nodiscard]] static std::unique_ptr<ScriptModule> load_builtin(
       std::string_view name, std::string& error);
 
+  //! Parses one WARPLOOM_SCRIPT_MODULES entry: "<path>[:in[:out]]" with pin
+  //! counts in 1..9 (same contract the dispatch "script" node enforces).
+  //! Pure string logic (no dlopen), so the viewport's env handling is
+  //! unit-testable without a display. False on any malformed entry, with
+  //! `outputs` defaulting to 1 when only inputs are given.
+  [[nodiscard]] static bool parse_module_spec(std::string_view entry,
+                                              std::string& path,
+                                              std::uint32_t& inputs,
+                                              std::uint32_t& outputs);
+
   [[nodiscard]] std::string_view module_name() const noexcept;
   //! Calls the module tick. Returns the output count, or -1 on module error.
   [[nodiscard]] std::int32_t tick(double dt, const double* inputs,

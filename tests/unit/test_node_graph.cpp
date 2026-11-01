@@ -208,6 +208,72 @@ TEST(NodeGraph, PasteRollsBackOnFailure) {
   EXPECT_EQ(g.node_count(), 2U) << "failed paste mutated the graph";
 }
 
+TEST(NodeGraph, SubgraphCopyLayoutRoundTrip) {
+  NodeGraph g;
+  register_builtin_node_types(g);
+  const auto c1 =
+      g.add_node("const_number", {{"value", NodeValue::make_number(3)}});
+  const auto c2 =
+      g.add_node("const_number", {{"value", NodeValue::make_number(4)}});
+  const auto add = g.add_node("add", {});
+  { std::string le; ASSERT_TRUE(g.add_link(c1, "value", add, "a", le)); }
+  { std::string le; ASSERT_TRUE(g.add_link(c2, "value", add, "b", le)); }
+  const std::map<std::uint64_t, std::pair<double, double>> layout{
+      {c1, {10.0, 20.0}}, {c2, {50.0, 60.0}}, {add, {30.0, 40.0}}};
+
+  // Layout-aware copy carries positions; the plain overload is unchanged.
+  const std::string frag = g.copy_subgraph({c1, add, c2}, layout);
+  EXPECT_NE(frag.find("\"x\":10"), std::string::npos) << frag;
+  EXPECT_NE(frag.find("\"y\":60"), std::string::npos) << frag;
+  const std::string plain = g.copy_subgraph({c1, add, c2});
+  EXPECT_EQ(plain.find("\"x\""), std::string::npos) << plain;
+
+  // Paste reports positions parallel to the new ids (fragment node order).
+  NodeGraph g2;
+  register_builtin_node_types(g2);
+  std::vector<std::uint64_t> new_ids;
+  std::vector<std::pair<double, double>> positions;
+  std::string error;
+  ASSERT_TRUE(g2.paste_subgraph(frag, new_ids, error, &positions))
+      << error;
+  ASSERT_EQ(new_ids.size(), 3U);
+  ASSERT_EQ(positions.size(), 3U);
+  // Fragment order is renormalized-ascending: ids were 1,2,3 (c1,c2,add).
+  EXPECT_DOUBLE_EQ(positions[0].first, 10.0);
+  EXPECT_DOUBLE_EQ(positions[0].second, 20.0);
+  EXPECT_DOUBLE_EQ(positions[1].first, 50.0);
+  EXPECT_DOUBLE_EQ(positions[1].second, 60.0);
+  EXPECT_DOUBLE_EQ(positions[2].first, 30.0);
+  EXPECT_DOUBLE_EQ(positions[2].second, 40.0);
+
+  // Layout-aware copy of the pasted nodes (with their positions) is the
+  // same fragment again -- positions survive the round trip.
+  std::map<std::uint64_t, std::pair<double, double>> pasted_layout;
+  for (std::size_t i = 0; i < new_ids.size(); ++i) {
+    pasted_layout[new_ids[i]] = positions[i];
+  }
+  EXPECT_EQ(g2.copy_subgraph(new_ids, pasted_layout), frag);
+
+  // Old fragments (no layout) still paste; positions default to 0,0 and
+  // the positions vector stays parallel.
+  NodeGraph g3;
+  register_builtin_node_types(g3);
+  std::vector<std::uint64_t> old_ids;
+  std::vector<std::pair<double, double>> old_pos;
+  ASSERT_TRUE(g3.paste_subgraph(plain, old_ids, error, &old_pos)) << error;
+  ASSERT_EQ(old_ids.size(), 3U);
+  for (const auto& p : old_pos) {
+    EXPECT_DOUBLE_EQ(p.first, 0.0);
+    EXPECT_DOUBLE_EQ(p.second, 0.0);
+  }
+  // And a null positions sink keeps working (existing callers unchanged).
+  NodeGraph g4;
+  register_builtin_node_types(g4);
+  std::vector<std::uint64_t> null_ids;
+  EXPECT_TRUE(g4.paste_subgraph(plain, null_ids, error)) << error;
+  EXPECT_EQ(null_ids.size(), 3U);
+}
+
 }  // namespace
 
 // ============================================================================

@@ -2100,6 +2100,45 @@ std::string SetNodePositionCommand::describe() const {
   return "move node " + std::to_string(node_id_);
 }
 
+PasteSubgraphCommand::PasteSubgraphCommand(std::string fragment, double dx,
+                                           double dy)
+    : fragment_(std::move(fragment)), dx_(dx), dy_(dy) {}
+
+bool PasteSubgraphCommand::apply(SceneDocument& doc, std::string& error) {
+  std::vector<std::uint64_t> ids;
+  std::vector<std::pair<double, double>> positions;
+  if (!doc.node_graph.paste_subgraph(fragment_, ids, error, &positions)) {
+    return false;
+  }
+  new_ids_ = ids;
+  for (std::size_t i = 0; i < ids.size(); ++i) {
+    doc.node_layout.insert_or_assign(
+        ids[i], std::make_pair(positions[i].first + dx_,
+                               positions[i].second + dy_));
+  }
+  applied_ = true;
+  return true;
+}
+
+void PasteSubgraphCommand::undo(SceneDocument& doc) {
+  OMNICPP_CONTRACT(applied_);
+  for (auto it = new_ids_.rbegin(); it != new_ids_.rend(); ++it) {
+    OMNICPP_CONTRACT(doc.node_graph.remove_node(*it));
+    doc.node_layout.erase(*it);
+  }
+  if (!new_ids_.empty()) {
+    // Cursor back to the first claimed id so undo+redo reclaims the same
+    // ids — the same pattern as AddNodeCommand::undo (LIFO order makes
+    // this exact: nothing claimed ids after this paste).
+    doc.node_graph.restore_id_cursor(new_ids_.front());
+  }
+  applied_ = false;
+}
+
+std::string PasteSubgraphCommand::describe() const {
+  return "paste " + std::to_string(new_ids_.size()) + " nodes";
+}
+
 // ============================================================================
 // CommandStack
 // ============================================================================

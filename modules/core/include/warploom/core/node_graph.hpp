@@ -193,13 +193,26 @@ class NodeGraph final {
   //! new node ids in the fragment's (renormalized) node order.
   [[nodiscard]] std::string copy_subgraph(
       const std::vector<std::uint64_t>& node_ids) const;
-  [[nodiscard]] bool paste_subgraph(std::string_view fragment,
-                                    std::vector<std::uint64_t>& out_new_ids,
-                                    std::string& error);
+  //! Layout-aware variant: each node also carries "x"/"y" (0,0 when the id
+  //! is absent from `layout`) so a paste restores canvas positions. The
+  //! plain overload's bytes are unchanged; the parser accepts both shapes.
+  [[nodiscard]] std::string copy_subgraph(
+      const std::vector<std::uint64_t>& node_ids,
+      const std::map<std::uint64_t, std::pair<double, double>>& layout) const;
+  [[nodiscard]] bool paste_subgraph(
+      std::string_view fragment, std::vector<std::uint64_t>& out_new_ids,
+      std::string& error,
+      std::vector<std::pair<double, double>>* out_positions = nullptr);
   //! Strict parse; on failure returns false with `error` set, `out` untouched.
   //! Types must be registered in the callee's graph.
   [[nodiscard]] static bool from_json(std::string_view text, NodeGraph& out,
                                       std::string& error);
+
+  //! Shared writer for both copy_subgraph overloads.
+  [[nodiscard]] std::string copy_subgraph_impl(
+      const std::vector<std::uint64_t>& node_ids,
+      const std::map<std::uint64_t, std::pair<double, double>>& layout,
+      bool with_layout) const;
 
   //! Clears per-node evaluation state (previous evaluation times). Replay
   //! and scrub-seeks re-simulate from a snapshot, which starts with empty

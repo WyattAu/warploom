@@ -20,9 +20,23 @@
 #include <vector>
 
 #include "warploom/core/contract.hpp"
+#include "warploom/core/numeric_cast.hpp"
 
 namespace warploom::editor {
 namespace ui = ::warploom::ui;  // S1
+
+std::string selected_node_nids(const std::vector<NodeView>& views) {
+  std::string nids;
+  for (const auto& v : views) {
+    if (v.selected) {
+      if (!nids.empty()) {
+        nids += ",";
+      }
+      nids += std::to_string(v.node_id);
+    }
+  }
+  return nids;
+}
 
 std::string value_to_text(const NodeValue& value) {
   switch (value.type) {
@@ -151,6 +165,56 @@ void NodeEditorView::rebuild(ui::WidgetTree& tree,
       row_y += 14.0F;
     }
 
+    // G4: one value row per output pin ("name = value"), stacked after
+    // the param rows. A card with N outputs shows N rows; the old paint
+    // readout drew every pin at the same card-bottom line, so any node
+    // past the first output (script nodes, the pulse builtin's on+value)
+    // overdrew into one illegible line. Handles are cached on the view
+    // for sync_values(); text is refreshed after each evaluation.
+    // G4 script nodes declare one out pin but evaluate N dynamic outputs
+    // (params outputs=1..9); emit one row per dynamic output so all of them
+    // are readable. Only the declared pins get sockets (append_pins), so
+    // dynamic outputs are readouts, not link sources -- stated limit.
+    if (show_values_) {
+      if (const auto* type = graph_->find_type(node.type); type != nullptr) {
+        std::vector<std::string> row_pins;
+        for (const auto& out : type->outputs) row_pins.push_back(out.name);
+        if (node.type == "script") {
+          std::uint64_t n_out = 0;
+          const auto oit = node.params.find("outputs");
+          if (oit != node.params.end() &&
+              oit->second.type == NodeValue::Type::Number &&
+              ::warploom::core::checked_double_to_uint64(oit->second.number,
+                                                        n_out) &&
+              n_out >= 1U && n_out <= 9U && n_out != row_pins.size()) {
+            row_pins.clear();
+            for (std::uint64_t i = 0; i < n_out; ++i) {
+              row_pins.push_back("out" + std::to_string(i));
+            }
+          }
+        }
+        for (const auto& pin : row_pins) {
+          ui::Widget row;
+          row.kind = ui::WidgetKind::Panel;
+          row.name = "value_row_" + std::to_string(node.id) + "_" + pin;
+          const auto it = node.outputs.find(pin);
+          row.text = pin + " = " +
+                     (it != node.outputs.end() ? value_to_text(it->second)
+                                              : "?");
+          row.color = 0xFF141A20U;
+          row.border_color = 0x00000000U;
+          row.fixed_w = kCardW;
+          row.fixed_h = 14.0F;
+          row.text_color = kValueColor;
+          const auto row_handle = tree.add(row, card_root_);
+          tree.get(row_handle).x = view.x;
+          tree.get(row_handle).y = row_y;
+          row_y += 14.0F;
+          view.value_rows.emplace_back(pin, row_handle);
+        }
+      }
+    }
+
     views_.push_back(view);
   }
 }
@@ -200,28 +264,27 @@ void NodeEditorView::append_pins(ui::PaintList& list) const {
   }
 }
 
-void NodeEditorView::append_value_texts(
-    ui::PaintList& list) const {
-  for (const auto& node : graph_->nodes()) {
-    const NodeView* v = find_view(node.id);
-    const auto* type = graph_->find_type(node.type);
-    if (v == nullptr || type == nullptr) {
-      continue;
-    }
-    for (const auto& pin : type->outputs) {
-      const auto it = node.outputs.find(pin.name);
-      if (it == node.outputs.end()) {
+void NodeEditorView::sync_values() {
+  if (card_root_ == ui::kInvalidWidget || tree_ref_ == nullptr) {
+    return;
+  }
+  // Cached handles: no name search, no re-derivation. A row whose node or
+  // pin is gone (type changed without a rebuild — caller error) keeps its
+  // last text rather than crashing; rebuild() re-derives everything.
+  for (const auto& view : views_) {
+    const GraphNode* node = graph_->find(view.node_id);
+    for (const auto& [pin, handle] : view.value_rows) {
+      if (handle == ui::kInvalidWidget || handle >= tree_ref_->size()) {
         continue;
       }
-      // Readout: bottom-left of the card, one line per output pin. The
-      // fixed 56 px card fits one readout row under the type label.
-      std::string text = pin.name + "=" + value_to_text(it->second);
-      if (text.size() > 16U) {
-        text.resize(16U);  // fits 140 px minus padding at 8 px/char
+      std::string text = pin + " = ?";
+      if (node != nullptr) {
+        const auto it = node->outputs.find(pin);
+        if (it != node->outputs.end()) {
+          text = pin + " = " + value_to_text(it->second);
+        }
       }
-      list.texts.push_back(
-          ui::PaintText{v->x + 6.0F, v->y + kCardH - 18.0F, text,
-                        kValueColor});
+      tree_ref_->get(handle).text = std::move(text);
     }
   }
 }
@@ -383,9 +446,6 @@ void NodeEditorView::append_wires(ui::PaintList& list) const {
     emit_straight_wires(list);
   }
   emit_pending_wire(list);
-  if (show_values_) {
-    append_value_texts(list);
-  }
   append_pins(list);
 }
 

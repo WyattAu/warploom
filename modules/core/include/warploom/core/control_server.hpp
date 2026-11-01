@@ -170,6 +170,33 @@ struct ControlCommand final {
     //                                        "available": true|false}
     SetBloom,
     GetBloom,
+    // v1.12: RT sub-toggles (E2/R2) — host-owned ray-query flags, live. No
+    // pipeline rebuild: the RT shaders read push pad1 (bit 0 reflections,
+    // bit 1 AO), so a toggle only changes the next recorded frame.
+    //   SetRtReflections/SetRtAo: numbers[0] = 0/1 ("enabled", required)
+    //   GetRtReflections/GetRtAo: no payload; detail = JSON {"enabled": ...}
+    SetRtReflections,
+    GetRtReflections,
+    SetRtAo,
+    GetRtAo,
+    // v1.13: stepped PT (E2/R1) — deterministic "accumulate K frames".
+    // The tracer holds at the target (further rounds no-op), so a stepped
+    // run always converges to exactly K samples no matter the wall clock.
+    //   SetPtSampleTarget: numbers[0] = K ("samples", required, 0 = unbounded)
+    //   GetPtSamples: no payload; detail = JSON {"samples": N}
+    //   GetPtMean: no payload; detail = JSON {"mean": overall mean luminance}
+    SetPtSampleTarget,
+    GetPtSamples,
+    GetPtMean,
+    // v1.14: subgraph copy/paste (G2) — engine half of the editor UI.
+    //   CopySubgraph: text = comma-separated node ids ("nids", required,
+    //                 e.g. "3,7,9"); detail = the fragment JSON (a strict
+    //                 scanner parses it — hand-edits are rejected).
+    //   PasteSubgraph: text = fragment JSON ("fragment", required, sent
+    //                  JSON-escaped); undoable (removes the pasted nodes +
+    //                  restores the id cursor); detail = JSON {"ids":[...]}.
+    CopySubgraph,
+    PasteSubgraph,
   };
 
   //! One entry of the public command-name table: every `Kind` maps to
@@ -204,6 +231,9 @@ struct ControlCommand final {
   //                   bare value (string form; "true"/"false" = bool,
   //                   numeric value uses x)
   //   SetNodePosition: numbers[0] = node id, numbers[1..2] = x,y
+  // v1.14 subgraph payloads:
+  //   CopySubgraph:  text = comma-separated node ids ("nids")
+  //   PasteSubgraph: text = fragment JSON ("fragment", escape-decoded)
   std::string text;
   std::string text2;
   std::string text3;

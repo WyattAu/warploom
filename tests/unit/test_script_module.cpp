@@ -197,3 +197,44 @@ TEST(ScriptModule, RustModuleDeterministic) {
   EXPECT_EQ(std::memcmp(a, b, sizeof(a)), 0);
 }
 #endif  // WARPLOOM_TEST_RUST_MODULE
+
+// ---------------------------------------------------------------------------
+// Module-spec parsing: the WARPLOOM_SCRIPT_MODULES "path[:in[:out]]" form
+// the viewport consumes. Defaults are 1 in / 1 out; counts are 1..9.
+
+TEST(ScriptModule, ParseModuleSpec) {
+  std::string path;
+  std::uint32_t n_in = 0U;
+  std::uint32_t n_out = 0U;
+
+  EXPECT_TRUE(ScriptModule::parse_module_spec("mod.so", path, n_in, n_out));
+  EXPECT_EQ(path, "mod.so");
+  EXPECT_EQ(n_in, 1U);
+  EXPECT_EQ(n_out, 1U);
+
+  EXPECT_TRUE(
+      ScriptModule::parse_module_spec("mod.so:3", path, n_in, n_out));
+  EXPECT_EQ(n_in, 3U);
+  EXPECT_EQ(n_out, 1U);
+
+  EXPECT_TRUE(
+      ScriptModule::parse_module_spec("mod.so:2:4", path, n_in, n_out));
+  EXPECT_EQ(n_in, 2U);
+  EXPECT_EQ(n_out, 4U);
+
+  EXPECT_FALSE(ScriptModule::parse_module_spec("", path, n_in, n_out));
+  EXPECT_FALSE(
+      ScriptModule::parse_module_spec("mod.so:0", path, n_in, n_out));
+  EXPECT_FALSE(
+      ScriptModule::parse_module_spec("mod.so:10", path, n_in, n_out));
+  EXPECT_FALSE(
+      ScriptModule::parse_module_spec("mod.so:2:0", path, n_in, n_out));
+  EXPECT_FALSE(
+      ScriptModule::parse_module_spec("mod.so:x", path, n_in, n_out));
+  EXPECT_FALSE(
+      ScriptModule::parse_module_spec("mod.so:2:", path, n_in, n_out));
+  EXPECT_FALSE(
+      ScriptModule::parse_module_spec(":2", path, n_in, n_out));
+  EXPECT_FALSE(
+      ScriptModule::parse_module_spec("mod.so:2:3:4", path, n_in, n_out));
+}

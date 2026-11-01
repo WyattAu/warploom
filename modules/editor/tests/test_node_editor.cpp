@@ -390,48 +390,187 @@ TEST(NodeEditorPins, PinHitTestFindsInputAndOutputSides) {
   EXPECT_FALSE(view.pin_at(5000.0F, 5000.0F).valid());
 }
 
+//! Row text lookup for the G4 value rows ("value_row_<id>_<pin>").
+std::string value_row_text(WidgetTree& tree, std::uint64_t id,
+                           const std::string& pin) {
+  const auto handle =
+      tree.find_by_name("value_row_" + std::to_string(id) + "_" + pin);
+  if (handle == warploom::ui::kInvalidWidget) return "<missing>";
+  return tree.get(handle).text;
+}
+
 TEST(NodeEditorValues, ReadoutsAppearAfterEvaluate) {
   auto g = make_graph();
   WidgetTree tree;
   auto view = make_view(g, tree);
   view.set_show_values(true);
-  PaintList before = full_paint(view, tree, 800.0F, 600.0F);
-  // Before evaluation the readouts show the seeded zero values.
-  bool zeros_before = false;
-  for (const auto& t : before.texts) {
-    if (t.text == "value=0" || t.text == "sum=0") zeros_before = true;
-  }
-  EXPECT_TRUE(zeros_before) << "seeded outputs must read as zero";
+  // Before evaluation the rows show the seeded zero values.
+  EXPECT_EQ(value_row_text(tree, 1, "value"), "value = 0");
+  EXPECT_EQ(value_row_text(tree, 2, "sum"), "sum = 0");
 
   std::string error;
   ASSERT_TRUE(g.evaluate(error)) << error;
+  view.sync_values();
   PaintList after = full_paint(view, tree, 800.0F, 600.0F);
+  (void)after;
 
-  // After evaluation: const emits 2; add shows 2+0=2 (same count, new
-  // values — readouts track evaluation, not just existence).
-  ASSERT_EQ(after.texts.size(), before.texts.size());
-  bool found_value = false;
-  bool found_sum = false;
-  for (const auto& t : after.texts) {
-    if (t.text == "value=2") found_value = true;
-    if (t.text == "sum=2") found_sum = true;
-  }
-  EXPECT_TRUE(found_value) << "const node must show its output";
-  EXPECT_TRUE(found_sum) << "add node must show the evaluated sum";
+  // After evaluation: const emits 2; add shows 2+0=2 — rows track
+  // evaluation, not just existence.
+  EXPECT_EQ(value_row_text(tree, 1, "value"), "value = 2");
+  EXPECT_EQ(value_row_text(tree, 2, "sum"), "sum = 2");
 }
 
 TEST(NodeEditorValues, ReadoutsHiddenWhenDisabled) {
   auto g = make_graph();
   WidgetTree tree;
-  auto view = make_view(g, tree);
+  NodeEditorView view(g);
   view.set_show_values(false);
+  const auto canvas = tree.add(warploom::ui::Widget{}, tree.root());
+  view.rebuild(tree, canvas);
+  view.sync_widgets();
   std::string error;
   ASSERT_TRUE(g.evaluate(error)) << error;
+  view.sync_values();
   PaintList list = full_paint(view, tree, 800.0F, 600.0F);
   for (const auto& t : list.texts) {
     EXPECT_EQ(t.text.find('='), std::string::npos)
         << "no readout texts expected, found: " << t.text;
   }
+  EXPECT_EQ(value_row_text(tree, 1, "value"), "<missing>");
+  EXPECT_EQ(value_row_text(tree, 2, "sum"), "<missing>");
+}
+
+TEST(NodeEditorValues, MultiOutputNodeGetsOneRowPerPin) {
+  // The G4 case: the pulse builtin has two outputs (on + value). The old
+  // paint readout drew every pin at the same card-bottom line, so the
+  // second output overwrote the first. Rows must be one per pin at
+  // distinct heights.
+  warploom::editor::NodeGraph g;
+  warploom::editor::register_builtin_node_types(g);
+  const auto pid = g.add_node("pulse", {});
+  ASSERT_NE(pid, 0U);
+  WidgetTree tree;
+  NodeEditorView view(g);
+  const auto canvas = tree.add(warploom::ui::Widget{}, tree.root());
+  view.rebuild(tree, canvas);
+  view.sync_widgets();
+  std::string error;
+  ASSERT_TRUE(g.evaluate(error)) << error;
+  view.sync_values();
+  const auto on_row =
+      tree.find_by_name("value_row_" + std::to_string(pid) + "_on");
+  const auto value_row =
+      tree.find_by_name("value_row_" + std::to_string(pid) + "_value");
+  ASSERT_NE(on_row, warploom::ui::kInvalidWidget);
+  ASSERT_NE(value_row, warploom::ui::kInvalidWidget);
+  EXPECT_NE(on_row, value_row);
+  EXPECT_NE(tree.get(on_row).y, tree.get(value_row).y)
+      << "rows must stack, not overdraw";
+  EXPECT_FALSE(tree.get(on_row).text.empty());
+  EXPECT_FALSE(tree.get(value_row).text.empty());
+  EXPECT_NE(tree.get(on_row).text, tree.get(value_row).text)
+      << "distinct pins must read distinctly (on="
+      << tree.get(on_row).text << " value=" << tree.get(value_row).text
+      << ")";
+}
+
+TEST(NodeEditorValues, ScriptNodeGetsOneRowPerDynamicOutput) {
+  // G4: the "script" dispatch type declares one out pin but evaluates N
+  // dynamic outputs (params outputs=1..9). The editor must show one row
+  // per dynamic output; only the declared pins get sockets (readouts for
+  // the rest -- the rows are the UI half, sockets stay declared).
+  warploom::editor::NodeGraph g;
+  warploom::editor::register_builtin_node_types(g);
+  warploom::editor::register_script_node_type(g);
+  const auto sid = g.add_node(
+      "script", {{"outputs", warploom::editor::NodeValue::make_number(3.0)}});
+  ASSERT_NE(sid, 0U);
+  const auto one = g.add_node("script", {});
+  ASSERT_NE(one, 0U);
+  WidgetTree tree;
+  NodeEditorView view(g);
+  const auto canvas = tree.add(warploom::ui::Widget{}, tree.root());
+  view.rebuild(tree, canvas);
+  // Three dynamic rows for the outputs=3 node, one for the default node.
+  const auto r0 = tree.find_by_name("value_row_" + std::to_string(sid) + "_out0");
+  const auto r1 = tree.find_by_name("value_row_" + std::to_string(sid) + "_out1");
+  const auto r2 = tree.find_by_name("value_row_" + std::to_string(sid) + "_out2");
+  ASSERT_NE(r0, warploom::ui::kInvalidWidget);
+  ASSERT_NE(r1, warploom::ui::kInvalidWidget);
+  ASSERT_NE(r2, warploom::ui::kInvalidWidget);
+  EXPECT_NE(tree.get(r0).y, tree.get(r1).y);
+  EXPECT_NE(tree.get(r1).y, tree.get(r2).y);
+  const auto d0 = tree.find_by_name("value_row_" + std::to_string(one) + "_out0");
+  ASSERT_NE(d0, warploom::ui::kInvalidWidget);
+  EXPECT_EQ(tree.find_by_name("value_row_" + std::to_string(one) + "_out1"),
+            warploom::ui::kInvalidWidget);
+  // Unknown module degrades to zeros; every dynamic row reads it.
+  std::string error;
+  ASSERT_TRUE(g.evaluate(error)) << error;
+  view.sync_values();
+  EXPECT_EQ(tree.get(r0).text, "out0 = 0");
+  EXPECT_EQ(tree.get(r1).text, "out1 = 0");
+  EXPECT_EQ(tree.get(r2).text, "out2 = 0");
+}
+
+TEST(NodeEditorValues, SyncRefreshesAfterReEvaluate) {
+  auto g = make_graph();
+  WidgetTree tree;
+  auto view = make_view(g, tree);
+  std::string error;
+  ASSERT_TRUE(g.evaluate(error)) << error;
+  view.sync_values();
+  ASSERT_EQ(value_row_text(tree, 2, "sum"), "sum = 2");
+  // Change the const input and re-evaluate WITHOUT syncing: rows go
+  // stale. A test that passes without sync_values() proves nothing about
+  // the refresh path, so the staleness is asserted first (sabotage).
+  auto* node = g.find_mut(1);
+  ASSERT_NE(node, nullptr);
+  // const_number emits its "value" PARAM (not an input pin).
+  node->params["value"] = warploom::editor::NodeValue::make_number(5.0);
+  ASSERT_TRUE(g.evaluate(error)) << error;
+  EXPECT_EQ(value_row_text(tree, 2, "sum"), "sum = 2")
+      << "rows must NOT refresh without sync_values()";
+  view.sync_values();
+  EXPECT_EQ(value_row_text(tree, 2, "sum"), "sum = 5")
+      << "sync_values() must refresh rows after re-evaluate";
+}
+
+TEST(NodeEditorValues, ValueRowsDoNotDisturbParamHitTest) {
+  // Value rows sit AFTER param rows, so param hit-testing is unchanged.
+  auto g = make_graph();
+  WidgetTree tree;
+  auto view = make_view(g, tree);
+  const auto* v1 = view.find_view(1);
+  ASSERT_NE(v1, nullptr);
+  // Node 1 (const) has one output -> one value row below its param row.
+  // Its param "value" must still hit-test at the param-row band.
+  const auto hit =
+      view.param_row_at(v1->x + 10.0F, v1->y + NodeEditorView::kCardH + 7.0F);
+  ASSERT_TRUE(hit.valid());
+  EXPECT_EQ(hit.node_id, 1U);
+  EXPECT_EQ(hit.param, "value");
+}
+
+// ============================================================================
+// G2: selection -> copy_subgraph nids (the viewport's Ctrl+C payload).
+// The XCB keycode mapping stays platform-gated; everything else on the
+// path is this pure function, so the payload is headless-provable.
+// ============================================================================
+
+TEST(NodeEditorCopy, SelectedNodeNidsJoinsInViewOrder) {
+  auto g = make_graph();
+  WidgetTree tree;
+  auto view = make_view(g, tree);
+  // No selection -> empty payload (the viewport sends no copy).
+  EXPECT_EQ(warploom::editor::selected_node_nids(view.views()), "");
+  ASSERT_NE(view.find_view(1), nullptr);
+  ASSERT_NE(view.find_view(2), nullptr);
+  view.find_view(1)->selected = true;
+  view.find_view(2)->selected = true;
+  EXPECT_EQ(warploom::editor::selected_node_nids(view.views()), "1,2");
+  view.find_view(1)->selected = false;
+  EXPECT_EQ(warploom::editor::selected_node_nids(view.views()), "2");
 }
 
 // ============================================================================

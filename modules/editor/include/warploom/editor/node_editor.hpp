@@ -23,6 +23,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "warploom/core/control_server.hpp"
@@ -36,13 +37,23 @@ namespace ui = ::warploom::ui;  // S1: ui module moved to the warploom namespace
 [[nodiscard]] std::string value_to_text(const NodeValue& value);
 
 //! Per-node view state: canvas position (view-space pixels, top-left of
-//! the node card) and selection.
+//! the node card), selection, and cached value-row widget handles.
 struct NodeView final {
   std::uint64_t node_id{0};
   float x{0.0F};
   float y{0.0F};
   bool selected{false};
+  //! (output pin name, row widget handle) for G4 value rows, in type
+  //! output order. Filled by rebuild(); read by sync_values().
+  std::vector<std::pair<std::string, std::uint32_t>> value_rows{};
 };
+
+//! G2: comma-joined node ids of the selected views, in view order (""
+//! when none). Pure function so the viewport's Ctrl+C path (selection ->
+//! copy_subgraph nids) is headless-provable; only the XCB keycode mapping
+//! stays platform-gated like all viewport input.
+[[nodiscard]] std::string selected_node_nids(
+    const std::vector<NodeView>& views);
 
 //! Wire routing style. Bezier approximates a horizontal cubic bezier
 //! (control points at the horizontal midpoint) with small rect segments —
@@ -84,10 +95,19 @@ class NodeEditorView final {
   //! everything (appended). Routing follows `wire_style`.
   void append_wires(ui::PaintList& list) const;
 
-  //! After `graph.evaluate()`: appends one text readout per node output
-  //! pin ("name=value") at the card bottom when value readouts are on.
+  //! After `graph.evaluate()`: one value row per node output pin
+  //! ("name = value") stacked under the card's param rows, when value
+  //! readouts are on. A card with N outputs shows N rows — the old
+  //! single paint readout overdrew every output past the first.
+  //! Rows are built by rebuild() and refreshed by sync_values(), which the
+  //! host calls after each evaluation (values change without any graph
+  //! mutation, so rebuild alone would go stale).
   void set_show_values(bool on) noexcept { show_values_ = on; }
   [[nodiscard]] bool show_values() const noexcept { return show_values_; }
+  //! Refreshes every value row's text from the graph's current outputs.
+  //! Cheap (cached widget handles); call after each `graph.evaluate()`
+  //! and after any rebuild, before paint. No-op when rows were not built.
+  void sync_values();
 
   // -- Binding wires (M11) -------------------------------------------------
   //! Destination anchor for a binding wire (the inspector chip's left edge).
@@ -208,8 +228,6 @@ class NodeEditorView final {
   }
   //! Emits pin squares for all nodes at their CURRENT view positions.
   void append_pins(ui::PaintList& list) const;
-  //! Emits per-output value readout texts (post-evaluate).
-  void append_value_texts(ui::PaintList& list) const;
   //! Emits one straight band for every link.
   void emit_straight_wires(ui::PaintList& list) const;
   //! Emits bezier-approximated wires (8 segments per link).

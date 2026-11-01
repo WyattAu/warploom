@@ -76,8 +76,20 @@ const std::vector<ControlCommand::KindName>& ControlCommand::kind_names() {
       // v1.10 bloom toggle (E2/R4).
       {Kind::SetBloom, "set_bloom"},
       {Kind::GetBloom, "get_bloom"},
+      // v1.12 RT sub-toggles (E2/R2).
+      {Kind::SetRtReflections, "set_rt_reflections"},
+      {Kind::GetRtReflections, "get_rt_reflections"},
+      {Kind::SetRtAo, "set_rt_ao"},
+      // v1.13 stepped PT (E2/R1).
+      {Kind::SetPtSampleTarget, "set_pt_sample_target"},
+      {Kind::GetPtSamples, "get_pt_samples"},
+      {Kind::GetPtMean, "get_pt_mean"},
+      {Kind::GetRtAo, "get_rt_ao"},
       // v1.11 viewport resize: drives the swapchain recreate path on demand.
       {Kind::SetViewportSize, "set_viewport_size"},
+      // v1.14 subgraph copy/paste (G2).
+      {Kind::CopySubgraph, "copy_subgraph"},
+      {Kind::PasteSubgraph, "paste_subgraph"},
   };
   return kTable;
 }
@@ -94,6 +106,50 @@ const char* ControlCommand::kind_name(Kind kind) noexcept {
 namespace {
 
 //! Flat-JSON scans (same approach as input_state.cpp's script parser).
+
+//! Escape-aware string field: decodes \" \\ \n \t \r (exactly what the
+//! server's own json_escape emits, plus tab/CR tolerance) and rejects any
+//! other escape. Needed for payloads that legitimately contain quotes —
+//! paste_subgraph's fragment is machine JSON. The plain scanner above is
+//! untouched: changing it would alter every existing command's parse.
+[[nodiscard]] bool find_escaped_string_field(const std::string& line,
+                                             const char* key,
+                                             std::string& out) {
+  const std::string needle = "\"" + std::string(key) + "\"";
+  const std::size_t key_pos = line.find(needle);
+  if (key_pos == std::string::npos) return false;
+  const std::size_t colon = line.find(':', key_pos + needle.size());
+  if (colon == std::string::npos) return false;
+  std::size_t pos = line.find('\"', colon + 1);
+  if (pos == std::string::npos) return false;
+  ++pos;  // past the opening quote
+  out.clear();
+  while (pos < line.size()) {
+    const char c = line[pos];
+    if (c == '"') return true;  // closing quote
+    if (c == '\\') {
+      ++pos;
+      if (pos >= line.size()) return false;
+      const char e = line[pos];
+      if (e == '"' || e == '\\') {
+        out.push_back(e);
+      } else if (e == 'n') {
+        out.push_back('\n');
+      } else if (e == 't') {
+        out.push_back('\t');
+      } else if (e == 'r') {
+        out.push_back('\r');
+      } else {
+        return false;  // unsupported escape (incl. \u): reject loudly
+      }
+      ++pos;
+      continue;
+    }
+    out.push_back(c);
+    ++pos;
+  }
+  return false;  // unterminated
+}
 
 [[nodiscard]] bool find_string_field(const std::string& line, const char* key,
                                      std::string& out) {
@@ -393,6 +449,28 @@ namespace {
     }
     case ControlCommand::Kind::SetBloom:
       take("enabled");
+      break;
+    case ControlCommand::Kind::SetRtReflections:
+      take("enabled");
+      break;
+    case ControlCommand::Kind::SetRtAo:
+      take("enabled");
+      break;
+    case ControlCommand::Kind::SetPtSampleTarget:
+      take("samples");
+      break;
+    case ControlCommand::Kind::CopySubgraph:
+      // Comma-separated ids ride in one string field (the flat wire format
+      // has no arrays); the session parses them strictly.
+      take_text("nids", command.text);
+      break;
+    case ControlCommand::Kind::PasteSubgraph:
+      // Machine JSON with quotes: decoded escape-aware (the plain scanner
+      // stops at the first interior quote).
+      if (!find_escaped_string_field(line, "fragment", command.text)) {
+        error = "missing \"fragment\" escaped-string field";
+        return false;
+      }
       break;
     default:
       break;

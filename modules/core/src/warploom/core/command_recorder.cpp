@@ -31,6 +31,13 @@ using CK = ::warploom::core::ControlCommand::Kind;
     case CK::SetExposure:
     case CK::SetBloom:
     case CK::GetBloom:
+    case CK::SetRtReflections:
+    case CK::GetRtReflections:
+    case CK::SetRtAo:
+    case CK::GetRtAo:
+    case CK::SetPtSampleTarget:
+    case CK::GetPtSamples:
+    case CK::GetPtMean:
       return false;
     case CK::SpawnCube:
     case CK::SetProperty:

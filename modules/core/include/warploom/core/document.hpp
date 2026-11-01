@@ -436,6 +436,29 @@ class SetNodeParamCommand final : public Command {
   PropValue old_value_{};
 };
 
+//! Pastes a copy_subgraph fragment with fresh ids; undo removes the pasted
+//! nodes (and their layout rows) and restores the id cursor, so paste+undo
+//! round-trips byte-identically. Positions come from the fragment's
+//! layout-aware "x"/"y" plus the caller offset (paste cascade).
+class PasteSubgraphCommand final : public Command {
+ public:
+  PasteSubgraphCommand(std::string fragment, double dx, double dy);
+
+  [[nodiscard]] bool apply(SceneDocument& doc, std::string& error) override;
+  void undo(SceneDocument& doc) override;
+  [[nodiscard]] std::string describe() const override;
+  [[nodiscard]] const std::vector<std::uint64_t>& new_ids() const noexcept {
+    return new_ids_;
+  }
+
+ private:
+  std::string fragment_;
+  double dx_;
+  double dy_;
+  std::vector<std::uint64_t> new_ids_{};  // claimed at apply
+  bool applied_{false};
+};
+
 //! Moves a node's view position; undo restores the previous position (or
 //! removes the layout entry when it had none).
 class SetNodePositionCommand final : public Command {

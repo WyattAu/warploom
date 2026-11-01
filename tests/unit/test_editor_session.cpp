@@ -391,6 +391,81 @@ TEST(EditorSessionNodes, ProtocolRoundTripAllCommands) {
   EXPECT_EQ(reloaded.node_graph.link_count(), 1U);
 }
 
+TEST(EditorSessionNodes, CopyPasteUndoRedoRoundTrip) {
+  SessionFixture f;
+
+  // Build: const(40,20) + add(60,80), link value->a.
+  const double pos0[2] = {40.0, 20.0};
+  auto r = f.send(ControlCommand::Kind::NodeAdd, pos0, 2, "const_number");
+  ASSERT_TRUE(r.ok) << r.error;
+  const double pos1[2] = {60.0, 80.0};
+  r = f.send(ControlCommand::Kind::NodeAdd, pos1, 2, "add");
+  ASSERT_TRUE(r.ok) << r.error;
+  const double ends[2] = {1.0, 2.0};
+  r = f.send(ControlCommand::Kind::LinkNodes, ends, 2, "value", "a");
+  ASSERT_TRUE(r.ok) << r.error;
+
+  // Copy via the protocol: fragment carries the layout-aware positions.
+  r = f.send(ControlCommand::Kind::CopySubgraph, nullptr, 0, "1,2");
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_NE(r.detail.find("\"x\":40"), std::string::npos) << r.detail;
+  EXPECT_NE(r.detail.find("\"y\":80"), std::string::npos) << r.detail;
+  const std::string frag = r.detail;
+  const std::size_t undo_before = f.session.stack().undo_count();
+
+  // Paste: two fresh nodes, the internal link remapped, cascade +32.
+  r = f.send(ControlCommand::Kind::PasteSubgraph, nullptr, 0, frag);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_NE(r.detail.find("\"ids\":[3,4]"), std::string::npos)
+      << r.detail;
+  EXPECT_EQ(f.session.document().node_graph.node_count(), 4U);
+  EXPECT_EQ(f.session.document().node_graph.link_count(), 2U);
+  const auto& layout = f.session.document().node_layout;
+  EXPECT_DOUBLE_EQ(layout.at(3U).first, 72.0);   // 40 + cascade 32
+  EXPECT_DOUBLE_EQ(layout.at(3U).second, 52.0);  // 20 + cascade 32
+  EXPECT_DOUBLE_EQ(layout.at(4U).first, 92.0);
+  EXPECT_DOUBLE_EQ(layout.at(4U).second, 112.0);
+
+  // Undo removes exactly the pasted nodes and restores the id cursor;
+  // redo reclaims the SAME ids (byte-identical round trip).
+  r = f.send(ControlCommand::Kind::Undo);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(f.session.document().node_graph.node_count(), 2U);
+  EXPECT_EQ(f.session.document().node_graph.link_count(), 1U);
+  EXPECT_EQ(f.session.document().node_layout.count(3U), 0U);
+  EXPECT_EQ(f.session.stack().undo_count(), undo_before);
+  r = f.send(ControlCommand::Kind::Redo);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(f.session.document().node_graph.node_count(), 4U);
+  EXPECT_NE(f.session.document().node_graph.find(3U), nullptr);
+  EXPECT_NE(f.session.document().node_graph.find(4U), nullptr);
+  EXPECT_DOUBLE_EQ(layout.at(3U).first, 72.0);
+
+  // A second paste after the redo lands on a FURTHER cascade (+64): the
+  // counter is a new-edit sequence, not rewound by undo.
+  r = f.send(ControlCommand::Kind::PasteSubgraph, nullptr, 0, frag);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_NE(r.detail.find("\"ids\":[5,6]"), std::string::npos)
+      << r.detail;
+  EXPECT_DOUBLE_EQ(layout.at(5U).first, 104.0);  // 40 + cascade 64
+
+  // Validation: empty nids, bad ids, unknown ids, bad fragments.
+  r = f.send(ControlCommand::Kind::CopySubgraph);
+  EXPECT_FALSE(r.ok);
+  r = f.send(ControlCommand::Kind::CopySubgraph, nullptr, 0, "1,x");
+  EXPECT_FALSE(r.ok) << r.detail;
+  r = f.send(ControlCommand::Kind::CopySubgraph, nullptr, 0, "1,,2");
+  EXPECT_FALSE(r.ok) << r.detail;
+  r = f.send(ControlCommand::Kind::CopySubgraph, nullptr, 0, "99");
+  EXPECT_FALSE(r.ok) << r.error;
+  const std::size_t nodes_before = f.session.document().node_graph.node_count();
+  r = f.send(ControlCommand::Kind::PasteSubgraph, nullptr, 0, "{oops}");
+  EXPECT_FALSE(r.ok) << r.detail;
+  EXPECT_EQ(f.session.document().node_graph.node_count(), nodes_before);
+  r = f.send(ControlCommand::Kind::PasteSubgraph);
+  EXPECT_FALSE(r.ok);
+}
+
 TEST(EditorSessionNodes, SocketDrivenNodeCommands) {
   SessionFixture f;
   omnicpp::core::ControlServer server;
@@ -433,6 +508,78 @@ TEST(EditorSessionNodes, SocketDrivenNodeCommands) {
   EXPECT_NE(replies.find("\"id\":4,\"ok\":true"), std::string::npos);
   EXPECT_EQ(f.session.document().node_graph.node_count(), 2U);
   EXPECT_EQ(f.session.document().node_graph.link_count(), 1U);
+
+  close(client);
+  server.stop();
+}
+
+TEST(EditorSessionNodes, SocketDrivenCopyPasteEscapes) {
+  // Wire-level copy/paste through a real socket: the fragment travels
+  // JSON-escaped and must decode to the exact machine bytes the copy
+  // produced (layout positions included), then paste + undo over the wire.
+  SessionFixture f;
+  omnicpp::core::ControlServer server;
+  const std::string path = "/tmp/omnicpp_test_editor_copypaste.sock";
+  std::string error;
+  ASSERT_TRUE(server.start(path, error)) << error;
+
+  const int client = ::socket(AF_UNIX, SOCK_STREAM, 0);
+  ASSERT_GE(client, 0);
+  sockaddr_un addr{};
+  addr.sun_family = AF_UNIX;
+  std::snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path.c_str());
+  ASSERT_EQ(connect(client, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)),
+            0);
+  server.poll(f.session);
+  char buf[65536];
+  ssize_t n = recv(client, buf, sizeof(buf) - 1, 0);
+  ASSERT_GT(n, 0);
+
+  const std::string setup =
+      std::string("{\"cmd\":\"add_node\",\"id\":1,\"type\":\"const_number\",") +
+      "\"x\":10,\"y\":20}\n"
+      "{\"cmd\":\"copy_subgraph\",\"id\":2,\"nids\":\"1\"}\n";
+  ASSERT_EQ(send(client, setup.data(), setup.size(), 0),
+            static_cast<ssize_t>(setup.size()));
+  server.poll(f.session);
+  n = recv(client, buf, sizeof(buf) - 1, MSG_DONTWAIT);
+  ASSERT_GT(n, 0);
+  buf[n] = '\0';
+  const std::string copy_replies(buf);
+  EXPECT_NE(copy_replies.find("\"id\":2,\"ok\":true"), std::string::npos)
+      << copy_replies;
+  // The fragment inside the escaped detail carries the layout position.
+  EXPECT_NE(copy_replies.find("\\\"x\\\":10"), std::string::npos)
+      << copy_replies;
+
+  // Extract the escaped fragment from the copy reply's detail and paste it
+  // back verbatim: the server must decode it to the copy's exact bytes.
+  // detail":"..." — take everything between the detail quote and the
+  // reply's closing quote (the detail is the last field).
+  const std::string marker = "\"id\":2,\"ok\":true,\"detail\":\"";
+  const auto dpos = copy_replies.find(marker);
+  ASSERT_NE(dpos, std::string::npos) << copy_replies;
+  const auto dstart = dpos + marker.size();
+  const auto dend = copy_replies.find("\"}", dstart);
+  ASSERT_NE(dend, std::string::npos) << copy_replies;
+  const std::string escaped_frag =
+      copy_replies.substr(dstart, dend - dstart);
+  const std::string paste_line =
+      "{\"cmd\":\"paste_subgraph\",\"id\":3,\"fragment\":\"" +
+      escaped_frag + "\"}\n"
+      "{\"cmd\":\"undo\",\"id\":4}\n";
+  ASSERT_EQ(send(client, paste_line.data(), paste_line.size(), 0),
+            static_cast<ssize_t>(paste_line.size()));
+  server.poll(f.session);
+  n = recv(client, buf, sizeof(buf) - 1, MSG_DONTWAIT);
+  ASSERT_GT(n, 0);
+  buf[n] = '\0';
+  const std::string paste_replies(buf);
+  EXPECT_NE(paste_replies.find("\"id\":3,\"ok\":true"), std::string::npos)
+      << paste_replies;
+  EXPECT_NE(paste_replies.find("\"id\":4,\"ok\":true"), std::string::npos)
+      << paste_replies;
+  EXPECT_EQ(f.session.document().node_graph.node_count(), 1U);
 
   close(client);
   server.stop();

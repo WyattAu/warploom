@@ -389,8 +389,13 @@ EditorSession::EditorSession() {
   doc_.objects.push_back(std::move(env));
   doc_.next_object_id = kEnvironmentObjectId + 1;
   // The session owns the node-type registry: the same registered set the
-  // node editor toolbar and document parser validate against.
+  // node editor toolbar and document parser validate against. The unbound
+  // "script" type rides along (G4 viewport wiring): a saved document may
+  // name it, and the toolbar lists it, whether or not a module with the
+  // requested name is loaded — an unknown module degrades to zero outputs
+  // deterministically, never to a load failure.
   register_builtin_node_types(doc_.node_graph);
+  register_script_node_type(doc_.node_graph);
 }
 
 ::warploom::core::ControlReply EditorSession::on_control(
@@ -646,9 +651,12 @@ bool EditorSession::handle_edit(
         reply.error = "add_node needs \"type\"";
         return true;
       }
-      const double x = command.number_count > 1U ? command.numbers[1]
+      // numbers[0..1] = x,y per the documented wire payload (the old code
+      // read [1]/[2], so a wire add_node landed at (y, 40) and the viewport
+      // toolbar dropped nodes at (mouse_y, 40) instead of the cursor.
+      const double x = command.number_count > 0U ? command.numbers[0]
                                                  : 40.0;
-      const double y = command.number_count > 2U ? command.numbers[2]
+      const double y = command.number_count > 1U ? command.numbers[1]
                                                  : 40.0;
       auto cmd = std::make_unique<AddNodeCommand>(command.text, x, y);
       std::string error;
@@ -765,6 +773,101 @@ bool EditorSession::handle_edit(
       reply.detail = "node moved";
       return true;
     }
+    case CK::CopySubgraph: {
+      // Strict comma-separated id list (flat wire format has no arrays):
+      // digits and commas only, no empties, no whitespace.
+      if (command.text.empty()) {
+        reply.ok = false;
+        reply.error = "copy_subgraph needs \"nids\" (e.g. \"1,2,3\")";
+        return true;
+      }
+      std::vector<std::uint64_t> ids;
+      std::string token;
+      std::string parse_error;
+      const auto flush_token = [&] {
+        if (token.empty() ||
+            token.find_first_not_of("0123456789") != std::string::npos) {
+          parse_error = "copy_subgraph: bad id \"" + token + "\"";
+          return false;
+        }
+        std::uint64_t v = 0;
+        for (const char c : token) {
+          const auto d = static_cast<std::uint64_t>(c - '0');
+          if (v > (0xFFFFFFFFFFFFFFFFULL - d) / 10U) {
+            parse_error = "copy_subgraph: id out of range";
+            return false;
+          }
+          v = v * 10U + d;
+        }
+        ids.push_back(v);
+        token.clear();
+        return true;
+      };
+      bool parse_ok = true;
+      for (const char c : command.text) {
+        if (c == ',') {
+          parse_ok = flush_token();
+          if (!parse_ok) break;
+        } else {
+          token.push_back(c);
+        }
+      }
+      if (parse_ok) parse_ok = flush_token();
+      if (!parse_ok) {
+        reply.ok = false;
+        reply.error = parse_error;
+        return true;
+      }
+      for (const auto id : ids) {
+        if (doc_.node_graph.find(id) == nullptr) {
+          reply.ok = false;
+          reply.error =
+              "copy_subgraph: no node " + std::to_string(id);
+          return true;
+        }
+      }
+      // Layout-aware copy: pastes restore canvas positions (cascade offset
+      // applied at paste time by PasteSubgraphCommand).
+      reply.ok = true;
+      reply.detail = doc_.node_graph.copy_subgraph(ids, doc_.node_layout);
+      return true;
+    }
+    case CK::PasteSubgraph: {
+      if (command.text.empty()) {
+        reply.ok = false;
+        reply.error = "paste_subgraph needs \"fragment\"";
+        return true;
+      }
+      // Cascade so repeated pastes do not stack exactly on the originals.
+      // Baked into the command at construction, so undo+redo is stable
+      // and replays reproduce the same offsets through the same counter.
+      const double off =
+          32.0 * static_cast<double>((paste_count_ % 8U) + 1U);
+      auto cmd =
+          std::make_unique<PasteSubgraphCommand>(command.text, off, off);
+      std::string error;
+      if (!stack_.execute(std::move(cmd), error)) {
+        reply.ok = false;
+        reply.error = "paste_subgraph failed: " + error;
+        return true;
+      }
+      ++paste_count_;
+      const auto* pasted = static_cast<const PasteSubgraphCommand*>(
+          stack_.undo_top());
+      std::string detail = "{\"ids\":[";
+      if (pasted != nullptr) {
+        bool first = true;
+        for (const auto id : pasted->new_ids()) {
+          if (!first) detail += ",";
+          first = false;
+          detail += std::to_string(id);
+        }
+      }
+      detail += "]}";
+      reply.ok = true;
+      reply.detail = detail;
+      return true;
+    }
     case CK::SaveDocument: {
       if (command.text.empty()) {
         reply.ok = false;
@@ -803,6 +906,7 @@ bool EditorSession::handle_edit(
       SceneDocument loaded;
       // Registry first: the parser validates node types against the target.
       register_builtin_node_types(loaded.node_graph);
+      register_script_node_type(loaded.node_graph);
       std::string error;
       if (!SceneDocument::load_from_file(command.text, loaded, error)) {
         reply.ok = false;
@@ -1274,6 +1378,19 @@ bool EditorSession::handle_query(
     case CK::GetBloom:
       reply.ok = true;
       reply.detail = "bloom acknowledged (host executes)";
+      break;
+    case CK::SetRtReflections:
+    case CK::GetRtReflections:
+    case CK::SetRtAo:
+    case CK::GetRtAo:
+      reply.ok = true;
+      reply.detail = "rt sub-toggle acknowledged (host executes)";
+      break;
+    case CK::SetPtSampleTarget:
+    case CK::GetPtSamples:
+    case CK::GetPtMean:
+      reply.ok = true;
+      reply.detail = "pt stepped accumulation acknowledged (host executes)";
       break;
     default:
       reply.ok = false;

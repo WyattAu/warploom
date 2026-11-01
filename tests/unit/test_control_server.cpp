@@ -80,6 +80,14 @@ class FakeHost final : public ControlHost {
       case ControlCommand::Kind::ScrubInfo:
         reply.detail = "scrub_info";
         break;
+      case ControlCommand::Kind::CopySubgraph:
+        last_text_ = command.text;
+        reply.detail = "copy " + command.text;
+        break;
+      case ControlCommand::Kind::PasteSubgraph:
+        last_text_ = command.text;
+        reply.detail = "paste-ok";
+        break;
       default:
         reply.ok = false;
         reply.error = "fake host: unhandled kind";
@@ -98,6 +106,7 @@ class FakeHost final : public ControlHost {
   std::uint64_t steps_{0};
   std::uint64_t cubes_{0};
   std::uint64_t captures_{0};
+  std::string last_text_;
   // Sentinel 7777 = "never scrubbed": distinguishes a real 0 from no command.
   std::uint64_t last_scrub_start_{7777};
   std::uint64_t last_scrub_to_{7777};
@@ -336,6 +345,9 @@ TEST_F(ControlServerTest, WireParityEveryKindParsesAndEnforcesPayloads) {
       case ControlCommand::Kind::ScrubTo:
         expect_missing = "missing \\\"frame\\\"";
         break;
+      case ControlCommand::Kind::PasteSubgraph:
+        expect_missing = "missing \\\"fragment\\\"";
+        break;
       case ControlCommand::Kind::BindNodeProperty:
         expect_missing = "bind_node_property needs";
         break;
@@ -347,6 +359,44 @@ TEST_F(ControlServerTest, WireParityEveryKindParsesAndEnforcesPayloads) {
           << entry.name << " accepted an empty payload -> " << reply;
     }
   }
+  ::close(fd);
+}
+
+TEST_F(ControlServerTest, SubgraphFragmentDecodesEscapesOverTheWire) {
+  FakeHost host;
+  ControlServer server;
+  std::string error;
+  ASSERT_TRUE(server.start(path_, error)) << error;
+  const int fd = connect_client();
+  (void)server.poll(host);
+  (void)read_message(fd);  // swallow welcome
+
+  // nids ride as one comma-separated string (the flat wire has no arrays).
+  const std::string copy_reply =
+      roundtrip(fd, "{\"cmd\":\"copy_subgraph\",\"id\":7,\"nids\":\"3,7\"}",
+                server, host);
+  EXPECT_NE(copy_reply.find("\"ok\":true"), std::string::npos) << copy_reply;
+  EXPECT_EQ(host.last_text_, "3,7");
+
+  // The fragment is machine JSON with interior quotes: it must arrive
+  // JSON-escaped and decode back to the raw bytes. The plain string
+  // scanner would stop at the first interior quote and corrupt the paste,
+  // which is why this key has its own extractor.
+  const std::string paste_reply = roundtrip(
+      fd,
+      "{\"cmd\":\"paste_subgraph\",\"id\":8,\"fragment\":\"{\\\"nodes\\\":"
+      "[{\\\"id\\\":1,\\\"type\\\":\\\"a\\\"}]}\"}",
+      server, host);
+  EXPECT_NE(paste_reply.find("\"ok\":true"), std::string::npos)
+      << paste_reply;
+  EXPECT_EQ(host.last_text_, "{\"nodes\":[{\"id\":1,\"type\":\"a\"}]}");
+
+  // An unsupported escape is a protocol error, not a silent corruption.
+  const std::string bad_reply = roundtrip(
+      fd, "{\"cmd\":\"paste_subgraph\",\"id\":9,\"fragment\":\"a\\qb\"}",
+      server, host);
+  EXPECT_NE(bad_reply.find("\"ok\":false"), std::string::npos) << bad_reply;
+  EXPECT_NE(bad_reply.find("fragment"), std::string::npos) << bad_reply;
   ::close(fd);
 }
 

@@ -421,6 +421,20 @@ std::string NodeGraph::to_json() const {
 
 std::string NodeGraph::copy_subgraph(
     const std::vector<std::uint64_t>& node_ids) const {
+  const std::map<std::uint64_t, std::pair<double, double>> empty;
+  return copy_subgraph_impl(node_ids, empty, false);
+}
+
+std::string NodeGraph::copy_subgraph(
+    const std::vector<std::uint64_t>& node_ids,
+    const std::map<std::uint64_t, std::pair<double, double>>& layout) const {
+  return copy_subgraph_impl(node_ids, layout, true);
+}
+
+std::string NodeGraph::copy_subgraph_impl(
+    const std::vector<std::uint64_t>& node_ids,
+    const std::map<std::uint64_t, std::pair<double, double>>& layout,
+    bool with_layout) const {
   // Renormalize: sort the selection, map ids to 1..n in ascending order. The
   // fragment is then a pure function of the subgraph STRUCTURE — copy, paste,
   // copy again round-trips byte-identically, which the test pins.
@@ -447,7 +461,18 @@ std::string NodeGraph::copy_subgraph(
       fp = false;
       out += quote(key) + ":" + value_to_json(value);
     }
-    out += "}}";
+    out += "}";
+    if (with_layout) {
+      double lx = 0.0;
+      double ly = 0.0;
+      const auto li = layout.find(id);
+      if (li != layout.end()) {
+        lx = li->second.first;
+        ly = li->second.second;
+      }
+      out += ",\"x\":" + num_to_string(lx) + ",\"y\":" + num_to_string(ly);
+    }
+    out += "}";
   }
   out += "],\"links\":[";
   first = true;
@@ -466,10 +491,12 @@ std::string NodeGraph::copy_subgraph(
   return out;
 }
 
-bool NodeGraph::paste_subgraph(std::string_view fragment,
-                               std::vector<std::uint64_t>& out_new_ids,
-                               std::string& error) {
+bool NodeGraph::paste_subgraph(
+    std::string_view fragment, std::vector<std::uint64_t>& out_new_ids,
+    std::string& error,
+    std::vector<std::pair<double, double>>* out_positions) {
   out_new_ids.clear();
+  if (out_positions != nullptr) out_positions->clear();
   // Parse via the existing strict reader: wrap the fragment as a full graph
   // document and read it into a scratch graph, then transplant with fresh ids.
   // Parse the fragment. It is machine-written by copy_subgraph in the exact
@@ -479,6 +506,8 @@ bool NodeGraph::paste_subgraph(std::string_view fragment,
     std::uint64_t id{0};
     std::string type;
     std::map<std::string, NodeValue> params;
+    double x{0.0};
+    double y{0.0};
   };
   struct FragLink {
     std::uint64_t from{0};
@@ -523,6 +552,20 @@ bool NodeGraph::paste_subgraph(std::string_view fragment,
         t.remove_prefix(1);
       }
       return !t.empty();  // closing quote consumed below
+    };
+    const auto read_number = [&](double& v) {
+      skip_ws();
+      if (t.empty()) return false;
+      v = std::strtod(std::string(t.substr(0, 48)).c_str(), nullptr);
+      bool any = false;
+      while (!t.empty() && (isdigit(static_cast<unsigned char>(t.front())) ||
+                            t.front() == '-' || t.front() == '+' ||
+                            t.front() == '.' || t.front() == 'e' ||
+                            t.front() == 'E')) {
+        t.remove_prefix(1);
+        any = true;
+      }
+      return any;
     };
     const auto read_key = [&](std::string_view key) {
       skip_ws();
@@ -601,7 +644,19 @@ bool NodeGraph::paste_subgraph(std::string_view fragment,
             }
           } while (expect(','));
         }
-        if (!expect('}') || !expect('}')) { error = "bad fragment"; return false; }
+        if (!expect('}')) { error = "bad fragment"; return false; }
+        // Optional layout (layout-aware writer only): ,"x":num,"y":num.
+        // Absent in older fragments — positions default to 0,0.
+        skip_ws();
+        if (!t.empty() && t.front() == ',') {
+          t.remove_prefix(1);
+          if (!read_key("x")) { error = "bad fragment"; return false; }
+          if (!read_number(n.x)) { error = "bad fragment"; return false; }
+          if (!expect(',')) { error = "bad fragment"; return false; }
+          if (!read_key("y")) { error = "bad fragment"; return false; }
+          if (!read_number(n.y)) { error = "bad fragment"; return false; }
+        }
+        if (!expect('}')) { error = "bad fragment"; return false; }
         frag_nodes.push_back(std::move(n));
       } while (expect(','));
     }
@@ -638,6 +693,8 @@ bool NodeGraph::paste_subgraph(std::string_view fragment,
     std::uint64_t frag_id;
     std::string type;
     std::map<std::string, NodeValue> params;
+    double x{0.0};
+    double y{0.0};
   };
   std::vector<PlanEntry> plan;
   std::map<std::uint64_t, std::uint64_t> remap;
@@ -648,7 +705,7 @@ bool NodeGraph::paste_subgraph(std::string_view fragment,
     }
     const std::uint64_t fresh =
         peek_next_id() + static_cast<std::uint64_t>(plan.size());
-    plan.push_back(PlanEntry{n.id, n.type, n.params});
+    plan.push_back(PlanEntry{n.id, n.type, n.params, n.x, n.y});
     remap[n.id] = fresh;
   }
 
@@ -664,9 +721,14 @@ bool NodeGraph::paste_subgraph(std::string_view fragment,
           (void)remove_node(remap[entry2.frag_id]);
         }
       }
+      out_new_ids.clear();
+      if (out_positions != nullptr) out_positions->clear();
       return false;
     }
     out_new_ids.push_back(remap[entry.frag_id]);
+    if (out_positions != nullptr) {
+      out_positions->emplace_back(entry.x, entry.y);
+    }
   }
   for (const auto& l : frag_links) {
     const auto fi = remap.find(l.from);
@@ -689,6 +751,7 @@ bool NodeGraph::paste_subgraph(std::string_view fragment,
         (void)remove_node(remap[entry.frag_id]);
       }
       out_new_ids.clear();
+      if (out_positions != nullptr) out_positions->clear();
       return false;
     }
   }

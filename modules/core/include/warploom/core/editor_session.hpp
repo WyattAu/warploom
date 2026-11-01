@@ -292,6 +292,11 @@ class EditorSession final : public ::warploom::core::ControlHost {
   //! W1: checkpoint ring for hash-verified scrubbing. Frame-thread-only
   //! (all access arrives via on_control), matching the session's model.
   ReplayScrubber scrubber_{};
+  //! G2: paste cascade counter (paste N lands at +32*(N%8+1) px). Ephemeral
+  //! session state, but replay-safe: a replay re-runs the same command
+  //! sequence through the same counter, so positions reproduce exactly.
+  //! Undo does not rewind it (a new paste is a new edit, not a redo).
+  std::uint32_t paste_count_{0};
 };
 
 }  // namespace warploom::editor
