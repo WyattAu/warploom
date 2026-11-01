@@ -82,15 +82,23 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
 
 ### T0. Substrate + performance budgets (first, unlocks everything)
 
-- [ ] **R6b: allocate/alias Vulkan images from the plan.** Loop 13
-  derived lifetimes from the recorded graph; now create/alias/destroy
-  from it. Exit: compose hand-written target list deleted, 4-of-10
-  elision holds on-device, history never aliased (fuzz + Lean model
-  updated), 0 diagnostics, pixel A/B clean.
-- [ ] **Scene pass as a graph node (B2 seam).** Retire the hand-written
-  UNDEFINED→COLOR_ATTACHMENT_OPTIMAL barrier + `initial_layout` seeding;
-  one graph from scene through compose. Own verification run (touches
-  pass framing).
+- [x] **R6b: allocate/alias Vulkan images from the plan.** Loop 13
+  derived lifetimes; the compose chain now derives the superset plan,
+  materializes it in `VulkanTransientStore`, and adopts the images into
+  the render-pass shells — no create()/bind_image() names an HDR, bloom
+  or depth image anymore. Exit met: 4-of-10 elision holds on-device
+  (`TransientStore.ElidesDisjointPairsOnDevice`, 10 images over 6 owner
+  allocations); history never aliased (`FuzzNeverAliasesHistoryOnDevice`
+  plus the Lean model: `planKind_history_dedicated`,
+  `planKind_aliased_sound`, `planKind_owner_earlier` — re-elaborated
+  clean under the pinned toolchain 2026-11-01, byte-identical olean);
+  0 diagnostics via the tests' own validation-count assertions; pixel
+  A/B pinned by the compose golden hashes in the 693-test green run.
+- [x] **Scene pass as a graph node (B2 seam).** The scene pass records
+  as a node in the same compile as the compose stages (T0 unified
+  scene+compose frame graph): no hand-written barrier, no
+  `initial_layout` seeding on the compose path. Covered by the compose
+  golden-hash tests and the full 693-test green run on the unified path.
 - [ ] **Dynamic rendering for fullscreen passes (Blade stage 1)** so
   passes un-bake; prerequisite for GENERAL-layout PT/bloom layering work.
 - [x] **Perf budgets as gates (T0).** Per-config frame budgets
