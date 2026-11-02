@@ -60,14 +60,23 @@ public:
       //! Static rasterizer depth-bias slope factor (shadow-map acne relief),
       //! baked into VkPipelineRasterizationStateCreateInfo::depthBiasSlopeFactor.
       float depth_bias_slope = 0.0f,
-      //! Declare VK_DYNAMIC_STATE_DEPTH_BIAS on this pipeline. Set this
-      //! whenever the recorder will call vkCmdSetDepthBias: without the
-      //! dynamic state registered, that call is both a validation error
-      //! (VUID-vkCmdDrawIndexed-None-08608) and a silent no-op, so the bias
-      //! it sets never reaches the rasterizer. It is deliberately separate
-      //! from depth_bias_slope above -- a pipeline can carry a static bias,
-      //! a dynamic bias, or both.
-      bool dynamic_depth_bias = false);
+  //! Declare VK_DYNAMIC_STATE_DEPTH_BIAS on this pipeline. Set this
+  //! whenever the recorder will call vkCmdSetDepthBias: without the
+  //! dynamic state registered, that call is both a validation error
+  //! (VUID-vkCmdDrawIndexed-None-08608) and a silent no-op, so the bias
+  //! it sets never reaches the rasterizer. It is deliberately separate
+  //! from depth_bias_slope above -- a pipeline can carry a static bias,
+  //! a dynamic bias, or both.
+  bool dynamic_depth_bias = false);
+
+  //! Create a fullscreen-triangle pipeline for dynamic rendering
+  //! (Blade stage 1): no render pass, formats declared inline via
+  //! VkPipelineRenderingCreateInfo. Depth test/write forced off — dynamic
+  //! compose stages have no depth attachment.
+  [[nodiscard]] ::warploom::core::Result<void> create_graphics_pipeline_dynamic(
+      VkDevice device, VkFormat color_format,
+      VkPipelineLayout pipeline_layout = VK_NULL_HANDLE,
+      bool enable_backface_cull = true);
 
   //! Create a compute pipeline from the "compute" stage module (load with
   //! load_shader_stage_file(device, path, "compute") first). Requires a
@@ -88,6 +97,17 @@ public:
   [[nodiscard]] VkPipelineLayout pipeline_layout() const noexcept { return layout_; }
 
 private:
+  //! Shared core behind create_graphics_pipeline (baked render pass) and
+  //! create_graphics_pipeline_dynamic (VkPipelineRenderingCreateInfo).
+  //! Exactly one of `render_pass`, `rendering_create_info` must be set;
+  //! the struct is `void*` so the header compiles without Vulkan.
+  [[nodiscard]] ::warploom::core::Result<void> create_graphics_pipeline_impl(
+      VkDevice device, VkRenderPass render_pass,
+      const void* rendering_create_info, VkFormat vertex_format,
+      VkPipelineLayout pipeline_layout, bool enable_depth_test,
+      bool enable_depth_write, bool enable_backface_cull,
+      float depth_bias_slope, bool dynamic_depth_bias);
+
   //! Device that owns every handle below, recorded so cleanup() works from
   //! the destructor. Previously the destructor passed VK_NULL_HANDLE, which
   //! cleanup() ignores, so every pipeline leaked its VkPipeline, layout and

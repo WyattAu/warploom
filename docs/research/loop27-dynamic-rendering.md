@@ -1,9 +1,11 @@
 # Loop 27: dynamic rendering for fullscreen passes (Blade stage 0)
 
-Status: adopted for negotiation; migration staged. Stage 0 (this loop)
-enables the feature bit and proves begin/end on-device. Later stages move
-each fullscreen pass (compose, bloom, PT blit, sky, UI) off baked render
-passes; each stage lands with its own golden-hash re-proof.
+Status: stages 0-2 landed 2026-11-01 on the RTX 2060. Stage 0 (this loop)
+enables the feature bit and proves begin/end on-device. Stage 1 migrates
+the compose bloom downsample; stage 2 the tonemap (present image threaded
+per call, modeled as caller-owned history). Later stages move the
+remaining fullscreen passes (PT blit, sky, UI) off baked render passes;
+each stage lands with its own re-proof.
 
 ## Source
 
@@ -55,8 +57,32 @@ pass, a pass can consume whatever layout the previous stage produced.
 
 ## What was measured
 
-Stage 0 only: feature negotiates on the RTX 2060
-(`has_dynamic_rendering()` true); the clear-only dynamic pass writes
-64x64 red pixels read back bit-exact with 0 validation errors and 0
-warnings. No pass migrated yet; no frame-time claim until stage 1
-re-measures the per-config budgets.
+Stage 0: feature negotiates on the RTX 2060 (`has_dynamic_rendering()`
+true); the clear-only dynamic pass writes 64x64 red pixels read back
+bit-exact with 0 validation errors and 0 warnings.
+
+Stage 1 (2026-11-01, RTX 2060): the bloom downsample records via
+`vkCmdBeginRendering` when `enable_dynamic_rendering` is requested and
+advertised, baked otherwise. `ComposeBloomMigratesToDynamic` proves the
+routing (bloom in dyn_passes, tonemap in passes), the node-list gate
+(mixed nodes verify; a forged unknown-image sample fails it), the
+fallback (dyn empty, two baked passes when unrequested), and a mixed-
+graph execute with 0 diagnostics. `UnifiedFrameWithDynamicBloomRecordsClean`
+drives the production unified frame (scene + dynamic bloom + tonemap)
+through `VulkanRenderer`: non-clear readback, 0 errors, 0 warnings.
+No frame-time claim yet; the per-config budgets re-measure when the
+remaining passes migrate.
+
+Stage 2 (2026-11-01, RTX 2060): the tonemap records via
+`vkCmdBeginRendering` into the swapchain image whenever the framing is
+negotiated and the caller supplies the present image/view (per-call
+parameters through build/record/record_commands -- the renderer resolves
+the swapchain image internally, headless callers pass their stand-in;
+null keeps the baked path). The present image is a fifth plan kind
+(kKindPresent): caller-owned history, planned but never created, exactly
+like the external source. `UnifiedFrameWithDynamicBloomRecordsClean`
+asserts golden parity (canonical hash 12508388375569283214, identical to
+the baked golden) on frame one and a non-clear dynamic-bloom frame two,
+0 diagnostics; a wrong-final-layout sabotage fails with VUIDs plus a hash
+mismatch, then reverts. Baked callers (null present) are untouched: every
+pre-existing golden hash still green.

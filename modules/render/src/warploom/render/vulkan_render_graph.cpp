@@ -127,6 +127,95 @@ bool access_ordering_matters(std::uint32_t prev_access, std::uint32_t prev_stage
   return prev_writes || next_writes;
 }
 
+#ifdef OMNICPP_HAS_VULKAN
+constexpr std::uint32_t kSampleReadAccess = VK_ACCESS_SHADER_READ_BIT;
+constexpr std::uint32_t kSampleReadStage =
+    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+#else
+constexpr std::uint32_t kSampleReadAccess = 0x20;  // SHADER_READ
+constexpr std::uint32_t kSampleReadStage = 0x80;   // FRAGMENT_SHADER
+#endif
+
+//! One attachment's barrier + state update. Shared by render attachments
+//! and dynamic passes (whose single color target is attachment-shaped).
+void compile_attachment(ImageState& state, const RenderPassAttachment& att,
+                        std::vector<GraphBarrier>& barriers) {
+  const bool needs_barrier =
+      !state.valid || state.layout != att.used_layout ||
+      access_ordering_matters(state.access, state.stage, att.access,
+                              att.stage);
+  if (needs_barrier) {
+    GraphBarrier barrier;
+    barrier.image = att.image;
+    barrier.old_layout = state.valid ? state.layout : VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.new_layout = att.used_layout;
+    barrier.src_access = state.access;
+    barrier.dst_access = att.access;
+    barrier.src_stage = state.valid ? state.stage : 0U;
+    barrier.dst_stage = att.stage;
+    barrier.aspect = 0U;
+    barriers.push_back(barrier);
+  }
+  state.layout = att.final_layout;
+  state.access = att.access;
+  state.stage = att.stage;
+  state.valid = true;
+}
+
+//! One pass's sampled images: transition from whatever an earlier pass
+//! left behind into the sampled layout (first-use external images honor
+//! their declared initial state). Shared by render and dynamic nodes.
+void compile_sampled_uses(
+    std::unordered_map<ImageSubresourceKey, ImageState, ImageSubresourceKeyHash>& states,
+    const std::vector<GraphSampledImage>& sampled,
+    std::vector<GraphBarrier>& barriers) {
+  for (const GraphSampledImage& sample : sampled) {
+    if (!sample.image) continue;
+    ImageState& state = states[{sample.image, 0U}];
+    if (!state.valid) {
+      if (sample.initial_layout == VK_IMAGE_LAYOUT_UNDEFINED) {
+        state.layout = sample.used_layout;
+        state.access = kSampleReadAccess;
+        state.stage = kSampleReadStage;
+        state.valid = true;
+        continue;
+      }
+      GraphBarrier barrier;
+      barrier.image = sample.image;
+      barrier.old_layout = sample.initial_layout;
+      barrier.new_layout = sample.used_layout;
+      barrier.src_access = sample.initial_access;
+      barrier.dst_access = kSampleReadAccess;
+      barrier.src_stage = sample.initial_stage;
+      barrier.dst_stage = kSampleReadStage;
+      barrier.aspect = sample.aspect;
+      barriers.push_back(barrier);
+      state.layout = sample.used_layout;
+      state.access = kSampleReadAccess;
+      state.stage = kSampleReadStage;
+      state.valid = true;
+      continue;
+    }
+    if (state.layout != sample.used_layout ||
+        access_ordering_matters(state.access, state.stage,
+                                kSampleReadAccess, kSampleReadStage)) {
+      GraphBarrier barrier;
+      barrier.image = sample.image;
+      barrier.old_layout = state.layout;
+      barrier.new_layout = sample.used_layout;
+      barrier.src_access = state.access;
+      barrier.dst_access = kSampleReadAccess;
+      barrier.src_stage = state.stage;
+      barrier.dst_stage = kSampleReadStage;
+      barrier.aspect = sample.aspect;
+      barriers.push_back(barrier);
+    }
+    state.layout = sample.used_layout;
+    state.access = kSampleReadAccess;
+    state.stage = kSampleReadStage;
+  }
+}
+
 } // namespace
 
 CompiledRenderGraph compile_render_graph(const std::vector<GraphPass>& passes) {
@@ -256,97 +345,30 @@ CompiledGraph compile_graph(const std::vector<GraphNode>& nodes) {
     const GraphPass* render = node.render;
     if (render != nullptr) {
       std::vector<GraphBarrier>& barriers = out.barriers_per_node[p];
-#ifdef OMNICPP_HAS_VULKAN
-      constexpr std::uint32_t kShaderRead = VK_ACCESS_SHADER_READ_BIT;
-      constexpr std::uint32_t kFragStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-#else
-      constexpr std::uint32_t kShaderRead = 0x20;   // SHADER_READ
-      constexpr std::uint32_t kFragStage = 0x80;    // FRAGMENT_SHADER
-#endif
       for (const RenderPassAttachment& att : render->attachments) {
         if (!att.image) continue;
-        ImageState& state = states[{att.image, 0U}];
-        const bool needs_barrier =
-            !state.valid ||
-            state.layout != att.used_layout ||
-            access_ordering_matters(state.access, state.stage, att.access, att.stage);
-        if (needs_barrier) {
-          GraphBarrier barrier;
-          barrier.image = att.image;
-          barrier.old_layout = state.valid ? state.layout : VK_IMAGE_LAYOUT_UNDEFINED;
-          barrier.new_layout = att.used_layout;
-          barrier.src_access = state.access;
-          barrier.dst_access = att.access;
-          barrier.src_stage = state.valid ? state.stage : 0U;
-          barrier.dst_stage = att.stage;
-          barrier.aspect = 0U;
-          barriers.push_back(barrier);
-        }
-        state.layout = att.final_layout;
-        state.access = att.access;
-        state.stage = att.stage;
-        state.valid = true;
+        compile_attachment(states[{att.image, 0U}], att, barriers);
       }
-
       // Sampled (non-attachment) images: track the layout transition from
       // whatever an earlier graph pass left behind into the sampled layout.
       // A depth attachment -> shader read (shadow map) carries the
       // write->read execution barrier inside the layout transition.
-      for (const GraphSampledImage& sampled : render->sampled_images) {
-        if (!sampled.image) continue;
-        ImageState& state = states[{sampled.image, 0U}];
-        if (!state.valid) {
-          if (sampled.initial_layout == VK_IMAGE_LAYOUT_UNDEFINED) {
-            // No in-graph producer and the caller asserts the image is
-            // already in used_layout with no outstanding writes. Record the
-            // state and emit nothing.
-            state.layout = sampled.used_layout;
-            state.access = kShaderRead;
-            state.stage = kFragStage;
-            state.valid = true;
-            continue;
-          }
-          // An external producer left the image somewhere else. Emit the
-          // transition from where it really is, the way the compute path
-          // already does with GraphImageUse::initial_layout.
-          GraphBarrier barrier;
-          barrier.image = sampled.image;
-          barrier.old_layout = sampled.initial_layout;
-          barrier.new_layout = sampled.used_layout;
-          barrier.src_access = sampled.initial_access;
-          barrier.dst_access = kShaderRead;
-          barrier.src_stage = sampled.initial_stage;
-          barrier.dst_stage = kFragStage;
-          barrier.aspect = sampled.aspect;
-          barriers.push_back(barrier);
-          state.layout = sampled.used_layout;
-          state.access = kShaderRead;
-          state.stage = kFragStage;
-          state.valid = true;
-          continue;
-        }
-        constexpr std::uint32_t kSampleAccess = kShaderRead;
-        constexpr std::uint32_t kSampleStage = kFragStage;
-        if (state.layout != sampled.used_layout ||
-            access_ordering_matters(state.access, state.stage,
-                                    kSampleAccess, kSampleStage)) {
-          GraphBarrier barrier;
-          barrier.image = sampled.image;
-          barrier.old_layout = state.layout;
-          barrier.new_layout = sampled.used_layout;
-          barrier.src_access = state.access;
-          barrier.dst_access = kSampleAccess;
-          barrier.src_stage = state.stage;
-          barrier.dst_stage = kSampleStage;
-          barrier.aspect = sampled.aspect;
-          barriers.push_back(barrier);
-        }
-        // Sampling is a read: state keeps the sampled layout with read
-        // access so a later writer sees the WAR edge.
-        state.layout = sampled.used_layout;
-        state.access = kSampleAccess;
-        state.stage = kSampleStage;
+      compile_sampled_uses(states, render->sampled_images, barriers);
+    }
+
+    // Dynamic pass: the single color target compiles exactly like a render
+    // attachment (barrier to COLOR_ATTACHMENT_OPTIMAL, tracked to
+    // final_layout); samples compile exactly like render samples.
+    if (node.dynamic != nullptr) {
+      const GraphDynamicPass& dyn = *node.dynamic;
+      std::vector<GraphBarrier>& barriers = out.barriers_per_node[p];
+      if (dyn.image != VK_NULL_HANDLE) {
+        compile_attachment(states[{dyn.image, 0U}],
+                           color_attachment(dyn.image, dyn.view, dyn.format,
+                                            dyn.final_layout),
+                           barriers);
       }
+      compile_sampled_uses(states, dyn.sampled_images, barriers);
     }
 
     if (node.compute != nullptr) {
@@ -384,6 +406,8 @@ CompiledGraph compile_graph(const std::vector<GraphNode>& nodes) {
       out.buffer_edges_per_node[p] = node.compute->buffer_edges;
     } else if (node.render != nullptr) {
       out.buffer_edges_per_node[p] = node.render->buffer_edges;
+    } else if (node.dynamic != nullptr) {
+      out.buffer_edges_per_node[p] = node.dynamic->buffer_edges;
     }
   }
   return out;
@@ -395,7 +419,8 @@ void execute_graph(
     const CompiledGraph& compiled,
     void (*record_render)(VkCommandBuffer, const GraphPass&, void*),
     void (*record_compute)(VkCommandBuffer, const GraphComputePass&, void*),
-    std::uint32_t current_family) {
+    std::uint32_t current_family,
+    void (*record_dynamic)(VkCommandBuffer, const GraphDynamicPass&, void*)) {
   if (!command_buffer) return;
 #ifdef OMNICPP_HAS_VULKAN
   // Staging vectors for the steady-state frame path (no heap operations);
@@ -509,6 +534,58 @@ void execute_graph(
       vkCmdBeginRenderPass(command_buffer, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
       if (record_render) record_render(command_buffer, pass, pass.user_data);
       vkCmdEndRenderPass(command_buffer);
+    } else if (node.dynamic != nullptr && record_dynamic != nullptr) {
+      // Dynamic node: the pre-barriers above already moved the image to
+      // COLOR_ATTACHMENT_OPTIMAL. The callback records bind + draw only;
+      // the executor owns the rendering scope, the same split as the
+      // baked path (begin/end here, draw in the callback).
+      const GraphDynamicPass& pass = *node.dynamic;
+      VkRenderingAttachmentInfo color{};
+      color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+      color.imageView = pass.view;
+      color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      color.loadOp = pass.clear ? VK_ATTACHMENT_LOAD_OP_CLEAR
+                                : VK_ATTACHMENT_LOAD_OP_LOAD;
+      color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+      color.clearValue = pass.clear_value;
+      VkRenderingInfo rendering{};
+      rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+      rendering.renderArea.offset = {0, 0};
+      rendering.renderArea.extent = {pass.width, pass.height};
+      rendering.layerCount = 1U;
+      rendering.colorAttachmentCount = 1U;
+      rendering.pColorAttachments = &color;
+      vkCmdBeginRendering(command_buffer, &rendering);
+      record_dynamic(command_buffer, pass, pass.user_data);
+      vkCmdEndRendering(command_buffer);
+      // Dynamic rendering performs no implicit end-of-pass transition
+      // (baked passes get it from VkRenderPass). Materialize final_layout
+      // explicitly when it differs, mirroring the compute path's post
+      // barrier; the compiler already tracks the image AT final_layout.
+      if (pass.final_layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+        const bool to_sampled =
+            pass.final_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkImageMemoryBarrier post{};
+        post.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        post.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        post.dstAccessMask = to_sampled
+                                 ? VkAccessFlags{VK_ACCESS_SHADER_READ_BIT}
+                                 : VkAccessFlags{VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT};
+        post.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        post.newLayout = pass.final_layout;
+        post.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        post.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        post.image = pass.image;
+        post.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        post.subresourceRange.baseMipLevel = 0U;
+        post.subresourceRange.levelCount = 1U;
+        post.subresourceRange.layerCount = 1U;
+        vkCmdPipelineBarrier(
+            command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            to_sampled ? VkPipelineStageFlags{VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT}
+                       : VkPipelineStageFlags{VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT},
+            0, 0, nullptr, 0, nullptr, 1U, &post);
+      }
     } else if (node.compute != nullptr && record_compute) {
       record_compute(command_buffer, *node.compute, node.compute->user_data);
 
@@ -554,6 +631,7 @@ void execute_graph(
   }
 #else
   (void)nodes; (void)compiled; (void)record_render; (void)record_compute; (void)current_family;
+  (void)record_dynamic;
 #endif
 }
 

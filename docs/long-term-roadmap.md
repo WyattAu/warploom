@@ -66,8 +66,9 @@ fingerprint stability, byte-identical replays).
   live drag + undo/redo proof, KTX2 BC1/BC3 decode in-tree.
 - **Known gaps:** PT is a static snapshot (app-scene geometry landed --
   mannequin/city/sponza traced, actors frozen mid-stride, skinned parts in
-  bind pose placed by model*bone; no live/deforming PT); no bloom on PT;
-  no denoiser (deliberate v1 deferral, decision recorded);
+  bind pose placed by model*bone; no live/deforming PT); PT + bloom layers
+  since 2026-11-01 (bright-pass over the accumulation sum x 1/n, additive
+  post-curve like raster); no denoiser (deliberate v1 deferral, decision recorded);
   no adaptive sampling; transient planner (R6a) unwired — R6b unblocked
   by Loop 13 graph-derived lifetimes but still to wire; physics has no
   rotation/joints, capsule/sleeping/velocity-update partially open;
@@ -99,14 +100,23 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
   scene+compose frame graph): no hand-written barrier, no
   `initial_layout` seeding on the compose path. Covered by the compose
   golden-hash tests and the full 693-test green run on the unified path.
-- [ ] **Dynamic rendering for fullscreen passes (Blade stage 1)** so
+- [x] **Dynamic rendering for fullscreen passes (Blade stage 1)** so
   passes un-bake; prerequisite for GENERAL-layout PT/bloom layering work.
   Stage 0 DONE: the device negotiates `dynamicRendering` (1.3 core, no
   extension) behind `has_dynamic_rendering()`, proven by
   `DynamicRendering.ClearOnlyPassWritesAttachment` (blue pre-fill +
   CLEAR-load red read back bit-exact, sabotage-checked: DONT_CARE fails
-  it; 0 validation diagnostics). Nothing records dynamically yet; each
-  pass migrates with its own golden-hash re-proof (see loop27).
+  it; 0 validation diagnostics).  Stage 1 DONE 2026-11-01 (RTX 2060): the
+  compose bloom downsample records dynamically when requested AND
+  advertised (`ComposeChainConfig::enable_dynamic_rendering`, negotiated
+  in `ensure()`, baked fallback otherwise). Stage 2 DONE the same day:
+  the tonemap goes dynamic too (see §8.1). Proven by
+  `DynamicRendering.ComposeBloomMigratesToDynamic`
+  (routing + node-list gate + sabotage + mixed-graph execute, 0
+  diagnostics) and `DynamicRendering.UnifiedFrameWithDynamicBloomRecordsClean`
+  (production unified frame, golden-hash parity with the baked path, 0
+  diagnostics). Remaining passes (sky, UI) migrate in later stages,
+  each with its own re-proof (see loop27).
 - [x] **Perf budgets as gates (T0).** Per-config frame budgets
   (default, bloom, nohdr, gd, rt, node, pt, scale10k, phys4k, phys8k) in
   docs/perf-budgets.json from real GPU timing; `analyze_telemetry.py
@@ -115,9 +125,16 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
   analyzer runs green, 0 validation diagnostics; budgets carry ~1.5-2x
   headroom and record the measure-time load, so a canary firing on a
   loaded machine means re-run at low load before blaming the change.
-- [ ] **Async-compute evaluation.** Queue family is discovered, never
-  used. Spike: H-Z reduce and/or bloom downsample off the graphics
-  queue; adopt only on measured win with determinism intact.
+- [x] **Async-compute evaluation.** MEASURED, verdict ADOPT
+  (`AsyncComputeSpike.ReduceOverlapsGraphics`, RTX 2060, under
+  validation): production `depth_reduce` on the COMPUTE-only queue while
+  graphics renders beats sequential-on-graphics by 36-54% across 4 runs
+  (delta -3.3 to -4.7 ms; the ~4 ms reduce hides almost entirely behind
+  the render). Pyramid bit-identical across queues and equal to
+  floatBitsToUint(0.5) everywhere; 0 diagnostics. The in-renderer
+  migration is staged (loop28: concurrent images, persisted per-frame
+  depth, timeline handoff + golden re-proof) -- the frame-loop surgery
+  does not ride along with the spike.
 
 ### T1. Raster core (one render path, then scale)
 
@@ -145,8 +162,15 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
   absolute-index subset check refused PT-with-bloom-off, and the per-frame
   external descriptor write was VUID-03047 with frames in flight.
 - [ ] **RT sub-toggles (R2) + GPU-driven skinned scenes (R3).**
-- [ ] **PT + bloom layering** (source already divided by n; design the
-  combine, then pin by hash).
+- [x] **PT + bloom layering.** DONE 2026-11-01 (RTX 2060): the bloom
+  bright-pass reads the external accumulation in GENERAL and divides by
+  the sample count BEFORE the Karis threshold (new `bloom_downsample_pt`
+  shader + pipeline, same 0.8 threshold as raster), so the tonemap adds
+  the same post-curve bloom term on both paths. Pinned by
+  `VulkanHardware.PathTracedFrameLayersBloom` (PT+bloom frame differs from
+  PT-only AND the mean rises; sabotage-forcing the raster path reproduces
+  the old black-slot frame and fails it; 0 diagnostics). Raster path
+  untouched (own shader, own sets, golden hashes green).
 - [ ] **Live PT: adaptive sampling** (Cycles 0.01 / Karma Pixel Oracle
   pattern; fixed-budget win) then **in-tree à-trous/SVGF over the
   existing G-buffer** with the recorded constraint: temporal-history
@@ -248,12 +272,66 @@ demand), OIDN (budget-excluded), BRep kernel (spike only).
   workflows) for T5–T7 before designing new UI/API. Proposals that skip
   this survey carry the burden of proof.
 
-## 7. Execution order (next 4 commits, smallest first)
+## 7. Distance to v1 (measured 2026-11-01, 697-test green run)
 
-1. T0 budgets: publish per-config frame budgets + scale-benchmark
-   baselines (no code change to hot paths; gates extended).
-2. T0 seam: scene pass as graph node (one verification run).
-3. R6b wiring (create/alias/destroy from the plan).
-4. T2 app-scene PT geometry (first non-cubes scene through the tracer).
+Against the §5 definition, criterion by criterion:
+
+1. **PT live + denoiser + adaptive, on app scenes, at budgets: FAR.**
+   Pause-to-converge on app scenes is real; PT + bloom layers. Missing:
+   per-frame live stepping discipline, adaptive sampling, and the whole
+   in-tree denoiser (à-trous/SVGF spike → implementation is the single
+   biggest item left). Skinned/deforming PT is rigid-placement only.
+2. **Deterministic tick + replay + scrub incl. physics: MEDIUM.** Two
+   crisp items: scrub checkpoints capture document, not physics; the
+   sub-frame fraction is not in the protocol yet.
+3. **Timeline tracks + concurrent arms + clip strip: MEDIUM.** Strip
+   chrome + block-move live-proven; camera/light/render tracks and
+   concurrent record + play are specless.
+4. **Physics spheres + capsules + rotation + joints + sleeping: MEDIUM-FAR.**
+   Grid broadphase pinned with speedups; rotation and joints are each a
+   design arc (loops 2/3 researched, not built); capsule/sleeping partial.
+5. **Content pipeline: NEAR.** glTF + KTX2 decode + asset browser done;
+   only GPU-native upload on the VRAM trigger remains.
+6. **One render path, aliasing on-device, matrix green: NEAR-DONE.** R6b
+   + B2 + Blade stage 1 landed; remaining are Blade later stages and the
+   async-compute decision.
+7. **Hardware CI + E6: NEAR in code, FAR in access.** Nothing to invent;
+   needs a machine with an NVIDIA GPU on the CI path, then packaging.
+
+## 8. Execution order (next stages, smallest unblocking step first)
+
+1. **Blade stage 2 (T0).** DONE 2026-11-01 (RTX 2060): the tonemap goes
+   dynamic whenever the framing is negotiated AND the caller supplies the
+   present image/view -- threaded per call (the renderer resolves the
+   swapchain image internally; headless callers pass their stand-in
+   explicitly; null keeps the baked path), not a setter, so no per-frame
+   descriptor writes and no state to go stale across resizes. The present
+   image is modeled as caller-owned history in the skeleton/plan/gate
+   (kKindPresent), exactly like the external source. Pinned by golden
+   parity in `DynamicRendering.UnifiedFrameWithDynamicBloomRecordsClean`
+   (same canonical hash as the baked golden, 12508388375569283214) plus
+   a wrong-final-layout sabotage (VUIDs + hash failure, reverted). Baked
+   path untouched: all golden hashes green.
+2. **Async-compute spike (T0).** DONE -- measured win, ADOPT recorded
+   (spike + loop28): 36-54% on the reduce leg, determinism intact.
+   The migration itself (H-Z reduce onto the compute queue) is the next
+   render stage; exit for THAT stage: concurrent images + persisted depth
+   + timeline handoff with golden parity and 0 diagnostics.
+3. **Scrub restores physics + sub-frame fraction in the protocol (T4).**
+   Exit: checkpoint scrub reproduces physics bit-identically; fraction
+   replays deterministically through the protocol.
+4. **Rotation, then joints, then capsule + sleeping (T3).** One design
+   arc each, validator clean before the next starts.
+5. **Live PT: per-frame stepping discipline, adaptive sampling, then the
+   denoiser (T2).** Spike à-trous/SVGF against the temporal-history
+   constraint first; build only what the spike justifies. Exit: live PT
+   on app scenes at the published budgets.
+6. **Camera/light/render tracks + concurrent arms (T5).** Spec first
+   (WyattAu repo survey per §6), then chrome.
+7. **E3 hardware runner, then E6 packaging (T8).** RT is the best-tested
+   and least-protected subsystem; that inversion ends here.
+8. **T1/T6/T7 remainder on consumer need.** LOD generation, CSM-on-need,
+   scene management, parametric bridge: specced when a consumer proves
+   the need, not before.
 
 Then re-evaluate per the loop: what unblocked what, what it revealed.

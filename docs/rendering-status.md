@@ -76,7 +76,7 @@ Two verification milestones worth knowing when reading the Proof column:
 | GPU skinning (bone SSBO) | yes | yes | `test_gpu_skinning`, `test_gpu_mannequin` |
 | GPU timestamps / frame latency percentiles | yes | yes | `GpuTiming`; telemetry `gpu_ns` |
 | Parallel secondary command-buffer recording | yes | **test-only** | `test_parallel_recorder` |
-| Async-compute queue submission | no | no | queue family discovered, never used for submission |
+| Async-compute queue submission | yes | **test-only** | `AsyncComputeQueue` (timeline handoff, proven by `VulkanHardware.AsyncComputeTimelineHandoff`) + `AsyncComputeSpike.ReduceOverlapsGraphics` (production `depth_reduce` on the COMPUTE-only queue overlaps graphics: 36-54% faster than sequential, 0 diagnostics, loop28). Renderer H-Z still records inline on graphics; migration staged in loop28 |
 | HDR intermediate + exposure | yes | yes | `WARPLOOM_EXPOSURE=<float>` at start-up and `set_exposure` over the control socket (v1.9); the configured value is pinned by `ComposeChainHonoursConfiguredExposure` |
 | Deferred / G-buffer, MSAA | no | no | every image is `VK_SAMPLE_COUNT_1_BIT` |
 | CSM / cascaded shadow maps | no | no | single 2048² map |
@@ -121,9 +121,10 @@ Two honest caveats on the ray tracing:
   accumulation image directly. It also **holds the camera** while active (a
   moving view averages a smear rather than converging). A resize rebuilds the
   accumulation and re-points both compose chains, so the mode survives
-  `set_viewport_size`. What is still narrow: no app-scene integration (one cube
-  + slab), and bloom does not layer on the PT source (the source is already
-  divided by n).
+  `set_viewport_size`. Bloom layers on the PT source since 2026-11-01 (the
+  PT bright-pass divides the accumulation by n before the Karis threshold;
+  `VulkanHardware.PathTracedFrameLayersBloom`). What is still narrow: no
+  app-scene integration (one cube + slab).
 
 ## Determinism
 

@@ -1081,7 +1081,7 @@ TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
                                          ? tracer.sample_count()
                                          : 1U));
       chain.record(cmd, present_pass.render_pass(), present_pass.framebuffer(0U),
-                   kSize, kSize);
+                   ldr.image(), ldr.image_view(), kSize, kSize);
       EXPECT_EQ(vkEndCommandBuffer(cmd), VK_SUCCESS);
       VkFence fence{};
       VkFenceCreateInfo fi{};
@@ -1134,6 +1134,246 @@ TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
   // Leaving PT must restore the chain's own intermediate.
   chain.set_external_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
   EXPECT_FALSE(chain.using_external_source());
+
+  vkDestroyCommandPool(context.device(), cmd_pool, nullptr);
+  chain.destroy();
+  tracer.destroy();
+  allocator.destroy_allocation(geo_alloc);
+  present_pass.cleanup(context.device());
+  ldr.cleanup();
+  allocator.cleanup();
+  context.cleanup();
+#else
+  GTEST_SKIP() << "Vulkan types or test shaders unavailable";
+#endif
+}
+
+//! PT + bloom layering, pinned headlessly.
+//!
+//! Before this, bloom never layered on path-traced frames: in PT mode the
+//! bloom downsample sampled the chain's own HDR intermediate (which the scene
+//! never renders), and the tonemap bound the black bloom slot. A white-sky
+//! box at exposure 1.0 carries means far above the 0.8 Karis threshold, so a
+//! working layer MUST change the frame -- and must only ADD light (the bloom
+//! term is post-curve additive), so the mean must rise. Both directions are
+//! sabotage-checked: forcing the raster bloom path in PT mode (or dropping
+//! the external_bloom set selection) reproduces the old black-slot frame,
+//! which fails the hash-difference assertion; dividing by the wrong count
+//! fails the convergence bound inherited from PathTracedFrameConverges-
+//! ThroughCompose's noise-floor argument.
+TEST(VulkanHardware, PathTracedFrameLayersBloom) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  omnicpp::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("OmniCppPTBloom", true).is_ok());
+  if (!context.has_ray_tracing() || !context.has_ray_tracing_pipeline()) {
+    context.cleanup();
+    GTEST_SKIP() << "ray tracing pipeline not available on this device";
+  }
+  omnicpp::render::VulkanMemoryAllocator allocator;
+  ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device())
+                  .is_ok());
+
+  constexpr std::uint32_t kSize = 64U;
+  constexpr VkFormat kLdrFormat = VK_FORMAT_B8G8R8A8_UNORM;
+  omnicpp::render::VulkanOffscreenTarget ldr;
+  ASSERT_TRUE(ldr
+                  .create(context.device(), context.physical_device(),
+                          kLdrFormat, kSize, kSize, &allocator,
+                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+                  .is_ok());
+  const VkFormat depth_format =
+      omnicpp::render::VulkanRenderPass::find_supported_depth_format(context.physical_device());
+  omnicpp::render::VulkanRenderPass present_pass;
+  ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
+                                  depth_format)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_depth_resources(context.device(),
+                                          context.physical_device(),
+                                          depth_format, kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_framebuffers(context.device(), {ldr.image_view()},
+                                       kSize, kSize)
+                  .is_ok());
+
+  std::vector<float> tris;
+  tris.reserve(12U * 9U);
+  for (int i = 0; i < 12; ++i) {
+    for (int c = 0; c < 3; ++c) {
+      const float v = static_cast<float>((i + c) % 4);
+      tris.push_back(v < 2.0F ? -1.0F : 1.0F);
+    }
+  }
+  tris.resize(12U * 9U);
+  auto geo = allocator.create_buffer(
+      tris.size() * sizeof(float),
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  omnicpp::render::Allocation geo_alloc = geo.value();
+  std::memcpy(geo_alloc.mapped, tris.data(), tris.size() * sizeof(float));
+  VkBufferDeviceAddressInfo addr{};
+  addr.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  addr.buffer = geo_alloc.buffer;
+
+  omnicpp::render::VulkanPathTracer tracer;
+  omnicpp::render::PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.width = kSize;
+  cfg.height = kSize;
+  cfg.max_bounces = 2U;
+  omnicpp::render::PathTracerMesh mesh{};
+  mesh.vertex_buffer_address =
+      vkGetBufferDeviceAddress(context.device(), &addr);
+  mesh.triangle_count = 12U;
+  mesh.max_vertex = 35U;
+  cfg.meshes = {mesh};
+  cfg.instances = {omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.8F)};
+  ASSERT_TRUE(tracer
+                  .create(context.physical_device(), context.device(),
+                          context.graphics_queue(),
+                          static_cast<std::uint32_t>(
+                              context.queue_families().graphics_family),
+                          allocator, cfg)
+                  .is_ok());
+  ASSERT_TRUE(tracer.ready());
+  omnicpp::render::PathTracerCamera cam{};
+  cam.position = {0.0F, 0.0F, 4.0F};
+  cam.forward = {0.0F, 0.0F, -1.0F};
+  tracer.set_camera(cam);
+
+  omnicpp::render::VulkanComposeChain chain;
+  omnicpp::render::ComposeChainConfig cc{};
+  cc.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  // 1.0, not the convergence probe's 0.05: the white sky (radiance 1.0)
+  // must sit ABOVE the 0.8 Karis threshold, or "bloom changes nothing"
+  // would pass vacuously. The threshold assertion below is what makes a
+  // no-op layer fail loudly instead of passing silently.
+  cc.exposure = 1.0F;
+  cc.enable_bloom = true;
+  ASSERT_TRUE(chain
+                  .ensure(context.device(), context.physical_device(),
+                          context.graphics_queue(), cc, present_pass.render_pass(),
+                          VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(chain.ready());
+  // Capability, not pixels: the PT shader ships with the repo, so its
+  // absence is a build break, not a skip. Without this, a missing .spv
+  // would silently run the PT-only path and fail the hash assertion with
+  // no explanation of which half broke.
+  ASSERT_TRUE(chain.bloom_available());
+  ASSERT_TRUE(chain.pt_bloom_available());
+  chain.set_external_source(tracer.accum_image(), tracer.accum_view());
+
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+      context.device(),
+      static_cast<std::uint32_t>(context.queue_families().graphics_family));
+  ASSERT_TRUE(pool.is_ok());
+  VkCommandPool cmd_pool = pool.value();
+
+  const auto submit = [&](VkCommandBuffer cmd) {
+    EXPECT_EQ(vkEndCommandBuffer(cmd), VK_SUCCESS);
+    VkFence fence{};
+    VkFenceCreateInfo fi{};
+    fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    vkCreateFence(context.device(), &fi, nullptr, &fence);
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1U;
+    si.pCommandBuffers = &cmd;
+    EXPECT_EQ(vkQueueSubmit(context.graphics_queue(), 1, &si, fence), VK_SUCCESS);
+    EXPECT_EQ(vkWaitForFences(context.device(), 1, &fence, VK_TRUE, UINT64_MAX),
+              VK_SUCCESS);
+    vkDestroyFence(context.device(), fence, nullptr);
+  };
+  const auto record_compose = [&]() {
+    auto cb =
+        omnicpp::render::VulkanRenderer::allocate_command_buffer(context.device(),
+                                                                cmd_pool);
+    EXPECT_TRUE(cb.is_ok());
+    VkCommandBuffer cmd = cb.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    EXPECT_EQ(vkBeginCommandBuffer(cmd, &bi), VK_SUCCESS);
+    chain.set_inverse_samples(
+        1.0F / static_cast<float>(tracer.sample_count() > 0U
+                                      ? tracer.sample_count()
+                                      : 1U));
+    chain.record(cmd, present_pass.render_pass(), present_pass.framebuffer(0U),
+                 ldr.image(), ldr.image_view(), kSize, kSize);
+    submit(cmd);
+  };
+  const auto read_now = [&]() -> omnicpp_test::ReadbackResult {
+    return readback_swapchain_image(
+        context.physical_device(), context.device(), context.graphics_queue(),
+        static_cast<std::uint32_t>(context.queue_families().graphics_family),
+        ldr.image(), kLdrFormat, kSize, kSize, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, true);
+  };
+  const auto mean_luma = [](const omnicpp_test::ReadbackResult& r) {
+    double sum = 0.0;
+    for (const std::uint32_t px : r.pixels) {
+      sum += static_cast<double>(px & 0xFFU) +
+             static_cast<double>((px >> 8U) & 0xFFU) +
+             static_cast<double>((px >> 16U) & 0xFFU);
+    }
+    return r.pixels.empty()
+               ? 0.0
+               : sum / static_cast<double>(r.pixels.size());
+  };
+
+  // Converge first (8 samples), bloom OFF: the PT-only baseline.
+  for (std::uint32_t f = 0; f < 8U; ++f) {
+    const bool clear = (tracer.sample_count() == 0U);
+    auto cb =
+        omnicpp::render::VulkanRenderer::allocate_command_buffer(context.device(),
+                                                                cmd_pool);
+    ASSERT_TRUE(cb.is_ok());
+    VkCommandBuffer cmd = cb.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    ASSERT_EQ(vkBeginCommandBuffer(cmd, &bi), VK_SUCCESS);
+    tracer.record_round(cmd, f, clear);
+    chain.set_inverse_samples(
+        1.0F / static_cast<float>(tracer.sample_count() > 0U
+                                      ? tracer.sample_count()
+                                      : 1U));
+    chain.record(cmd, present_pass.render_pass(), present_pass.framebuffer(0U),
+                 ldr.image(), ldr.image_view(), kSize, kSize);
+    submit(cmd);
+  }
+  EXPECT_EQ(tracer.sample_count(), 8U);
+  record_compose();
+  const omnicpp_test::ReadbackResult pt_only = read_now();
+  ASSERT_GT(pt_only.non_clear_pixels, 0U)
+      << "PT-only baseline came back black";
+  const double mean_off = mean_luma(pt_only);
+
+  // Same accumulation, bloom ON: the toggle is a re-record, so no new
+  // tracer rounds are needed -- and none are taken, which is what keeps
+  // the 1/n divide identical between the two frames.
+  ASSERT_TRUE(chain.set_bloom_enabled(true));
+  record_compose();
+  const omnicpp_test::ReadbackResult pt_bloom = read_now();
+  ASSERT_GT(pt_bloom.non_clear_pixels, 0U)
+      << "PT+bloom frame came back black";
+  const double mean_on = mean_luma(pt_bloom);
+  EXPECT_NE(pt_bloom.hash, pt_only.hash)
+      << "bloom added nothing to the path-traced frame (means " << mean_off
+      << " -> " << mean_on << "): the layer is not reaching the tonemap";
+  EXPECT_GT(mean_on, mean_off)
+      << "bloom must only ADD light (post-curve additive term): mean fell "
+      << mean_off << " -> " << mean_on;
+
+  EXPECT_EQ(context.validation_error_count(), 0U);
+  EXPECT_EQ(context.validation_warning_count(), 0U);
 
   vkDestroyCommandPool(context.device(), cmd_pool, nullptr);
   chain.destroy();
@@ -1313,7 +1553,8 @@ TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
         vkCmdEndRenderPass(cmd);
       }
       chain.record(cmd, present_pass.render_pass(),
-                   present_pass.framebuffer(1U), kSize, kSize);
+                   present_pass.framebuffer(1U), capture_ldr.image(),
+                   capture_ldr.image_view(), kSize, kSize);
       vkEndCommandBuffer(cmd);
       VkFence fence{};
       VkFenceCreateInfo fi{};
@@ -1378,7 +1619,7 @@ TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
   bi2.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(cmd2, &bi2);
   chain.record(cmd2, present_pass.render_pass(), present_pass.framebuffer(0U),
-               kSize, kSize);
+               ldr.image(), ldr.image_view(), kSize, kSize);
   vkEndCommandBuffer(cmd2);
   VkFence f2{};
   VkFenceCreateInfo fi2{};

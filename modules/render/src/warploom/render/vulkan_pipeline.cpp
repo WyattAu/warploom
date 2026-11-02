@@ -231,9 +231,53 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
     bool enable_backface_cull,
     [[maybe_unused]] float depth_bias_slope,
     [[maybe_unused]] bool dynamic_depth_bias) {
+  return create_graphics_pipeline_impl(device, render_pass, nullptr,
+                                       vertex_format, pipeline_layout,
+                                       enable_depth_test, enable_depth_write,
+                                       enable_backface_cull, depth_bias_slope,
+                                       dynamic_depth_bias);
+}
+
+::warploom::core::Result<void> VulkanPipeline::create_graphics_pipeline_dynamic(
+    VkDevice device, VkFormat color_format,
+    VkPipelineLayout pipeline_layout,
+    bool enable_backface_cull) {
+#ifdef OMNICPP_HAS_VULKAN
+  VkPipelineRenderingCreateInfo rendering_info{};
+  rendering_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+  rendering_info.colorAttachmentCount = 1U;
+  rendering_info.pColorAttachmentFormats = &color_format;
+  rendering_info.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+  rendering_info.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+  // Dynamic compose stages have no depth attachment: depth off, and the
+  // pipeline layout's push range is the caller's (set at create time).
+  return create_graphics_pipeline_impl(device, VK_NULL_HANDLE,
+                                       &rendering_info, color_format,
+                                       pipeline_layout, false, false,
+                                       enable_backface_cull, 0.0F, false);
+#else
+  (void)device; (void)color_format; (void)pipeline_layout;
+  (void)enable_backface_cull;
+  return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
+::warploom::core::Result<void> VulkanPipeline::create_graphics_pipeline_impl(
+    VkDevice device, VkRenderPass render_pass,
+    const void* rendering_create_info,
+    VkFormat vertex_format,
+    VkPipelineLayout pipeline_layout,
+    bool enable_depth_test,
+    bool enable_depth_write,
+    bool enable_backface_cull,
+    [[maybe_unused]] float depth_bias_slope,
+    [[maybe_unused]] bool dynamic_depth_bias) {
 #ifdef OMNICPP_HAS_VULKAN
   device_ = device;
-  if (!device || !render_pass || !vertex_shader_ || !fragment_shader_) {
+  // Exactly one framing: a baked render pass, or a dynamic rendering struct.
+  if (!device || !vertex_shader_ || !fragment_shader_ ||
+      ((render_pass == VK_NULL_HANDLE) == (rendering_create_info == nullptr))) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
@@ -370,6 +414,7 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
   pipeline_info.pDynamicState = &dynamic_state;
   pipeline_info.layout = layout_;
   pipeline_info.renderPass = render_pass;
+  pipeline_info.pNext = rendering_create_info;
   pipeline_info.subpass = 0;
   pipeline_info.basePipelineHandle = VK_NULL_HANDLE;
 
@@ -381,15 +426,17 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
     // bare "not available" left this undiagnosable for hours.
     std::fprintf(stderr,
                  "VulkanPipeline: vkCreateGraphicsPipelines failed (VkResult %d) "
-                 "for render pass %p format %d\n",
+                 "for render pass %p format %d%s\n",
                  static_cast<int>(result), static_cast<const void*>(render_pass),
-                 static_cast<int>(vertex_format));
+                 static_cast<int>(vertex_format),
+                 rendering_create_info != nullptr ? " (dynamic)" : "");
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
   return ::warploom::core::Result<void>::ok();
 #else
-  (void)device; (void)render_pass; (void)vertex_format; (void)pipeline_layout;
+  (void)device; (void)render_pass; (void)rendering_create_info;
+  (void)vertex_format; (void)pipeline_layout;
   (void)enable_depth_test; (void)enable_depth_write; (void)enable_backface_cull;
   return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif

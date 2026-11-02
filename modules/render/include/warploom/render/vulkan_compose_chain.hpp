@@ -40,8 +40,17 @@ class VulkanDescriptorManager;
 struct ComposeStage {
   const VulkanPipeline* pipeline{nullptr};
   VulkanOffscreenTarget* target{nullptr};
+  //! Presentation write (Blade stage 2: the dynamic tonemap). When set,
+  //! the stage writes the swapchain image directly and `pass`/`framebuffer`
+  //! are unused. Exactly one of `target`, `present_view` is set per stage.
+  VkImage present_image{VK_NULL_HANDLE};
+  VkImageView present_view{VK_NULL_HANDLE};
   VkRenderPass pass{VK_NULL_HANDLE};
   VkFramebuffer framebuffer{VK_NULL_HANDLE};
+  //! Blade stage 1: when true the stage records with dynamic rendering
+  //! (GraphDynamicPass) instead of its baked pass/framebuffer. Decided at
+  //! ensure() time from ComposeChainConfig::enable_dynamic_rendering.
+  bool dynamic{false};
   std::uint32_t width{0};
   std::uint32_t height{0};
   const void* push{nullptr};
@@ -58,6 +67,13 @@ struct ComposeStage {
 void record_compose_stage(VkCommandBuffer command_buffer,
                           const GraphPass& pass, void* user);
 
+//! Record callback for a DYNAMIC compose stage (Blade stage 1): builds the
+//! draw from the stage (pipeline, layout, set, push) and the node's
+//! extents, and records it with record_fullscreen_dynamic_pass. The node's
+//! view/layout come from the compiled pass, not the stage.
+void record_compose_dynamic_stage(VkCommandBuffer command_buffer,
+                                  const GraphDynamicPass& pass, void* user);
+
 struct ComposeChainConfig {
   //! Initial bloom state. The chain PRE-ALLOCATES every bloom resource
   //! regardless of this value (docs/research/rendering-and-graphs.md, R7), so
@@ -69,6 +85,10 @@ struct ComposeChainConfig {
   //! bloom_downsample.frag.spv / bloom_upsample.frag.spv.
   std::string compose_shader_dir;
   float exposure{1.0f};
+  //! Record fullscreen stages with dynamic rendering (Blade stage 1).
+  //! Decided at ensure() time (pipelines bake the framing); the chain
+  //! falls back to baked passes when the device lacks dynamicRendering.
+  bool enable_dynamic_rendering{false};
   //! HDR intermediate format; VK_FORMAT_UNDEFINED picks R16G16B16A16_SFLOAT
   //! when the device supports rendering to it and sampling from it.
   VkFormat hdr_format{VK_FORMAT_UNDEFINED};
@@ -93,24 +113,33 @@ class VulkanComposeChain final {
       VkFormat present_format, std::uint32_t width, std::uint32_t height);
 
   //! Record bloom (when enabled) then tonemap+FXAA into `target_pass` /
-  //! `target_framebuffer`. Requires a successful ensure().
+  //! `target_framebuffer`. Requires a successful ensure(). `present_image`
+  //! / `present_view` carry the swapchain image for the dynamic tonemap
+  //! (Blade stage 2); null selects the baked tonemap regardless of the
+  //! negotiated framing.
   void record(VkCommandBuffer command_buffer, VkRenderPass target_pass,
-              VkFramebuffer target_framebuffer, std::uint32_t width,
+              VkFramebuffer target_framebuffer, VkImage present_image,
+              VkImageView present_view, std::uint32_t width,
               std::uint32_t height);
 
   //! Build the compose stages' graph passes WITHOUT recording them, so a
   //! caller can embed them in a larger graph (T0: the scene pass becomes a
   //! graph node in the same compile, and the compiler owns the scene ->
   //! compose transition instead of a hand-written barrier + an initial_layout
-  //! seed). `stages` receives the stage descriptions and `passes` one
-  //! GraphPass per stage with user_data pointing at its stage; both must
-  //! outlive the execute_graph call. `clear_storage` supplies the two clear
-  //! values every pass points at (one caller-owned array, not per-pass
+  //! seed). `stages` receives the stage descriptions, `passes` one GraphPass
+  //! per baked stage and `dyn_passes` one GraphDynamicPass per dynamic stage
+  //! (Blade stage 1: the bloom downsample when enable_dynamic_rendering),
+  //! each with user_data pointing at its stage; all three must outlive the
+  //! execute_graph call. `clear_storage` supplies the two clear values every
+  //! baked pass points at (one caller-owned array, not per-pass
   //! temporaries). Performs the per-frame external-source descriptor write,
   //! exactly as record() does.
   void build_graph_passes(VkRenderPass target_pass,
-                          VkFramebuffer target_framebuffer, std::uint32_t width,
-                          std::uint32_t height, std::vector<GraphPass>& passes,
+                          VkFramebuffer target_framebuffer,
+                          VkImage present_image, VkImageView present_view,
+                          std::uint32_t width, std::uint32_t height,
+                          std::vector<GraphPass>& passes,
+                          std::vector<GraphDynamicPass>& dyn_passes,
                           std::vector<ComposeStage>& stages,
                           VkClearValue* clear_storage);
 
@@ -137,6 +166,16 @@ class VulkanComposeChain final {
   [[nodiscard]] bool bloom_enabled() const noexcept { return bloom_enabled_; }
   //! True when the bloom pipelines were built, i.e. a toggle to ON is legal.
   [[nodiscard]] bool bloom_available() const noexcept { return bloom_available_; }
+  //! True when the PT bloom pipeline was built: PT + bloom actually layers.
+  //! When false, PT frames compose without bloom even with the toggle on
+  //! (never a refused frame). Test seam: distinguishes "layered nothing
+  //! because the shader was missing" from "layered nothing but should have".
+  [[nodiscard]] bool pt_bloom_available() const noexcept {
+    return pt_bloom_available_;
+  }
+  //! Whether the bloom stage currently records dynamically. Test seam for
+  //! Blade stage 1 (no device needed to assert the negotiated outcome).
+  [[nodiscard]] bool dynamic_bloom() const noexcept { return dynamic_enabled_; }
 
   //! R6b per-frame gate: re-derive kind lifetimes from the scene + compose
   //! nodes actually recorded and check the stored plan still covers them:
@@ -152,6 +191,13 @@ class VulkanComposeChain final {
   //! executing it.
   [[nodiscard]] bool verify_frame_nodes(
       const std::vector<GraphPass>& passes) const;
+  //! Node-list overload (Blade stage 1): the unified frame is a mixed
+  //! render + dynamic node list, so the gate walks nodes rather than
+  //! passes. Identical rule (subset of the shape's planned intervals,
+  //! alias pairs still disjoint); a dynamic node's single target folds in
+  //! as its attachment and its sampled_images as its samples.
+  [[nodiscard]] bool verify_frame_nodes(
+      const std::vector<GraphNode>& nodes) const;
 
   //! Image kinds for the plan-derived store. The kind IS the alias-compat-
   //! ibility tag: equal kinds have identical creation parameters BY
@@ -164,12 +210,19 @@ class VulkanComposeChain final {
     kKindHdrDepth = 2,
     kKindBloomColor = 3,
     kKindExternal = 4,
+    //! The presentation image (Blade stage 2: the dynamic tonemap writes
+    //! it as a graph attachment). Caller-owned history like the external
+    //! source -- planned (so the gate covers it) but never created.
+    kKindPresent = 5,
   };
 
   //! The node shapes derive_compose_plan walks, with placeholder handles
   //! (skeleton_image_of(kind)). Mirrors build_graph_passes' stage structure:
   //! scene writes HDR color + depth; bloom_down (when recordable) writes
-  //! bloom sampling HDR; tonemap samples HDR + bloom + external. The tonemap
+  //! bloom sampling HDR AND the external source (PT + bloom layering: the
+  //! bloom stage reads whichever source the frame actually has, so the
+  //! skeleton is the SUPERSET of both); tonemap samples HDR + bloom +
+  //! external. The tonemap
   //! sampling all three is the SUPERSET of the raster shape (HDR + bloom)
   //! and the PT shape (external) -- but only SHAPE-relatively, not in
   //! absolute indices: without the bloom stage the tonemap sits at index 1,
@@ -292,6 +345,16 @@ class VulkanComposeChain final {
   std::unique_ptr<VulkanDescriptorManager> descriptor_manager_;
   std::unique_ptr<VulkanPipeline> compose_pipeline_;
   std::unique_ptr<VulkanPipeline> bloom_down_pipeline_;
+  //! PT-variant bloom pipeline (bloom_downsample_pt.frag: Karis over the
+  //! accumulation sum x inverse_samples). Built in the same framing as the
+  //! raster bloom pipeline (baked or dynamic per dynamic_enabled_), so the
+  //! PT + bloom stage records whichever way the chain negotiated.
+  std::unique_ptr<VulkanPipeline> bloom_down_pt_pipeline_;
+  //! Dynamic tonemap pipeline (Blade stage 2): same shaders as the baked
+  //! tonemap, created without a render pass against the presentation
+  //! format. Selected by the negotiated framing whenever the caller
+  //! supplied the present image/view.
+  std::unique_ptr<VulkanPipeline> compose_dynamic_pipeline_;
   std::unique_ptr<VulkanOffscreenTarget> hdr_target_;
   std::unique_ptr<VulkanOffscreenTarget> bloom_target_;
   VkDescriptorSetLayout compose_layout_{VK_NULL_HANDLE};
@@ -313,12 +376,25 @@ class VulkanComposeChain final {
   //! still in flight. That is what makes the toggle a pure re-record.
   VkDescriptorSet compose_set_nobloom_{VK_NULL_HANDLE};
   //! Tonemap set bound to the external source (see set_external_source), with
-  //! the black bloom slot: 1/n divide by the source's own accumulation, so
-  //! bloom must not be layered on it.
+  //! the black bloom slot (PT without bloom). When PT + bloom layer, the
+  //! chain binds compose_set_external_bloom_ instead: same source at
+  //! binding 0, the real bloom target at binding 1.
   VkDescriptorSet compose_set_external_{VK_NULL_HANDLE};
+  //! Tonemap set for PT + bloom: binding 0 is the external accumulation in
+  //! GENERAL, binding 1 the bloom target. Pre-written (see set_external_-
+  //  source), so layering bloom on a path-traced frame is a bind-time
+  //! selection like the raster toggle, never a descriptor write.
+  VkDescriptorSet compose_set_external_bloom_{VK_NULL_HANDLE};
   //! External HDR source image + view (the path tracer's accumulation image).
   VkImage external_image_{VK_NULL_HANDLE};
   VkImageView external_view_{VK_NULL_HANDLE};
+  //! Presentation image + view of the frame being built (Blade stage 2).
+  //! Cached from build_graph_passes' parameters because kind_of_image()
+  //! maps handles to kinds and the swapchain image is caller-owned: the
+  //! member lives exactly as long as the built passes (one synchronous
+  //! build/verify/execute), the same lifetime rule as compose_push_.
+  VkImage present_image_{VK_NULL_HANDLE};
+  VkImageView present_view_{VK_NULL_HANDLE};
   float inverse_samples_{1.0F};
   //! One-sampler layout/set for the bloom bright-pass. It reads the HDR scene,
   //! which in the two-binding compose layout is binding 0 -- where binding 1
@@ -326,6 +402,11 @@ class VulkanComposeChain final {
   //! own one-binding set, pointed at the scene.
   VkDescriptorSetLayout bloom_stage_layout_{VK_NULL_HANDLE};
   VkDescriptorSet bloom_down_set_{VK_NULL_HANDLE};
+  //! PT-variant bloom set: same one-binding layout, pointed at the external
+  //! accumulation in GENERAL (PT + bloom layering). Written by
+  //! set_external_source() and ensure(), exactly like the tonemap's
+  //! external sets, so entering PT never writes a descriptor per frame.
+  VkDescriptorSet bloom_down_set_external_{VK_NULL_HANDLE};
   VkFormat hdr_format_{VK_FORMAT_UNDEFINED};
   std::uint32_t compose_width_{0};
   std::uint32_t compose_height_{0};
@@ -341,6 +422,16 @@ class VulkanComposeChain final {
   //! config_.enable_bloom, so a chain built with bloom off can still be
   //! toggled on at runtime; false only when the bloom shaders were missing.
   bool bloom_available_{false};
+  //! True once the PT bloom pipeline exists (bloom_downsample_pt.frag
+  //! present). Independent of bloom_available_: a chain with raster bloom
+  //! but no PT shader layers nothing on path-traced frames, and PT + bloom
+  //! falls back to PT-only rather than refusing the frame.
+  bool pt_bloom_available_{false};
+  //! True when the bloom stage records with dynamic rendering (Blade
+  //! stage 1): requested by ComposeChainConfig::enable_dynamic_rendering
+  //! AND advertised by the device. Decided in ensure(); stages built by
+  //! build_graph_passes read it. Falls back to baked passes when false.
+  bool dynamic_enabled_{false};
   //! R6b: the plan-derived image store backing the HDR color, HDR depth and
   //! bloom targets. ensure() derives the superset skeleton (bloom + external
   //! shapes included), plans it, and materializes it here; the
@@ -369,7 +460,7 @@ class VulkanComposeChain final {
   //! Reference intervals per bloom shape ([0] without, [1] with the bloom
   //! stage), each walked from its own skeleton. verify selects by whether
   //! the recorded frame contains a bloom write.
-  KindInterval planned_intervals_[2][kKindExternal + 1]{};
+  KindInterval planned_intervals_[2][kKindPresent + 1]{};
   //! Tonemap push constants for the frame being built. A MEMBER (not a
   //! build_graph_passes local) because stages point at it and execute_graph
   //! reads it during execute: a local would die at build return. Overwritten

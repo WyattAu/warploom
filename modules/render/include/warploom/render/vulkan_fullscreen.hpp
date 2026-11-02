@@ -78,6 +78,28 @@ struct FullscreenPass {
     VkCommandBuffer command_buffer, const FullscreenPass& pass,
     VkDescriptorSet set0);
 
+//! One dynamic-rendering fullscreen draw (Blade stage 1). Reuses
+//! FullscreenPass for every draw parameter (pipeline, layout, extents,
+//! samples, push constants); its render_pass/framebuffer/clear_values are
+//! ignored by the draw core and stay null. The target view and the load
+//! choice live here because dynamic rendering has no pass object to own
+//! them. Compose stages always CLEAR (every dynamic target is fully
+//! overwritten each frame).
+struct DynamicFullscreenPass {
+  FullscreenPass draw{};
+  VkImageView view{VK_NULL_HANDLE};
+  bool clear{true};
+  VkClearValue clear_value{};
+};
+
+//! Record beginRendering + draw + endRendering for one dynamic pass.
+//! The image must already be in COLOR_ATTACHMENT_OPTIMAL (the graph
+//! compiler emits that barrier); the pass leaves it there, and the
+//! compiler tracks the next use from the node's final layout.
+[[nodiscard]] ::warploom::core::Result<void> record_fullscreen_dynamic_pass(
+    VkCommandBuffer command_buffer, const DynamicFullscreenPass& pass,
+    VkDescriptorSet set0);
+
 //! Build a GraphPass for a FullscreenPass: extents/clears forwarded,
 //! sampled_images filled from pass.samples so compile_graph computes the
 //! producer -> sample transitions. Attachments stay empty (fullscreen

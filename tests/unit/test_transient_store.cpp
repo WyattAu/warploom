@@ -452,9 +452,12 @@ TEST(TransientStore, ChainSkeletonMatchesDerivedLifetimes) {
       if (kind == VulkanComposeChain::kKindBloomColor) return 640U * 360U * 8U;
       return 1280U * 720U * 16U;
     };
+    // Caller-owned history: the external accumulation and the present
+    // image (Blade stage 2) are both planned but never created.
     const auto history = [](VkImage image) noexcept -> bool {
-      return VulkanComposeChain::skeleton_kind_of(image) ==
-             VulkanComposeChain::kKindExternal;
+      const int kind = VulkanComposeChain::skeleton_kind_of(image);
+      return kind == VulkanComposeChain::kKindExternal ||
+             kind == VulkanComposeChain::kKindPresent;
     };
     const auto derived = warploom::render::derive_frame_resources(
         [&]() {
@@ -466,29 +469,46 @@ TEST(TransientStore, ChainSkeletonMatchesDerivedLifetimes) {
         }(),
         sizes, history, kinds);
     // First-touch order is fixed by construction: hdr, depth, [bloom,]
-    // external.
-    ASSERT_EQ(derived.size(), include_bloom ? 4U : 3U);
+    // external, present (the tonemap writes the present image in both
+    // shapes -- Blade stage 2 models the full frame including present).
+    ASSERT_EQ(derived.size(), include_bloom ? 5U : 4U);
     EXPECT_EQ(derived[0].layout_tag,
               static_cast<std::uint64_t>(VulkanComposeChain::kKindHdrColor));
     EXPECT_EQ(derived[1].layout_tag,
               static_cast<std::uint64_t>(VulkanComposeChain::kKindHdrDepth));
     EXPECT_EQ(derived[0].first_use, 0U);
     EXPECT_EQ(derived[1].first_use, 0U);
-    EXPECT_EQ(derived[1].last_use, 0U);
-    if (include_bloom) {
+    EXPECT_EQ(derived[1].last_use, 0U);    if (include_bloom) {
       EXPECT_EQ(derived[2].layout_tag,
                 static_cast<std::uint64_t>(
                     VulkanComposeChain::kKindBloomColor));
       EXPECT_EQ(derived[2].first_use, 1U);
       EXPECT_EQ(derived[2].last_use, 2U);
       EXPECT_EQ(derived[3].layout_tag,
-                static_cast<std::uint64_t>(VulkanComposeChain::kKindExternal));
+                static_cast<std::uint64_t>(
+                    VulkanComposeChain::kKindExternal));
       EXPECT_TRUE(derived[3].history);
+      EXPECT_EQ(derived[4].layout_tag,
+                static_cast<std::uint64_t>(
+                    VulkanComposeChain::kKindPresent));
+      EXPECT_TRUE(derived[4].history);
+      EXPECT_EQ(derived[4].first_use, 2U);
+      EXPECT_EQ(derived[4].last_use, 2U);
       EXPECT_EQ(derived[0].last_use, 2U);
     } else {
+      // Without bloom the tonemap declares the present attachment before
+      // sampling external, so present first-touches first: hdr, depth,
+      // present, external.
       EXPECT_EQ(derived[2].layout_tag,
-                static_cast<std::uint64_t>(VulkanComposeChain::kKindExternal));
+                static_cast<std::uint64_t>(
+                    VulkanComposeChain::kKindPresent));
       EXPECT_TRUE(derived[2].history);
+      EXPECT_EQ(derived[2].first_use, 1U);
+      EXPECT_EQ(derived[2].last_use, 1U);
+      EXPECT_EQ(derived[3].layout_tag,
+                static_cast<std::uint64_t>(
+                    VulkanComposeChain::kKindExternal));
+      EXPECT_TRUE(derived[3].history);
       EXPECT_EQ(derived[0].last_use, 1U);
     }
   }

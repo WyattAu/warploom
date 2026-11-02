@@ -114,6 +114,22 @@ namespace warploom::render {
   }
   hdr_format_ = hdr_format;
 
+  // Blade stage 1: negotiate dynamic rendering for the bloom stage. The
+  // config requests it; the device grants it (Vulkan 1.3 core feature,
+  // no extension). Falls back to baked passes when either side says no,
+  // so a device without dynamicRendering still composes identically.
+  dynamic_enabled_ = false;
+  if (config_.enable_dynamic_rendering) {
+    VkPhysicalDeviceVulkan13Features features13{};
+    features13.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    VkPhysicalDeviceFeatures2 features2{};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &features13;
+    vkGetPhysicalDeviceFeatures2(physical_device_, &features2);
+    dynamic_enabled_ = features13.dynamicRendering != 0U;
+  }
+
   // One-time setup: allocator, descriptors, samplers, pipelines, black
   // texture. Size-dependent resources are (re)created below.
   if (!allocator_) {
@@ -133,14 +149,15 @@ namespace warploom::render {
         {0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
          VK_SHADER_STAGE_FRAGMENT_BIT},
         {0, 1, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-         VK_SHADER_STAGE_FRAGMENT_BIT}}, 3U);
+         VK_SHADER_STAGE_FRAGMENT_BIT}}, 4U);
     if (!layout.is_ok()) return refuse("compose descriptor layout failed");
     compose_layout_ = layout.value();
     auto set = descriptor_manager_->allocate_set(compose_layout_);
     if (!set.is_ok()) return refuse("compose descriptor set failed");
     compose_set_ = set.value();
-    // Two tonemap sets, not one: the bloom toggle binds whichever is already
-    // written, so switching costs nothing at runtime. Capacity 2 matches.
+    // Four tonemap sets, not one: the mode/stage selection binds whichever is
+    // already written, so switching costs nothing at runtime (bloom toggle,
+    // PT enter/leave, PT + bloom). Capacity 4 matches.
     auto nobloom_set = descriptor_manager_->allocate_set(compose_layout_);
     if (!nobloom_set.is_ok()) return refuse("compose (no-bloom) set failed");
     compose_set_nobloom_ = nobloom_set.value();
@@ -150,20 +167,31 @@ namespace warploom::render {
     auto external_set = descriptor_manager_->allocate_set(compose_layout_);
     if (!external_set.is_ok()) return refuse("compose (external) set failed");
     compose_set_external_ = external_set.value();
+    // Fourth tonemap set: PT + bloom layering. Binding 0 is the external
+    // accumulation in GENERAL, binding 1 the bloom target. Same pre-write
+    // rule: entering PT with bloom on binds rather than writes.
+    auto external_bloom_set = descriptor_manager_->allocate_set(compose_layout_);
+    if (!external_bloom_set.is_ok()) return refuse("compose (external+bloom) set failed");
+    compose_set_external_bloom_ = external_bloom_set.value();
 
     // The bloom stage set is allocated UNCONDITIONALLY. The original code
     // allocated it only when bloom was on, "because otherwise they are dead
     // weight" -- which is precisely the lazy-create anti-pattern that made the
     // runtime toggle a rebuild. One extra combined-image-sampler descriptor is
     // not a memory concern; a toggle that has to build pipelines at runtime is.
-    auto stage_layout = descriptor_manager_->create_layout({
-        {0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-         VK_SHADER_STAGE_FRAGMENT_BIT}}, 1U);
+  auto stage_layout = descriptor_manager_->create_layout({
+      {0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+       VK_SHADER_STAGE_FRAGMENT_BIT}}, 2U);
     if (!stage_layout.is_ok()) return refuse("bloom stage layout failed");
     bloom_stage_layout_ = stage_layout.value();
     auto down_set = descriptor_manager_->allocate_set(bloom_stage_layout_);
     if (!down_set.is_ok()) return refuse("bloom downsample set failed");
     bloom_down_set_ = down_set.value();
+    // PT-variant bloom set: same one-binding layout, pointed at the external
+    // accumulation. Unconditional for the same lazy-create reason as above.
+    auto down_external_set = descriptor_manager_->allocate_set(bloom_stage_layout_);
+    if (!down_external_set.is_ok()) return refuse("bloom downsample (external) set failed");
+    bloom_down_set_external_ = down_external_set.value();
   }
 
   if (hdr_sampler_ == VK_NULL_HANDLE) {
@@ -328,6 +356,32 @@ namespace warploom::render {
         .is_ok();
   };
 
+  // PT-variant bloom: Karis over the accumulation sum x inverse_samples
+  // (bloom_downsample_pt.frag). Separate pipeline AND layout (the PT shader
+  // takes the 16-byte Compose push; the raster one takes none), built in
+  // the same framing the chain negotiated. Failure is NOT fatal -- exactly
+  // like the raster bloom above, its absence only disables layering.
+  const auto build_pt_bloom_pipeline = [&]() -> bool {
+    VkDescriptorSetLayout stage_layouts[1] = {bloom_stage_layout_};
+    VkPushConstantRange push{};
+    push.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    push.offset = 0U;
+    push.size = 16U;
+    if (bloom_down_pt_pipeline_ == nullptr) {
+      bloom_down_pt_pipeline_ = std::make_unique<VulkanPipeline>();
+    }
+    bloom_down_pt_pipeline_->cleanup();
+    if (!bloom_down_pt_pipeline_
+             ->load_shader_stage_file(device_, dir + "/fullscreen.vert.spv", "vertex").is_ok() ||
+        !bloom_down_pt_pipeline_
+             ->load_shader_stage_file(device_, dir + "/bloom_downsample_pt.frag.spv", "fragment").is_ok()) {
+      return false;
+    }
+    return bloom_down_pt_pipeline_
+        ->create_pipeline_layout(device_, stage_layouts, 1U, &push)
+        .is_ok();
+  };
+
   // ---- size-dependent resources ---------------------------------------
   if (compose_ready_ && compose_width_ == width && compose_height_ == height) {
     return ::warploom::core::Result<void>::ok();
@@ -407,6 +461,14 @@ namespace warploom::render {
                   "(no bloom image planned)\n");
   }
 
+  // The presentation format sizes the plan's present entry (Blade stage 2),
+  // so the unknown-target refuse moves ahead of the derive. Same refusal,
+  // earlier: previously the tonemap pipeline creation below refused on the
+  // same condition after the store was already materialized.
+  if (present_pass_ == VK_NULL_HANDLE ||
+      present_format_ == VK_FORMAT_UNDEFINED) {
+    return refuse("presentation target unknown");
+  }
   // R6b: derive the superset plan, materialize it in the store, and adopt
   // the images into the render-pass shells. The hand-written target image
   // list is gone: no create()/bind_image() call names an HDR/bloom/depth
@@ -448,16 +510,51 @@ namespace warploom::render {
   }
 
   // Tonemap targets the swapchain image: built for the presentation render
-  // pass and format, NOT the HDR intermediate's.
-  if (present_pass_ == VK_NULL_HANDLE ||
-      present_format_ == VK_FORMAT_UNDEFINED) {
-    return refuse("presentation target unknown");
-  }
+  // pass and format, NOT the HDR intermediate's. (The unknown-target refuse
+  // now lives ahead of the derive above.)
   if (!compose_pipeline_
            ->create_graphics_pipeline(device_, present_pass_, present_format_,
                                      compose_layout, false, false, false)
            .is_ok()) {
     return refuse("compose pipeline creation failed");
+  }
+  // Blade stage 2: the dynamic tonemap pipeline shares the baked one's
+  // shaders, set layouts and push range, but no render pass. Built only
+  // when negotiated; its absence (like every pipeline failure here that
+  // is not the tonemap itself) only disables the dynamic tonemap, never
+  // the frame.
+  if (compose_dynamic_pipeline_ == nullptr) {
+    compose_dynamic_pipeline_ = std::make_unique<VulkanPipeline>();
+  }
+  compose_dynamic_pipeline_->cleanup();
+  if (dynamic_enabled_) {
+    VkDescriptorSetLayout dyn_layouts[1] = {compose_layout_};
+    VkPushConstantRange dyn_push{};
+    dyn_push.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    dyn_push.offset = 0U;
+    dyn_push.size = 16U;
+    if (!compose_dynamic_pipeline_
+             ->load_shader_stage_file(device_, dir + "/fullscreen.vert.spv",
+                                      "vertex")
+             .is_ok() ||
+        !compose_dynamic_pipeline_
+             ->load_shader_stage_file(device_, dir + "/tonemap_fxaa.frag.spv",
+                                      "fragment")
+             .is_ok() ||
+        !compose_dynamic_pipeline_
+             ->create_pipeline_layout(device_, dyn_layouts, 1U, &dyn_push)
+             .is_ok() ||
+        !compose_dynamic_pipeline_
+             ->create_graphics_pipeline_dynamic(device_, present_format_,
+                                               compose_dynamic_pipeline_
+                                                   ->pipeline_layout(),
+                                               false)
+             .is_ok()) {
+      WARPLOOM_WARN("render",
+                    "dynamic tonemap pipeline creation failed; tonemap records "
+                    "baked (dynamic bloom unaffected)\n");
+      compose_dynamic_pipeline_->cleanup();
+    }
   }
 
   // Bloom shell over the store's image, built when the shaders exist.
@@ -487,12 +584,18 @@ namespace warploom::render {
                   "bloom target creation failed; bloom unavailable this "
                   "session (tonemap unaffected)\n");
     bloom_target_->cleanup();
-  } else if (!bloom_down_pipeline_
-                    ->create_graphics_pipeline(
-                        device_, bloom_target_->render_pass(), hdr_format_,
-                        bloom_down_pipeline_->pipeline_layout(), false, false,
-                        false)
-                    .is_ok()) {
+  } else if ((dynamic_enabled_
+                  ? !bloom_down_pipeline_
+                         ->create_graphics_pipeline_dynamic(
+                             device_, hdr_format_,
+                             bloom_down_pipeline_->pipeline_layout(), false)
+                         .is_ok()
+                  : !bloom_down_pipeline_
+                         ->create_graphics_pipeline(
+                             device_, bloom_target_->render_pass(), hdr_format_,
+                             bloom_down_pipeline_->pipeline_layout(), false,
+                             false, false)
+                         .is_ok())) {
     WARPLOOM_WARN("render",
                   "bloom pipeline creation failed; bloom unavailable this "
                   "session (tonemap unaffected)\n");
@@ -501,6 +604,39 @@ namespace warploom::render {
     bloom_available_ = true;
   }
   bloom_enabled_ = bloom_enabled_ && bloom_available_;
+
+  // PT-variant bloom pipeline: same shell (bloom target), different source
+  // shader. Built only when the raster bloom exists (no target otherwise),
+  // in the same framing. Missing PT shader (or pipeline failure) only
+  // disables layering: PT + bloom falls back to PT-only.
+  pt_bloom_available_ = false;
+  if (bloom_available_) {
+    const bool pt_shaders_ok = build_pt_bloom_pipeline();
+    if (!pt_shaders_ok) {
+      WARPLOOM_WARN("render",
+                    "PT bloom shaders unavailable; PT frames compose without "
+                    "bloom (raster bloom unaffected)\n");
+      if (bloom_down_pt_pipeline_ != nullptr) bloom_down_pt_pipeline_->cleanup();
+    } else if ((dynamic_enabled_
+                    ? !bloom_down_pt_pipeline_
+                           ->create_graphics_pipeline_dynamic(
+                               device_, hdr_format_,
+                               bloom_down_pt_pipeline_->pipeline_layout(), false)
+                           .is_ok()
+                    : !bloom_down_pt_pipeline_
+                           ->create_graphics_pipeline(
+                               device_, bloom_target_->render_pass(), hdr_format_,
+                               bloom_down_pt_pipeline_->pipeline_layout(), false,
+                               false, false)
+                           .is_ok())) {
+      WARPLOOM_WARN("render",
+                    "PT bloom pipeline creation failed; PT frames compose "
+                    "without bloom (raster bloom unaffected)\n");
+      bloom_down_pt_pipeline_->cleanup();
+    } else {
+      pt_bloom_available_ = true;
+    }
+  }
 
   // Bind the two sampler slots of BOTH tonemap sets: HDR input at 0, and at 1
   // either the bloom target or the 1x1 black texture. Writing both up front is
@@ -563,6 +699,47 @@ namespace warploom::render {
              .is_ok()) {
       return refuse("external-source descriptor write failed");
     }
+    // PT + bloom set: same source at binding 0, the real bloom target (or
+    // black when bloom is unavailable) at binding 1. Same fallback rule as
+    // above, so selecting it without a source is equally harmless.
+    if (!descriptor_manager_
+             ->write_image(compose_set_external_bloom_, 0U,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                           hdr_sampler_,
+                           have_external ? external_view_
+                                         : hdr_target_->image_view(),
+                           have_external
+                               ? VK_IMAGE_LAYOUT_GENERAL
+                               : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           0U)
+             .is_ok() ||
+        !descriptor_manager_
+             ->write_image(compose_set_external_bloom_, 1U,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                           linear_sampler_, bloom_slot_view,
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
+             .is_ok()) {
+      return refuse("external+bloom descriptor write failed");
+    }
+  }
+  // PT-variant bloom set: the external accumulation in GENERAL, or the HDR
+  // fallback when no source is set (never bound then, but never dangling).
+  {
+    const bool have_external = external_image_ != VK_NULL_HANDLE &&
+                               external_view_ != VK_NULL_HANDLE;
+    if (!descriptor_manager_
+             ->write_image(bloom_down_set_external_, 0U,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                           hdr_sampler_,
+                           have_external ? external_view_
+                                         : hdr_target_->image_view(),
+                           have_external
+                               ? VK_IMAGE_LAYOUT_GENERAL
+                               : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           0U)
+             .is_ok()) {
+      return refuse("external bloom-stage descriptor write failed");
+    }
   }
   // The bright-pass reads the HDR scene. Only when bloom exists: with no target
   // there is no pipeline to bind this to, and writing a null view fails.
@@ -610,6 +787,31 @@ void record_compose_stage(VkCommandBuffer command_buffer,
 #endif
 }
 
+void record_compose_dynamic_stage(VkCommandBuffer command_buffer,
+                                  const GraphDynamicPass& pass, void* user) {
+#ifdef OMNICPP_HAS_VULKAN
+  const auto* stage = static_cast<const ComposeStage*>(user);
+  if (stage == nullptr || stage->pipeline == nullptr) return;
+  // The executor owns begin/endRendering; the callback owns bind + draw --
+  // the same split as the baked path (begin/end in execute_graph, draw
+  // here). A dynamic draw reuses every draw parameter (pipeline, layout,
+  // extents, push) and only swaps the framing for the node's view.
+  FullscreenPass draw{};
+  draw.pipeline = stage->pipeline->pipeline();
+  draw.pipeline_layout = stage->pipeline->pipeline_layout();
+  draw.width = pass.width;
+  draw.height = pass.height;
+  draw.push_data = stage->push;
+  draw.push_size = stage->push_size;
+  draw.push_stage_flags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  (void)record_fullscreen_draw(command_buffer, draw, stage->set);
+#else
+  (void)command_buffer;
+  (void)pass;
+  (void)user;
+#endif
+}
+
 void VulkanComposeChain::set_external_source(VkImage image,
                                              VkImageView view) noexcept {
   external_image_ = image;
@@ -630,19 +832,50 @@ void VulkanComposeChain::set_external_source(VkImage image,
       have ? VK_IMAGE_LAYOUT_GENERAL
            : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
       0U);
+  // PT + bloom layering reads the same source twice (tonemap binding 0 and
+  // the bloom bright-pass), so all three source-bound sets move together.
+  // A set written here while another frame is in flight would be VUID-03047,
+  // but these writes happen on mode transitions (enter/leave PT), never per
+  // frame -- the same rule the original write follows.
+  if (compose_set_external_bloom_ != VK_NULL_HANDLE) {
+    (void)descriptor_manager_->write_image(
+        compose_set_external_bloom_, 0U,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, hdr_sampler_,
+        have ? view : hdr_target_->image_view(),
+        have ? VK_IMAGE_LAYOUT_GENERAL
+             : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        0U);
+  }
+  if (bloom_down_set_external_ != VK_NULL_HANDLE) {
+    (void)descriptor_manager_->write_image(
+        bloom_down_set_external_, 0U,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, hdr_sampler_,
+        have ? view : hdr_target_->image_view(),
+        have ? VK_IMAGE_LAYOUT_GENERAL
+             : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        0U);
+  }
 }
 
 void VulkanComposeChain::build_graph_passes(
     VkRenderPass target_pass, VkFramebuffer target_framebuffer,
-    std::uint32_t width, std::uint32_t height, std::vector<GraphPass>& passes,
+    VkImage present_image, VkImageView present_view, std::uint32_t width,
+    std::uint32_t height, std::vector<GraphPass>& passes,
+    std::vector<GraphDynamicPass>& dyn_passes,
     std::vector<ComposeStage>& stages, VkClearValue* clear_storage) {
 #ifdef OMNICPP_HAS_VULKAN
   passes.clear();
+  dyn_passes.clear();
   stages.clear();
   if (!compose_ready_ || hdr_sampler_ == VK_NULL_HANDLE ||
       clear_storage == nullptr) {
     return;
   }
+  // Blade stage 2: cache the presentation image for kind_of_image() (the
+  // swapchain image is caller-owned, like the external source). Lives
+  // exactly as long as the built passes -- see the member docs.
+  present_image_ = present_image;
+  present_view_ = present_view;
 
   // Where the scene pass left the HDR image. It is recorded outside this graph
   // when record() is used alone, so each stage's first sample of it declares
@@ -688,20 +921,52 @@ void VulkanComposeChain::build_graph_passes(
   // The shader stays in assets/shaders (bloom_upsample.frag) and
   // test_postprocessing.cpp still exercises it directly: it is a legitimate
   // standalone pass, just not part of this chain.
+  // Blade stage 1: the bloom downsample migrates to dynamic rendering when
+  // negotiated (dynamic_enabled_); the tonemap stays baked because it writes
+  // the swapchain, whose image/view the chain is never handed. The stage
+  // flag records which framing its pass uses so record() and the renderer
+  // route each node to the matching record callback.
+  const bool bloom_dynamic = bloom_on && dynamic_enabled_;
+  // PT + bloom layering: with an external accumulation AND bloom on, the
+  // bright-pass reads the external SUM (GENERAL, ordered by the source scope
+  // below -- the same fix as the tonemap's frozen-view bug) instead of the
+  // HDR intermediate, which the scene never renders in PT mode. The PT
+  // shader divides by the sample count before the threshold, so it sees the
+  // same mean radiance the raster bloom thresholds; exposure stays in the
+  // tonemap on both paths.
+  const bool external = external_image_ != VK_NULL_HANDLE;
+  const bool pt_bloom = external && bloom_on && pt_bloom_available_ &&
+                        bloom_down_pt_pipeline_ != nullptr;
   if (bloom_on) {
     ComposeStage down{};
-    down.pipeline = bloom_down_pipeline_.get();
+    down.pipeline = pt_bloom ? bloom_down_pt_pipeline_.get()
+                             : bloom_down_pipeline_.get();
     down.target = bloom_target_.get();
     down.pass = bloom_target_->render_pass();
     down.framebuffer = bloom_target_->framebuffer();
+    down.dynamic = bloom_dynamic;
     down.width = bloom_target_->width();
     down.height = bloom_target_->height();
-    down.set = bloom_down_set_;
-    down.samples[0].image = hdr_target_->image();
-    down.samples[0].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    down.samples[0].initial_layout = hdr_from_scene;
-    down.samples[0].initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    down.samples[0].initial_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    down.set = pt_bloom ? bloom_down_set_external_ : bloom_down_set_;
+    if (pt_bloom) {
+      // The PT shader takes the Compose push (inverse_samples); the raster
+      // shader takes none. Same member the tonemap points at, written above.
+      down.push = &compose_push_;
+      down.push_size = sizeof(compose_push_);
+      down.samples[0].image = external_image_;
+      down.samples[0].used_layout = VK_IMAGE_LAYOUT_GENERAL;
+      down.samples[0].initial_layout = VK_IMAGE_LAYOUT_GENERAL;
+      down.samples[0].initial_access = VK_ACCESS_SHADER_WRITE_BIT;
+      down.samples[0].initial_stage =
+          VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+    } else {
+      down.samples[0].image = hdr_target_->image();
+      down.samples[0].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      down.samples[0].initial_layout = hdr_from_scene;
+      down.samples[0].initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+      down.samples[0].initial_stage =
+          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    }
     down.sample_count = 1;
     stages.push_back(down);
   }
@@ -713,19 +978,33 @@ void VulkanComposeChain::build_graph_passes(
   // cost of the toggle. The off-set's slot 1 is the 1x1 black texture, so the
   // shader is unchanged between configurations and the set is chosen, not
   // rewritten.
+  //
+  // Blade stage 2: the tonemap goes dynamic whenever the negotiated framing
+  // is dynamic AND the caller supplied the present image/view. The baked
+  // path stays for callers that only have a pass/framebuffer (and whenever
+  // the device refused dynamic rendering): same shaders, same sets, same
+  // samples -- only the framing differs.
+  const bool tonemap_dynamic =
+      dynamic_enabled_ && compose_dynamic_pipeline_ != nullptr &&
+      compose_dynamic_pipeline_->pipeline() != VK_NULL_HANDLE &&
+      present_image != VK_NULL_HANDLE && present_view != VK_NULL_HANDLE;
   ComposeStage tonemap{};
-  tonemap.pipeline = compose_pipeline_.get();
+  tonemap.pipeline = tonemap_dynamic ? compose_dynamic_pipeline_.get()
+                                     : compose_pipeline_.get();
   tonemap.target = nullptr;  // presentation target
+  tonemap.present_image = present_image;
+  tonemap.present_view = present_view;
+  tonemap.dynamic = tonemap_dynamic;
   tonemap.pass = target_pass;
   tonemap.framebuffer = target_framebuffer;
   tonemap.width = width;
   tonemap.height = height;
   tonemap.push = &compose_push_;
   tonemap.push_size = sizeof(compose_push_);
-  // Three pre-written sets, selected by what this frame actually contains:
-  // external source (path tracing) > bloom > plain raster.
-  const bool external = external_image_ != VK_NULL_HANDLE;
-  tonemap.set = external ? compose_set_external_
+  // Four pre-written sets, selected by what this frame actually contains:
+  // PT + bloom > PT-only > raster bloom > plain raster.
+  tonemap.set = external ? (pt_bloom ? compose_set_external_bloom_
+                                     : compose_set_external_)
                          : (bloom_on ? compose_set_ : compose_set_nobloom_);
   tonemap.samples[0].image = external ? external_image_ : hdr_target_->image();
   tonemap.samples[0].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -771,7 +1050,7 @@ void VulkanComposeChain::build_graph_passes(
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
   }
   tonemap.sample_count = 1U;
-  if (!external && bloom_on) {
+  if (bloom_on && (!external || pt_bloom)) {
     tonemap.samples[1].image = bloom_target_->image();
     tonemap.samples[1].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     tonemap.samples[1].initial_layout = bloom_target_->color_final_layout();
@@ -786,10 +1065,43 @@ void VulkanComposeChain::build_graph_passes(
   // so the compiler tracks write-after-write and write-after-read edges too.
   // The pass carries the stage as its opaque record handle; `stages` (the
   // out-param) owns them, so user_data stays valid through the caller's
-  // execute_graph call.
+  // execute_graph call. Baked stages fill `passes`, dynamic stages fill
+  // `dyn_passes` (Blade stage 1: the bloom downsample); the caller keeps
+  // both alive and builds one mixed GraphNode list.
   passes.reserve(stages.size());
+  dyn_passes.reserve(stages.size());
   for (std::size_t i = 0; i < stages.size(); ++i) {
     const ComposeStage& stage = stages[i];
+    if (stage.dynamic) {
+      // Dynamic target: the bloom shell (Blade stage 1) or the swapchain
+      // image (Blade stage 2: the tonemap). The swapchain image starts
+      // UNDEFINED every frame (acquire gives no layout guarantee) and the
+      // baked present pass clears it -- the dynamic tonemap clears it too,
+      // and leaves it in PRESENT_SRC_KHR, the baked pass's finalLayout.
+      GraphDynamicPass dyn{};
+      if (stage.target != nullptr) {
+        dyn.name = "compose-bloom";
+        dyn.image = stage.target->image();
+        dyn.view = stage.target->image_view();
+        dyn.format = stage.target->format();
+        dyn.final_layout = stage.target->color_final_layout();
+      } else {
+        dyn.name = "compose-tonemap";
+        dyn.image = stage.present_image;
+        dyn.view = stage.present_view;
+        dyn.format = present_format_;
+        dyn.final_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+      }
+      dyn.width = stage.width;
+      dyn.height = stage.height;
+      dyn.clear = true;
+      dyn.clear_value.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+      dyn.sampled_images.assign(stage.samples.begin(),
+                                stage.samples.begin() + stage.sample_count);
+      dyn.user_data = &stages[i];
+      dyn_passes.push_back(dyn);
+      continue;
+    }
     GraphPass pass{};
     pass.name = "compose";
     pass.render_pass = stage.pass;
@@ -831,34 +1143,51 @@ void VulkanComposeChain::build_graph_passes(
   // is compiler-owned instead of hand-seeded.
 #else
   (void)target_pass; (void)target_framebuffer;
+  (void)present_image; (void)present_view;
   (void)width; (void)height;
-  (void)passes; (void)stages; (void)clear_storage;
+  (void)passes; (void)dyn_passes; (void)stages; (void)clear_storage;
 #endif
 }
 
 void VulkanComposeChain::record(VkCommandBuffer command_buffer,
                                 VkRenderPass target_pass,
                                 VkFramebuffer target_framebuffer,
+                                VkImage present_image, VkImageView present_view,
                                 std::uint32_t width, std::uint32_t height) {
 #ifdef OMNICPP_HAS_VULKAN
   std::vector<GraphPass> passes;
+  std::vector<GraphDynamicPass> dyn_passes;
   std::vector<ComposeStage> stages;
   VkClearValue clear[2]{};
-  build_graph_passes(target_pass, target_framebuffer, width, height, passes,
-                     stages, clear);
-  if (passes.empty()) return;
+  build_graph_passes(target_pass, target_framebuffer, present_image,
+                     present_view, width, height, passes, dyn_passes, stages,
+                     clear);
+  if (passes.empty() && dyn_passes.empty()) return;
 
+  // Mixed node list in stage order: the bloom dynamic node (if any) was
+  // declared first, so it records first. from_dynamic borrows the stored
+  // pass; stages outlive the call, so every user_data stays valid.
   std::vector<GraphNode> nodes;
-  nodes.reserve(passes.size());
-  for (const GraphPass& pass : passes) {
-    nodes.push_back(GraphNode::from_render(pass));
+  nodes.reserve(passes.size() + dyn_passes.size());
+  std::size_t bi = 0, di = 0;
+  for (const ComposeStage& stage : stages) {
+    if (stage.dynamic && stage.target != nullptr) {
+      if (di < dyn_passes.size()) {
+        nodes.push_back(GraphNode::from_dynamic(dyn_passes[di++]));
+      }
+    } else {
+      if (bi < passes.size()) {
+        nodes.push_back(GraphNode::from_render(passes[bi++]));
+      }
+    }
   }
 
   const CompiledGraph compiled = compile_graph(nodes);
   execute_graph(command_buffer, nodes, compiled, &record_compose_stage,
-                nullptr);
+                nullptr, 0U, &record_compose_dynamic_stage);
 #else
   (void)command_buffer; (void)target_pass; (void)target_framebuffer;
+  (void)present_image; (void)present_view;
   (void)width; (void)height;
 #endif
 }
@@ -875,7 +1204,7 @@ int VulkanComposeChain::skeleton_kind_of(VkImage image) noexcept {
   const auto id = static_cast<std::uintptr_t>(
       reinterpret_cast<std::uintptr_t>(image));
   if (id >= static_cast<std::uintptr_t>(kKindHdrColor) &&
-      id <= static_cast<std::uintptr_t>(kKindExternal)) {
+      id <= static_cast<std::uintptr_t>(kKindPresent)) {
     return static_cast<int>(id);
   }
   return 0;
@@ -891,6 +1220,8 @@ const char* VulkanComposeChain::transient_kind_name(int kind) noexcept {
       return "bloom_color";
     case kKindExternal:
       return "external";
+    case kKindPresent:
+      return "present";
     default:
       return "unknown";
   }
@@ -908,6 +1239,11 @@ void VulkanComposeChain::build_plan_skeleton_nodes(
   scene.attachments = {hdr_att, depth_att};
   passes.push_back(scene);
   if (include_bloom) {
+    // PT + bloom superset: the recorded bloom stage samples HDR (raster) or
+    // the external accumulation (PT), so the skeleton samples BOTH. That
+    // widens the with-bloom external interval from [2,2] to [1,2], which
+    // covers the PT + bloom recording ([bloom=1, tonemap=2]) and still
+    // contains the raster one ([tonemap=2]). Subset checks only shrink.
     GraphPass down{};
     down.name = "bloom_down";
     RenderPassAttachment bloom_att{};
@@ -915,11 +1251,20 @@ void VulkanComposeChain::build_plan_skeleton_nodes(
     down.attachments = {bloom_att};
     GraphSampledImage sample{};
     sample.image = skeleton_image_of(kKindHdrColor);
-    down.sampled_images = {sample};
+    GraphSampledImage sample_pt{};
+    sample_pt.image = skeleton_image_of(kKindExternal);
+    down.sampled_images = {sample, sample_pt};
     passes.push_back(down);
   }
   GraphPass tonemap{};
   tonemap.name = "tonemap";
+  // Blade stage 2: the tonemap WRITES the presentation image (dynamic
+  // framing), so the skeleton declares it as an attachment -- the plan
+  // covers the full frame including present. Caller-owned history like
+  // the external source: planned, never created, never aliased.
+  RenderPassAttachment present_att{};
+  present_att.image = skeleton_image_of(kKindPresent);
+  tonemap.attachments = {present_att};
   GraphSampledImage sample_hdr{};
   sample_hdr.image = skeleton_image_of(kKindHdrColor);
   tonemap.sampled_images.push_back(sample_hdr);
@@ -938,7 +1283,7 @@ void VulkanComposeChain::skeleton_intervals(bool include_bloom,
                                             KindInterval* out,
                                             int* first_touch,
                                             int* touch_count) {
-  for (int k = 0; k <= kKindExternal; ++k) out[k] = KindInterval{};
+  for (int k = 0; k <= kKindPresent; ++k) out[k] = KindInterval{};
   std::vector<GraphPass> skeleton;
   build_plan_skeleton_nodes(include_bloom, skeleton);
   int n = 0;
@@ -987,8 +1332,8 @@ bool VulkanComposeChain::derive_compose_plan(
     std::uint32_t first{0};
     std::uint32_t last{0};
   };
-  Interval by_kind[kKindExternal + 1]{};
-  int first_touch[kKindExternal + 1]{0, 0, 0, 0, 0};
+  Interval by_kind[kKindPresent + 1]{};
+  int first_touch[kKindPresent + 1]{0, 0, 0, 0, 0, 0};
   int touch_count = 0;
   for (std::uint32_t p = 0; p < skeleton.size(); ++p) {
     const GraphPass& node = skeleton[p];
@@ -1023,6 +1368,18 @@ bool VulkanComposeChain::derive_compose_plan(
   } else {
     return false;
   }
+  // Presentation bytes per pixel (Blade stage 2: the plan covers the
+  // present image). The unknown-format refuse ahead of the derive keeps
+  // present_format_ known here; anything else fails loudly like hdr_bpp.
+  std::uint64_t present_bpp = 0U;
+  if (present_format_ == VK_FORMAT_R16G16B16A16_SFLOAT) {
+    present_bpp = 8U;
+  } else if (present_format_ == VK_FORMAT_B8G8R8A8_UNORM ||
+             present_format_ == VK_FORMAT_B8G8R8A8_SRGB) {
+    present_bpp = 4U;
+  } else {
+    return false;
+  }
   planned_resources_.clear();
   planned_kinds_.clear();
   for (int t = 0; t < touch_count; ++t) {
@@ -1031,10 +1388,10 @@ bool VulkanComposeChain::derive_compose_plan(
     r.name = transient_kind_name(kind);
     r.first_use = by_kind[kind].first;
     r.last_use = by_kind[kind].last;
-    // The external source is caller-owned history (read across the frame
-    // boundary by the tracer/capture); everything the store creates is
-    // frame-local transient.
-    r.history = (kind == kKindExternal);
+    // Caller-owned history (read across the frame boundary by the
+    // tracer/capture, written by present for the swapchain); everything the
+    // store creates is frame-local transient.
+    r.history = (kind == kKindExternal || kind == kKindPresent);
     switch (kind) {
       case kKindHdrColor:
         r.size_bytes = static_cast<std::uint64_t>(width) * height * hdr_bpp;
@@ -1048,6 +1405,13 @@ bool VulkanComposeChain::derive_compose_plan(
       case kKindExternal:
         r.size_bytes = static_cast<std::uint64_t>(width) * height * 16U;
         break;
+      case kKindPresent:
+        // Swapchain-sized, presentation format. The planner only uses the
+        // size for packing; a history entry is always Dedicated, so this
+        // never shares -- but it must be honest for the store's bind check.
+        r.size_bytes =
+            static_cast<std::uint64_t>(width) * height * present_bpp;
+        break;
       default:
         return false;
     }
@@ -1059,8 +1423,10 @@ bool VulkanComposeChain::derive_compose_plan(
       planned_resources_, static_cast<std::uint32_t>(skeleton.size()));
   if (planned_plan_.size() != planned_resources_.size()) return false;
 
-  // One desc per OWNED kind present in the skeleton. The external source is
-  // caller-owned: planned (its history blocks aliasing) but never created.
+  // One desc per OWNED kind present in the skeleton. The external source
+  // and the present image are caller-owned: planned (their history blocks
+  // aliasing) but never created.
+  // NOTE: no present desc block -- same rule as external.
   TransientImageDesc hdr{};
   hdr.name = transient_kind_name(kKindHdrColor);
   hdr.format = hdr_format;
@@ -1097,8 +1463,8 @@ bool VulkanComposeChain::derive_compose_plan(
   // index earlier, and an absolute map over the bloom-on skeleton refuses a
   // legal frame. Both maps come from the same skeleton builder, never from
   // restated constants.
-  int ft_off[kKindExternal + 1]{};
-  int ft_on[kKindExternal + 1]{};
+  int ft_off[kKindPresent + 1]{};
+  int ft_on[kKindPresent + 1]{};
   int n_off = 0;
   int n_on = 0;
   skeleton_intervals(false, planned_intervals_[0], ft_off, &n_off);
@@ -1109,6 +1475,9 @@ bool VulkanComposeChain::derive_compose_plan(
 int VulkanComposeChain::kind_of_image(VkImage image) const noexcept {
   if (image == VK_NULL_HANDLE) return 0;
   if (image == external_image_) return kKindExternal;
+  // Blade stage 2: the presentation image is caller-owned (swapchain or a
+  // headless stand-in), cached per built frame -- see present_image_.
+  if (image == present_image_) return kKindPresent;
   if (image == transient_store_.image(transient_kind_name(kKindHdrColor))) {
     return kKindHdrColor;
   }
@@ -1122,6 +1491,105 @@ int VulkanComposeChain::kind_of_image(VkImage image) const noexcept {
 }
 
 bool VulkanComposeChain::verify_frame_nodes(
+    const std::vector<GraphNode>& nodes) const {
+  if (!transient_store_.ready()) return false;
+  if (planned_resources_.size() != planned_kinds_.size() ||
+      planned_resources_.size() != planned_plan_.size()) {
+    return false;
+  }
+  // Node walk: a render node's attachments + samples, a dynamic node's
+  // single target + samples, a compute node's image uses. Same interval
+  // rule as the pass walk -- the framing (baked vs dynamic) changes the
+  // barrier shape, not the lifetime each image is live for.
+  struct NodeInterval {
+    bool seen{false};
+    std::uint32_t first{0};
+    std::uint32_t last{0};
+  };
+  NodeInterval by_kind[kKindPresent + 1]{};
+  auto touch = [&](int kind, std::uint32_t p) -> bool {
+    if (kind <= 0 || kind > kKindPresent) return false;
+    if (!by_kind[kind].seen) {
+      by_kind[kind].seen = true;
+      by_kind[kind].first = p;
+    }
+    by_kind[kind].last = p;
+    return true;
+  };
+  for (std::uint32_t p = 0; p < nodes.size(); ++p) {
+    const GraphNode& node = nodes[p];
+    if (node.render != nullptr) {
+      for (const RenderPassAttachment& att : node.render->attachments) {
+        if (!touch(kind_of_image(att.image), p)) return false;
+      }
+      for (const GraphSampledImage& sample : node.render->sampled_images) {
+        if (!touch(kind_of_image(sample.image), p)) return false;
+      }
+    }
+    if (node.dynamic != nullptr) {
+      if (node.dynamic->image != VK_NULL_HANDLE) {
+        if (!touch(kind_of_image(node.dynamic->image), p)) return false;
+      }
+      for (const GraphSampledImage& sample : node.dynamic->sampled_images) {
+        if (!touch(kind_of_image(sample.image), p)) return false;
+      }
+    }
+    if (node.compute != nullptr) {
+      for (const GraphImageUse& use : node.compute->image_uses) {
+        if (use.image == VK_NULL_HANDLE || use.level_count == 0U) continue;
+        if (!touch(kind_of_image(use.image), p)) return false;
+      }
+    }
+  }
+  const KindInterval* ref =
+      planned_intervals_[by_kind[kKindBloomColor].seen ? 1 : 0];
+  for (int kind = kKindHdrColor; kind <= kKindPresent; ++kind) {
+    if (!by_kind[kind].seen) continue;
+    if (!ref[kind].seen) return false;
+    if (by_kind[kind].first < ref[kind].first ||
+        by_kind[kind].last > ref[kind].last) {
+      return false;
+    }
+    for (std::size_t i = 0; i < planned_kinds_.size(); ++i) {
+      if (planned_kinds_[i] == kind && planned_resources_[i].history &&
+          kind != kKindExternal && kind != kKindPresent) {
+        return false;
+      }
+    }
+  }
+  for (const ResourceAllocationPlan& entry : planned_plan_) {
+    if (entry.kind != ResourceAllocation::Aliased) continue;
+    int owner_kind = 0, sharer_kind = 0;
+    for (std::size_t i = 0; i < planned_resources_.size(); ++i) {
+      if (planned_resources_[i].name == entry.resource) {
+        sharer_kind = planned_kinds_[i];
+      }
+      if (planned_resources_[i].name == entry.shares_with) {
+        owner_kind = planned_kinds_[i];
+      }
+    }
+    if (owner_kind <= 0 || sharer_kind <= 0) return false;
+    if (!by_kind[owner_kind].seen || !by_kind[sharer_kind].seen) continue;
+    const std::uint32_t a_first = by_kind[sharer_kind].first;
+    const std::uint32_t a_last = by_kind[sharer_kind].last;
+    const std::uint32_t b_first = by_kind[owner_kind].first;
+    const std::uint32_t b_last = by_kind[owner_kind].last;
+    if (a_first <= b_last && b_first <= a_last) return false;
+  }
+  for (std::size_t i = 0; i < planned_resources_.size(); ++i) {
+    if (!planned_resources_[i].history) continue;
+    if (planned_plan_[i].kind == ResourceAllocation::Aliased) return false;
+    for (const ResourceAllocationPlan& entry : planned_plan_) {
+      if (entry.kind == ResourceAllocation::Aliased &&
+          entry.shares_with == planned_resources_[i].name) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool VulkanComposeChain::verify_frame_nodes(
     const std::vector<GraphPass>& passes) const {
   if (!transient_store_.ready()) return false;
   if (planned_resources_.size() != planned_kinds_.size() ||
@@ -1130,14 +1598,14 @@ bool VulkanComposeChain::verify_frame_nodes(
   }
   // Kind-aware walk over what was ACTUALLY recorded (same visit order as
   // the skeleton walk). An unknown handle is a shape violation, not a skip:
-  // every image in these nodes must be a planned kind or the external
-  // source, otherwise the plan does not cover the frame.
+  // every image in these nodes must be a planned kind (store-owned,
+  // external, or present), otherwise the plan does not cover the frame.
   struct Interval {
     bool seen{false};
     std::uint32_t first{0};
     std::uint32_t last{0};
   };
-  Interval by_kind[kKindExternal + 1]{};
+  Interval by_kind[kKindPresent + 1]{};
   for (std::uint32_t p = 0; p < passes.size(); ++p) {
     const GraphPass& node = passes[p];
     for (const RenderPassAttachment& att : node.attachments) {
@@ -1172,18 +1640,19 @@ bool VulkanComposeChain::verify_frame_nodes(
   // with the toggle off, HDR in PT mode) is idle memory, not a violation:
   // skipping it is sound because an untouched image cannot corrupt an alias
   // pair.
-  for (int kind = kKindHdrColor; kind <= kKindExternal; ++kind) {
+  for (int kind = kKindHdrColor; kind <= kKindPresent; ++kind) {
     if (!by_kind[kind].seen) continue;
     if (!ref[kind].seen) return false;
     if (by_kind[kind].first < ref[kind].first ||
         by_kind[kind].last > ref[kind].last) {
       return false;
     }
-    // Owned images are never history; only the caller-owned external is.
-    // (History lives in the stored plan, not the shape maps.)
+    // Owned images are never history; only the caller-owned external and
+    // present images are. (History lives in the stored plan, not the
+    // shape maps.)
     for (std::size_t i = 0; i < planned_kinds_.size(); ++i) {
       if (planned_kinds_[i] == kind && planned_resources_[i].history &&
-          kind != kKindExternal) {
+          kind != kKindExternal && kind != kKindPresent) {
         return false;
       }
     }
@@ -1236,6 +1705,8 @@ void VulkanComposeChain::destroy() noexcept {
   compose_set_ = VK_NULL_HANDLE;
   compose_set_nobloom_ = VK_NULL_HANDLE;
   compose_set_external_ = VK_NULL_HANDLE;
+  compose_set_external_bloom_ = VK_NULL_HANDLE;
+  bloom_down_set_external_ = VK_NULL_HANDLE;
   external_image_ = VK_NULL_HANDLE;
   external_view_ = VK_NULL_HANDLE;
   inverse_samples_ = 1.0F;
@@ -1254,6 +1725,15 @@ void VulkanComposeChain::destroy() noexcept {
   if (bloom_down_pipeline_ != nullptr) {
     bloom_down_pipeline_->cleanup();
     bloom_down_pipeline_.reset();
+  }
+  if (bloom_down_pt_pipeline_ != nullptr) {
+    bloom_down_pt_pipeline_->cleanup();
+    bloom_down_pt_pipeline_.reset();
+  }
+  pt_bloom_available_ = false;
+  if (compose_dynamic_pipeline_ != nullptr) {
+    compose_dynamic_pipeline_->cleanup();
+    compose_dynamic_pipeline_.reset();
   }
   // Targets before the allocator that owns their memory. Both may be null when
   // ensure() refused before reaching them (a Vulkan-off build never

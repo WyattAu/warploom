@@ -87,13 +87,20 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
 ::warploom::core::Result<void> VulkanRenderer::initialize_headless(
     VulkanContext& context, const VulkanRenderPass& render_pass,
     std::uint32_t width, std::uint32_t height, const RendererConfig& config,
-    VkFormat present_format) {
+    VkFormat present_format, VkImage present_image, VkImageView present_view) {
   if (width == 0U || height == 0U) {
     return ::warploom::core::Result<void>::error(
         ::warploom::core::RuntimeError::invalid_config);
   }
-  return initialize_common(context, render_pass, config, nullptr, width, height,
-                           present_format);
+  auto result = initialize_common(context, render_pass, config, nullptr, width,
+                                  height, present_format);
+  if (result.is_ok()) {
+    // Borrowed for the renderer's lifetime (see the member docs): the
+    // offscreen target behind the caller's framebuffer.
+    headless_present_image_ = present_image;
+    headless_present_view_ = present_view;
+  }
+  return result;
 }
 
 //: Shared setup for initialize() and initialize_headless(). `swapchain` may be
@@ -278,6 +285,7 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
     cc.compose_shader_dir = config_.compose_shader_dir;
     cc.exposure = config_.exposure;
     cc.hdr_format = config_.hdr_format;
+    cc.enable_dynamic_rendering = config_.enable_dynamic_rendering;
     (void)compose_->ensure(device_, physical_device_, graphics_queue_, cc,
                            render_pass_, present_format_, target_width,
                            target_height);
@@ -1064,6 +1072,21 @@ struct VulkanRenderer::UnifiedFrameNode {
   bool* failed{nullptr};
 };
 
+void VulkanRenderer::record_unified_frame_dynamic_node(
+    VkCommandBuffer command_buffer, const GraphDynamicPass& pass,
+    void* user_data) {
+  auto* node = static_cast<UnifiedFrameNode*>(user_data);
+  if (node == nullptr || node->renderer == nullptr) return;
+  if (node->is_scene) {
+    // The scene never records dynamically: a scene dispatch on a dynamic
+    // node means the mixed node list miswired user_data. Fail loudly.
+    if (node->failed != nullptr) *node->failed = true;
+    return;
+  }
+  record_compose_dynamic_stage(command_buffer, pass,
+                               const_cast<ComposeStage*>(node->stage));
+}
+
 void VulkanRenderer::record_unified_frame_node(
     VkCommandBuffer command_buffer, const GraphPass& pass, void* user_data) {
   auto* node = static_cast<UnifiedFrameNode*>(user_data);
@@ -1437,43 +1460,74 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
     scene_dispatch.failed = &unified_frame_failed;
     scene_node.user_data = &scene_dispatch;
 
+    // Blade stage 2: resolve the presentation image for the dynamic tonemap.
+    // Real path: the swapchain image/view at this frame's index (the
+    // renderer owns the swapchain, so no signature change leaks out).
+    // Headless: the borrowed stand-in from initialize_headless. Either may
+    // be null -- then the tonemap records baked, same as before stage 2.
+    VkImage present_image = VK_NULL_HANDLE;
+    VkImageView present_view = VK_NULL_HANDLE;
+    if (!headless_ && swapchain_ != nullptr &&
+        image_index < swapchain_->image_count()) {
+      present_image = swapchain_->images()[image_index];
+      present_view = swapchain_->image_view(image_index);
+    } else if (headless_) {
+      present_image = headless_present_image_;
+      present_view = headless_present_view_;
+    }
     VkClearValue compose_clear[2]{};
     std::vector<ComposeStage> compose_stages;
     std::vector<GraphPass> compose_passes;
-    compose_->build_graph_passes(render_pass_, framebuffer, width, height,
-                                 compose_passes, compose_stages, compose_clear);
+    std::vector<GraphDynamicPass> compose_dyn_passes;
+    compose_->build_graph_passes(render_pass_, framebuffer, present_image,
+                                 present_view, width, height, compose_passes,
+                                 compose_dyn_passes, compose_stages,
+                                 compose_clear);
 
-    std::vector<UnifiedFrameNode> compose_dispatch(compose_passes.size());
-    for (std::size_t i = 0; i < compose_passes.size(); ++i) {
+    // Mixed node list in stage order: baked stages record through the
+    // render callback, dynamic stages (Blade stage 1: bloom) through the
+    // dynamic callback. One dispatch entry per STAGE keeps user_data
+    // wiring stage-aligned whichever framing the stage chose.
+    std::vector<UnifiedFrameNode> compose_dispatch(compose_stages.size());
+    for (std::size_t i = 0; i < compose_stages.size(); ++i) {
       compose_dispatch[i].renderer = this;
       compose_dispatch[i].is_scene = false;
-      compose_dispatch[i].stage = static_cast<const ComposeStage*>(
-          compose_passes[i].user_data);
-      compose_passes[i].user_data = &compose_dispatch[i];
-    }
-
-    std::vector<GraphPass> all_passes;
-    all_passes.reserve(1U + compose_passes.size());
-    all_passes.push_back(scene_node);
-    for (const GraphPass& compose_pass : compose_passes) {
-      all_passes.push_back(compose_pass);
+      compose_dispatch[i].stage = &compose_stages[i];
     }
     std::vector<GraphNode> nodes;
-    nodes.reserve(all_passes.size());
-    for (const GraphPass& pass : all_passes) {
-      nodes.push_back(GraphNode::from_render(pass));
+    nodes.reserve(1U + compose_stages.size());
+    nodes.push_back(GraphNode::from_render(scene_node));
+    {
+      std::size_t bi = 0, di = 0;
+      for (std::size_t i = 0; i < compose_stages.size(); ++i) {
+        if (compose_stages[i].dynamic) {
+          if (di < compose_dyn_passes.size()) {
+            compose_dyn_passes[di].user_data = &compose_dispatch[i];
+            nodes.push_back(GraphNode::from_dynamic(compose_dyn_passes[di++]));
+          }
+        } else {
+          if (bi < compose_passes.size()) {
+            compose_passes[bi].user_data = &compose_dispatch[i];
+            nodes.push_back(GraphNode::from_render(compose_passes[bi++]));
+          }
+        }
+      }
+      // scene_node.user_data was set to &scene_dispatch before the push
+      // above; nodes borrow the passes, so the dispatch outlives execute.
     }
     // R6b gate: the recorded shape must still fit the plan the store was
     // materialized from. A shape change that breaks coverage fails here --
     // loudly, before anything records -- instead of aliasing two live
-    // images or sampling an image the plan does not know.
-    if (!compose_->verify_frame_nodes(all_passes)) {
+    // images or sampling an image the plan does not know. Node-list form:
+    // the unified frame mixes baked and dynamic nodes (Blade stage 1).
+    if (!compose_->verify_frame_nodes(nodes)) {
       unified_frame_failed = true;
     }
     const CompiledGraph compiled = compile_graph(nodes);
     if (!unified_frame_failed) {
       execute_graph(cb, nodes, compiled,
-                    &VulkanRenderer::record_unified_frame_node, nullptr);
+                    &VulkanRenderer::record_unified_frame_node, nullptr, 0U,
+                    &VulkanRenderer::record_unified_frame_dynamic_node);
     }
 
     if (unified_frame_failed) {

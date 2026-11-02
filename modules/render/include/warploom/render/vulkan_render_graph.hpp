@@ -127,6 +127,37 @@ struct GraphPass {
   void* user_data{nullptr};
 };
 
+//! One dynamic-rendering pass (Blade stage 1): a single color attachment
+//! recorded with vkCmdBeginRendering — no render pass, no framebuffer.
+//! The compiler treats the image like a render attachment (barrier to
+//! COLOR_ATTACHMENT_OPTIMAL, tracked to final_layout) and the samples
+//! exactly like a render node's sampled images. The executor emits the
+//! pre-barriers, begins rendering, calls the record callback (bind + draw
+//! only), and ends rendering; a post-barrier materializes final_layout
+//! when it differs from COLOR_ATTACHMENT_OPTIMAL (mirroring the compute
+//! path's explicit post transition, since dynamic rendering performs no
+//! implicit end-of-pass transition).
+struct GraphDynamicPass {
+  const char* name{nullptr};
+  VkImage image{VK_NULL_HANDLE};
+  VkImageView view{VK_NULL_HANDLE};
+  //! Informational only (pipeline-compatibility asserts); the barriers and
+  //! the begin info derive from layouts, never from this.
+  VkFormat format{VK_FORMAT_UNDEFINED};
+  VkImageLayout final_layout{VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+  //! CLEAR writes clear_value; LOAD preserves. Compose stages always CLEAR.
+  bool clear{true};
+  VkClearValue clear_value{};
+  std::uint32_t width{0};
+  std::uint32_t height{0};
+  //! Images this pass SAMPLES (same compiler treatment as render samples).
+  std::vector<GraphSampledImage> sampled_images;
+  //! Buffer dependencies this pass CONSUMES (same treatment as render's).
+  std::vector<GraphBufferEdge> buffer_edges;
+  //! Opaque handle returned to the record callback.
+  void* user_data{nullptr};
+};
+
 //! One compute pass: dispatches recorded through a callback (no render pass).
 struct GraphBarrier {
   VkImage image{VK_NULL_HANDLE};
@@ -154,12 +185,14 @@ struct GraphComputePass {
   void* user_data{nullptr};
 };
 
-//! An ordered graph node: either a render pass or a compute pass.
+//! An ordered graph node: a render pass, a compute pass, or a dynamic pass.
 struct GraphNode {
   const GraphPass* render{nullptr};
   const GraphComputePass* compute{nullptr};
-  [[nodiscard]] static GraphNode from_render(const GraphPass& p) noexcept { return {&p, nullptr}; }
-  [[nodiscard]] static GraphNode from_compute(const GraphComputePass& p) noexcept { return {nullptr, &p}; }
+  const GraphDynamicPass* dynamic{nullptr};
+  [[nodiscard]] static GraphNode from_render(const GraphPass& p) noexcept { return {&p, nullptr, nullptr}; }
+  [[nodiscard]] static GraphNode from_compute(const GraphComputePass& p) noexcept { return {nullptr, &p, nullptr}; }
+  [[nodiscard]] static GraphNode from_dynamic(const GraphDynamicPass& p) noexcept { return {nullptr, nullptr, &p}; }
 };
 
 //! A compiled buffer dependency edge between two passes (producer → this
@@ -200,7 +233,8 @@ void execute_graph(
     const CompiledGraph& compiled,
     void (*record_render)(VkCommandBuffer, const GraphPass&, void*),
     void (*record_compute)(VkCommandBuffer, const GraphComputePass&, void*),
-    std::uint32_t current_family = kIgnoredQueueFamily);
+    std::uint32_t current_family = kIgnoredQueueFamily,
+    void (*record_dynamic)(VkCommandBuffer, const GraphDynamicPass&, void*) = nullptr);
 
 //! A computed transition inserted before a pass.
 //! Compiled barrier plan: barriers_[pass_index] run before that pass.

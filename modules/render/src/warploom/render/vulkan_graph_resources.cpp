@@ -54,6 +54,14 @@ std::vector<FrameResource> derive_frame_resources(
       for (const GraphSampledImage& s : node.render->sampled_images) {
         touch(s.image, pass);
       }
+    } else if (node.dynamic != nullptr) {
+      // Same touch order as render (target, then samples): lifetimes are
+      // framing-independent, so the planner sees the identical sequence
+      // whether a stage records baked or dynamic.
+      touch(node.dynamic->image, pass);
+      for (const GraphSampledImage& s : node.dynamic->sampled_images) {
+        touch(s.image, pass);
+      }
     } else if (node.compute != nullptr) {
       for (const GraphImageUse& u : node.compute->image_uses) {
         touch(u.image, pass);

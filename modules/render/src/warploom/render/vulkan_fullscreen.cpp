@@ -85,6 +85,43 @@ namespace warploom::render {
 #endif
 }
 
+::warploom::core::Result<void> record_fullscreen_dynamic_pass(
+    VkCommandBuffer command_buffer, const DynamicFullscreenPass& pass,
+    VkDescriptorSet set0) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!command_buffer || pass.view == VK_NULL_HANDLE ||
+      pass.draw.width == 0U || pass.draw.height == 0U) {
+    return ::warploom::core::Result<void>::error(
+        ::warploom::core::RuntimeError::invalid_config);
+  }
+  VkRenderingAttachmentInfo color{};
+  color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+  color.imageView = pass.view;
+  color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  color.loadOp = pass.clear ? VK_ATTACHMENT_LOAD_OP_CLEAR
+                            : VK_ATTACHMENT_LOAD_OP_LOAD;
+  color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  color.clearValue = pass.clear_value;
+  VkRenderingInfo rendering{};
+  rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+  rendering.renderArea.offset = {0, 0};
+  rendering.renderArea.extent = {pass.draw.width, pass.draw.height};
+  rendering.layerCount = 1U;
+  rendering.colorAttachmentCount = 1U;
+  rendering.pColorAttachments = &color;
+  vkCmdBeginRendering(command_buffer, &rendering);
+  const auto draw = record_fullscreen_draw(command_buffer, pass.draw, set0);
+  vkCmdEndRendering(command_buffer);
+  return draw;
+#else
+  (void)command_buffer;
+  (void)pass;
+  (void)set0;
+  return ::warploom::core::Result<void>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
 GraphPass fullscreen_graph_pass(const FullscreenPass& pass) {
   GraphPass out{};
   out.name = "fullscreen";

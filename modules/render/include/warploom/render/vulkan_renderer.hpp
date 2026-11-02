@@ -168,6 +168,13 @@ struct RendererConfig {
   bool enable_bloom{false};
   //! Half-resolution bloom buffer edge, in pixels.
   std::uint32_t bloom_downscale{2};
+  //! Record the compose fullscreen stages with dynamic rendering
+  //! (vkCmdBeginRendering, no render pass objects) instead of baked
+  //! render passes. Requires a 1.3 device with dynamicRendering enabled
+  //! (see VulkanContext::has_dynamic_rendering); when unsupported the
+  //! chain falls back to baked passes. Same pixels either way — the
+  //! golden hashes pin both framings.
+  bool enable_dynamic_rendering{false};
 };
 
 class VulkanRenderer final {
@@ -205,14 +212,21 @@ public:
   //! the compose chain, exactly as the swapchain's extent would. `present_format`
   //! is the format of the target `record_commands` will write when compose is
   //! enabled -- the tonemap pipeline bakes it in, and a headless frame has no
-  //! swapchain to read it from, so the caller states it.
+  //! swapchain to read it from, so the caller states it. `present_image` /
+  //! `present_view` are the headless stand-in for the swapchain image (Blade
+  //! stage 2: the dynamic tonemap writes it as a graph attachment). The
+  //! caller owns them -- typically the offscreen target behind the
+  //! framebuffer passed to record_commands -- and they must outlive the
+  //! renderer, exactly like the render pass's own images.
   [[nodiscard]] ::warploom::core::Result<void> initialize_headless(
       VulkanContext& context,
       const VulkanRenderPass& render_pass,
       std::uint32_t width,
       std::uint32_t height,
       const RendererConfig& config = {},
-      VkFormat present_format = VK_FORMAT_B8G8R8A8_UNORM);
+      VkFormat present_format = VK_FORMAT_B8G8R8A8_UNORM,
+      VkImage present_image = VK_NULL_HANDLE,
+      VkImageView present_view = VK_NULL_HANDLE);
 
  private:
   //! Shared setup for initialize() and initialize_headless(); `swapchain` may
@@ -468,6 +482,7 @@ public:
     cc.compose_shader_dir = config_.compose_shader_dir;
     cc.exposure = config_.exposure;
     cc.hdr_format = config_.hdr_format;
+    cc.enable_dynamic_rendering = config_.enable_dynamic_rendering;
     return cc;
   }
 
@@ -478,6 +493,12 @@ public:
   //! chain: the tonemap pipeline bakes in the target's render pass + format.
   VkRenderPass present_pass_{VK_NULL_HANDLE};
   VkFormat present_format_{VK_FORMAT_UNDEFINED};
+  //! Headless presentation image/view (Blade stage 2): the dynamic tonemap
+  //! writes it as a graph attachment. Set by initialize_headless; the real
+  //! path resolves the swapchain image/view per frame instead, so these
+  //! stay null there. Borrowed -- must outlive the renderer.
+  VkImage headless_present_image_{VK_NULL_HANDLE};
+  VkImageView headless_present_view_{VK_NULL_HANDLE};
 
   //! Full-screen passes moved to vulkan_fullscreen.hpp (B3b step 1): the
   //! compose chain and the graph callbacks both need them, and the chain must
@@ -655,6 +676,13 @@ private:
   static void record_unified_frame_node(VkCommandBuffer command_buffer,
                                         const GraphPass& pass,
                                         void* user_data);
+  //! Dynamic twin of record_unified_frame_node (Blade stage 1): routes a
+  //! dynamic compose node (bloom) to record_compose_dynamic_stage. The
+  //! scene never records dynamically, so a scene-marked dispatch here is a
+  //! wiring error and fails the frame rather than recording nothing.
+  static void record_unified_frame_dynamic_node(
+      VkCommandBuffer command_buffer, const GraphDynamicPass& pass,
+      void* user_data);
 #ifdef OMNICPP_HAS_VULKAN
   //! Scene contents for the unified graph's scene node: viewport/scissor
   //! plus the application callback (or the built-in demo draw). Returns
