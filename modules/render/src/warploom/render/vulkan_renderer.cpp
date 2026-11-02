@@ -134,6 +134,10 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
   physical_device_ = context.physical_device();
   graphics_queue_ = context.graphics_queue();
   present_queue_ = context.present_queue();
+  // Loop28 step 1: H-Z images go CONCURRENT when a dedicated compute family
+  // exists. No behaviour change -- the same queue records the same work --
+  // but the compute leg can later use them without ownership transfer.
+  cross_queue_sharing_ = context.cross_queue_sharing();
   render_pass_ = render_pass.render_pass();
   render_pass_resource_ = &render_pass;
   swapchain_ = swapchain;
@@ -279,13 +283,10 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
   // before the caller gets control back from initialize().
   if (config_.enable_hdr_compose) {
     if (!compose_) compose_ = std::make_unique<VulkanComposeChain>();
-    ComposeChainConfig cc{};
-    cc.enable_bloom = config_.enable_bloom;
-    cc.bloom_downscale = config_.bloom_downscale;
-    cc.compose_shader_dir = config_.compose_shader_dir;
-    cc.exposure = config_.exposure;
-    cc.hdr_format = config_.hdr_format;
-    cc.enable_dynamic_rendering = config_.enable_dynamic_rendering;
+    // Single conversion (compose_config()): the two ensure call sites must
+    // not restate the field list by hand, or the next config field lands
+    // in one path and not the other.
+    const ComposeChainConfig cc = compose_config();
     (void)compose_->ensure(device_, physical_device_, graphics_queue_, cc,
                            render_pass_, present_format_, target_width,
                            target_height);
@@ -2181,12 +2182,14 @@ bool VulkanRenderer::record_hiz_reduction(
 
   auto first = std::make_unique<VulkanHiZPyramid>();
   auto first_result = first->create(device_, physical_device_, width, height,
-                                    levels, allocator.get());
+                                    levels, allocator.get(),
+                                    cross_queue_sharing_);
   if (!first_result.is_ok()) return first_result;
 
   auto second = std::make_unique<VulkanHiZPyramid>();
   auto second_result = second->create(device_, physical_device_, width, height,
-                                      levels, allocator.get());
+                                      levels, allocator.get(),
+                                      cross_queue_sharing_);
   if (!second_result.is_ok()) return second_result;
 
   hiz_allocator_ = std::move(allocator);
@@ -2409,6 +2412,7 @@ void VulkanRenderer::cleanup(VkDevice device) noexcept {
   device_ = nullptr;
   graphics_queue_ = nullptr;
   present_queue_ = nullptr;
+  cross_queue_sharing_ = ImageSharing{};
   render_pass_ = nullptr;
   render_pass_resource_ = nullptr;
   pending_hiz_frame_ = false;

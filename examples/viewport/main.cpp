@@ -1704,9 +1704,14 @@ bool setup_wm_delete_protocol(ViewportApp& app) {
   const VkFormat depth_format =
       omnicpp::render::VulkanRenderPass::find_supported_depth_format(
           context.physical_device());
+  // Loop28 step 1: the swapchain depth is an H-Z depth source, so it is
+  // created CONCURRENT when a dedicated compute family exists (exclusive
+  // otherwise -- cross_queue_sharing() decides, exactly as the renderer
+  // does for its own H-Z images).
   if (!app.render_pass
            .create_depth_resources(context.device(), context.physical_device(),
-                                   depth_format, width, height)
+                                   depth_format, width, height,
+                                   context.cross_queue_sharing())
            .is_ok() ||
       !app.render_pass
            .create_framebuffers(context.device(), app.swapchain.image_views(),
@@ -6612,10 +6617,12 @@ bool ViewportApp::initialize() {
   if (!render_pass
            .create(context.device(), swapchain.image_format(), depth_format)
            .is_ok() ||
+      // Loop28 step 1: same concurrent-depth rule as the resize path.
       !render_pass
            .create_depth_resources(context.device(), context.physical_device(),
                                    depth_format, swapchain.extent_width(),
-                                   swapchain.extent_height())
+                                   swapchain.extent_height(),
+                                   context.cross_queue_sharing())
            .is_ok() ||
       !render_pass
            .create_framebuffers(context.device(), swapchain.image_views(),

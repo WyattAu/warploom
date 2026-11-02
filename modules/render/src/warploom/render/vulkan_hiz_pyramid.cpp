@@ -13,7 +13,7 @@ VulkanHiZPyramid::~VulkanHiZPyramid() { cleanup(device_); }
 ::warploom::core::Result<void> VulkanHiZPyramid::create(
     VkDevice device, VkPhysicalDevice physical_device,
     std::uint32_t width, std::uint32_t height, std::uint32_t levels,
-    VulkanMemoryAllocator* allocator) {
+    VulkanMemoryAllocator* allocator, const ImageSharing& sharing) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !physical_device || width == 0 || height == 0 ||
       image_ != VK_NULL_HANDLE) {
@@ -48,7 +48,18 @@ VulkanHiZPyramid::~VulkanHiZPyramid() { cleanup(device_); }
   // 41 VUIDs on the first frame with the copy pass enabled.
   image_info.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  // Loop28 step 1: a pyramid the compute queue will reduce into is
+  // CONCURRENT over both families; every other pyramid stays EXCLUSIVE.
+  // The family pair lives on the stack: vkCreateImage copies it, so no
+  // lifetime extends past this call.
+  std::uint32_t sharing_families[2] = {sharing.graphics_family,
+                                       sharing.compute_family};
   image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  if (sharing.concurrent_ok()) {
+    image_info.sharingMode = VK_SHARING_MODE_CONCURRENT;
+    image_info.queueFamilyIndexCount = 2U;
+    image_info.pQueueFamilyIndices = sharing_families;
+  }
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
 
   if (vkCreateImage(device, &image_info, nullptr, &image_) != VK_SUCCESS) {

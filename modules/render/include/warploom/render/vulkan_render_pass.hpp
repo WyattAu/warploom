@@ -30,9 +30,13 @@ public:
       VkDevice device, const std::vector<VkImageView>& swapchain_views,
       std::uint32_t width, std::uint32_t height);
 
+  //! `sharing` (loop28 step 1) selects CONCURRENT over {graphics, compute}
+  //! for a depth the H-Z compute leg will sample; the default keeps
+  //! EXCLUSIVE for every existing caller.
   [[nodiscard]] ::warploom::core::Result<void> create_depth_resources(
       VkDevice device, VkPhysicalDevice physical_device,
-      VkFormat format, std::uint32_t width, std::uint32_t height);
+      VkFormat format, std::uint32_t width, std::uint32_t height,
+      const ImageSharing& sharing = ImageSharing{});
 
   void cleanup(VkDevice device) noexcept;
 

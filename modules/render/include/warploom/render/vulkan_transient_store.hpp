@@ -67,6 +67,11 @@ struct TransientImageDesc {
   std::uint32_t usage{0};
   //! Aspect for the view (color or depth). 0 infers from the format.
   std::uint32_t aspect{0};
+  //! Cross-queue sharing (loop28 step 1): the compose HDR depth sets this
+  //! so the compute queue may later sample it. Deliberately EXCLUDED from
+  //! image_descs_equal: sharing is per-image access, not per-memory layout,
+  //! so two images with different sharing may still bind the same memory.
+  ImageSharing sharing{};
 };
 
 //! One materialized image.

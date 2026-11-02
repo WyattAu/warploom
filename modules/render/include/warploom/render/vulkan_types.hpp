@@ -195,3 +195,26 @@ constexpr std::uint32_t VK_COLOR_SPACE_SRGB_NONLINEAR_KHR = 0;
 #ifndef OMNICPP_VULKAN_TYPES_AVAILABLE
 #define OMNICPP_VULKAN_TYPES_AVAILABLE WARPLOOM_VULKAN_TYPES_AVAILABLE
 #endif
+
+namespace warploom::render {
+
+//! Cross-queue image sharing (loop28 step 1: async-compute H-Z migration).
+//! An image touched from two queue families needs VK_SHARING_MODE_CONCURRENT
+//! over both; an image used on one queue stays EXCLUSIVE. Vulkan-free (two
+//! family indices + a flag) so public headers keep compiling without Vulkan;
+//! each creation site applies it to its VkImageCreateInfo when set.
+struct ImageSharing {
+  //! True only with a dedicated COMPUTE-only family: concurrent sharing
+  //! without a second queue is meaningless (and a validation error with
+  //! one family index), so every producer must check ok() rather than this.
+  bool concurrent{false};
+  std::uint32_t graphics_family{0};
+  std::uint32_t compute_family{0};
+  //! The one validity rule, in one place: concurrent with two DISTINCT
+  //! families. Four creation sites apply this struct; none restates the rule.
+  [[nodiscard]] bool concurrent_ok() const noexcept {
+    return concurrent && graphics_family != compute_family;
+  }
+};
+
+}  // namespace warploom::render

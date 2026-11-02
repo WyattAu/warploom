@@ -92,6 +92,11 @@ struct ComposeChainConfig {
   //! HDR intermediate format; VK_FORMAT_UNDEFINED picks R16G16B16A16_SFLOAT
   //! when the device supports rendering to it and sampling from it.
   VkFormat hdr_format{VK_FORMAT_UNDEFINED};
+  //! Cross-queue sharing (loop28 step 1) for the HDR depth image: set when
+  //! a dedicated COMPUTE-only family exists, so the H-Z compute leg may
+  //! later sample it. The HDR color and bloom images stay EXCLUSIVE -- they
+  //! never leave the graphics queue.
+  ImageSharing cross_queue_sharing{};
 };
 
 class VulkanComposeChain final {
@@ -443,10 +448,11 @@ class VulkanComposeChain final {
   //! image description per owned kind. Pure (no device): the intervals come
   //! from walking the skeleton nodes, never from constants.
   bool derive_compose_plan(std::uint32_t width, std::uint32_t height,
-                           std::uint32_t bw, std::uint32_t bh,
-                           VkFormat hdr_format, bool depth_sampleable,
-                           bool include_bloom,
-                           std::vector<TransientImageDesc>& descs);
+                            std::uint32_t bw, std::uint32_t bh,
+                            VkFormat hdr_format, bool depth_sampleable,
+                            bool include_bloom,
+                            std::vector<TransientImageDesc>& descs,
+                            const ImageSharing& sharing);
   //! Kind of a live image handle (store-owned or the external source).
   //! 0 when unknown -- verify treats that as a shape violation, not a skip.
   [[nodiscard]] int kind_of_image(VkImage image) const noexcept;

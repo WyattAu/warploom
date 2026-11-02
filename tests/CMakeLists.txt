@@ -65,6 +65,7 @@ add_executable(warploom_unit_tests
     unit/test_hiz_frame_state.cpp
     unit/test_renderer_hiz_contract.cpp
     unit/test_hiz_sampled_pingpong.cpp
+    unit/test_hiz_concurrent_sharing.cpp
     unit/test_dual_queue_graph.cpp
     unit/test_async_compute_spike.cpp
     unit/test_gpu_driven.cpp

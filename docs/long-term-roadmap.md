@@ -132,9 +132,18 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
   (delta -3.3 to -4.7 ms; the ~4 ms reduce hides almost entirely behind
   the render). Pyramid bit-identical across queues and equal to
   floatBitsToUint(0.5) everywhere; 0 diagnostics. The in-renderer
-  migration is staged (loop28: concurrent images, persisted per-frame
-  depth, timeline handoff + golden re-proof) -- the frame-loop surgery
-  does not ride along with the spike.
+  migration is staged (loop28) -- the frame-loop surgery does not ride
+  along with the spike. Step 1 DONE 2026-11-02 (RTX 2060): H-Z images
+  (pyramids, compose HDR depth, swapchain depth) are CONCURRENT over
+  {graphics, compute} when a dedicated COMPUTE-only family exists
+  (`VulkanContext::cross_queue_sharing`, one validity rule in
+  `ImageSharing::concurrent_ok`), exclusive otherwise. No behaviour
+  change by construction; proven by
+  `VulkanHardware.ConcurrentSharingMatchesExclusive` (concurrent pyramid
+  reduces bit-identically to exclusive, absolute 0.5 check both legs,
+  sabotage-checked, 0 diagnostics) with the compose+H-Z and golden-hash
+  tests green. Steps 2-3 (persisted per-frame depth, compute-queue reduce
+  + pack with golden re-proof + sabotage) are next.
 
 ### T1. Raster core (one render path, then scale)
 

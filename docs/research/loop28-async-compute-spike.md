@@ -90,8 +90,19 @@ violation on the shared buffers.
 
 ## Adopt staging (the part that is NOT this loop)
 
-1. CONCURRENT pyramid + H-Z depth-source images (mechanical; verifiable by
-   golden parity + 0 diagnostics, no behaviour change).
+1. CONCURRENT pyramid + H-Z depth-source images -- DONE 2026-11-02
+   (RTX 2060, commit with this doc). `ImageSharing` (one validity rule:
+   concurrent with two distinct families) flows from
+   `VulkanContext::cross_queue_sharing()` into the pyramid, the
+   transient-store HDR depth (surgical: HDR color and bloom stay
+   EXCLUSIVE), and the swapchain depth (renderer + viewport both build
+   from the same helper). Verifiable by golden parity + 0 diagnostics,
+   no behaviour change: `ConcurrentSharingMatchesExclusive` reduces a
+   0.5-cleared depth into both pyramids on the graphics queue --
+   identical words, absolute check both legs (sabotaged live: a wrong
+   constant fails both legs), 0 diagnostics -- and the compose+H-Z
+   (`ComposeDepthReductionIsValidationClean`) and golden-hash tests are
+   green with sharing auto-enabled under the same binary.
 2. Persisted per-frame depth for the compute leg (frame-parity discipline;
    the lifetime fix §5 requires).
 3. Compute-queue reduce + pack behind the existing timeline handoff,

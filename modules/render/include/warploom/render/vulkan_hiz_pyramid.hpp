@@ -38,10 +38,14 @@ public:
   }
 
   //! Create a pyramid. Pass levels=0 to allocate the complete runtime chain.
+  //! `sharing` (loop28 step 1) selects CONCURRENT over {graphics, compute}
+  //! for a pyramid the compute queue will reduce into; the default keeps
+  //! EXCLUSIVE for every existing caller.
   [[nodiscard]] ::warploom::core::Result<void> create(
       VkDevice device, VkPhysicalDevice physical_device,
       std::uint32_t width, std::uint32_t height, std::uint32_t levels = 0,
-      VulkanMemoryAllocator* allocator = nullptr);
+      VulkanMemoryAllocator* allocator = nullptr,
+      const ImageSharing& sharing = ImageSharing{});
   //! Releases all Vulkan objects. The device and allocator must outlive this call.
   void cleanup(VkDevice device) noexcept;
 

@@ -175,7 +175,17 @@ VulkanTransientStore::~VulkanTransientStore() { destroy(); }
     image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
     image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     image_info.usage = desc->usage;
+    // Loop28 step 1: the H-Z depth source is CONCURRENT over both families;
+    // every other store image stays EXCLUSIVE. Same stack-copy rule as the
+    // pyramid: vkCreateImage copies the indices synchronously.
+    std::uint32_t sharing_families[2] = {desc->sharing.graphics_family,
+                                         desc->sharing.compute_family};
     image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (desc->sharing.concurrent_ok()) {
+      image_info.sharingMode = VK_SHARING_MODE_CONCURRENT;
+      image_info.queueFamilyIndexCount = 2U;
+      image_info.pQueueFamilyIndices = sharing_families;
+    }
     image_info.samples = VK_SAMPLE_COUNT_1_BIT;
 
     VkImage image = VK_NULL_HANDLE;

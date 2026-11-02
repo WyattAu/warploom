@@ -73,6 +73,22 @@ public:
   }
   //! True when a COMPUTE-only queue family was found and a queue was fetched.
   [[nodiscard]] bool has_dedicated_compute() const noexcept { return compute_queue_ != nullptr; }
+  //! Cross-queue image sharing for H-Z images (loop28 step 1): concurrent
+  //! over {graphics, compute} when a dedicated COMPUTE-only family exists,
+  //! exclusive otherwise. Renderer and viewport both build from this, so the
+  //! two H-Z depth sources (compose HDR depth, swapchain depth) never drift.
+  [[nodiscard]] ImageSharing cross_queue_sharing() const noexcept {
+    ImageSharing out{};
+    if (has_dedicated_compute() && queue_families_.graphics_family >= 0 &&
+        queue_families_.compute_family >= 0) {
+      out.concurrent = true;
+      out.graphics_family =
+          static_cast<std::uint32_t>(queue_families_.graphics_family);
+      out.compute_family =
+          static_cast<std::uint32_t>(queue_families_.compute_family);
+    }
+    return out;
+  }
   [[nodiscard]] const QueueFamilyIndices& queue_families() const noexcept { return queue_families_; }
   [[nodiscard]] const DeviceProperties& device_properties() const noexcept { return device_properties_; }
   [[nodiscard]] bool has_validation() const noexcept { return validation_enabled_; }

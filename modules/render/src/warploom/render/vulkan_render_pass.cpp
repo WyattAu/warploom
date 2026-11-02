@@ -144,7 +144,8 @@ VulkanRenderPass::~VulkanRenderPass() { cleanup(device_); }
 
 ::warploom::core::Result<void> VulkanRenderPass::create_depth_resources(
     VkDevice device, VkPhysicalDevice physical_device,
-    VkFormat format, std::uint32_t width, std::uint32_t height) {
+    VkFormat format, std::uint32_t width, std::uint32_t height,
+    const ImageSharing& sharing) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!device || !physical_device) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
@@ -184,7 +185,17 @@ VulkanRenderPass::~VulkanRenderPass() { cleanup(device_); }
           transfer_usage, 0, &usage_properties) == VK_SUCCESS) {
     image_info.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
   }
+  // Loop28 step 1: the swapchain H-Z depth source is CONCURRENT over both
+  // families when the caller passes sharing; same stack-copy rule as the
+  // pyramid and the transient store.
+  std::uint32_t sharing_families[2] = {sharing.graphics_family,
+                                       sharing.compute_family};
   image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  if (sharing.concurrent_ok()) {
+    image_info.sharingMode = VK_SHARING_MODE_CONCURRENT;
+    image_info.queueFamilyIndexCount = 2U;
+    image_info.pQueueFamilyIndices = sharing_families;
+  }
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
 
   VkResult result = vkCreateImage(device, &image_info, nullptr, &depth_image_);

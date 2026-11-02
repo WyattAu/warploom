@@ -483,6 +483,7 @@ public:
     cc.exposure = config_.exposure;
     cc.hdr_format = config_.hdr_format;
     cc.enable_dynamic_rendering = config_.enable_dynamic_rendering;
+    cc.cross_queue_sharing = cross_queue_sharing_;
     return cc;
   }
 
@@ -696,6 +697,13 @@ private:
   VkPhysicalDevice physical_device_{VK_NULL_HANDLE};
   VkQueue graphics_queue_{VK_NULL_HANDLE};
   VkQueue present_queue_{VK_NULL_HANDLE};
+  //! H-Z cross-queue sharing (loop28 step 1), captured from the context at
+  //! initialize: concurrent over {graphics, compute} with a dedicated
+  //! COMPUTE-only family, exclusive otherwise. Flows into the pyramid
+  //! images (recreate_hiz_resources) and the compose HDR depth (compose
+  //! chain config). Set once in initialize_common; both initialize paths
+  //! funnel there.
+  ImageSharing cross_queue_sharing_{};
   VkCommandPool command_pool_{VK_NULL_HANDLE};
   VkRenderPass render_pass_{VK_NULL_HANDLE};
   VkPipelineLayout pipeline_layout_{VK_NULL_HANDLE};

@@ -476,7 +476,8 @@ namespace warploom::render {
   // them, and so does anything the application reads back through capture.
   std::vector<TransientImageDesc> store_descs;
   if (!derive_compose_plan(width, height, bw, bh, hdr_format_,
-                           depth_sampleable, bloom_shaders_ok, store_descs)) {
+                           depth_sampleable, bloom_shaders_ok, store_descs,
+                           config_.cross_queue_sharing)) {
     return refuse("transient plan derivation failed");
   }
   if (!transient_store_
@@ -1316,7 +1317,8 @@ void VulkanComposeChain::skeleton_intervals(bool include_bloom,
 bool VulkanComposeChain::derive_compose_plan(
     std::uint32_t width, std::uint32_t height, std::uint32_t bw,
     std::uint32_t bh, VkFormat hdr_format, bool depth_sampleable,
-    bool include_bloom, std::vector<TransientImageDesc>& descs) {
+    bool include_bloom, std::vector<TransientImageDesc>& descs,
+    const ImageSharing& sharing) {
   descs.clear();
   if (width == 0U || height == 0U || bw == 0U || bh == 0U ||
       hdr_format == VK_FORMAT_UNDEFINED) {
@@ -1445,6 +1447,10 @@ bool VulkanComposeChain::derive_compose_plan(
                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
   if (depth_sampleable) depth.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
   depth.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+  // Loop28 step 1: the HDR depth is the H-Z depth source on the compose
+  // path, so it is created CONCURRENT when a dedicated compute family
+  // exists. Color and bloom stay EXCLUSIVE (graphics-queue-only).
+  depth.sharing = sharing;
   descs.push_back(depth);
   if (include_bloom) {
     TransientImageDesc bloom{};
