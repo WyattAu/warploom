@@ -17,6 +17,7 @@ find_package(Threads REQUIRED)
 # GPU-dependent runtime tests (raw Vulkan symbols in the TU): only added
 # when Vulkan headers are available. Headless CI legs build the rest.
 set(WARPLOOM_GPU_TEST_SOURCES
+    unit/test_pluecker_intersector.cpp
     unit/test_ray_query_first_contact.cpp
     unit/test_rt_shadows.cpp
     unit/test_rt_reflections.cpp
@@ -65,6 +66,7 @@ add_executable(warploom_unit_tests
     unit/test_renderer_hiz_contract.cpp
     unit/test_hiz_sampled_pingpong.cpp
     unit/test_dual_queue_graph.cpp
+    unit/test_async_compute_spike.cpp
     unit/test_gpu_driven.cpp
     unit/test_gpu_driven_ab.cpp
     unit/test_gpu_driven_cull.cpp
@@ -75,6 +77,10 @@ add_executable(warploom_unit_tests
     unit/test_mesh_table.cpp
     unit/test_scene_submission.cpp
     unit/test_scene_extraction.cpp
+    unit/test_exact_predicates.cpp
+    unit/test_golden_hash_grid.cpp
+    unit/test_se3_skinning.cpp
+    unit/test_quadric_decimation.cpp
     unit/test_scene_camera.cpp
     unit/test_scene_resources.cpp
     unit/test_gltf_importer.cpp
