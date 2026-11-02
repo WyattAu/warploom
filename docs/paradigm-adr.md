@@ -224,3 +224,40 @@ Verdict: **adopted as a header-only utility + 3 guarding tests**.
  and ADR-005. Scope is stated in the header: midpoint placement (not
  optimal-position QEM), boundary locked, no attributes, no manifold
  repair. Spike files warning-clean.
+
+## ADR-007: trial #602 homological multi-scale slicing (adopted as guard)
+
+Spike `MultiscaleTopologyTrial` in
+ `tests/unit/test_multiscale_topology.cpp` tests the homological
+ prerequisite of the 602 claim: a multi-scale chain must preserve
+ topology across scales. The full claim (no LOD pop-in via continuous
+ slicing) needs render integration and stays staged; what is adopted is
+ the acceptance guard the staged generator will use --
+ `euler_chi` in `modules/core/include/warploom/core/mesh_topology.hpp`
+ (chi = V-E+F on the live index soup, dead verts/degenerate tris
+ excluded, ordered sets so deterministic). Closed-torus probe
+ (24x16, 768 tris -> 192, no boundary so every edge is eligible),
+ deterministic, this machine (scalar C++, -O2):
+
+- QEM chi **0** (handle preserved) vs blind chi **34** (handle pinched
+  and fragmented) -- identical 192 tris, so the outcome differs only
+  by cost function, not budget.
+- Sabotage-validated: negating the QEM cost drives chi to 1 (torus
+  pinched sphere-like) and fails the guard; the blind baseline IS the
+  broken version, so the test fails a broken QEM by construction.
+- Timing: ~1.8s for the 768->192 pair (288 single-edge steps with
+  per-iteration quadric re-accumulation); acceptable for an offline
+  asset-conditioning guard, not for runtime -- stated, not hidden.
+
+Consumer investigation (recorded, same session): there is NO
+ asset-conditioning path in-tree (gltf_importer emits meshes directly;
+ `lod_meshes` is hand-populated in tests), and the QEM header carries
+ positions only -- production wiring needs attribute-aware collapse
+ (uv/normal/skin streams) first. So the generator itself stays staged
+ behind that extension; what lands now is its acceptance guard plus
+ the measured proof that the guard discriminates. Forcing a
+ positions-only wiring into the importer would silently corrupt
+ attributes -- rejected on that ground, not on effort.
+
+Verdict: **adopted as a header-only guard + 2 guarding tests**.
+ Spike files warning-clean.

@@ -7326,8 +7326,13 @@ void ViewportApp::run() {
         compose_path.scene_framebuffer = capture_chain->scene_framebuffer();
         compose_path.scene_depth = capture_chain->scene_depth_image();
         compose_path.record_compose = [&](VkCommandBuffer cmd) {
+          // Blade stage 2: null present selects the baked tonemap (header
+          // contract). The capture records into its own offscreen target,
+          // not the swapchain, so there is no present image to thread --
+          // and baked keeps captures byte-identical to pre-stage-2.
           capture_chain->record(cmd, capture.pass_handle(),
-                                capture.framebuffer_handle(), width, height);
+                                capture.framebuffer_handle(), VK_NULL_HANDLE,
+                                VK_NULL_HANDLE, width, height);
         };
         compose_path_ptr = &compose_path;
       }

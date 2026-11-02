@@ -81,6 +81,7 @@ add_executable(warploom_unit_tests
     unit/test_golden_hash_grid.cpp
     unit/test_se3_skinning.cpp
     unit/test_quadric_decimation.cpp
+    unit/test_multiscale_topology.cpp
     unit/test_scene_camera.cpp
     unit/test_scene_resources.cpp
     unit/test_gltf_importer.cpp

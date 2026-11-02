@@ -115,7 +115,7 @@ measured reason). A trial that cannot be measured does not land.
 | ID | Paradigm | Area | Tier | Status | ADR |
 |----|----------|------|------|--------|-----|
 | 601 | Plucker beam-tracing foliations (no BVH) | render | P2 | pending | -- |
-| 602 | Homological multi-scale geometry slicing (no LOD pop-in) | render | P1 | pending | -- |
+| 602 | Homological multi-scale geometry slicing (no LOD pop-in) | render | P1 | adopted | ADR-007 |
 | 603 | Dual-graph topological scene connectivity (no scene graph) | core | P2 | pending | -- |
 | 604 | Hyperbolic metric world coordinates (no origin rebasing) | core | P2 | pending | -- |
 | 605 | Homological occlusion shadow fields (no HZB readback) | render | P2 | pending | -- |
@@ -487,11 +487,11 @@ measured reason). A trial that cannot be measured does not land.
 
 ## Scoreboard
 
-- Pending P0: none -- queue drained. Decided: 554 rejected (ADR-002), 831 adopted (ADR-003), 608 adopted live (ADR-004), 611 adopted as utility (ADR-005), 800 adopted as utility (ADR-006).
+- Pending P0: none -- queue drained. Decided: 554 rejected (ADR-002), 831 adopted (ADR-003), 608 adopted live (ADR-004), 611 adopted as utility (ADR-005), 800 adopted as utility (ADR-006), 602 adopted as guard (ADR-007).
 - Pending P1: 558, 566, 587, 590, 591, 594, 595, 602, 606, 619, 622, 623,
   626, 630, 632, 633, 635, 638, 660, 835, 849.
 - Pending P2: everything else not OUT.
 - Out of scope (ADR-001): 561, 567, 571, 610, all of LIX, LXI, LXII, LXIII,
   LXIV, LXV, LXVI, LXVIII, LXIX, LXX, LXXV, LXXVI, LXXVII, 726, 728, 730,
   763-766, 769, 770, 771-774, 776-780, 843, 844, 847.
-- Adopted: 831 (utility), 608 (live), 611 (utility), 800 (utility). Rejected: 554.
+- Adopted: 831 (utility), 608 (live), 611 (utility), 800 (utility), 602 (guard). Rejected: 554.
