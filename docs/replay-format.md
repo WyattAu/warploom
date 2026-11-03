@@ -45,6 +45,12 @@ and reject unknown `schema_version` values.
 - `scene`: free-text scene name captured at `start_capture` time.
 - `created_unix`: writer's wall clock, informational only — never used for
   determinism.
+- `fixed_dt` (T4a): the host's fixed simulation step in seconds, shortest
+  round-trip form. `load_replay` re-simulates physics with this increment
+  (pause-tracked, same substep derivation as the live tick). Absent or
+  non-positive (files predating T4a) means "unknown — do not re-simulate":
+  physics stays as the opening checkpoint restored it and the closing
+  check covers the document only — the pre-T4a contract, bit for bit.
 
 ### Command records
 
@@ -108,24 +114,37 @@ no state effect; recording it would abort re-apply on load for no fidelity
 gain. The `end` record's `commands` count is therefore the count of
 recorded (successful) commands.
 
-### Checkpoint records (two lines)
+### Checkpoint records (three lines since T4a; two before)
 
 A checkpoint is a marker line followed by the raw document JSON on the next
-line. Embedding the document as a nested OBJECT (not an escaped string)
-keeps every line unescaped and the reader trivial: after a `ckpt` marker,
-the next line IS the document bytes.
+line, followed (T4a) by the raw physics-snapshot JSON on a third line.
+Embedding both as nested OBJECTs (not escaped strings) keeps every line
+unescaped and the reader trivial: after a `ckpt` marker, the next line IS
+the document bytes, and when the marker carries `p_hash` the line after
+that IS the physics bytes.
 
 ```
-{"record":"ckpt","frame":42,"hash":"18446744073709551615"}
+{"record":"ckpt","frame":42,"hash":"18446744073709551615","p_hash":"6354134"}
 {"schema_version":2,...}
+{"gravity":-9.81,...,"bodies":[...],"joints":[...]}
 ```
 
 - `frame`: logical frame at capture.
 - `hash`: decimal string of the capture-time `fnv1a64` over the document
   line's bytes (decimal string, not number, to stay lossless through any
   JSON round-trip).
+- `p_hash` (T4a, optional): decimal string of the capture-time `fnv1a64`
+  over the physics line's bytes. Absent in pre-T4a files, whose checkpoints
+  hydrate with EMPTY physics — defined to restore an empty world, never
+  stale state (see the scrubber header: absent and empty are the same
+  defined state, not two cases).
 - The document line: the byte-deterministic document serialization captured
   at that frame (identical bytes to what W1 stores in the ring).
+- The physics line (T4a, present iff `p_hash` is): the T4a solver snapshot
+  (configuration knobs + bodies in id order + joints + map tags; floats in
+  shortest round-trip form, exact float32 recovery). Old readers reject
+  the trailing line, so this is a forward-only extension — documented,
+  never silently misparsed.
 
 ### Capture end
 
@@ -164,19 +183,26 @@ Loading a replay file (`load_replay` protocol command, v1.7) into a session:
 
 1. Parse + validate header (`schema_version == 1`, `format` matches). Reject
    otherwise (clean protocol error, state untouched).
-2. Every checkpoint record is hash-verified (bytes → hash) and inserted into
-   the session's scrubber ring. The opening state is restored from the
-   hydrated opening BYTES, not from a ring lookup by frame: opening and
-   closing can share a frame (a capture with no Step between start and
-   stop), and same-frame ring insertion replaces newest-wins, so a lookup
-   by frame could return the closing bytes and the log would re-apply on
-   top of them.
+2. Every checkpoint record is hash-verified (document bytes → hash, and
+   physics bytes → p_hash when present) and inserted into the session's
+   scrubber ring. The opening state is restored from the hydrated opening
+   BYTES, not from a ring lookup by frame: opening and closing can share
+   a frame (a capture with no Step between start and stop), and same-frame
+   ring insertion replaces newest-wins, so a lookup by frame could return
+   the closing bytes and the log would re-apply on top of them. The opening
+   physics restores into temporaries first (same atomicity as the document:
+   nothing commits on a torn payload).
 3. **Re-apply the command log in `seq` order** through the session's normal
    `on_control` path (same mutation authority as live editing, so undo
    history, bindings, and validation behave identically), executing the
    tick contract above for every recorded `step` between commands
-   (`sync_graph` + `tick_timeline` per tick, logical frame incrementing
-   from the opening checkpoint's frame). Re-applied
+   (`sync_graph` + physics re-simulation + `tick_timeline` per tick,
+   logical frame incrementing from the opening checkpoint's frame).
+   Physics re-simulation (T4a) runs the session's own `step_physics` — the
+   same substep derivation as the live tick, so re-simulation cannot drift
+   from it — gated by pause tracked from the re-applied Pause/Resume
+   commands, with the header's `fixed_dt`. Files without `fixed_dt`
+   re-simulate nothing (pre-T4a contract, bit for bit). Re-applied
    commands are NOT re-recorded when a capture is active — the loaded log
    IS their record. A command that fails to apply aborts the load with the
    seq, command, and error; the session state is then whatever the prefix
@@ -189,14 +215,19 @@ Loading a replay file (`load_replay` protocol command, v1.7) into a session:
    against the last checkpoint record in file order (which `stop_capture`
    always writes last — a mid-file `scrub_start` may target a frame ahead
    of the final log position, so greatest-frame would pick the wrong
-   record), failing the load loudly on mismatch. Writers always embed
-   that closing checkpoint (`stop_capture` snapshots the live document),
-   so a mismatch means the capture contains effects outside the command
-   log (e.g. host ticks never issued as commands) and the file cannot
-   replay itself. Verified by
-   `TimelineSession.LoadReplayVerifiesEndStateAgainstClosingCheckpoint`.
-   Files with no checkpoint records skip the check (nothing to compare
-   against).
+   record), failing the load loudly on mismatch. When the file drove
+   re-simulation (header `fixed_dt` present) AND the closing checkpoint
+   carries physics, the closing physics bytes must match too — a mismatch
+   means the capture contains simulation effects outside the command log
+   and the file cannot replay itself. Writers always embed
+   that closing checkpoint (`stop_capture` snapshots the live document
+   and world), so a mismatch means the capture contains effects outside
+   the command log (e.g. host ticks never issued as commands) and the file
+   cannot replay itself. Verified by
+   `TimelineSession.LoadReplayVerifiesEndStateAgainstClosingCheckpoint`
+   and `PhysicsScrub.ReplayFileRoundTripsPhysicsBitIdentically` (plus the
+   paused-span variant). Files with no checkpoint records skip the check
+   (nothing to compare against).
 
 Scrub-to-a-checkpoint after load is plain W1 time warp (history clears at
 the warp, same as live).

@@ -355,10 +355,21 @@ declares a slot 3.
       refreshes from the document and would otherwise snap every simulated
       object back to its authored position each frame.
 
-      Honest limit: `snapshot_json()` is the live protocol query, so physics is
-      *reported*. Scrub checkpoints still capture the document only, so a
-      time-warp scrub does not yet restore physics. That is the rest of the
-      replay coverage.
+      Closed (T4a, 2026-11-03): checkpoints now carry the full solver state
+      (T4a physics_snapshot codec: knobs + bodies in id order + joints +
+      session map, floats in shortest round-trip form), so a time-warp
+      scrub restores physics bit-identically — proven by
+      `PhysicsScrub.RingScrubRestoresPhysicsBitIdentically` (checkpoint,
+      run on, scrub back to identical fingerprint/snapshot bytes, continue
+      to an identical trajectory). File checkpoints carry it too (marker
+      `p_hash` + third line; `fixed_dt` in the header), the opening physics
+      restores into temporaries, the re-apply loop re-simulates through the
+      session's own `step_physics` (pause-tracked), and the closing check
+      covers physics — proven by `ReplayFileRoundTripsPhysicsBitIdentically`
+      and the paused-span variant. Tamper fails loudly at all three layers
+      (ring hash, codec schema with world+map untouched, file load error).
+      Pre-T4a files load exactly as before (no `fixed_dt` = no
+      re-simulation, empty physics = empty world).
 
       Verified: 100.0000% of pixels identical to pre-C1, 14 tick tests (8 new),
       570 total, 0 diagnostics, 0 leaks, 6/6 ctest, 64/64 live proofs. Removing

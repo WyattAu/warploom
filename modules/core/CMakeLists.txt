@@ -37,6 +37,7 @@ add_library(warploom_core SHARED
     src/warploom/core/input_state.cpp
     src/warploom/core/input_translators.cpp
     src/warploom/core/node_graph.cpp
+    src/warploom/core/physics_snapshot.cpp
     src/warploom/core/property_registry.cpp
     src/warploom/core/replay_scrubber.cpp
     src/warploom/core/script_module.cpp

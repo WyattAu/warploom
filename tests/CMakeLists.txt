@@ -35,6 +35,7 @@ add_executable(warploom_unit_tests
     unit/test_animation_state_machine.cpp
     unit/test_physics_world.cpp
     unit/test_physics_ecs_bridge.cpp
+    unit/test_physics_scrub.cpp
     unit/test_control_server.cpp
     unit/test_diagnostics.cpp
     unit/test_document_projection.cpp

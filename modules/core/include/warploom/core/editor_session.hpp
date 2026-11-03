@@ -223,13 +223,14 @@ class EditorSession final : public ::warploom::core::ControlHost {
   [[nodiscard]] bool capture_start(std::uint64_t frame,
                                    const std::string& scene,
                                    std::string& error) {
-    return recorder_.start(frame, doc_, scene, error);
+    return recorder_.start(frame, doc_, physics_bytes(), last_fixed_dt_,
+                            scene, error);
   }
   //! Ends recording and writes the file atomically (tmp+rename, 0600).
   //! Embeds the closing checkpoint at the current logical frame.
   [[nodiscard]] bool capture_stop(const std::string& path,
-                                  std::string& error) {
-    return recorder_.stop(path, doc_, error);
+                                   std::string& error) {
+    return recorder_.stop(path, doc_, physics_bytes(), error);
   }
   [[nodiscard]] const CommandRecorder& recorder() const noexcept {
     return recorder_;
@@ -243,8 +244,9 @@ class EditorSession final : public ::warploom::core::ControlHost {
   }
   //! Loads a warploom-replay-v1 file: hash-verified checkpoint hydration
   //! + command-log re-apply in seq order (spec "Load semantics"), with
-  //! ONE full session tick (sync_graph + tick_timeline) per recorded step
-  //! tick — sample capture re-executes deterministically.
+  //! ONE full session tick per recorded step tick — sample capture
+  //! re-executes deterministically, and physics re-simulates with the
+  //! header's fixed_dt when the file carries it (T4a).
   [[nodiscard]] bool load_replay(const std::string& path,
                                  std::string& error);
 
@@ -292,6 +294,17 @@ class EditorSession final : public ::warploom::core::ControlHost {
   //! W1: checkpoint ring for hash-verified scrubbing. Frame-thread-only
   //! (all access arrives via on_control), matching the session's model.
   ReplayScrubber scrubber_{};
+  //! Host fixed step latched from the last tick with fixed_dt > 0 (T4a).
+  //! Both shipped hosts tick at a constant 1/60, so this is the increment
+  //! the live simulation actually integrated with; capture_start records
+  //! it into the replay header for re-simulation.
+  double last_fixed_dt_{1.0 / 60.0};
+  //! Current solver state as checkpoint bytes (T4a physics_snapshot codec).
+  [[nodiscard]] std::string physics_bytes() const;
+  //! Stage 2 of tick(): integrate the world in fixed_dt-derived substeps.
+  //! Shared by tick() and load_replay so re-simulation cannot drift from
+  //! the live integration order. Returns the substep count.
+  std::uint32_t step_physics(double fixed_dt);
   //! G2: paste cascade counter (paste N lands at +32*(N%8+1) px). Ephemeral
   //! session state, but replay-safe: a replay re-runs the same command
   //! sequence through the same counter, so positions reproduce exactly.

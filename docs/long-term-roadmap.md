@@ -142,8 +142,14 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
   `VulkanHardware.ConcurrentSharingMatchesExclusive` (concurrent pyramid
   reduces bit-identically to exclusive, absolute 0.5 check both legs,
   sabotage-checked, 0 diagnostics) with the compose+H-Z and golden-hash
-  tests green. Steps 2-3 (persisted per-frame depth, compute-queue reduce
-  + pack with golden re-proof + sabotage) are next.
+  tests green. Steps 2-3 DONE 2026-11-02/03 (RTX 2060): persisted
+  per-frame depth snapshots (bit-identical to live depth,
+  `HiZGraph.DepthSnapshotsMatchLiveDepth`) and compute-queue reduce + pack
+  (`compute_reduce_hiz_snapshot`, bit-identical to the graphics result,
+  `HiZGraph.ComputeReduceMatchesGraphicsReduce`, 0 diagnostics). Remaining
+  for the full migration: pipeline the compute leg a frame behind graphics
+  with the timeline handoff instead of CPU-waiting (overlap, not just
+  correctness) — plus Blade's later stages (sky, UI passes).
 
 ### T1. Raster core (one render path, then scale)
 
@@ -290,9 +296,11 @@ Against the §5 definition, criterion by criterion:
    per-frame live stepping discipline, adaptive sampling, and the whole
    in-tree denoiser (à-trous/SVGF spike → implementation is the single
    biggest item left). Skinned/deforming PT is rigid-placement only.
-2. **Deterministic tick + replay + scrub incl. physics: MEDIUM.** Two
-   crisp items: scrub checkpoints capture document, not physics; the
-   sub-frame fraction is not in the protocol yet.
+2. **Deterministic tick + replay + scrub incl. physics: NEAR.** T4a DONE
+   2026-11-03: checkpoints (ring + file) carry the full solver state;
+   scrub restores physics bit-identically; re-apply re-simulates with the
+   header dt (pause-tracked) and the closing check covers physics. One
+   crisp item left: the sub-frame fraction is not in the protocol yet.
 3. **Timeline tracks + concurrent arms + clip strip: MEDIUM.** Strip
    chrome + block-move live-proven; camera/light/render tracks and
    concurrent record + play are specless.
@@ -323,12 +331,15 @@ Against the §5 definition, criterion by criterion:
    path untouched: all golden hashes green.
 2. **Async-compute spike (T0).** DONE -- measured win, ADOPT recorded
    (spike + loop28): 36-54% on the reduce leg, determinism intact.
-   The migration itself (H-Z reduce onto the compute queue) is the next
-   render stage; exit for THAT stage: concurrent images + persisted depth
-   + timeline handoff with golden parity and 0 diagnostics.
-3. **Scrub restores physics + sub-frame fraction in the protocol (T4).**
-   Exit: checkpoint scrub reproduces physics bit-identically; fraction
-   replays deterministically through the protocol.
+   Migration steps 1-3 DONE 2026-11-02/03: CONCURRENT images, persisted
+   depth snapshots, compute-queue reduce + pack (bit-identical, 0
+   diagnostics). Remaining: pipeline the compute leg (overlap, not just
+   correctness) + Blade later stages (sky, UI).
+3. **Scrub restores physics (T4a).** DONE 2026-11-03: checkpoint scrub
+   reproduces physics bit-identically (ring + file, re-simulation with
+   header dt, closing check covers physics). Left: **sub-frame fraction
+   in the protocol (T4b).** Exit: fraction replays deterministically
+   through the protocol.
 4. **Rotation, then joints, then capsule + sleeping (T3).** One design
    arc each, validator clean before the next starts.
 5. **Live PT: per-frame stepping discipline, adaptive sampling, then the

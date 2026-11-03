@@ -34,6 +34,7 @@ ReplayScrubber::ReplayScrubber(std::size_t capacity)
 }
 
 bool ReplayScrubber::capture(std::uint64_t frame, const SceneDocument& doc,
+                             const std::string& physics_json,
                              std::string& /*error*/) {
   // to_json is byte-deterministic and total (contracts in document.hpp);
   // the error parameter stays for API stability.
@@ -41,6 +42,11 @@ bool ReplayScrubber::capture(std::uint64_t frame, const SceneDocument& doc,
   cp.frame = frame;
   cp.json = doc.to_json();
   cp.hash = fnv1a64(cp.json.data(), cp.json.size());
+  // Physics bytes are opaque to the ring: same bytes in, same bytes out,
+  // hashed the same way. Empty means "no physics state" (see header).
+  cp.physics_json = physics_json;
+  cp.physics_hash =
+      fnv1a64(cp.physics_json.data(), cp.physics_json.size());
   // Re-capturing the same frame replaces the old checkpoint (newest state
   // wins — auto-capture and manual markers can target the same frame).
   for (auto& existing : ring_) {
@@ -59,11 +65,14 @@ bool ReplayScrubber::capture(std::uint64_t frame, const SceneDocument& doc,
 }
 
 void ReplayScrubber::insert(std::uint64_t frame, std::uint64_t hash,
-                            std::string json) {
+                            std::string json, std::uint64_t physics_hash,
+                            std::string physics_json) {
   ReplayCheckpoint cp;
   cp.frame = frame;
   cp.hash = hash;
   cp.json = std::move(json);
+  cp.physics_hash = physics_hash;
+  cp.physics_json = std::move(physics_json);
   for (auto& existing : ring_) {
     if (existing.frame == frame) {
       existing = std::move(cp);
@@ -85,14 +94,38 @@ bool ReplayScrubber::restore(std::uint64_t frame, SceneDocument& doc,
     error = "scrub: no checkpoint at frame " + std::to_string(frame);
     return false;
   }
-  return restore_bytes(cp->json, cp->hash, doc, error);
+  if (fnv1a64(cp->physics_json.data(), cp->physics_json.size()) !=
+      cp->physics_hash) {
+    error = "scrub: checkpoint physics failed hash verification";
+    return false;
+  }
+  return restore_bytes(cp->json, cp->hash, cp->physics_json,
+                        cp->physics_hash, doc, error);
+}
+
+bool ReplayScrubber::physics_for(std::uint64_t frame,
+                                 std::string& out) const {
+  const ReplayCheckpoint* cp = find_checkpoint(frame);
+  if (cp == nullptr) return false;
+  if (fnv1a64(cp->physics_json.data(), cp->physics_json.size()) !=
+      cp->physics_hash) {
+    return false;
+  }
+  out = cp->physics_json;
+  return true;
 }
 
 bool ReplayScrubber::restore_bytes(const std::string& json,
-                                   std::uint64_t hash, SceneDocument& doc,
-                                   std::string& error) {
+                                   std::uint64_t hash,
+                                   const std::string& physics_json,
+                                   std::uint64_t physics_hash,
+                                   SceneDocument& doc, std::string& error) {
   if (fnv1a64(json.data(), json.size()) != hash) {
     error = "scrub: checkpoint bytes failed hash verification";
+    return false;
+  }
+  if (fnv1a64(physics_json.data(), physics_json.size()) != physics_hash) {
+    error = "scrub: checkpoint physics failed hash verification";
     return false;
   }
   SceneDocument parsed;

@@ -7,9 +7,11 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <charconv>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <system_error>
 
 #include "warploom/core/replay_scrubber.hpp"
 
@@ -92,6 +94,7 @@ void append_json_string(const std::string& value, std::string& out) {
 }  // namespace
 
 bool CommandRecorder::start(std::uint64_t frame, const SceneDocument& doc,
+                            const std::string& physics_json, double fixed_dt,
                             const std::string& scene, std::string& error) {
   if (active_) {
     error = "capture already active";
@@ -100,9 +103,10 @@ bool CommandRecorder::start(std::uint64_t frame, const SceneDocument& doc,
   active_ = true;
   frame_ = frame;
   scene_ = scene;
+  fixed_dt_ = fixed_dt > 0.0 ? fixed_dt : 1.0 / 60.0;
   log_.clear();
   checkpoints_.clear();
-  embed_checkpoint(doc, frame);
+  embed_checkpoint(doc, physics_json, frame);
   return true;
 }
 
@@ -124,16 +128,20 @@ void CommandRecorder::record(const ::warploom::core::ControlCommand& command) {
 }
 
 void CommandRecorder::embed_checkpoint(const SceneDocument& doc,
+                                       const std::string& physics_json,
                                        std::uint64_t frame) {
   CheckpointLine line;
   line.frame = frame;
   line.json = doc.to_json();
   line.hash = fnv1a64(line.json.data(), line.json.size());
+  line.physics_json = physics_json;
+  line.physics_hash =
+      fnv1a64(line.physics_json.data(), line.physics_json.size());
   checkpoints_.push_back(std::move(line));
 }
 
 bool CommandRecorder::stop(const std::string& path, const SceneDocument& doc,
-                           std::string& error) {
+                           const std::string& physics_json, std::string& error) {
   if (!active_) {
     error = "no capture active";
     return false;
@@ -142,15 +150,28 @@ bool CommandRecorder::stop(const std::string& path, const SceneDocument& doc,
     error = "stop_capture needs \"path\"";
     return false;
   }
-  embed_checkpoint(doc, frame_);
+  embed_checkpoint(doc, physics_json, frame_);
 
   std::string out;
   out.reserve(4096U + log_.size() * 64U);
-  // Header.
+  // Header. fixed_dt is the host's fixed step (T4a): load_replay
+  // re-simulates physics with this increment; files predating it carry
+  // 0, which means "unknown — do not re-simulate" (status quo).
   out += "{\"record\":\"header\",\"schema_version\":1,"
          "\"format\":\"warploom-replay-v1\",\"scene\":";
   append_json_string(scene_, out);
-  out += ",\"created_unix\":0}\n";
+  out += ",\"created_unix\":0,\"fixed_dt\":";
+  {
+    char buf[32];
+    const auto printed =
+        std::to_chars(buf, buf + sizeof(buf), fixed_dt_);
+    if (printed.ec == std::errc{}) {
+      out.append(buf, static_cast<std::size_t>(printed.ptr - buf));
+    } else {
+      out += "0";
+    }
+  }
+  out += "}\n";
 
   // Interleave by logical frame: commands and checkpoint markers in file
   // order — checkpoints carry the frame they were embedded at, commands
@@ -204,8 +225,16 @@ bool CommandRecorder::stop(const std::string& path, const SceneDocument& doc,
       out += std::to_string(c.frame);
       out += ",\"hash\":\"";
       out += std::to_string(c.hash);
+      out += "\",\"p_hash\":\"";
+      out += std::to_string(c.physics_hash);
       out += "\"}\n";
       out += c.json;
+      out += '\n';
+      // T4a: solver state travels on the third line (empty object-line
+      // when the checkpoint captured no physics). Old readers reject
+      // unknown trailing lines, so this is a forward-only extension
+      // documented in replay-format.md — never silently misparsed.
+      out += c.physics_json.empty() ? "{}" : c.physics_json;
       out += '\n';
     }
   }

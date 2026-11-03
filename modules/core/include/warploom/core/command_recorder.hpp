@@ -37,9 +37,13 @@ class CommandRecorder final {
  public:
   //! Begins recording at logical `frame`. Embeds the opening checkpoint
   //! (capture-start + explicit-snapshots density, per the format spec).
+  //! `physics_json` is the T4a solver snapshot at the same moment (opaque
+  //! bytes); `fixed_dt` is the host's fixed step recorded into the header
+  //! so load_replay re-simulates physics with the same increment.
   //! Returns false + error when already recording or the document fails to
   //! serialize.
   [[nodiscard]] bool start(std::uint64_t frame, const SceneDocument& doc,
+                           const std::string& physics_json, double fixed_dt,
                            const std::string& scene, std::string& error);
 
   //! Ends recording and writes the file. Embeds the closing checkpoint at
@@ -48,7 +52,7 @@ class CommandRecorder final {
   //! fails; recording STOPS only on success (a failed stop keeps the
   //! session intact — caller may retry). Clears the log on success.
   [[nodiscard]] bool stop(const std::string& path, const SceneDocument& doc,
-                          std::string& error);
+                          const std::string& physics_json, std::string& error);
 
   //! Records a command whose reply was already ok. Enforces the spec's
   //! recorded-kinds set and updates the logical frame for step commands.
@@ -58,8 +62,10 @@ class CommandRecorder final {
   //! frame, the session's scrub_start handler uses the scrub target frame
   //! (checkpoints must be warpable targets, not logical arrival frames),
   //! `stop` uses the final logical frame. Explicit frames never collide,
-  //! so same-frame replacement stays meaningful.
-  void embed_checkpoint(const SceneDocument& doc, std::uint64_t frame);
+  //! so same-frame replacement stays meaningful. Physics travels with the
+  //! document (T4a); both hashes land in the marker line.
+  void embed_checkpoint(const SceneDocument& doc,
+                        const std::string& physics_json, std::uint64_t frame);
 
   //! True while a capture is active.
   [[nodiscard]] bool active() const noexcept { return active_; }
@@ -88,6 +94,8 @@ class CommandRecorder final {
     std::uint64_t frame{0};
     std::uint64_t hash{0};
     std::string json{};
+    std::uint64_t physics_hash{0};
+    std::string physics_json{};
   };
 
   std::vector<RecordedCommand> log_{};
@@ -95,6 +103,9 @@ class CommandRecorder final {
   bool active_{false};
   std::uint64_t frame_{0};
   std::string scene_{};
+  //! Host fixed step latched at start (T4a): re-simulation increment.
+  //! 0 in files predating the header field = unknown, do not re-simulate.
+  double fixed_dt_{0.0};
 };
 
 }  // namespace warploom::editor

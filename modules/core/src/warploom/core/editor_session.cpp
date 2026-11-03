@@ -20,6 +20,7 @@
 
 #include "warploom/core/contract.hpp"
 #include "warploom/core/control_server.hpp"
+#include "warploom/core/physics_snapshot.hpp"
 #include "warploom/core/replay_scrubber.hpp"
 
 namespace warploom::editor {
@@ -178,8 +179,34 @@ void append_number(std::string& out, double value) {
 }
 }  // namespace
 
+std::string EditorSession::physics_bytes() const {
+  return physics_snapshot_json(physics_, physics_bodies_);
+}
+
+std::uint32_t EditorSession::step_physics(double fixed_dt) {
+  // Substep count is derived from fixed_dt alone, never from wall-clock, so
+  // a replay that re-ticks the same frames reproduces the same integration.
+  // Clamped so a pathological dt cannot make one tick arbitrarily expensive.
+  // Shared by tick() and load_replay's re-apply loop: one derivation, one
+  // integration order, or the two would drift.
+  auto substeps = static_cast<std::uint32_t>(
+      std::ceil(fixed_dt / kMaxPhysicsSubstep));
+  substeps = std::clamp<std::uint32_t>(substeps, 1U, kMaxPhysicsSubsteps);
+  const auto substep_dt =
+      static_cast<float>(fixed_dt / static_cast<double>(substeps));
+  for (std::uint32_t i = 0; i < substeps; ++i) physics_.step(substep_dt);
+  return substeps;
+}
+
 EditorSession::TickReport EditorSession::tick(const FrameInput& input) {
   TickReport report{};
+
+  // Latch the host's fixed step for capture headers (T4a): both shipped
+  // hosts tick at a constant dt, so the last positive value is the
+  // increment the live simulation integrated with.
+  if (input.fixed_dt > 0.0) {
+    last_fixed_dt_ = input.fixed_dt;
+  }
 
   // 1. Bindings write their pin values into object properties.
   std::string error;
@@ -195,16 +222,7 @@ EditorSession::TickReport EditorSession::tick(const FrameInput& input) {
   // simulation, but must still see graph edits apply, which is why this sits
   // after sync_graph.
   if (!input.paused && input.fixed_dt > 0.0) {
-    // Substep count is derived from fixed_dt alone, never from wall-clock, so
-    // a replay that re-ticks the same frames reproduces the same integration.
-    // Clamped so a pathological dt cannot make one tick arbitrarily expensive.
-    auto substeps = static_cast<std::uint32_t>(
-        std::ceil(input.fixed_dt / kMaxPhysicsSubstep));
-    substeps = std::clamp<std::uint32_t>(substeps, 1U, kMaxPhysicsSubsteps);
-    const auto substep_dt =
-        static_cast<float>(input.fixed_dt / static_cast<double>(substeps));
-    for (std::uint32_t i = 0; i < substeps; ++i) physics_.step(substep_dt);
-    report.physics_substeps = substeps;
+    report.physics_substeps = step_physics(input.fixed_dt);
 
     // Push the simulated poses into the projected store so the renderer shows
     // the simulation. Done before project() below? No -- project() refreshes
@@ -940,7 +958,7 @@ bool EditorSession::handle_edit(
       // the scrub TARGET frame (capture-start + explicit-snapshots density,
       // per the format spec; targets never collide, logical frames would).
       if (recorder_.active()) {
-        recorder_.embed_checkpoint(doc_, frame);
+        recorder_.embed_checkpoint(doc_, physics_bytes(), frame);
       }
       reply.ok = true;
       reply.detail = "checkpoint @" + std::to_string(frame);
@@ -965,7 +983,7 @@ bool EditorSession::handle_edit(
       // (pre-capture) checkpoint would otherwise write a file that fails
       // to load itself. Embed the restored bytes when missing.
       if (recorder_.active() && !recorder_.has_checkpoint(frame)) {
-        recorder_.embed_checkpoint(doc_, frame);
+        recorder_.embed_checkpoint(doc_, physics_bytes(), frame);
       }
       reply.ok = true;
       reply.detail = "scrubbed to frame " + std::to_string(frame);
@@ -1548,15 +1566,32 @@ std::size_t EditorSession::sync_graph(std::string& error) {
 }
 
 bool EditorSession::scrub_start(std::uint64_t frame, std::string& error) {
-  return scrubber_.capture(frame, doc_, error);
+  return scrubber_.capture(frame, doc_, physics_bytes(), error);
 }
 
 bool EditorSession::scrub_to(std::uint64_t frame, std::string& error) {
+  // T4a: restore physics FIRST into temporaries, so a torn physics payload
+  // fails with doc_, physics_, and the map all untouched (same atomicity
+  // the document restore already guarantees).
+  ::warploom::physics::PhysicsWorld restored_physics;
+  std::map<std::uint64_t, std::uint32_t> restored_map;
+  std::string physics_json;
+  if (!scrubber_.physics_for(frame, physics_json)) {
+    error = "scrub: no checkpoint at frame " + std::to_string(frame);
+    return false;
+  }
+  if (!physics_restore_json(restored_physics, restored_map, physics_json,
+                             error)) {
+    error = "scrub: checkpoint physics failed to restore: " + error;
+    return false;
+  }
   SceneDocument restored;
   if (!scrubber_.restore(frame, restored, error)) {
     return false;
   }
   doc_ = std::move(restored);
+  physics_ = std::move(restored_physics);
+  physics_bodies_ = std::move(restored_map);
   stack_ = CommandStack(doc_);  // undo cannot cross a time warp
   // Selection survives only when the restored document still has the object.
   if (selected_id_ != 0U && doc_.find(selected_id_) == nullptr) {
@@ -1601,6 +1636,23 @@ namespace {
     const unsigned long long v =
         std::stoull(line.substr(key_pos + needle.size()), &consumed);
     out = static_cast<std::uint64_t>(v);
+    return consumed > 0U;
+  } catch (const std::exception&) {
+    return false;
+  }
+}
+
+//! Parses an optional scalar double field ("key":number). Missing or
+//! malformed leaves `out` untouched and returns false — the caller decides
+//! whether absence is an error (new field) or a default (old file).
+[[nodiscard]] bool replay_find_scalar(const std::string& line, const char* key,
+                                      double& out) {
+  const std::string needle = "\"" + std::string(key) + "\":";
+  const std::size_t key_pos = line.find(needle);
+  if (key_pos == std::string::npos) return false;
+  try {
+    std::size_t consumed = 0;
+    out = std::stod(line.substr(key_pos + needle.size()), &consumed);
     return consumed > 0U;
   } catch (const std::exception&) {
     return false;
@@ -1667,6 +1719,12 @@ bool EditorSession::load_replay(const std::string& path,
     error = "load_replay: not a warploom-replay-v1 file";
     return false;
   }
+  // T4a: the fixed step the live run integrated with. Absent (old file) or
+  // non-positive means "unknown — do not re-simulate physics" (status quo:
+  // physics stays untouched and the closing check covers the document only).
+  double replay_fixed_dt = 0.0;
+  (void)replay_find_scalar(lines.front(), "fixed_dt", replay_fixed_dt);
+  if (!(replay_fixed_dt > 0.0)) replay_fixed_dt = 0.0;
   // Truncation guard: the last line must be the end record.
   if (!replay_find_string(lines.back(), "record", record) ||
       record != "end") {
@@ -1684,6 +1742,8 @@ bool EditorSession::load_replay(const std::string& path,
     std::uint64_t frame{0};
     std::uint64_t hash{0};
     std::string json{};
+    std::uint64_t physics_hash{0};
+    std::string physics_json{};
   };
   std::vector<HydratedCheckpoint> hydrated;
   std::uint64_t expected_seq = 0;
@@ -1735,6 +1795,12 @@ bool EditorSession::load_replay(const std::string& path,
     } else if (record == "ckpt") {
       HydratedCheckpoint cp;
       std::string hash_text;
+      std::string p_hash_text;
+      // p_hash is optional: files predating T4a checkpoints carry the
+      // document line only, and hydrate with empty physics (defined to
+      // restore an empty world — never stale state).
+      const bool has_physics = replay_find_string(line, "p_hash",
+                                                  p_hash_text);
       if (!replay_find_u64(line, "frame", cp.frame) ||
           !replay_find_string(line, "hash", hash_text)) {
         error = "load_replay: malformed ckpt record at line " +
@@ -1753,6 +1819,27 @@ bool EditorSession::load_replay(const std::string& path,
                 std::to_string(i);
         return false;
       }
+      if (has_physics) {
+        if (i + 1 >= lines.size()) {
+          error = "load_replay: ckpt at line " + std::to_string(i + 1) +
+                  " has no physics line";
+          return false;
+        }
+        cp.physics_json = lines[++i];
+        try {
+          cp.physics_hash = std::stoull(p_hash_text);
+        } catch (const std::exception&) {
+          error = "load_replay: malformed p_hash at line " +
+                  std::to_string(i);
+          return false;
+        }
+        if (fnv1a64(cp.physics_json.data(), cp.physics_json.size()) !=
+            cp.physics_hash) {
+          error = "load_replay: checkpoint physics hash mismatch at line " +
+                  std::to_string(i + 1);
+          return false;
+        }
+      }
       hydrated.push_back(std::move(cp));
     }
     // "header"/"end" records: already validated.
@@ -1761,7 +1848,8 @@ bool EditorSession::load_replay(const std::string& path,
   // Hydrate the scrubber: the loaded session's timeline REPLACES the ring.
   scrubber_.clear();
   for (const auto& cp : hydrated) {
-    scrubber_.insert(cp.frame, cp.hash, cp.json);
+    scrubber_.insert(cp.frame, cp.hash, cp.json, cp.physics_hash,
+                      cp.physics_json);
   }
 
   // Re-apply needs a defined start state: restore the EARLIEST checkpoint
@@ -1774,13 +1862,28 @@ bool EditorSession::load_replay(const std::string& path,
   // top of them (duplicated objects + a closing-hash mismatch).
   if (!hydrated.empty()) {
     std::string restore_error;
+    // T4a: the world and map restore into temporaries first (same
+    // atomicity as the document: nothing commits on a torn payload).
+    ::warploom::physics::PhysicsWorld opening_physics;
+    std::map<std::uint64_t, std::uint32_t> opening_map;
+    if (!physics_restore_json(opening_physics, opening_map,
+                               hydrated.front().physics_json,
+                               restore_error)) {
+      error = "load_replay: opening physics failed to restore: " +
+              restore_error;
+      return false;
+    }
     if (!scrubber_.restore_bytes(hydrated.front().json,
-                                  hydrated.front().hash, doc_,
+                                  hydrated.front().hash,
+                                  hydrated.front().physics_json,
+                                  hydrated.front().physics_hash, doc_,
                                   restore_error)) {
       error = "load_replay: opening checkpoint failed to restore: " +
               restore_error;
       return false;
     }
+    physics_ = std::move(opening_physics);
+    physics_bodies_ = std::move(opening_map);
     stack_ = CommandStack(doc_);
     selected_id_ = 0;
   }
@@ -1797,6 +1900,11 @@ bool EditorSession::load_replay(const std::string& path,
       hydrated.empty() ? 0U : hydrated.front().frame;
 
   replaying_ = true;
+  // T4a: pause gates physics re-simulation exactly like the live tick
+  // (paused ticks advance neither). Files predating fixed_dt re-simulate
+  // nothing (replay_fixed_dt == 0): physics stays as the opening
+  // checkpoint restored it — the pre-T4a behaviour, bit for bit.
+  bool replay_paused = false;
   for (const auto& entry : logged) {
     // G3: ONE full session tick per recorded step tick — the sim loop is
     // the re-applier (headless sessions have no free-running clock). This
@@ -1811,6 +1919,9 @@ bool EditorSession::load_replay(const std::string& path,
     for (std::uint64_t t = 0; t < ticks_to_run; ++t) {
       std::string sync_error;
       (void)sync_graph(sync_error);
+      if (!replay_paused && replay_fixed_dt > 0.0) {
+        (void)step_physics(replay_fixed_dt);
+      }
       tick_timeline(frame_source_frame);
       frame_source_frame += 1;
     }
@@ -1823,6 +1934,8 @@ bool EditorSession::load_replay(const std::string& path,
               ") failed: " + reply.error;
       return false;
     }
+    if (entry.command.kind == CK::Pause) replay_paused = true;
+    if (entry.command.kind == CK::Resume) replay_paused = false;
   }
   replaying_ = false;
   // End-state verification (W2 contract, docs/replay-format.md "Load
@@ -1846,6 +1959,26 @@ bool EditorSession::load_replay(const std::string& path,
               std::to_string(hydrated[closing].hash) +
               "): the capture contains effects outside the command log";
       return false;
+    }
+    // T4a: the closing physics must match too — but ONLY when the re-apply
+    // could have moved it (new file with fixed_dt). Old files re-simulate
+    // nothing, so their closing physics is the opening state by
+    // construction... which the closing checkpoint also embeds only when
+    // the file predates physics entirely (empty). Compare only when the
+    // file both carries physics AND drove re-simulation; anything else is
+    // the pre-T4a contract and must keep loading exactly as before.
+    if (replay_fixed_dt > 0.0 && !hydrated[closing].physics_json.empty()) {
+      const std::string now_physics = physics_bytes();
+      const std::uint64_t now_phash =
+          fnv1a64(now_physics.data(), now_physics.size());
+      if (now_phash != hydrated[closing].physics_hash) {
+        error = "load_replay: re-applied physics does not match the "
+                "closing checkpoint at frame " +
+                std::to_string(hydrated[closing].frame) +
+                ": the capture contains simulation effects outside the "
+                "command log";
+        return false;
+      }
     }
   }
   return true;

@@ -138,6 +138,12 @@ class PhysicsWorld final {
   //! Gravity, exposed so a snapshot can carry the world's configuration and not
   //! just its bodies. A resumed replay with the wrong gravity diverges.
   [[nodiscard]] float gravity() const noexcept { return gravity_; }
+  //! Snapshot-restore primitive (T4a): the codec rebuilds a world by
+  //! clear + re-add in body-id order, so restored ids match the captured
+  //! session map. Gravity is configuration, not derived state, so it is
+  //! settable for the same reason.
+  void set_gravity(float gravity) noexcept { gravity_ = gravity; }
+  void clear_bodies() noexcept { bodies_.clear(); }
 
   //! One fixed step, in phase order:
   //!   1. integrate velocities (gravity) and positions (semi-implicit Euler),
