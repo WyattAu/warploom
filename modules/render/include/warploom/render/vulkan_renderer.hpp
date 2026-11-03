@@ -19,6 +19,7 @@
 #include "warploom/render/vulkan_hiz_pyramid.hpp"
 #include "warploom/render/vulkan_render_graph.hpp"
 #include "warploom/render/vulkan_scene.hpp"
+#include "warploom/render/vulkan_compute.hpp"
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -130,6 +131,12 @@ struct RendererConfig {
   //! records the depth-to-H-Z reduction; the callback remains available for
   //! application-specific culling and scene-buffer work.
   std::string hiz_reduction_shader_path{};
+  //! Loop28 step 3: record the H-Z reduce + pack on the dedicated compute
+  //! queue reading the persisted snapshot (step 2), instead of inline on
+  //! the graphics queue reading live depth. Requires a COMPUTE-only family
+  //! (else silently stays on graphics); the snapshot copy still runs on
+  //! graphics. Off by default: enable explicitly per run.
+  bool hiz_compute_reduce{false};
   //! Record GPU timestamp queries around each frame (2 per frame slot) and
   //! resolve the previous frame's duration on slot reuse. Zero overhead when
   //! disabled; `gpu_timing().available` reports whether the device supports
@@ -641,6 +648,22 @@ public:
   //! Persisted depth snapshot for ping-pong slot `index` (loop28 step 2),
   //! or null when snapshots are unsupported/disabled. Rests in
   //! SHADER_READ_ONLY_OPTIMAL after any completed H-Z frame.
+  //! True when the compute-queue reduce path is armed (config requested AND
+  //! a dedicated COMPUTE-only family exists AND H-Z direct mode is on).
+  [[nodiscard]] bool hiz_compute_reduce_enabled() const noexcept {
+    return hiz_compute_enabled_;
+  }
+  //! Reduce the persisted snapshot for `slot` on the compute queue
+  //! (loop28 step 3, synchronous proof shape): records the same per-level
+  //! dispatches the graphics path would run -- reading the snapshot view
+  //! instead of live depth -- plus the pack copy, submits on the dedicated
+  //! compute queue, and CPU-waits for completion. The destination pyramid
+  //! and packed buffer then hold THIS snapshot's reduction, bit-identical
+  //! to the graphics-queue result. Returns the signalled timeline value.
+  //! Fails cleanly (never partial) when compute is unavailable, the slot
+  //! has no snapshot, or submission fails.
+  [[nodiscard]] ::warploom::core::Result<std::uint64_t> compute_reduce_hiz_snapshot(
+      std::uint32_t slot);
   [[nodiscard]] VkImage hiz_depth_snapshot_image(std::uint32_t index) const noexcept {
     return index < 2U ? hiz_depth_snapshot_[index] : VK_NULL_HANDLE;
   }
@@ -685,6 +708,15 @@ private:
   //! Release the loop28-step-2 persisted depth snapshots (device must be
   //! idle; called before the binding allocator is torn down).
   void destroy_hiz_depth_snapshots() noexcept;
+  //! Re-point a slot's compute sets at its snapshot view (loop28 step 3).
+  //! Called after a snapshot is (re)created; no-op when the view is
+  //! unchanged (steady state performs zero updates). Returns false when a
+  //! descriptor write fails (caller marks snapshots invalid, never fails
+  //! the frame).
+  [[nodiscard]] bool repoint_hiz_compute_sets(std::uint32_t slot) noexcept;
+  //! AsyncComputeQueue::record callback: reduce + pack for one snapshot
+  //! slot onto the compute command buffer.
+  static void record_hiz_compute_work(VkCommandBuffer command_buffer, void* user_data);
 #ifdef OMNICPP_HAS_VULKAN
   //! Ensure the snapshot slot holds a depth image matching width/height/
   //! format (loop28 step 2, lazy: the compose HDR depth may not exist when
@@ -793,6 +825,32 @@ private:
   //! depth under HDR compose, the swapchain depth otherwise -- and either is
   //! rebuilt on resize, so the binding is refreshed when it drifts.
   VkImageView hiz_bound_depth_view_[2]{VK_NULL_HANDLE, VK_NULL_HANDLE};
+  // --- Compute-queue reduce (loop28 step 3) ----------------------------
+  //! Snapshot-reading twin of hiz_reduction_sets_: binding 0 every level
+  //! and binding 2 at level 0 point at the persisted snapshot view for the
+  //! slot instead of the live depth view. Allocated with the graphics sets
+  //! (same layout, 2x levels sets) and re-pointed when a snapshot is
+  //! (re)created. Only consumed by the compute-queue reduce; the graphics
+  //! path never touches these.
+  std::vector<VkDescriptorSet> hiz_compute_sets_[2];
+  //! View currently bound in each slot's compute sets (snapshot view).
+  VkImageView hiz_compute_bound_view_[2]{VK_NULL_HANDLE, VK_NULL_HANDLE};
+  //! Set array the dispatch callback binds (graphics sets on the graphics
+  //! record path, compute sets on the compute record path). Null outside a
+  //! reduction record.
+  const std::vector<VkDescriptorSet>* active_hiz_sets_{nullptr};
+  //! Renderer-owned compute submission context (dedicated COMPUTE-only
+  //! family). Initialized when hiz_compute_reduce is requested AND the
+  //! device provides a dedicated family; otherwise the reduce stays on
+  //! graphics regardless of the flag.
+  AsyncComputeQueue hiz_compute_queue_;
+  VkQueue hiz_compute_raw_queue_{VK_NULL_HANDLE};
+  std::uint32_t hiz_compute_family_{0U};
+  bool hiz_compute_available_{false};
+  //! True when the frame loop (or tests) should reduce on compute. Requires
+  //! hiz_compute_available_ AND the config flag; kept as a member so the
+  //! record path branches once instead of re-deriving it per frame.
+  bool hiz_compute_enabled_{false};
   // --- Persisted per-frame H-Z depth (loop28 step 2) ---------------------
   //! The live depth attachment is overwritten by the next frame's scene
   //! render, so a compute-queue reduce (loop28 step 3) cannot read it behind

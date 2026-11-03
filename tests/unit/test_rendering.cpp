@@ -689,6 +689,162 @@ TEST(HiZGraph, DepthSnapshotsMatchLiveDepth) {
 #endif
 }
 
+//! Loop28 step 3 (synchronous proof): the compute-queue reduce of the
+//! persisted snapshot is bit-identical to the graphics-queue reduce of the
+//! live depth.
+//!
+//! Why this exists: step 3 moves the reduce across queues. The risk is a
+//! mis-wired descriptor (compute sets sampling live depth, a stale view, or
+//! the wrong slot) producing a plausible but wrong pyramid -- and every
+//! brightness/hash assertion passing because the graphics pyramid is still
+//! correct. This pins the compute result directly: after two graphics
+//! frames, the packed words are read back, the last slot is re-reduced on
+//! the compute queue from its snapshot, and the packed words must match
+//! exactly. 0 diagnostics proves no queue-ownership violation on the shared
+//! images/buffer. Sabotage-checked by construction: re-pointing the compute
+//! sets at the wrong view (or skipping the re-point) changes level 0 and
+//! fails the word comparison while the graphics path stays green.
+TEST(HiZGraph, ComputeReduceMatchesGraphicsReduce) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  omnicpp::render::VulkanContext probe;
+  ASSERT_TRUE(probe.initialize("OmniCppHiZProbe", true).is_ok());
+  const bool dedicated = probe.has_dedicated_compute();
+  probe.cleanup();
+  if (!dedicated) {
+    GTEST_SKIP() << "no COMPUTE-only family: compute reduce not testable here";
+  }
+  constexpr std::uint32_t kSize = 256U;
+  omnicpp::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("OmniCppHiZCompute", true).is_ok());
+  omnicpp::render::VulkanMemoryAllocator allocator;
+  ASSERT_TRUE(
+      allocator.initialize(context.device(), context.physical_device()).is_ok());
+
+  omnicpp::render::VulkanOffscreenTarget ldr;
+  ASSERT_TRUE(ldr
+                  .create(context.device(), context.physical_device(),
+                          VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator,
+                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+                  .is_ok());
+  const VkFormat depth_format =
+      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+          context.physical_device());
+  ASSERT_NE(depth_format, VK_FORMAT_UNDEFINED);
+  omnicpp::render::VulkanRenderPass present_pass;
+  ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
+                                  depth_format)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_depth_resources(context.device(),
+                                          context.physical_device(),
+                                          depth_format, kSize, kSize)
+                  .is_ok());
+  if (!present_pass.depth_is_sampleable()) {
+    GTEST_SKIP() << "depth is not sampleable on this device; H-Z needs it";
+  }
+  ASSERT_TRUE(present_pass
+                  .create_framebuffers(context.device(), {ldr.image_view()},
+                                       kSize, kSize)
+                  .is_ok());
+
+  omnicpp::render::RendererConfig config;
+  config.enable_hiz = true;
+  config.enable_hdr_compose = true;
+  config.enable_bloom = false;
+  config.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  config.hiz_reduction_shader_path =
+      std::string(WARPLOOM_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
+  config.hiz_compute_reduce = true;
+
+  omnicpp::render::VulkanRenderer renderer;
+  const auto init =
+      renderer.initialize_headless(context, present_pass, kSize, kSize, config,
+                                   VK_FORMAT_B8G8R8A8_UNORM);
+  ASSERT_TRUE(init.is_ok()) << "headless compose+hiz+compute init failed: "
+                            << static_cast<std::uint32_t>(init.error());
+  ASSERT_TRUE(renderer.hiz_direct_enabled());
+  ASSERT_TRUE(renderer.hiz_compute_reduce_enabled())
+      << "dedicated compute exists but the compute path did not arm";
+
+  omnicpp::render::VulkanPipeline pipeline;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  ASSERT_TRUE(pipeline
+                  .load_shader_file(context.device(),
+                                     shader_dir + "/triangle.vert.spv")
+                  .is_ok());
+  ASSERT_TRUE(pipeline
+                  .load_shader_file(context.device(),
+                                     shader_dir + "/triangle.frag.spv")
+                  .is_ok());
+  ASSERT_TRUE(pipeline
+                  .create_graphics_pipeline(
+                      context.device(), renderer.hdr_render_pass(),
+                      renderer.hdr_format(), VK_NULL_HANDLE, true, true, false)
+                  .is_ok());
+  renderer.set_pipeline(pipeline.pipeline());
+  HiZCallbackState state;
+  state.renderer = &renderer;
+  renderer.set_hiz_record_callback(record_hiz_contract, &state);
+
+  for (int frame = 0; frame < 2; ++frame) {
+    state.calls = 0U;
+    auto image = renderer.begin_frame();
+    ASSERT_TRUE(image.is_ok());
+    ASSERT_TRUE(renderer
+                    .record_commands(image.value(),
+                                     present_pass.framebuffer(0U), kSize, kSize)
+                    .is_ok());
+    ASSERT_TRUE(renderer.submit_frame().is_ok());
+    ASSERT_TRUE(renderer.present_frame().is_ok());
+    renderer.wait_idle();
+    ASSERT_EQ(state.calls, 1U) << "frame " << frame;
+  }
+  EXPECT_EQ(context.validation_error_count(), 0U);
+  EXPECT_EQ(context.validation_warning_count(), 0U);
+
+  // Graphics-queue result: packed words after two graphics reduces.
+  const auto& packed = renderer.hiz_packed_pyramid();
+  ASSERT_TRUE(packed.buffer.is_valid());
+  std::size_t total_words = 0U;
+  for (const auto& dim : packed.level_dims) {
+    total_words += static_cast<std::size_t>(dim.first) * dim.second;
+  }
+  ASSERT_GT(total_words, 0U);
+  const auto gfx_words = readback_buffer(
+      context.physical_device(), context.device(), context.graphics_queue(),
+      static_cast<std::uint32_t>(context.queue_families().graphics_family),
+      packed.buffer.buffer, static_cast<VkDeviceSize>(total_words * 4U));
+  ASSERT_EQ(gfx_words.words.size(), total_words);
+
+  // Re-reduce the last snapshot on the compute queue into the same pyramid
+  // + pack, then compare. Bit-identical input (snapshot == live depth,
+  // pinned by DepthSnapshotsMatchLiveDepth) through the same shader must
+  // give bit-identical words whichever queue dispatches.
+  const std::uint32_t last_slot = renderer.hiz_last_snapshot_slot();
+  ASSERT_LT(last_slot, 2U);
+  const auto compute_result = renderer.compute_reduce_hiz_snapshot(last_slot);
+  ASSERT_TRUE(compute_result.is_ok())
+      << "compute reduce failed: "
+      << static_cast<std::uint32_t>(compute_result.error());
+  renderer.wait_idle();
+  EXPECT_EQ(context.validation_error_count(), 0U)
+      << "compute-queue reduce must be validation-clean on shared images";
+  EXPECT_EQ(context.validation_warning_count(), 0U);
+  const auto cmp_words = readback_buffer(
+      context.physical_device(), context.device(), context.graphics_queue(),
+      static_cast<std::uint32_t>(context.queue_families().graphics_family),
+      packed.buffer.buffer, static_cast<VkDeviceSize>(total_words * 4U));
+  ASSERT_EQ(cmp_words.words.size(), total_words);
+  EXPECT_EQ(cmp_words.words, gfx_words.words)
+      << "compute-queue pyramid must equal the graphics-queue pyramid";
+#else
+  GTEST_SKIP() << "built without Vulkan types or shader dir";
+#endif
+}
+
 //! Golden hash of a COMPOSED frame through the headless renderer.
 //!
 //! Why this exists: initialize_headless + the B3b chain extraction re-plumbed

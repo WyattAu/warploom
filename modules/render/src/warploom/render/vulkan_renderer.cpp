@@ -277,6 +277,24 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
       return hiz_result;
     }
   }
+  // Loop28 step 3: arm the compute-queue reduce when requested AND the
+  // device provides a dedicated COMPUTE-only family. Silent fallback to
+  // graphics otherwise -- no behaviour change on single-queue hardware.
+  hiz_compute_available_ = false;
+  hiz_compute_enabled_ = false;
+  hiz_compute_raw_queue_ = VK_NULL_HANDLE;
+  hiz_compute_family_ = 0U;
+  if (config_.enable_hiz && config_.hiz_compute_reduce && hiz_direct_enabled_ &&
+      context.has_dedicated_compute() && context.compute_queue() != VK_NULL_HANDLE) {
+    auto async_result = hiz_compute_queue_.initialize(
+        device_, context.compute_queue(), context.compute_family_index());
+    if (async_result.is_ok()) {
+      hiz_compute_available_ = true;
+      hiz_compute_enabled_ = true;
+      hiz_compute_raw_queue_ = context.compute_queue();
+      hiz_compute_family_ = context.compute_family_index();
+    }
+  }
   // Compose eagerly, at the swapchain extent, rather than on the first
   // record_commands(): an application builds its scene pipelines against the
   // HDR intermediate (see hdr_render_pass()), so the target has to exist
@@ -1984,6 +2002,8 @@ void VulkanRenderer::destroy_hiz_depth_snapshots() noexcept {
   hiz_last_depth_image_ = VK_NULL_HANDLE;
   hiz_last_depth_view_ = VK_NULL_HANDLE;
   hiz_last_snapshot_slot_ = 2U;
+  hiz_compute_bound_view_[0] = VK_NULL_HANDLE;
+  hiz_compute_bound_view_[1] = VK_NULL_HANDLE;
 #else
   hiz_snapshot_valid_ = false;
   hiz_snapshot_initialized_[0] = hiz_snapshot_initialized_[1] = false;
@@ -1992,6 +2012,46 @@ void VulkanRenderer::destroy_hiz_depth_snapshots() noexcept {
   hiz_last_snapshot_slot_ = 2U;
 #endif
 }
+
+#ifdef OMNICPP_HAS_VULKAN
+bool VulkanRenderer::repoint_hiz_compute_sets(std::uint32_t slot) noexcept {
+  if (slot >= 2U || hiz_descriptor_manager_ == nullptr ||
+      hiz_pyramids_[slot] == nullptr ||
+      hiz_depth_snapshot_view_[slot] == VK_NULL_HANDLE) {
+    return false;
+  }
+  if (hiz_compute_bound_view_[slot] == hiz_depth_snapshot_view_[slot] &&
+      hiz_compute_sets_[slot].size() >= hiz_state_.levels()) {
+    return true;
+  }
+  const VkSampler sampler = hiz_pyramids_[slot]->sampler();
+  auto& sets = hiz_compute_sets_[slot];
+  const std::uint32_t levels = hiz_state_.levels();
+  if (sets.size() < levels) return false;
+  for (std::uint32_t level = 0; level < levels; ++level) {
+    if (!hiz_descriptor_manager_
+             ->write_image(sets[level], 0U,
+                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, sampler,
+                           hiz_depth_snapshot_view_[slot],
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+             .is_ok()) {
+      return false;
+    }
+    if (level == 0U) {
+      if (!hiz_descriptor_manager_
+               ->write_image(sets[0], 2U,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, sampler,
+                             hiz_depth_snapshot_view_[slot],
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+               .is_ok()) {
+        return false;
+      }
+    }
+  }
+  hiz_compute_bound_view_[slot] = hiz_depth_snapshot_view_[slot];
+  return true;
+}
+#endif
 
 #ifdef OMNICPP_HAS_VULKAN
 bool VulkanRenderer::ensure_hiz_depth_snapshot(std::uint32_t slot,
@@ -2170,6 +2230,9 @@ void VulkanRenderer::copy_hiz_depth_to_snapshot(
   hiz_last_depth_view_ = record.depth_view;
   hiz_last_snapshot_slot_ = slot;
   hiz_snapshot_valid_ = true;
+  // Keep the compute sets pointed at the snapshot for step 3. Best-effort:
+  // a failed re-point leaves graphics green and only the compute path stale.
+  (void)repoint_hiz_compute_sets(slot);
 }
 #endif
 
@@ -2190,8 +2253,14 @@ void VulkanRenderer::cleanup_hiz_pipeline_resources() noexcept {
   hiz_reduction_layout_ = VK_NULL_HANDLE;
   hiz_reduction_sets_[0].clear();
   hiz_reduction_sets_[1].clear();
+  hiz_compute_sets_[0].clear();
+  hiz_compute_sets_[1].clear();
   hiz_bound_depth_view_[0] = VK_NULL_HANDLE;
   hiz_bound_depth_view_[1] = VK_NULL_HANDLE;
+  hiz_compute_bound_view_[0] = VK_NULL_HANDLE;
+  hiz_compute_bound_view_[1] = VK_NULL_HANDLE;
+  active_hiz_sets_ = nullptr;
+  active_hiz_record_ = nullptr;
   hiz_pyramid_initialized_[0] = false;
   hiz_pyramid_initialized_[1] = false;
   hiz_snapshot_initialized_[0] = false;
@@ -2217,14 +2286,20 @@ void VulkanRenderer::record_hiz_dispatch(
   const auto& record = *active_hiz_record_;
   if (pass.image_uses.empty()) return;
   const std::uint32_t level = pass.image_uses.front().base_mip;
-  if (level >= record.levels || level >= hiz_reduction_sets_[record.token.write_index].size()) {
+  // Loop28 step 3: the dispatch binds whichever set array the record path
+  // selected (graphics sets on graphics, snapshot-reading compute sets on
+  // compute). Falls back to the graphics sets when no path selected.
+  const auto* sets = active_hiz_sets_ != nullptr
+      ? active_hiz_sets_
+      : &hiz_reduction_sets_[record.token.write_index];
+  if (level >= record.levels || level >= sets->size()) {
     return;
   }
   const std::uint32_t mip_width =
       std::max(1U, record.destination_pyramid->width() >> level);
   const std::uint32_t mip_height =
       std::max(1U, record.destination_pyramid->height() >> level);
-  const VkDescriptorSet set = hiz_reduction_sets_[record.token.write_index][level];
+  const VkDescriptorSet set = (*sets)[level];
   const std::uint32_t push[4] = {
       record.render_width, record.render_height, record.tile_size, level};
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -2306,9 +2381,11 @@ bool VulkanRenderer::record_hiz_reduction(
   const auto compiled = compile_graph(nodes);
   hiz_dispatch_count_ = 0U;
   active_hiz_record_ = &record;
+  active_hiz_sets_ = &hiz_reduction_sets_[destination_index];
   execute_graph(command_buffer, nodes, compiled, nullptr,
                 &VulkanRenderer::record_hiz_graph_pass);
   active_hiz_record_ = nullptr;
+  active_hiz_sets_ = nullptr;
   const bool complete = hiz_dispatch_count_ == record.levels;
   if (complete) {
     // B5b: pack the pyramid for the occlusion cull. The graph leaves each mip
@@ -2380,6 +2457,164 @@ bool VulkanRenderer::record_hiz_reduction(
     }
   }
   return complete;
+}
+
+struct HizComputeWork {
+  VulkanRenderer* renderer{nullptr};
+  HiZFrameRecord record{};
+};
+
+void VulkanRenderer::record_hiz_compute_work(VkCommandBuffer command_buffer,
+                                              void* user_data) {
+#ifdef OMNICPP_HAS_VULKAN
+  auto* work = static_cast<HizComputeWork*>(user_data);
+  if (work == nullptr || work->renderer == nullptr || command_buffer == VK_NULL_HANDLE) {
+    return;
+  }
+  auto* self = work->renderer;
+  const HiZFrameRecord& record = work->record;
+  const std::uint32_t slot = record.token.write_index;
+  if (slot >= 2U || self->hiz_pyramids_[slot] == nullptr ||
+      self->hiz_compute_sets_[slot].size() < record.levels) {
+    return;
+  }
+  auto plan = self->make_hiz_graph_plan(record);
+  if (plan.passes.size() < record.levels) return;
+  // The shared plan declares the depth's initial layout as the live
+  // attachment (DEPTH_STENCIL_ATTACHMENT_OPTIMAL). The snapshot is never
+  // an attachment -- it rests in SHADER_READ_ONLY_OPTIMAL -- so patch the
+  // level-0 depth edge to its actual state. Without this the executor
+  // emits a DEPTH_ATTACHMENT barrier against a SAMPLED/TRANSFER image
+  // (VUID-01209) and samples a layout the image is not in.
+  if (!plan.passes.empty() && plan.passes[0].image_uses.size() >= 2U) {
+    auto& depth_use = plan.passes[0].image_uses[1];
+    depth_use.initial_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    depth_use.initial_access = VK_ACCESS_SHADER_READ_BIT;
+    depth_use.initial_stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+  }
+  std::vector<GraphNode> nodes;
+  nodes.reserve(record.levels);
+  for (std::uint32_t level = 0; level < record.levels; ++level) {
+    plan.passes[level].user_data = self;
+    nodes.push_back(GraphNode::from_compute(plan.passes[level]));
+  }
+  const auto compiled = compile_graph(nodes);
+  self->hiz_dispatch_count_ = 0U;
+  self->active_hiz_record_ = &record;
+  self->active_hiz_sets_ = &self->hiz_compute_sets_[slot];
+  execute_graph(command_buffer, nodes, compiled, nullptr,
+                &VulkanRenderer::record_hiz_graph_pass);
+  self->active_hiz_record_ = nullptr;
+  self->active_hiz_sets_ = nullptr;
+  if (self->hiz_dispatch_count_ != record.levels) return;
+  // Pack on compute as well: same transitions as the graphics pack (the
+  // pyramid images are CONCURRENT, so no ownership transfer is needed).
+  const VulkanHiZPyramid* pyramid = record.destination_pyramid;
+  if (self->hiz_packed_.buffer.is_valid() &&
+      self->hiz_packed_.level_offsets.size() >= record.levels) {
+    for (std::uint32_t level = 0;
+         level < record.levels && level < self->hiz_packed_.level_dims.size();
+         ++level) {
+      const auto [lw, lh] = self->hiz_packed_.level_dims[level];
+      if (lw == 0U || lh == 0U) continue;
+      VkImageMemoryBarrier to_src{};
+      to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      to_src.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      to_src.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      to_src.image = pyramid->image();
+      to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, level, 1U, 0U, 1U};
+      vkCmdPipelineBarrier(command_buffer,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, nullptr,
+                           0U, nullptr, 1U, &to_src);
+      VkBufferImageCopy region{};
+      region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0U, 1U};
+      region.imageExtent = {lw, lh, 1U};
+      region.bufferOffset =
+          static_cast<VkDeviceSize>(self->hiz_packed_.level_offsets[level]) * 4U;
+      vkCmdCopyImageToBuffer(command_buffer, pyramid->image(),
+                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                             self->hiz_packed_.buffer.buffer, 1U, &region);
+      VkImageMemoryBarrier back = to_src;
+      back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      back.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0U, 0U,
+                           nullptr, 0U, nullptr, 1U, &back);
+    }
+  }
+#else
+  (void)command_buffer;
+  (void)user_data;
+#endif
+}
+
+::warploom::core::Result<std::uint64_t>
+VulkanRenderer::compute_reduce_hiz_snapshot(std::uint32_t slot) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!hiz_compute_enabled_ || !hiz_compute_queue_.is_initialized() ||
+      slot >= 2U || hiz_pyramids_[slot] == nullptr ||
+      hiz_depth_snapshot_[slot] == VK_NULL_HANDLE ||
+      hiz_depth_snapshot_view_[slot] == VK_NULL_HANDLE ||
+      !hiz_reduction_pipeline_ || hiz_compute_sets_[slot].empty()) {
+    return ::warploom::core::Result<std::uint64_t>::error(
+        ::warploom::core::RuntimeError::invalid_config);
+  }
+  if (!repoint_hiz_compute_sets(slot)) {
+    return ::warploom::core::Result<std::uint64_t>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
+  }
+  // Build a snapshot-reading record mirroring the last graphics record's
+  // geometry: same destination pyramid, same extent/tile/levels, depth =
+  // snapshot. The plan's depth transitions then describe the snapshot's
+  // actual resting state (SHADER_READ_ONLY_OPTIMAL), matching the copy.
+  HiZFrameRecord record{};
+  record.token.write_index = slot;
+  record.token.has_previous = false;
+  record.token.previous_index = slot;
+  record.depth_image = hiz_depth_snapshot_[slot];
+  record.depth_view = hiz_depth_snapshot_view_[slot];
+  record.depth_is_sampleable = true;
+  record.destination_pyramid = hiz_pyramids_[slot].get();
+  record.destination_initialized = hiz_pyramid_initialized_[slot];
+  record.previous_pyramid = nullptr;
+  record.render_width = hiz_snapshot_width_[slot];
+  record.render_height = hiz_snapshot_height_[slot];
+  record.tile_size = hiz_state_.tile_size();
+  record.levels = hiz_state_.levels();
+  if (record.render_width == 0U || record.render_height == 0U ||
+      record.tile_size == 0U || record.levels == 0U) {
+    return ::warploom::core::Result<std::uint64_t>::error(
+        ::warploom::core::RuntimeError::invalid_config);
+  }
+  HizComputeWork work{this, record};
+  hiz_compute_queue_.begin();
+  hiz_compute_queue_.record(&VulkanRenderer::record_hiz_compute_work, &work);
+  auto submitted = hiz_compute_queue_.submit();
+  if (!submitted.is_ok()) {
+    return ::warploom::core::Result<std::uint64_t>::error(submitted.error());
+  }
+  // Synchronous proof shape: CPU-wait so the pyramid + packed buffer hold
+  // this snapshot's reduction on return (overlap/pipelining is the later
+  // stage; correctness of the compute-queue result comes first).
+  if (!hiz_compute_queue_.wait_done()) {
+    return ::warploom::core::Result<std::uint64_t>::error(
+        ::warploom::core::RuntimeError::vulkan_not_available);
+  }
+  hiz_pyramid_initialized_[slot] = true;
+  hiz_packed_.built_generation = hiz_state_.generation();
+  return ::warploom::core::Result<std::uint64_t>::ok(submitted.value());
+#else
+  (void)slot;
+  return ::warploom::core::Result<std::uint64_t>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
+#endif
 }
 #endif
 
@@ -2480,7 +2715,9 @@ bool VulkanRenderer::record_hiz_reduction(
          VK_SHADER_STAGE_COMPUTE_BIT},
         {0U, 2U, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
          VK_SHADER_STAGE_COMPUTE_BIT}};
-    auto layout_result = hiz_descriptor_manager_->create_layout(bindings, 2U * levels);
+    // Loop28 step 3: graphics sets (2 slots) + snapshot-reading compute sets
+    // (2 slots) share one layout.
+    auto layout_result = hiz_descriptor_manager_->create_layout(bindings, 4U * levels);
     if (!layout_result.is_ok()) {
       cleanup_hiz_pipeline_resources();
       return ::warploom::core::Result<void>::error(layout_result.error());
@@ -2512,6 +2749,8 @@ bool VulkanRenderer::record_hiz_reduction(
     for (std::uint32_t pyramid_index = 0; pyramid_index < 2U; ++pyramid_index) {
       auto& sets = hiz_reduction_sets_[pyramid_index];
       sets.reserve(levels);
+      auto& compute_sets = hiz_compute_sets_[pyramid_index];
+      compute_sets.reserve(levels);
       for (std::uint32_t level = 0; level < levels; ++level) {
         auto set_result = hiz_descriptor_manager_->allocate_set(hiz_reduction_layout_);
         if (!set_result.is_ok()) {
@@ -2541,7 +2780,36 @@ bool VulkanRenderer::record_hiz_reduction(
               ::warploom::core::RuntimeError::vulkan_not_available);
         }
         sets.push_back(set_result.value());
+        // Compute twin: identical except the depth bindings (0, and 2 at
+        // level 0) are re-pointed at the snapshot once it exists. Until
+        // then it mirrors the live view so the set is always valid.
+        auto compute_result = hiz_descriptor_manager_->allocate_set(hiz_reduction_layout_);
+        if (!compute_result.is_ok()) {
+          cleanup_hiz_pipeline_resources();
+          return ::warploom::core::Result<void>::error(compute_result.error());
+        }
+        if (!hiz_descriptor_manager_->write_image(
+                compute_result.value(), 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                hiz_pyramids_[pyramid_index]->sampler(),
+                render_pass_resource_->depth_view(),
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL).is_ok() ||
+            !hiz_descriptor_manager_->write_image(
+                compute_result.value(), 1U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                VK_NULL_HANDLE, hiz_pyramids_[pyramid_index]->mip_view(level),
+                VK_IMAGE_LAYOUT_GENERAL).is_ok() ||
+            !hiz_descriptor_manager_->write_image(
+                compute_result.value(), 2U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                hiz_pyramids_[pyramid_index]->sampler(), preceding,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL).is_ok()) {
+          cleanup_hiz_pipeline_resources();
+          for (auto& pyramid : hiz_pyramids_) pyramid.reset();
+          if (hiz_allocator_) hiz_allocator_.reset();
+          return ::warploom::core::Result<void>::error(
+              ::warploom::core::RuntimeError::vulkan_not_available);
+        }
+        compute_sets.push_back(compute_result.value());
       }
+      hiz_compute_bound_view_[pyramid_index] = render_pass_resource_->depth_view();
     }
     hiz_direct_enabled_ = true;
   }
@@ -2649,6 +2917,10 @@ void VulkanRenderer::cleanup(VkDevice device) noexcept {
   physical_device_ = nullptr;
   for (auto& pyramid : hiz_pyramids_) pyramid.reset();
   if (hiz_allocator_) hiz_allocator_.reset();
+  hiz_compute_queue_.cleanup();
+  hiz_compute_available_ = false;
+  hiz_compute_enabled_ = false;
+  hiz_compute_raw_queue_ = VK_NULL_HANDLE;
   hiz_enabled_ = false;
   hiz_state_.reset();
   device_ = nullptr;

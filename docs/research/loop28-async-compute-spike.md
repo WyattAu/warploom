@@ -1,9 +1,10 @@
 # Loop 28: async-compute overlap for the H-Z reduce (spike + adopt decision)
 
-Status: measured, verdict ADOPT. Migration staged (see §5): step 1 landed
-2026-11-02, step 2 landed 2026-11-03; step 3 (compute-queue reduce) is
-next. The spike (`AsyncComputeSpike.ReduceOverlapsGraphics`) stays green
-in-suite as the measurement record.
+Status: measured, verdict ADOPT. Migration staged (see §5): steps 1-3
+landed 2026-11-02/03; step 3 is proved synchronously (bit-identical
+compute result), pipelined overlap is the remaining stage. The spike
+(`AsyncComputeSpike.ReduceOverlapsGraphics`) stays green in-suite as the
+measurement record.
 
 ## Source
 
@@ -116,5 +117,22 @@ violation on the shared buffers.
    readback of both, DEPTH aspect). 0 diagnostics/warnings; the sabotage
    direction is structural (skip the copy -> null/invalid -> this fails
    while ComposeDepthReductionIsValidationClean still passes).
-3. Compute-queue reduce + pack behind the existing timeline handoff,
-   golden re-proof + sabotage, full suite under validation.
+3. Compute-queue reduce + pack -- DONE 2026-11-03 (this session,
+   synchronous proof shape). `RendererConfig::hiz_compute_reduce` arms a
+   renderer-owned `AsyncComputeQueue` (dedicated COMPUTE-only family;
+   silent graphics fallback otherwise). A snapshot-reading twin of the
+   reduction sets (binding 0 + binding 2 at level 0 re-pointed at the
+   snapshot, zero steady-state updates) feeds the same graph plan with one
+   patch: the level-0 depth edge's initial layout is the snapshot's
+   resting SHADER_READ_ONLY_OPTIMAL, not the live attachment's
+   DEPTH_STENCIL_ATTACHMENT_OPTIMAL (unpatched, the executor emits a
+   VUID-01209 barrier against a SAMPLED/TRANSFER image -- caught live, not
+   reasoned about). `compute_reduce_hiz_snapshot(slot)` records reduce +
+   pack on the compute queue, CPU-waits, and marks the pyramid/pack fresh.
+   Proved by `HiZGraph.ComputeReduceMatchesGraphicsReduce`: after two
+   graphics frames the packed words are read back, the last slot is
+   re-reduced on compute, and the words match bit-exactly, 0 diagnostics/
+   warnings (CONCURRENT images need no ownership transfer). Remaining for
+   the full migration: pipeline the compute leg a frame behind graphics
+   with the timeline handoff instead of CPU-waiting (overlap, not just
+   correctness) -- the spike already measured the headroom at -36..-54%.
