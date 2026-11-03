@@ -1,8 +1,9 @@
 # Loop 28: async-compute overlap for the H-Z reduce (spike + adopt decision)
 
-Status: measured, verdict ADOPT. The in-renderer migration is staged, not
-landed (see §5); the spike (`AsyncComputeSpike.ReduceOverlapsGraphics`)
-stays green in-suite as the measurement record.
+Status: measured, verdict ADOPT. Migration staged (see §5): step 1 landed
+2026-11-02, step 2 landed 2026-11-03; step 3 (compute-queue reduce) is
+next. The spike (`AsyncComputeSpike.ReduceOverlapsGraphics`) stays green
+in-suite as the measurement record.
 
 ## Source
 
@@ -104,6 +105,16 @@ violation on the shared buffers.
    (`ComposeDepthReductionIsValidationClean`) and golden-hash tests are
    green with sharing auto-enabled under the same binary.
 2. Persisted per-frame depth for the compute leg (frame-parity discipline;
-   the lifetime fix §5 requires).
+   the lifetime fix §5 requires) -- DONE 2026-11-03 (this session).
+   Each graphics-queue H-Z frame copies its live depth into a same-extent/
+   same-format snapshot indexed by the ping-pong token, parked in
+   SHADER_READ_ONLY_OPTIMAL next to the destination pyramid; the reduction
+   still samples live (no behaviour change). Proved by the new
+   `HiZGraph.DepthSnapshotsMatchLiveDepth`: after two ping-pong frames both
+   snapshots exist, the valid flag + last-slot introspection agree, and the
+   snapshot words are bit-identical to the live depth (image->buffer
+   readback of both, DEPTH aspect). 0 diagnostics/warnings; the sabotage
+   direction is structural (skip the copy -> null/invalid -> this fails
+   while ComposeDepthReductionIsValidationClean still passes).
 3. Compute-queue reduce + pack behind the existing timeline handoff,
    golden re-proof + sabotage, full suite under validation.

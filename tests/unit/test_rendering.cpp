@@ -422,6 +422,273 @@ TEST(HiZGraph, ComposeDepthReductionIsValidationClean) {
 #endif
 }
 
+//! Loop28 step 2: the persisted per-frame depth snapshot must be a bit-exact
+//! copy of the live depth the H-Z frame was built from.
+//!
+//! Why this exists: step 2 copies live -> snapshot on the graphics queue but
+//! keeps reducing from the live depth (no behaviour change), so every
+//! existing brightness/hash assertion passes whether or not the copy ran. A
+//! silently skipped or torn copy would only surface in step 3, when the
+//! compute-queue reduce reads garbage. This pins the copy directly: after
+//! two ping-pong frames both snapshots exist, the valid flag is set, the
+//! last slot is known, and the snapshot words equal the live-depth words.
+//! Sabotage-checked: skipping copy_hiz_depth_to_snapshot leaves snapshots
+//! null/invalid and fails here while ComposeDepthReductionIsValidationClean
+//! still passes, which is exactly the gap this test closes.
+TEST(HiZGraph, DepthSnapshotsMatchLiveDepth) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  constexpr std::uint32_t kSize = 256U;
+  omnicpp::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("OmniCppHiZSnapshot", true).is_ok());
+  omnicpp::render::VulkanMemoryAllocator allocator;
+  ASSERT_TRUE(
+      allocator.initialize(context.device(), context.physical_device()).is_ok());
+
+  omnicpp::render::VulkanOffscreenTarget ldr;
+  ASSERT_TRUE(ldr
+                  .create(context.device(), context.physical_device(),
+                          VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator,
+                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+                  .is_ok());
+  const VkFormat depth_format =
+      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+          context.physical_device());
+  ASSERT_NE(depth_format, VK_FORMAT_UNDEFINED);
+  omnicpp::render::VulkanRenderPass present_pass;
+  ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
+                                  depth_format)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_depth_resources(context.device(),
+                                          context.physical_device(),
+                                          depth_format, kSize, kSize)
+                  .is_ok());
+  if (!present_pass.depth_is_sampleable()) {
+    GTEST_SKIP() << "depth is not sampleable on this device; H-Z needs it";
+  }
+  ASSERT_TRUE(present_pass
+                  .create_framebuffers(context.device(), {ldr.image_view()},
+                                       kSize, kSize)
+                  .is_ok());
+
+  omnicpp::render::RendererConfig config;
+  config.enable_hiz = true;
+  config.enable_hdr_compose = true;
+  config.enable_bloom = false;
+  config.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  config.hiz_reduction_shader_path =
+      std::string(WARPLOOM_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
+
+  omnicpp::render::VulkanRenderer renderer;
+  const auto init =
+      renderer.initialize_headless(context, present_pass, kSize, kSize, config,
+                                   VK_FORMAT_B8G8R8A8_UNORM);
+  ASSERT_TRUE(init.is_ok()) << "headless compose+hiz init failed: "
+                            << static_cast<std::uint32_t>(init.error());
+  ASSERT_TRUE(renderer.hiz_direct_enabled());
+
+  omnicpp::render::VulkanPipeline pipeline;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  ASSERT_TRUE(pipeline
+                  .load_shader_file(context.device(),
+                                     shader_dir + "/triangle.vert.spv")
+                  .is_ok());
+  ASSERT_TRUE(pipeline
+                  .load_shader_file(context.device(),
+                                     shader_dir + "/triangle.frag.spv")
+                  .is_ok());
+  ASSERT_TRUE(pipeline
+                  .create_graphics_pipeline(
+                      context.device(), renderer.hdr_render_pass(),
+                      renderer.hdr_format(), VK_NULL_HANDLE, true, true, false)
+                  .is_ok());
+  renderer.set_pipeline(pipeline.pipeline());
+  HiZCallbackState state;
+  state.renderer = &renderer;
+  renderer.set_hiz_record_callback(record_hiz_contract, &state);
+
+  for (int frame = 0; frame < 2; ++frame) {
+    auto image = renderer.begin_frame();
+    ASSERT_TRUE(image.is_ok());
+    ASSERT_TRUE(renderer
+                    .record_commands(image.value(),
+                                     present_pass.framebuffer(0U), kSize, kSize)
+                    .is_ok());
+    ASSERT_TRUE(renderer.submit_frame().is_ok());
+    ASSERT_TRUE(renderer.present_frame().is_ok());
+    renderer.wait_idle();
+  }
+  EXPECT_EQ(context.validation_error_count(), 0U);
+  EXPECT_EQ(context.validation_warning_count(), 0U);
+
+  // Both ping-pong slots must hold a snapshot after two frames.
+  ASSERT_TRUE(renderer.hiz_depth_snapshots_valid());
+  const std::uint32_t last_slot = renderer.hiz_last_snapshot_slot();
+  ASSERT_LT(last_slot, 2U);
+  for (std::uint32_t slot = 0U; slot < 2U; ++slot) {
+    EXPECT_NE(renderer.hiz_depth_snapshot_image(slot), VK_NULL_HANDLE)
+        << "slot " << slot;
+    EXPECT_NE(renderer.hiz_depth_snapshot_view(slot), VK_NULL_HANDLE)
+        << "slot " << slot;
+  }
+  const VkImage live = renderer.hiz_last_depth_image();
+  const VkImage snap = renderer.hiz_depth_snapshot_image(last_slot);
+  ASSERT_NE(live, VK_NULL_HANDLE);
+  ASSERT_NE(snap, VK_NULL_HANDLE);
+  EXPECT_NE(live, snap) << "snapshot must be its own image, not an alias";
+
+  // Bit-exact compare: copy the DEPTH aspect of each image to a host buffer.
+  const auto read_depth_words = [&](VkImage image) {
+    std::vector<std::uint32_t> out;
+    if (image == VK_NULL_HANDLE) return out;
+    const VkDeviceSize bytes = static_cast<VkDeviceSize>(kSize) * kSize * 4U;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkBufferCreateInfo buf_info{};
+    buf_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buf_info.size = bytes;
+    buf_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    buf_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (vkCreateBuffer(context.device(), &buf_info, nullptr, &buffer) != VK_SUCCESS) {
+      return out;
+    }
+    VkMemoryRequirements req{};
+    vkGetBufferMemoryRequirements(context.device(), buffer, &req);
+    VkPhysicalDeviceMemoryProperties props{};
+    vkGetPhysicalDeviceMemoryProperties(context.physical_device(), &props);
+    std::uint32_t mem_type = UINT32_MAX;
+    for (std::uint32_t i = 0U; i < props.memoryTypeCount; ++i) {
+      const bool visible = (props.memoryTypes[i].propertyFlags &
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0U;
+      const bool coherent = (props.memoryTypes[i].propertyFlags &
+                             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0U;
+      if (visible && coherent && (req.memoryTypeBits & (1U << i)) != 0U) {
+        mem_type = i;
+        break;
+      }
+    }
+    if (mem_type == UINT32_MAX) {
+      vkDestroyBuffer(context.device(), buffer, nullptr);
+      return out;
+    }
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkMemoryAllocateInfo alloc{};
+    alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc.allocationSize = req.size;
+    alloc.memoryTypeIndex = mem_type;
+    if (vkAllocateMemory(context.device(), &alloc, nullptr, &memory) != VK_SUCCESS ||
+        vkBindBufferMemory(context.device(), buffer, memory, 0) != VK_SUCCESS) {
+      if (memory != VK_NULL_HANDLE) vkFreeMemory(context.device(), memory, nullptr);
+      vkDestroyBuffer(context.device(), buffer, nullptr);
+      return out;
+    }
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandPoolCreateInfo pool_info{};
+    pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    pool_info.queueFamilyIndex =
+        static_cast<std::uint32_t>(context.queue_families().graphics_family);
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    const auto fail = [&]() {
+      if (fence != VK_NULL_HANDLE) vkDestroyFence(context.device(), fence, nullptr);
+      if (cmd != VK_NULL_HANDLE && pool != VK_NULL_HANDLE) {
+        vkFreeCommandBuffers(context.device(), pool, 1U, &cmd);
+      }
+      if (pool != VK_NULL_HANDLE) vkDestroyCommandPool(context.device(), pool, nullptr);
+      vkFreeMemory(context.device(), memory, nullptr);
+      vkDestroyBuffer(context.device(), buffer, nullptr);
+      return out;
+    };
+    if (vkCreateCommandPool(context.device(), &pool_info, nullptr, &pool) != VK_SUCCESS) {
+      vkFreeMemory(context.device(), memory, nullptr);
+      vkDestroyBuffer(context.device(), buffer, nullptr);
+      return out;
+    }
+    VkCommandBufferAllocateInfo cmd_info{};
+    cmd_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmd_info.commandPool = pool;
+    cmd_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmd_info.commandBufferCount = 1U;
+    if (vkAllocateCommandBuffers(context.device(), &cmd_info, &cmd) != VK_SUCCESS) {
+      return fail();
+    }
+    VkFenceCreateInfo fence_info{};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    if (vkCreateFence(context.device(), &fence_info, nullptr, &fence) != VK_SUCCESS) {
+      return fail();
+    }
+    if (vkResetCommandBuffer(cmd, 0U) != VK_SUCCESS) return fail();
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(cmd, &begin) != VK_SUCCESS) return fail();
+    VkImageMemoryBarrier to_src{};
+    to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_src.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    to_src.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_src.image = image;
+    to_src.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 1U, 0U, 1U};
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, nullptr, 0U,
+                         nullptr, 1U, &to_src);
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 0U, 1U};
+    region.imageExtent = {kSize, kSize, 1U};
+    vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           buffer, 1U, &region);
+    VkImageMemoryBarrier back = to_src;
+    back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    back.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0U, 0U, nullptr,
+                         0U, nullptr, 1U, &back);
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) return fail();
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1U;
+    submit.pCommandBuffers = &cmd;
+    if (vkQueueSubmit(context.graphics_queue(), 1U, &submit, fence) != VK_SUCCESS) {
+      return fail();
+    }
+    if (vkWaitForFences(context.device(), 1U, &fence, VK_TRUE, 5000000000ULL) !=
+        VK_SUCCESS) {
+      return fail();
+    }
+    void* mapped = nullptr;
+    if (vkMapMemory(context.device(), memory, 0, bytes, 0, &mapped) != VK_SUCCESS) {
+      return fail();
+    }
+    out.resize(static_cast<std::size_t>(kSize) * kSize);
+    std::memcpy(out.data(), mapped, static_cast<std::size_t>(bytes));
+    vkUnmapMemory(context.device(), memory);
+    vkDestroyFence(context.device(), fence, nullptr);
+    vkFreeCommandBuffers(context.device(), pool, 1U, &cmd);
+    vkDestroyCommandPool(context.device(), pool, nullptr);
+    vkFreeMemory(context.device(), memory, nullptr);
+    vkDestroyBuffer(context.device(), buffer, nullptr);
+    EXPECT_EQ(context.validation_error_count(), 0U);
+    return out;
+  };
+  const auto live_words = read_depth_words(live);
+  const auto snap_words = read_depth_words(snap);
+  ASSERT_EQ(live_words.size(), static_cast<std::size_t>(kSize) * kSize);
+  ASSERT_EQ(snap_words.size(), live_words.size());
+  EXPECT_EQ(snap_words, live_words)
+      << "snapshot must equal the live depth it was copied from";
+#else
+  GTEST_SKIP() << "built without Vulkan types or shader dir";
+#endif
+}
+
 //! Golden hash of a COMPOSED frame through the headless renderer.
 //!
 //! Why this exists: initialize_headless + the B3b chain extraction re-plumbed

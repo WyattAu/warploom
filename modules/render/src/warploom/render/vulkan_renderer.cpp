@@ -1955,10 +1955,229 @@ VulkanHiZPyramid* VulkanRenderer::hiz_pyramid(std::uint32_t index) noexcept {
   return index < 2U ? hiz_pyramids_[index].get() : nullptr;
 }
 
+void VulkanRenderer::destroy_hiz_depth_snapshots() noexcept {
+#ifdef OMNICPP_HAS_VULKAN
+  // Device is idle at every call site (recreate waits, cleanup waits).
+  // Snapshots are bound through hiz_allocator_: release the allocation back
+  // BEFORE the allocator itself is torn down (callers order this first).
+  for (std::uint32_t i = 0; i < 2U; ++i) {
+    if (hiz_depth_snapshot_view_[i] != VK_NULL_HANDLE) {
+      vkDestroyImageView(device_, hiz_depth_snapshot_view_[i], nullptr);
+      hiz_depth_snapshot_view_[i] = VK_NULL_HANDLE;
+    }
+    if (hiz_depth_snapshot_[i] != VK_NULL_HANDLE) {
+      vkDestroyImage(device_, hiz_depth_snapshot_[i], nullptr);
+      hiz_depth_snapshot_[i] = VK_NULL_HANDLE;
+    }
+    if (hiz_allocator_ && hiz_depth_snapshot_alloc_[i].memory != VK_NULL_HANDLE) {
+      Allocation taken = hiz_depth_snapshot_alloc_[i];
+      taken.image = VK_NULL_HANDLE;
+      hiz_allocator_->destroy_allocation(taken);
+    }
+    hiz_depth_snapshot_alloc_[i] = Allocation{};
+    hiz_snapshot_initialized_[i] = false;
+  }
+  hiz_snapshot_valid_ = false;
+  hiz_snapshot_width_[0] = hiz_snapshot_width_[1] = 0U;
+  hiz_snapshot_height_[0] = hiz_snapshot_height_[1] = 0U;
+  hiz_snapshot_format_[0] = hiz_snapshot_format_[1] = VK_FORMAT_UNDEFINED;
+  hiz_last_depth_image_ = VK_NULL_HANDLE;
+  hiz_last_depth_view_ = VK_NULL_HANDLE;
+  hiz_last_snapshot_slot_ = 2U;
+#else
+  hiz_snapshot_valid_ = false;
+  hiz_snapshot_initialized_[0] = hiz_snapshot_initialized_[1] = false;
+  hiz_last_depth_image_ = VK_NULL_HANDLE;
+  hiz_last_depth_view_ = VK_NULL_HANDLE;
+  hiz_last_snapshot_slot_ = 2U;
+#endif
+}
+
+#ifdef OMNICPP_HAS_VULKAN
+bool VulkanRenderer::ensure_hiz_depth_snapshot(std::uint32_t slot,
+                                                std::uint32_t width,
+                                                std::uint32_t height,
+                                                VkFormat format) noexcept {
+  if (slot >= 2U || device_ == VK_NULL_HANDLE || hiz_allocator_ == nullptr ||
+      width == 0U || height == 0U || format == VK_FORMAT_UNDEFINED) {
+    return false;
+  }
+  if (hiz_snapshot_initialized_[slot] && hiz_depth_snapshot_[slot] != VK_NULL_HANDLE &&
+      hiz_snapshot_width_[slot] == width && hiz_snapshot_height_[slot] == height &&
+      hiz_snapshot_format_[slot] == format) {
+    return true;
+  }
+  // Drift (resize or format change): tear down this slot only. The allocator
+  // stays alive; the sibling slot is recreated lazily on its next frame.
+  if (hiz_depth_snapshot_view_[slot] != VK_NULL_HANDLE) {
+    vkDestroyImageView(device_, hiz_depth_snapshot_view_[slot], nullptr);
+    hiz_depth_snapshot_view_[slot] = VK_NULL_HANDLE;
+  }
+  if (hiz_depth_snapshot_[slot] != VK_NULL_HANDLE) {
+    vkDestroyImage(device_, hiz_depth_snapshot_[slot], nullptr);
+    hiz_depth_snapshot_[slot] = VK_NULL_HANDLE;
+  }
+  if (hiz_depth_snapshot_alloc_[slot].memory != VK_NULL_HANDLE) {
+    Allocation taken = hiz_depth_snapshot_alloc_[slot];
+    taken.image = VK_NULL_HANDLE;
+    hiz_allocator_->destroy_allocation(taken);
+    hiz_depth_snapshot_alloc_[slot] = Allocation{};
+  }
+  hiz_snapshot_initialized_[slot] = false;
+
+  VkImageCreateInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  info.imageType = VK_IMAGE_TYPE_2D;
+  info.extent = {width, height, 1U};
+  info.mipLevels = 1U;
+  info.arrayLayers = 1U;
+  info.format = format;
+  info.tiling = VK_IMAGE_TILING_OPTIMAL;
+  info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  // TRANSFER_DST: graphics-queue copy target. SAMPLED: step-3 compute
+  // reduction reads it. TRANSFER_SRC: readback/tests copy it out.
+  info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+               VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  std::uint32_t families[2] = {cross_queue_sharing_.graphics_family,
+                               cross_queue_sharing_.compute_family};
+  info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  if (cross_queue_sharing_.concurrent_ok()) {
+    info.sharingMode = VK_SHARING_MODE_CONCURRENT;
+    info.queueFamilyIndexCount = 2U;
+    info.pQueueFamilyIndices = families;
+  }
+  info.samples = VK_SAMPLE_COUNT_1_BIT;
+  VkImage image = VK_NULL_HANDLE;
+  if (vkCreateImage(device_, &info, nullptr, &image) != VK_SUCCESS) return false;
+  auto bound = hiz_allocator_->bind_image(image, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  if (!bound.is_ok()) {
+    vkDestroyImage(device_, image, nullptr);
+    return false;
+  }
+  VkImageAspectFlags aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+  if (format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+      format == VK_FORMAT_D24_UNORM_S8_UINT) {
+    aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+  }
+  VkImageViewCreateInfo view{};
+  view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  view.image = image;
+  view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  view.format = format;
+  view.subresourceRange.aspectMask = aspect;
+  view.subresourceRange.levelCount = 1U;
+  view.subresourceRange.layerCount = 1U;
+  VkImageView image_view = VK_NULL_HANDLE;
+  if (vkCreateImageView(device_, &view, nullptr, &image_view) != VK_SUCCESS) {
+    Allocation taken = bound.value();
+    taken.image = VK_NULL_HANDLE;
+    hiz_allocator_->destroy_allocation(taken);
+    vkDestroyImage(device_, image, nullptr);
+    return false;
+  }
+  hiz_depth_snapshot_[slot] = image;
+  hiz_depth_snapshot_view_[slot] = image_view;
+  hiz_depth_snapshot_alloc_[slot] = bound.value();
+  hiz_snapshot_initialized_[slot] = true;
+  hiz_snapshot_width_[slot] = width;
+  hiz_snapshot_height_[slot] = height;
+  hiz_snapshot_format_[slot] = format;
+  return true;
+}
+
+void VulkanRenderer::copy_hiz_depth_to_snapshot(
+    VkCommandBuffer command_buffer, const HiZFrameRecord& record,
+    VkFormat snapshot_format) noexcept {
+  const std::uint32_t slot = record.token.write_index;
+  if (command_buffer == VK_NULL_HANDLE || slot >= 2U ||
+      record.depth_image == VK_NULL_HANDLE || snapshot_format == VK_FORMAT_UNDEFINED ||
+      record.render_width == 0U || record.render_height == 0U) {
+    hiz_snapshot_valid_ = false;
+    return;
+  }
+  const bool slot_fresh =
+      !hiz_snapshot_initialized_[slot] || hiz_snapshot_width_[slot] != record.render_width ||
+      hiz_snapshot_height_[slot] != record.render_height ||
+      hiz_snapshot_format_[slot] != snapshot_format ||
+      hiz_depth_snapshot_[slot] == VK_NULL_HANDLE;
+  if (!ensure_hiz_depth_snapshot(slot, record.render_width, record.render_height,
+                                 snapshot_format)) {
+    hiz_snapshot_valid_ = false;
+    return;
+  }
+  VkImageAspectFlags aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+  if (snapshot_format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+      snapshot_format == VK_FORMAT_D24_UNORM_S8_UINT) {
+    aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+  }
+  // Depth leaves the reduction in SHADER_READ_ONLY_OPTIMAL; snapshot rests
+  // there too. Bounce both through transfer layouts for the copy, then back.
+  // Freshness is per-slot: ping-pong alternates, so the sibling slot is
+  // UNDEFINED on its first use even while the global valid flag is set.
+  const bool first_use = slot_fresh;
+  // Snapshot -> TRANSFER_DST.
+  VkImageMemoryBarrier snap_to_dst{};
+  snap_to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  snap_to_dst.srcAccessMask =
+      first_use ? 0U : static_cast<VkAccessFlags>(VK_ACCESS_SHADER_READ_BIT);
+  snap_to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  snap_to_dst.oldLayout = first_use ? VK_IMAGE_LAYOUT_UNDEFINED
+                                    : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  snap_to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  snap_to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  snap_to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  snap_to_dst.image = hiz_depth_snapshot_[slot];
+  snap_to_dst.subresourceRange = {aspect, 0U, 1U, 0U, 1U};
+  // Depth SHADER_READ -> TRANSFER_SRC.
+  VkImageMemoryBarrier depth_to_src{};
+  depth_to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  depth_to_src.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  depth_to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  depth_to_src.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  depth_to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  depth_to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  depth_to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  depth_to_src.image = record.depth_image;
+  depth_to_src.subresourceRange = {aspect, 0U, 1U, 0U, 1U};
+  VkImageMemoryBarrier pre[2] = {snap_to_dst, depth_to_src};
+  vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, nullptr, 0U,
+                       nullptr, 2U, pre);
+  VkImageCopy copy{};
+  copy.srcSubresource = {aspect, 0U, 0U, 1U};
+  copy.dstSubresource = {aspect, 0U, 0U, 1U};
+  copy.extent = {record.render_width, record.render_height, 1U};
+  vkCmdCopyImage(command_buffer, record.depth_image,
+                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, hiz_depth_snapshot_[slot],
+                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1U, &copy);
+  // Both back to SHADER_READ: the reduction's declared final state, and the
+  // snapshot's resting state for step 3.
+  VkImageMemoryBarrier snap_back = snap_to_dst;
+  snap_back.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  snap_back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  snap_back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  snap_back.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  VkImageMemoryBarrier depth_back = depth_to_src;
+  depth_back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  depth_back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  depth_back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  depth_back.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  VkImageMemoryBarrier post[2] = {snap_back, depth_back};
+  vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0U, 0U, nullptr,
+                       0U, nullptr, 2U, post);
+  hiz_last_depth_image_ = record.depth_image;
+  hiz_last_depth_view_ = record.depth_view;
+  hiz_last_snapshot_slot_ = slot;
+  hiz_snapshot_valid_ = true;
+}
+#endif
+
 void VulkanRenderer::cleanup_hiz_pipeline_resources() noexcept {
 #ifdef OMNICPP_HAS_VULKAN
   // Descriptor sets/layouts must be released before the image views they
   // reference. The device is idle whenever this helper is called.
+  destroy_hiz_depth_snapshots();
   if (hiz_reduction_pipeline_) {
     hiz_reduction_pipeline_->cleanup(device_);
     hiz_reduction_pipeline_.reset();
@@ -1975,6 +2194,12 @@ void VulkanRenderer::cleanup_hiz_pipeline_resources() noexcept {
   hiz_bound_depth_view_[1] = VK_NULL_HANDLE;
   hiz_pyramid_initialized_[0] = false;
   hiz_pyramid_initialized_[1] = false;
+  hiz_snapshot_initialized_[0] = false;
+  hiz_snapshot_initialized_[1] = false;
+  hiz_snapshot_valid_ = false;
+  hiz_last_depth_image_ = VK_NULL_HANDLE;
+  hiz_last_depth_view_ = VK_NULL_HANDLE;
+  hiz_last_snapshot_slot_ = 2U;
   hiz_direct_enabled_ = false;
 }
 
@@ -2135,6 +2360,23 @@ bool VulkanRenderer::record_hiz_reduction(
                              nullptr, 0U, nullptr, 1U, &back);
       }
       hiz_packed_.built_generation = hiz_state_.generation();
+    }
+    // Loop28 step 2: persist the frame's live depth for a future
+    // compute-queue reduce. Still graphics-queue, still same-frame -- no
+    // behaviour change; the reduction above keeps sampling the live depth.
+    // Format comes from the source that owns the image (compose HDR depth
+    // under HDR compose, swapchain depth otherwise); unknown owner skips.
+    VkFormat snapshot_format = VK_FORMAT_UNDEFINED;
+    if (compose_ != nullptr && record.depth_image == compose_->scene_depth_image()) {
+      snapshot_format = compose_->scene_depth_format();
+    } else if (render_pass_resource_ != nullptr &&
+               record.depth_image == render_pass_resource_->depth_image()) {
+      snapshot_format = render_pass_resource_->depth_format();
+    }
+    if (snapshot_format != VK_FORMAT_UNDEFINED) {
+      copy_hiz_depth_to_snapshot(command_buffer, record, snapshot_format);
+    } else {
+      hiz_snapshot_valid_ = false;
     }
   }
   return complete;

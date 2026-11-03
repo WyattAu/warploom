@@ -638,6 +638,26 @@ public:
   void discard_hiz_frame(const HiZFrameToken& token) noexcept;
   void invalidate_hiz(HiZInvalidation reason) noexcept { hiz_state_.invalidate(reason); }
   [[nodiscard]] const VulkanHiZPyramid* hiz_pyramid(std::uint32_t index) const noexcept;
+  //! Persisted depth snapshot for ping-pong slot `index` (loop28 step 2),
+  //! or null when snapshots are unsupported/disabled. Rests in
+  //! SHADER_READ_ONLY_OPTIMAL after any completed H-Z frame.
+  [[nodiscard]] VkImage hiz_depth_snapshot_image(std::uint32_t index) const noexcept {
+    return index < 2U ? hiz_depth_snapshot_[index] : VK_NULL_HANDLE;
+  }
+  [[nodiscard]] VkImageView hiz_depth_snapshot_view(std::uint32_t index) const noexcept {
+    return index < 2U ? hiz_depth_snapshot_view_[index] : VK_NULL_HANDLE;
+  }
+  [[nodiscard]] bool hiz_depth_snapshots_valid() const noexcept {
+    return hiz_snapshot_valid_;
+  }
+  //! Live depth image the last H-Z frame was built from (null before any).
+  [[nodiscard]] VkImage hiz_last_depth_image() const noexcept {
+    return hiz_last_depth_image_;
+  }
+  //! Snapshot slot written by the last H-Z frame (0/1, 2 = none yet).
+  [[nodiscard]] std::uint32_t hiz_last_snapshot_slot() const noexcept {
+    return hiz_last_snapshot_slot_;
+  }
   struct PackedPyramid;  //!< Defined with the H-Z members below.
   struct PackedPyramid {
     Allocation buffer{};  //!< valid() once created; device-local, no mapping
@@ -662,6 +682,26 @@ public:
 
 private:
   void cleanup_hiz_pipeline_resources() noexcept;
+  //! Release the loop28-step-2 persisted depth snapshots (device must be
+  //! idle; called before the binding allocator is torn down).
+  void destroy_hiz_depth_snapshots() noexcept;
+#ifdef OMNICPP_HAS_VULKAN
+  //! Ensure the snapshot slot holds a depth image matching width/height/
+  //! format (loop28 step 2, lazy: the compose HDR depth may not exist when
+  //! recreate_hiz_resources runs). Creates on first use and recreates on
+  //! extent/format drift. Returns false on Vulkan failure (caller skips the
+  //! copy and leaves snapshots invalid, never failing the frame).
+  [[nodiscard]] bool ensure_hiz_depth_snapshot(std::uint32_t slot,
+                                               std::uint32_t width,
+                                               std::uint32_t height,
+                                               VkFormat format) noexcept;
+  //! Copy the frame's live depth into the snapshot slot and park both in
+  //! SHADER_READ_ONLY_OPTIMAL for step 3. Best-effort: failures leave
+  //! snapshots invalid but never fail the reduction.
+  void copy_hiz_depth_to_snapshot(VkCommandBuffer command_buffer,
+                                   const HiZFrameRecord& record,
+                                   VkFormat snapshot_format) noexcept;
+#endif
 #ifdef OMNICPP_HAS_VULKAN
   [[nodiscard]] bool record_hiz_reduction(VkCommandBuffer command_buffer,
                                            const HiZFrameRecord& record);
@@ -753,6 +793,30 @@ private:
   //! depth under HDR compose, the swapchain depth otherwise -- and either is
   //! rebuilt on resize, so the binding is refreshed when it drifts.
   VkImageView hiz_bound_depth_view_[2]{VK_NULL_HANDLE, VK_NULL_HANDLE};
+  // --- Persisted per-frame H-Z depth (loop28 step 2) ---------------------
+  //! The live depth attachment is overwritten by the next frame's scene
+  //! render, so a compute-queue reduce (loop28 step 3) cannot read it behind
+  //! a same-frame wait without serializing the queues. Each frame's depth is
+  //! therefore copied here on the graphics queue right after the
+  //! reduction+pack; the snapshot rests in SHADER_READ_ONLY_OPTIMAL and is
+  //! indexed by the same ping-pong token as the destination pyramid. Step 2
+  //! writes but does not read the snapshots (the reduction still samples the
+  //! live depth: no behaviour change); step 3 moves the reduce onto the
+  //! compute queue reading the snapshot.
+  VkImage hiz_depth_snapshot_[2]{VK_NULL_HANDLE, VK_NULL_HANDLE};
+  VkImageView hiz_depth_snapshot_view_[2]{VK_NULL_HANDLE, VK_NULL_HANDLE};
+  Allocation hiz_depth_snapshot_alloc_[2]{};
+  bool hiz_snapshot_initialized_[2]{false, false};
+  bool hiz_snapshot_valid_{false};
+  std::uint32_t hiz_snapshot_width_[2]{0U, 0U};
+  std::uint32_t hiz_snapshot_height_[2]{0U, 0U};
+  VkFormat hiz_snapshot_format_[2]{VK_FORMAT_UNDEFINED, VK_FORMAT_UNDEFINED};
+  //! Depth source the last H-Z frame copied from (diagnostic/test
+  //! introspection: lets a test read back the live depth the snapshot must
+  //! match without reaching into the compose chain).
+  VkImage hiz_last_depth_image_{VK_NULL_HANDLE};
+  VkImageView hiz_last_depth_view_{VK_NULL_HANDLE};
+  std::uint32_t hiz_last_snapshot_slot_{2U};
   bool hiz_pyramid_initialized_[2]{false, false};
   bool hiz_direct_enabled_{false};
   bool hiz_enabled_{false};
