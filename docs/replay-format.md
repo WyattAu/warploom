@@ -109,6 +109,14 @@ non-timeline sessions are unaffected (empty clip set makes `tick_timeline`
 a no-op). Sample offsets are clip-relative, so `clip_move` never rewrites
 recorded samples and replay stays byte-faithful.
 
+**Step payload (T4b).** A logged `step` carries `"n":[ticks]` and,
+when the take ran a sub-frame position, `"n":[ticks,frac]` with `frac`
+in [0, 1): the landing position of the span's LAST tick inside its frame
+(`advance_timeline` clamps defensively, but writers only emit validated
+fractions — the protocol parser rejects non-finite and out-of-range
+values before they can enter the log). Files predating T4b carry bare
+`[ticks]` and replay exactly-on-frame, bit for bit.
+
 **Only commands whose reply was `ok` are recorded.** A failed command had
 no state effect; recording it would abort re-apply on load for no fidelity
 gain. The `end` record's `commands` count is therefore the count of
@@ -197,7 +205,9 @@ Loading a replay file (`load_replay` protocol command, v1.7) into a session:
    history, bindings, and validation behave identically), executing the
    tick contract above for every recorded `step` between commands
    (`sync_graph` + physics re-simulation + `tick_timeline` per tick,
-   logical frame incrementing from the opening checkpoint's frame).
+   logical frame incrementing from the opening checkpoint's frame; a
+   logged `frac` lands the span's last tick inside its frame via
+   interpolated playback, bare `[ticks]` stays step-hold).
    Physics re-simulation (T4a) runs the session's own `step_physics` — the
    same substep derivation as the live tick, so re-simulation cannot drift
    from it — gated by pause tracked from the re-applied Pause/Resume

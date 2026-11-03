@@ -72,8 +72,10 @@ fingerprint stability, byte-identical replays).
   no adaptive sampling; transient planner (R6a) unwired — R6b unblocked
   by Loop 13 graph-derived lifetimes but still to wire; physics has no
   rotation/joints, capsule/sleeping/velocity-update partially open;
-  scrub restores document, not physics; sub-frame fraction not yet in the
-  protocol; no hardware CI runner (RT tests skip on lavapipe); WASM/
+  scrub restores document, not physics; sub-frame fraction in the protocol
+  since 2026-11-03 (T4b: parsed + validated, forwarded by both hosts,
+  recorded, replayed deterministically); no hardware CI runner (RT tests
+  skip on lavapipe); WASM/
   Wayland/adoption (E6) open.
 
 ## 4. Track plan (parallel tracks, shared substrate first)
@@ -210,9 +212,10 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
 
 - ECS stays sparse-set until archetypes earn it on measurement.
 - **Scrub restores physics** (checkpoints capture document only today).
-- **Sub-frame fraction in the protocol** (D2b parameter exists, hosts
-  pass 0) so smooth playback is replayable; then concurrent
-  record-and-play.
+- **Sub-frame fraction in the protocol: DONE 2026-11-03** (T4b: `frac`
+  key on Step, validated at the boundary, forwarded by both hosts on the
+  span's last tick, recorded in `n`, replayed deterministically through
+  the closing-hash check). Next: concurrent record-and-play.
 
 ### T5. Movies / timeline
 
@@ -299,8 +302,9 @@ Against the §5 definition, criterion by criterion:
 2. **Deterministic tick + replay + scrub incl. physics: NEAR.** T4a DONE
    2026-11-03: checkpoints (ring + file) carry the full solver state;
    scrub restores physics bit-identically; re-apply re-simulates with the
-   header dt (pause-tracked) and the closing check covers physics. One
-   crisp item left: the sub-frame fraction is not in the protocol yet.
+   header dt (pause-tracked) and the closing check covers physics. T4b DONE
+   2026-11-03: the sub-frame fraction travels the protocol end to end
+   (parse + validate, host forward, record, deterministic replay).
 3. **Timeline tracks + concurrent arms + clip strip: MEDIUM.** Strip
    chrome + block-move live-proven; camera/light/render tracks and
    concurrent record + play are specless.
@@ -335,11 +339,11 @@ Against the §5 definition, criterion by criterion:
    depth snapshots, compute-queue reduce + pack (bit-identical, 0
    diagnostics). Remaining: pipeline the compute leg (overlap, not just
    correctness) + Blade later stages (sky, UI).
-3. **Scrub restores physics (T4a).** DONE 2026-11-03: checkpoint scrub
-   reproduces physics bit-identically (ring + file, re-simulation with
-   header dt, closing check covers physics). Left: **sub-frame fraction
-   in the protocol (T4b).** Exit: fraction replays deterministically
-   through the protocol.
+3. **Scrub restores physics (T4a) + sub-frame fraction (T4b).** BOTH DONE
+   2026-11-03: checkpoint scrub reproduces physics bit-identically (ring
+   + file, re-simulation with header dt, closing check covers physics);
+   the fraction replays deterministically end to end (wire key, host
+   forward, record, closing-hash-verified re-apply).
 4. **Rotation, then joints, then capsule + sleeping (T3).** One design
    arc each, validator clean before the next starts.
 5. **Live PT: per-frame stepping discipline, adaptive sampling, then the

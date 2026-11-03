@@ -305,6 +305,11 @@ class EditorSession final : public ::warploom::core::ControlHost {
   //! Shared by tick() and load_replay so re-simulation cannot drift from
   //! the live integration order. Returns the substep count.
   std::uint32_t step_physics(double fixed_dt);
+  //! Stage 3 of tick(): step-hold at whole frames, interpolated inside
+  //! the frame (T4b: the fraction travels in the Step command, so replay
+  //! reproduces smooth playback exactly). Shared by tick() and
+  //! load_replay for the same no-drift reason.
+  void advance_timeline(std::uint64_t frame, double sub_frame);
   //! G2: paste cascade counter (paste N lands at +32*(N%8+1) px). Ephemeral
   //! session state, but replay-safe: a replay re-runs the same command
   //! sequence through the same counter, so positions reproduce exactly.

@@ -39,6 +39,7 @@
 #include <string>
 #include <string_view>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 #include <sys/types.h>
@@ -954,6 +955,11 @@ struct ViewportApp {
   bool control_paused() const noexcept { return control_paused_; }
   bool control_paused_{false};
   std::uint32_t control_steps_requested_{0};
+  //! Pending sub-frame fractions, one entry per Step command in arrival
+  //! order: {ticks remaining in the span, frac for the span's LAST tick}.
+  //! Drained by step-released frames; the fraction is recorded in the Step
+  //! command itself, so replay reproduces the placement (T4b).
+  std::vector<std::pair<std::uint32_t, double>> control_step_fracs_;
   bool control_capture_requested_{false};
   //! Editor selection mirrored from the `select` control command (0 = none).
   std::uint64_t selected_object_id{0};
@@ -1066,17 +1072,24 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
         reply.detail = "resumed";
         app_.editor.record_external(command);  // W2: host-handled, recorded
         break;
-      case CK::Step:
-        app_.control_steps_requested_ +=
+      case CK::Step: {
+        const std::uint32_t ticks =
             command.number_count > 0
                 ? static_cast<std::uint32_t>(command.numbers[0])
                 : 1U;
-        reply.detail = "stepped " +
-                       std::to_string(command.number_count > 0
-                                          ? static_cast<unsigned>(command.numbers[0])
-                                          : 1U);
+        app_.control_steps_requested_ += ticks;
+        // T4b: the span's fraction rides along for its LAST released tick.
+        // A 0-tick step releases no frames and records nothing, so it
+        // queues nothing either — the queue and the log stay in lockstep.
+        if (ticks > 0U) {
+          const double frac =
+              command.number_count > 1 ? command.numbers[1] : 0.0;
+          app_.control_step_fracs_.emplace_back(ticks, frac);
+        }
+        reply.detail = "stepped " + std::to_string(ticks);
         app_.editor.record_external(command);  // W2: host-handled, recorded
         break;
+      }
       case CK::SetCamera: {
         if (command.number_count >= 6U) {
           app_.camera_override_ = true;
@@ -6470,13 +6483,13 @@ void tick_node_editor(ViewportApp& app) {
 //! it): free-run frames pass the live pause flag, while a step-released
 //! frame passes false -- a step is an explicit run instruction, exactly as
 //! the headless host ticks, so record/playback advance under step control.
-void tick_session(ViewportApp& app, bool paused) {
+void tick_session(ViewportApp& app, bool paused, double sub_frame = 0.0) {
   static constexpr double kTickFixedDt = 1.0 / 60.0;
-  // sub_frame is 0, so playback stays step-hold and identical to every earlier
-  // build. Passing a wall-clock fraction here would look smoother but would
-  // make timeline playback depend on when a frame was drawn, so a replay could
-  // not reproduce the original take until the fraction is in the protocol.
-  (void)app.editor.tick({app.frame_index, kTickFixedDt, 0.0, paused});
+  // Free-run frames pass 0 (step-hold, identical to every earlier build).
+  // Only a step-released frame carries a fraction, and only the one the
+  // Step command recorded — a wall-clock fraction here would make playback
+  // depend on when a frame was drawn, unreplayable by construction.
+  (void)app.editor.tick({app.frame_index, kTickFixedDt, sub_frame, paused});
 }
 
 //! Pre-pass chain when the node editor is active: the UI atlas one-time
@@ -7170,12 +7183,26 @@ void ViewportApp::run() {
     // the session as paused, so no replay semantics change -- only more
     // frames of the same image.
     bool step_released = false;
+    double step_sub_frame = 0.0;
     if (control_paused() && !pt_mode) {
       if (control_steps_requested_ == 0U) {
         continue;
       }
       --control_steps_requested_;
       step_released = true;
+      // T4b: the span's recorded fraction lands on its LAST released tick,
+      // mirroring the headless host and load_replay's re-apply loop.
+      while (!control_step_fracs_.empty() &&
+             control_step_fracs_.front().first == 0U) {
+        control_step_fracs_.erase(control_step_fracs_.begin());
+      }
+      if (!control_step_fracs_.empty()) {
+        auto& front = control_step_fracs_.front();
+        if (--front.first == 0U) {
+          step_sub_frame = front.second;
+          control_step_fracs_.erase(control_step_fracs_.begin());
+        }
+      }
     }
     const auto frame_start = std::chrono::steady_clock::now();
     auto image = renderer.begin_frame();
@@ -7206,7 +7233,7 @@ void ViewportApp::run() {
     // step-released frame ticks as running (paused=false): the step is the
     // run instruction, matching the headless host, so wire-driven
     // record/playback advance under step control while paused.
-    tick_session(*this, control_paused() && !step_released);
+    tick_session(*this, control_paused() && !step_released, step_sub_frame);
     // Input tick: poll drivers (virtual script when present), let the
     // camera respond, and log consumed events for auditability.
     input.begin_tick();

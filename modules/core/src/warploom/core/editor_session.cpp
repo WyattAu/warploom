@@ -183,6 +183,17 @@ std::string EditorSession::physics_bytes() const {
   return physics_snapshot_json(physics_, physics_bodies_);
 }
 
+void EditorSession::advance_timeline(std::uint64_t frame, double sub_frame) {
+  // One body for step-hold and interpolated playback (D2b): two
+  // implementations would drift. NaN fails the > 0.0 check and lands on
+  // step-hold — the same fate as a hostile live host's fraction.
+  if (sub_frame > 0.0) {
+    tick_timeline_interpolated(frame, sub_frame, Easing::Linear);
+  } else {
+    tick_timeline(frame);
+  }
+}
+
 std::uint32_t EditorSession::step_physics(double fixed_dt) {
   // Substep count is derived from fixed_dt alone, never from wall-clock, so
   // a replay that re-ticks the same frames reproduces the same integration.
@@ -241,11 +252,7 @@ EditorSession::TickReport EditorSession::tick(const FrameInput& input) {
   // sample point inside a frame -- at whole frames the pause was easy to miss
   // because playback mostly held. Both stages now obey the same gate.
   if (!input.paused) {
-    if (input.sub_frame > 0.0) {
-      tick_timeline_interpolated(input.frame, input.sub_frame, Easing::Linear);
-    } else {
-      tick_timeline(input.frame);
-    }
+    advance_timeline(input.frame, input.sub_frame);
   }
 
   // 4. Carry the document into the ECS. After the timeline so a clip's write
@@ -1916,13 +1923,21 @@ bool EditorSession::load_replay(const std::string& path,
                                   ? static_cast<std::uint64_t>(
                                         entry.command.numbers[0])
                                   : 1U;
+    // T4b: the recorded fraction lands the span's LAST tick inside its
+    // frame (smooth playback position). Absent on old Steps = 0 = the
+    // step-hold path, bit for bit.
+    const double frac =
+        entry.command.kind == CK::Step && entry.command.number_count > 1U
+            ? entry.command.numbers[1]
+            : 0.0;
     for (std::uint64_t t = 0; t < ticks_to_run; ++t) {
       std::string sync_error;
       (void)sync_graph(sync_error);
       if (!replay_paused && replay_fixed_dt > 0.0) {
         (void)step_physics(replay_fixed_dt);
       }
-      tick_timeline(frame_source_frame);
+      advance_timeline(frame_source_frame,
+                       t + 1U == ticks_to_run ? frac : 0.0);
       frame_source_frame += 1;
     }
     const auto reply = on_control(entry.command);

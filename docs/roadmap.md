@@ -606,8 +606,11 @@ declares a slot 3.
       it; the lesson is that adding a positional field to a widely-used aggregate
       wants designated initialisers at the call sites.
 
-      Still open in D2: recording the sub-frame fraction in the protocol so
-      playback can be smooth *and* replayable; concurrent record-and-play;
+      Still open in D2 (2026-11-03 update: the sub-frame fraction now
+      travels the protocol end to end — T4b: `frac` key on Step, validated
+      at the boundary, forwarded by both hosts on the span's last tick,
+      recorded in the file's `n` array, replayed deterministically through
+      the closing-hash check): concurrent record-and-play;
       camera/light/render tracks; and `ClipTimelineView`, which still has no
       caller in the app.
 

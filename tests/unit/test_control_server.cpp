@@ -42,6 +42,7 @@ class FakeHost final : public ControlHost {
         break;
       case ControlCommand::Kind::Step:
         steps_ += static_cast<std::uint64_t>(command.numbers[0]);
+        last_step_frac_ = command.number_count > 1U ? command.numbers[1] : 0.0;
         reply.detail = "stepped " + std::to_string(command.numbers[0]);
         break;
       case ControlCommand::Kind::SetCamera:
@@ -110,6 +111,8 @@ class FakeHost final : public ControlHost {
   // Sentinel 7777 = "never scrubbed": distinguishes a real 0 from no command.
   std::uint64_t last_scrub_start_{7777};
   std::uint64_t last_scrub_to_{7777};
+  // Sentinel 7777.0 = "no step yet": distinguishes a real 0.0 from no cmd.
+  double last_step_frac_{7777.0};
   double camera_[3]{8.0, 3.0, 0.0};
   double sun_[3]{0.45, 0.7, 0.55};
 };
@@ -214,6 +217,9 @@ TEST_F(ControlServerTest, EveryCommandRoundTrips) {
       {"{\"cmd\":\"resume\",\"id\":3}", "resumed"},
       {"{\"cmd\":\"step\",\"id\":4,\"ticks\":7}", "stepped 7"},
       {"{\"cmd\":\"step\",\"id\":5}", "stepped 1"},  // default ticks
+      // v1.12: the sub-frame fraction rides the same Step command.
+      {"{\"cmd\":\"step\",\"id\":10,\"ticks\":2,\"frac\":0.5}",
+       "stepped 2"},
       {"{\"cmd\":\"set_camera\",\"id\":6,\"ex\":1,\"ey\":2,\"ez\":3}",
        "camera set"},
       {"{\"cmd\":\"set_sun\",\"id\":7,\"x\":0.3,\"y\":0.65,\"z\":0.7}",
@@ -231,7 +237,8 @@ TEST_F(ControlServerTest, EveryCommandRoundTrips) {
     EXPECT_NE(id_marker.find("\"id\":"), std::string::npos) << reply;
   }
   EXPECT_TRUE(host.paused_ == false);  // resumed last
-  EXPECT_EQ(host.steps_, 8U);
+  EXPECT_EQ(host.steps_, 10U);
+  EXPECT_DOUBLE_EQ(host.last_step_frac_, 0.5);  // v1.12 frac case ran last
   EXPECT_EQ(host.camera_[0], 1.0);
   EXPECT_EQ(host.camera_[1], 2.0);
   EXPECT_EQ(host.camera_[2], 3.0);
@@ -240,6 +247,49 @@ TEST_F(ControlServerTest, EveryCommandRoundTrips) {
   EXPECT_NEAR(host.sun_[2], 0.7, 1e-6);
   EXPECT_EQ(host.cubes_, 1U);
   EXPECT_EQ(host.captures_, 1U);
+  ::close(fd);
+}
+
+//! v1.12: the Step "frac" key defaults to 0 and must lie in [0, 1) — the
+//! parser path the live socket clients exercise and struct-built tests bypass.
+TEST_F(ControlServerTest, StepFractionParsesAndValidates) {
+  FakeHost host;
+  ControlServer server;
+  std::string error;
+  ASSERT_TRUE(server.start(path_, error)) << error;
+
+  const int fd = connect_client();
+  (void)server.poll(host);
+  (void)read_message(fd);  // swallow welcome
+
+  const std::string r1 =
+      roundtrip(fd, "{\"cmd\":\"step\",\"id\":20,\"ticks\":1,\"frac\":0.25}",
+                server, host);
+  EXPECT_NE(r1.find("\"ok\":true"), std::string::npos) << r1;
+  EXPECT_DOUBLE_EQ(host.last_step_frac_, 0.25);
+
+  // No "frac" key: whole frame, fraction 0.
+  const std::string r2 =
+      roundtrip(fd, "{\"cmd\":\"step\",\"id\":21,\"ticks\":1}", server,
+                host);
+  EXPECT_NE(r2.find("\"ok\":true"), std::string::npos) << r2;
+  EXPECT_DOUBLE_EQ(host.last_step_frac_, 0.0);
+
+  // Out-of-range fractions are parse errors before any host dispatch.
+  const std::string r3 =
+      roundtrip(fd, "{\"cmd\":\"step\",\"id\":22,\"ticks\":1,\"frac\":1.5}",
+                server, host);
+  EXPECT_NE(r3.find("\\\"frac\\\" out of range"), std::string::npos) << r3;
+  EXPECT_NE(r3.find("\"ok\":false"), std::string::npos) << r3;
+  const std::string r4 =
+      roundtrip(fd, "{\"cmd\":\"step\",\"id\":23,\"ticks\":1,\"frac\":-0.1}",
+                server, host);
+  EXPECT_NE(r4.find("\\\"frac\\\" out of range"), std::string::npos) << r4;
+  EXPECT_NE(r4.find("\"ok\":false"), std::string::npos) << r4;
+  // The rejected commands never reached the host: fraction still the
+  // default-0 case's, and only the two accepted steps counted.
+  EXPECT_DOUBLE_EQ(host.last_step_frac_, 0.0);
+  EXPECT_EQ(host.steps_, 2U);
   ::close(fd);
 }
 

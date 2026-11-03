@@ -239,6 +239,22 @@ namespace {
       std::uint64_t ticks = 1;
       if (!find_unsigned_field(line, "ticks", ticks)) ticks = 1;
       numbers[count++] = static_cast<double>(ticks);
+      // T4b: optional sub-frame fraction for the LAST tick of the span
+      // (smooth playback position inside the landing frame). Absent (all
+      // existing captures) means exactly-on-frame. Validated HERE, at the
+      // protocol boundary, not downstream: stod accepts "nan"/"inf",
+      // and an alpha >= 1 would sample outside the landing frame. The
+      // session clamps defensively too, but a hostile fraction must never
+      // enter the command log — recorded garbage would replay as a
+      // different take on a build with a different clamp.
+      double frac = 0.0;
+      if (find_number_field(line, "frac", frac)) {
+        if (!(frac >= 0.0 && frac < 1.0)) {
+          error = "\"frac\" out of range [0, 1)";
+          return false;
+        }
+        numbers[count++] = frac;
+      }
       break;
     }
     case ControlCommand::Kind::SetCamera:

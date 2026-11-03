@@ -46,11 +46,17 @@ class HeadlessHost final : public omnicpp::core::ControlHost {
           command.number_count > 0U
               ? static_cast<std::uint64_t>(command.numbers[0])
               : 1U;
+      // T4b: the recorded sub-frame fraction lands the span's LAST tick
+      // inside its frame (smooth playback position). The fraction travels
+      // in the Step command itself, so it is recorded verbatim by the
+      // session's on_control below and load_replay reproduces this exact
+      // placement — the condition that makes forwarding it here
+      // deterministic rather than wall-clock-dependent.
+      const double frac =
+          command.number_count > 1U ? command.numbers[1] : 0.0;
       for (std::uint64_t t = 0; t < ticks; ++t) {
-        // sub_frame stays 0: the control host is deterministic by
-        // construction, and a fractional sample point would have to be
-        // recorded to be replayable.
-        (void)editor_.tick({frame_, kFixedDt, 0.0, false});
+        (void)editor_.tick(
+            {frame_, kFixedDt, t + 1U == ticks ? frac : 0.0, false});
         frame_ += 1;
       }
     }

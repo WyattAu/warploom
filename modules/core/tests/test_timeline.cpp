@@ -20,6 +20,8 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstdio>
+#include <fstream>
 #include <string>
 
 #include "warploom/core/document.hpp"
@@ -360,6 +362,138 @@ TEST(TimelineSession, RecordAndPlaybackDeterministic) {
     EXPECT_EQ(resamples[i].frame_offset, samples[i].frame_offset);
     EXPECT_DOUBLE_EQ(resamples[i].value.number, samples[i].value.number);
   }
+}
+
+// T4b: the sub-frame fraction is session intent, not presentation smoothing.
+// The take below records a Step carrying frac=0.5 and plays a clip through
+// it; load_replay must reproduce the interpolated value bit-for-bit. The
+// file's closing-hash check makes this fail-closed: a fraction dropped at
+// parse, record, file-write, or re-apply replays a different take and the
+// load is rejected instead of silently diverging.
+TEST(TimelineSession, SubFrameFractionRecordsAndReplaysDeterministically) {
+  ed::EditorSession s;
+  std::string error;
+  ASSERT_TRUE(s.capture_start(0, "frac", error)) << error;
+  static constexpr double kDt = 1.0 / 60.0;
+  std::uint64_t tick_frame = 0;
+  // Canonical host rhythm (mirrors LiveDriver AND the load_replay re-apply
+  // loop): one tick per command arrival, then the command; N ticks for a
+  // Step(N). A take driven any other way is unreplayable by construction —
+  // the log fixes the tick count AND the tick frames, so the live frames
+  // must be the same numbers. The unlogged-ticks test pins the refusal.
+  auto tick_once = [&](double sub = 0.0) {
+    (void)s.tick({tick_frame++, kDt, sub, false});
+  };
+
+  tick_once();
+  ok(s, [] {
+    omnicpp::core::ControlCommand c;
+    c.kind = CK::SpawnCube;
+    c.number_count = 0;
+    return c;
+  }());
+  const auto cube_id = s.document().objects.back().id;
+  tick_once();
+  ok(s, set_position(s, 7.0, 0.0, 0.0));
+
+  omnicpp::core::ControlCommand add;
+  add.kind = CK::ClipAdd;
+  add.text = "frac";
+  add.numbers[0] = 4;  // start frame
+  add.numbers[1] = 4;  // length
+  add.number_count = 2;
+  tick_once();
+  ok(s, add);
+  omnicpp::core::ControlCommand rec;
+  rec.kind = CK::ClipRecord;
+  rec.numbers[0] = 1;
+  rec.numbers[1] = static_cast<double>(cube_id);
+  rec.text = "position.x";
+  rec.number_count = 2;
+  tick_once();
+  ok(s, rec);
+  // Record span is [4, 8): the four setup commands consumed ticks 0..3, so
+  // the clip must cover the ticks that run while armed. The mid-take edit
+  // arrives AFTER its tick (tick-then-command), so it lands in the next
+  // sample: 7, 7, 7, 9.25 at offsets 0..3.
+  for (std::uint64_t i = 0; i < 4; ++i) {
+    tick_once();
+    if (i == 2) {
+      ok(s, set_position(s, 9.25, 0.0, 0.0));
+    } else {
+      ok(s, step_cmd(1));
+    }
+  }
+  tick_once();
+  ok(s, step_cmd(1));  // frame 8: past clip end, disarms, samples nothing
+
+  // Move the recorded span to [10, 14) and play it back. Replay applies
+  // the move after tick 9 and the play after tick 10, so playback ticks
+  // are 11 (offset 1, holds 7.0) and 12.5 (offset 2.5, the interpolated
+  // midpoint 8.125 with frac = 0.5). Same numbers live and on replay —
+  // the frame source is the accumulated tick count, not the wall clock.
+  omnicpp::core::ControlCommand move;
+  move.kind = CK::ClipMove;
+  move.numbers[0] = 1;
+  move.numbers[1] = 10;
+  move.number_count = 2;
+  tick_once();
+  ok(s, move);
+  omnicpp::core::ControlCommand play;
+  play.kind = CK::ClipPlay;
+  play.numbers[0] = 1;
+  play.number_count = 1;
+  tick_once();
+  ok(s, play);
+  tick_once();
+  ok(s, step_cmd(1));
+  const auto* held = s.document().find(cube_id);
+  ASSERT_NE(held, nullptr);
+  EXPECT_DOUBLE_EQ(held->properties.at("position").vec[0], 7.0);
+  (void)s.tick({tick_frame++, kDt, 0.5, false});
+  omnicpp::core::ControlCommand frac_step;
+  frac_step.kind = CK::Step;
+  frac_step.numbers[0] = 1.0;
+  frac_step.numbers[1] = 0.5;
+  frac_step.number_count = 2;
+  ok(s, frac_step);
+
+  // Linear midpoint between the offset-2 (7.0) and offset-3 (9.25) samples.
+  const auto* cube = s.document().find(cube_id);
+  ASSERT_NE(cube, nullptr);
+  EXPECT_DOUBLE_EQ(cube->properties.at("position").vec[0], 8.125);
+
+  const std::string path = "/tmp/g3_frac_roundtrip.replay";
+  ASSERT_TRUE(s.capture_stop(path, error)) << error;
+
+  // The fraction reached the FILE, not just the live session: the step's
+  // positional payload carries [ticks, frac]. (%.17g prints 0.5 exactly.)
+  std::ifstream in(path, std::ios::binary);
+  const std::string bytes((std::istreambuf_iterator<char>(in)),
+                          std::istreambuf_iterator<char>());
+  EXPECT_NE(bytes.find("\"n\":[1,0.5]"), std::string::npos) << bytes;
+
+  ed::EditorSession fresh;
+  std::string load_error;
+  ASSERT_TRUE(fresh.load_replay(path, load_error)) << load_error;
+  const auto* recube = fresh.document().find(cube_id);
+  ASSERT_NE(recube, nullptr);
+  EXPECT_DOUBLE_EQ(recube->properties.at("position").vec[0], 8.125);
+  // The recorded track itself re-simulated identically.
+  const auto* live_clip = s.document().find_clip(1);
+  const auto* re_clip = fresh.document().find_clip(1);
+  ASSERT_NE(live_clip, nullptr);
+  ASSERT_NE(re_clip, nullptr);
+  ASSERT_EQ(live_clip->tracks.size(), 1U);
+  ASSERT_EQ(re_clip->tracks.size(), 1U);
+  const auto& live_samples = live_clip->tracks.begin()->second.samples;
+  const auto& re_samples = re_clip->tracks.begin()->second.samples;
+  ASSERT_EQ(re_samples.size(), live_samples.size());
+  for (std::size_t i = 0; i < re_samples.size(); ++i) {
+    EXPECT_EQ(re_samples[i].frame_offset, live_samples[i].frame_offset);
+    EXPECT_DOUBLE_EQ(re_samples[i].value.number, live_samples[i].value.number);
+  }
+  std::remove(path.c_str());
 }
 
 // ============================================================================
