@@ -164,12 +164,16 @@ class PhysicsWorld final {
   [[nodiscard]] std::uint32_t substeps() const noexcept { return substeps_; }
 
   //! XPBD contact compliance (Loop 12, staged after Small Steps SIGGRAPH
-  //! 2021 / XPBD MIG 2016). The sphere-sphere positional correction divides
-  //! by `inv_sum + compliance` instead of `inv_sum` alone, so alpha > 0
-  //! softens contacts and alpha = 0 is definitionally the historical stiff
-  //! projection (pinned by `Loop12ComplianceZeroIsBitIdentical` and by the
-  //! Lean proof `compliance_zero_is_stiff`). Default 0: existing replays
-  //! reproduce bit-identically unless the caller opts in.
+  //! 2021 / XPBD MIG 2016; exact formulation per trial 638). The
+  //! sphere-sphere positional correction is the XPBD update
+  //! (C - atilde*lambda)/(w + atilde) with atilde = alpha/h^2 (lambda is
+  //! the accumulated separating magnitude, i.e. minus the textbook signed
+  //! multiplier — hence the minus here and a C > 0 fixed point),
+  //! so alpha > 0 softens contacts with a rest state independent of the
+  //! iteration and substep counts, and alpha = 0 is definitionally the
+  //! historical stiff projection (pinned by `Loop12ComplianceZeroIsBitIdentical`
+  //! and by the Lean proof `compliance_zero_is_stiff`). Default 0:
+  //! existing replays reproduce bit-identically unless the caller opts in.
   void set_contact_compliance(float alpha) noexcept {
     contact_compliance_ = alpha >= 0.0F ? alpha : 0.0F;
   }
@@ -512,6 +516,20 @@ class PhysicsWorld final {
           solve_contacts_.push_back(solve);
         }
       }
+      // Trial 638: exact-XPBD Lagrange multipliers, one per frozen
+      // contact, zeroed every substep (XPBD keeps lambda only within a
+      // step's iterations). Reused scratch, no steady-state allocation.
+      // atilde = alpha / h^2 is the XPBD scaled compliance: the same
+      // alpha means the same softness at any substep count or iteration
+      // count. alpha = 0 gives atilde = 0 exactly, i.e. the historical
+      // stiff projection bit-for-bit (pen + 0*lambda == pen in IEEE).
+      solve_lambda_.assign(solve_contacts_.size(), 0.0f);
+      const float h_sq = dt * dt;
+      const float contact_atilde =
+          (contact_compliance_ > 0.0f && h_sq > 0.0f)
+              ? contact_compliance_ / h_sq
+              : 0.0f;
+      joint_lambda_.assign(joints_.size(), 0.0f);
 
       // Islands are derived from the frozen pair list plus the grounded
       // flags BEFORE any correction lands, so both the positional passes
@@ -538,7 +556,8 @@ class PhysicsWorld final {
       // order (deterministic). With no joints this loop is empty and the
       // pass is the historical one.
       for (std::uint32_t pass = 0; pass < solver_iterations_; ++pass) {
-        for (const DistanceJoint& joint : joints_) {
+        for (std::size_t ji = 0; ji < joints_.size(); ++ji) {
+          const DistanceJoint& joint = joints_[ji];
           if (joint.a == joint.b || joint.a >= bodies_.size() ||
               joint.b >= bodies_.size()) {
             continue;
@@ -560,8 +579,20 @@ class PhysicsWorld final {
               is_asleep(joint.b) ? 0.0f : jb.inverse_mass;
           const float j_inv_eff = j_inv_a + j_inv_b;
           if (j_inv_eff <= 0.0f) continue;  // both pinned
-          const float jcorr =
-              (jdist - joint.rest_length) / (j_inv_eff + joint.compliance);
+          // Trial 638: exact XPBD joint solve. C = dist - rest, bilateral
+          // (a stretched joint pulls back too — unlike contact, no
+          // separation skip), atilde = alpha / h^2 like contacts. lambda
+          // is kept NONNEGATIVE by convention (accumulated separating
+          // magnitude), so the textbook -atilde*lambda term enters with a
+          // minus here: jcorr = (C - atilde*lambda)/(w + atilde).
+          const float j_atilde =
+              (joint.compliance > 0.0f && h_sq > 0.0f)
+                  ? joint.compliance / h_sq
+                  : 0.0f;
+          const float jcorr = ((jdist - joint.rest_length) -
+                               j_atilde * joint_lambda_[ji]) /
+                              (j_inv_eff + j_atilde);
+          joint_lambda_[ji] += jcorr;
           if (j_inv_a > 0.0f) {
             ja.position[0] += jnx * jcorr * j_inv_a;
             ja.position[1] += jny * jcorr * j_inv_a;
@@ -573,7 +604,8 @@ class PhysicsWorld final {
             jb.position[2] -= jnz * jcorr * j_inv_b;
           }
         }
-        for (const ContactSolve& solve : solve_contacts_) {
+        for (std::size_t ci = 0; ci < solve_contacts_.size(); ++ci) {
+          const ContactSolve& solve = solve_contacts_[ci];
           float pen = solve.penetration;
           if (pass > 0U) {
             const PhysicsBody& la = bodies_[solve.a];
@@ -604,7 +636,18 @@ class PhysicsWorld final {
               is_asleep(solve.b) ? 0.0f : b.inverse_mass;
           const float inv_eff = inv_a + inv_b;
           if (inv_eff <= 0.0f) continue;  // both pinned: restore keeps them
-          const float corr = pen / (inv_eff + contact_compliance_);
+          // Trial 638: exact XPBD contact solve (Muller et al., XPBD).
+          // Textbook dlambda = (-C - atilde*lambda)/(w + atilde); lambda
+          // here is the accumulated SEPARATING magnitude (nonnegative by
+          // construction), i.e. minus the textbook signed multiplier, so
+          // the atilde term enters with a minus: the fixed point is
+          // C = atilde*lambda > 0 (compliant penetration under load), not
+          // separation. The separation skip stays: contact is unilateral
+          // (C >= 0), so a separated pair applies nothing — unlike a
+          // bilateral joint.
+          const float corr = (pen - contact_atilde * solve_lambda_[ci]) /
+                             (inv_eff + contact_atilde);
+          solve_lambda_[ci] += corr;
           if (inv_a > 0.0f) {
             a.position[0] -= solve.nx * corr * inv_a;
             a.position[1] -= solve.ny * corr * inv_a;
@@ -1344,6 +1387,8 @@ class PhysicsWorld final {
   std::vector<PhysicsBody> check_saved_{};
   std::vector<SolveSnapshot> solve_snapshot_{};
   std::vector<ContactSolve> solve_contacts_{};
+  std::vector<float> solve_lambda_{};  //!< Trial 638: per-contact XPBD lambda.
+  std::vector<float> joint_lambda_{};  //!< Trial 638: per-joint XPBD lambda.
   //! Uniform-grid scratch. Bodies are bucketed in index order, so each bucket
   //! is already ascending and needs no sort.
   struct Cell {

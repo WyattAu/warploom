@@ -790,7 +790,10 @@ TEST(PhysicsWorld, Loop12ComplianceSoftensAndStaysDeterministic) {
                                            w.position_fingerprint());
   };
   const auto stiff = settle_top(0.0F);
-  const auto soft = settle_top(1.0F);
+  // Trial 638: alpha is now the exact-XPBD compliance (atilde = alpha/h^2
+  // with h = 1/120 here), so 1.0 would be collapse-soft, not settle-soft.
+  // 1e-4 is the moderate setting: visibly softer, structurally intact.
+  const auto soft = settle_top(1.0e-4F);
   // Compliance softens the correction, so the tower settles lower...
   EXPECT_LT(soft.first, stiff.first);
   // ...and the outputs differ, so a test using only the default value
@@ -798,5 +801,64 @@ TEST(PhysicsWorld, Loop12ComplianceSoftensAndStaysDeterministic) {
   // the tested value coincide with the buggy value).
   EXPECT_NE(soft.second, stiff.second);
   // ...while determinism is preserved at the new setting.
-  EXPECT_EQ(soft.second, settle_top(1.0F).second);
+  EXPECT_EQ(soft.second, settle_top(1.0e-4F).second);
+}
+
+// Trial 638 (adopted, ADR-008): exact-XPBD compliance. The rest state of
+// a loaded compliant contact must not depend on solver settings — the
+// incumbent divided by (inv + raw alpha) every pass, so 8 iterations
+// converged to ~stiff (pen 3e-6 vs 6.8e-4 at 1 iteration, measured
+// pre-adoption) and substeps shifted it 16x. With atilde = alpha/h^2 and
+// the accumulated lambda, the equilibrium is the compliant spring rest
+// (pen ~= alpha*m*g here: 1e-4*9.81 ~= 9.8e-4, measured exactly that).
+namespace {
+float trial638_rest(float alpha, std::uint32_t iters, std::uint32_t subs) {
+  PhysicsWorld w(-9.81F);
+  w.set_contact_compliance(alpha);
+  w.set_solver_iterations(iters);
+  w.set_substeps(subs);
+  PhysicsBody base;
+  base.position[1] = 0.5F;
+  base.radius = 0.5F;
+  base.inverse_mass = 0.0F;
+  base.restitution = 0.0F;
+  PhysicsBody top;
+  top.position[1] = 1.5F;
+  top.radius = 0.5F;
+  top.inverse_mass = 1.0F;
+  top.restitution = 0.0F;
+  (void)w.add_body(base);
+  (void)w.add_body(top);
+  for (std::size_t i = 0; i < 1200U; ++i) {
+    w.step(kDt);
+  }
+  return w.body(1).position[1];
+}
+}  // namespace
+
+TEST(PhysicsWorld, Trial638ComplianceIndependentOfIterationCount) {
+  const float stiff = trial638_rest(0.0F, 8U, 1U);
+  EXPECT_FLOAT_EQ(stiff, 1.5F);  // stiff rests exactly touching
+  const float it1 = trial638_rest(1.0e-4F, 1U, 1U);
+  const float it8 = trial638_rest(1.0e-4F, 8U, 1U);
+  // Compliant, not stiff: the equilibrium carries ~1e-3 penetration — and
+  // a test run at alpha = 0 could never tell the knob from broken.
+  EXPECT_LT(1.5F - it1, 2.0e-3F);
+  EXPECT_GT(1.5F - it1, 1.0e-4F);
+  // Iteration-count independence: the point of the exact formulation.
+  // (Pre-adoption: it8 sat 200x stiffer than it1.)
+  EXPECT_NEAR(it8, it1, 1.0e-5F);
+}
+
+TEST(PhysicsWorld, Trial638ComplianceIndependentOfSubstepCount) {
+  // Guards the atilde = alpha/h^2 scaling: raw alpha would shift the
+  // equilibrium ~16x across a 4x substep change (measured pre-adoption).
+  // The compliance band matters too: with raw alpha = 1e-4 the contact is
+  // ~stiff at every substep count, so a bare s4-vs-s1 comparison passes a
+  // broken scaling by accident. Pin the softness first, then the equality.
+  const float s1 = trial638_rest(1.0e-4F, 1U, 1U);
+  EXPECT_GT(1.5F - s1, 1.0e-4F);
+  EXPECT_LT(1.5F - s1, 2.0e-3F);
+  const float s4 = trial638_rest(1.0e-4F, 1U, 4U);
+  EXPECT_NEAR(s4, s1, 1.0e-5F);
 }

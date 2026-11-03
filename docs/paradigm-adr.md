@@ -261,3 +261,49 @@ Consumer investigation (recorded, same session): there is NO
 
 Verdict: **adopted as a header-only guard + 2 guarding tests**.
  Spike files warning-clean.
+
+## ADR-008: trial #638 XPBD exact compliance formulation (adopted)
+
+The engine already carried an XPBD-inspired compliance knob
+(`set_contact_compliance`, Loop 12) that divided each pass's correction
+by `inv_sum + alpha`. The trial question was whether to adopt the exact
+formulation (Muller et al., XPBD): per-contact Lagrange multiplier
+accumulation with the dt-scaled compliance `atilde = alpha/h^2`.
+
+Spike (this machine, deterministic C++, 2-stack under gravity,
+1200 steps of h = 1/120, alpha = 1.0): the incumbent's rest penetration
+was 6.8e-4 at 1 iteration but 3e-6 at 8 iterations — 200x stiffer — and
+a 4x substep change shifted it 16x. The shipped gd scene runs 8 passes,
+so the knob was nearly a no-op exactly where it was meant to act. The
+defect is structural, not tunable: re-deriving the residual each pass
+converges to the stiff limit regardless of alpha.
+
+Adopted: `solve_lambda_`/`joint_lambda_` scratch (zeroed per substep,
+insertion order, no steady-state allocation), `corr =
+(C - atilde*lambda)/(w + atilde)` with `lambda += corr`. The minus sign
+is the load-bearing detail: lambda here is the accumulated *separating*
+magnitude (nonnegative by construction), i.e. minus the textbook signed
+multiplier — a first version with a plus sign converged multi-pass
+takes to slight *separation* instead of compliant penetration, caught by
+the spike before landing. Contacts keep the separation skip (unilateral
+C >= 0); joints solve bilaterally. Ground stays a stiff clamp (no lambda
+— a compliant ground is a separate trial if a consumer ever needs it).
+alpha = 0 gives atilde = 0 exactly, so the default path is the
+historical stiff projection bit-for-bit (`pen + 0*lambda == pen`, then
+`pen/inv` as before) and every existing replay reproduces.
+
+Measured post-adoption (same scene, alpha = 1e-4): rest penetration
+9.81e-4 at 1 iteration AND at 8 iterations (identical to 6 decimals),
+9.79e-4 across a 4x substep change — and 9.81e-4 is exactly the
+compliant-spring prediction alpha*m*g. The knob's numeric meaning
+changed (old alpha = raw divisor, new alpha = physical compliance), so
+the Loop12 tower test moved from 1.0 to 1e-4 — same assertions, now
+pinning a sane settle instead of a collapse.
+
+Verdict: **adopted (solver change, default-0 replay-identical)**.
+Pinned by `Trial638ComplianceIndependentOfIterationCount` (softness band
++ 1e-5 iteration equality) and `Trial638ComplianceIndependentOfSubstepCount`
+(softness band + substep equality — the band is load-bearing: without it
+the raw-alpha sabotage passes a broken scaling by accident, verified).
+Sabotage-checked both directions: plus-sign lambda fails the iteration
+guard; raw alpha fails both guards. 625 unit + 15 core + 47 editor green.

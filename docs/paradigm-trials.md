@@ -166,7 +166,7 @@ measured reason). A trial that cannot be measured does not land.
 | 635 | Discrete-shells curvature energy (cloth bending) | phys | P1 | pending | -- |
 | 636 | Dual-quaternion continuum torsion (no volume loss) | phys | P2 | pending | -- |
 | 637 | Eigenvalue-domain strain-limiting projections | phys | P2 | pending | -- |
-| 638 | XPBD exact compliance formulation (verify/adopt formally) | phys | P1 | pending | -- |
+| 638 | XPBD exact compliance formulation (verify/adopt formally) | phys | P1 | adopted | ADR-008 |
 | 639 | Adaptive octree B-spline solids (no tet meshing) | phys | P2 | pending | -- |
 | 640 | C2 barrier potentials with analytic Hessians | phys | P2 | pending | -- |
 
