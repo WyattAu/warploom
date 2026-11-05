@@ -1,0 +1,79 @@
+#version 450
+
+// denoise_variance_atrous.comp — T2 denoiser SPIKE (single variance-guided
+// à-trous iteration, no G-buffer).
+//
+// Inputs: the PT mean (rgba32f) and second moment (rgba32f). Per-pixel luma
+// variance v = max(0, E2 - m^2) drives the edge-stopping width: a confident
+// center pixel (small v) rejects differing neighbors, a noisy one (large v)
+// accepts them. One 5x5 iteration at stride 1 on luminance-computed weights
+// applied to all three channels (chroma rides the luma decision, so no
+// color fringing from per-channel weights).
+//
+// What the spike measures: what variance-only guidance buys WITHOUT
+// normal/albedo/depth. A full SVGF needs the G-buffer the raygen does not
+// emit (normals exist only in the hit payload, albedo is a raygen constant,
+// depth is never stored) -- this spike tells us whether to build the filter
+// first or the G-buffer first.
+//
+// Determinism contract: a pure function of (mean, moment). No RNG, no
+// atomics, no cross-invocation communication, so two dispatches over
+// identical inputs are bit-identical. That is exactly the temporal-history
+// constraint the roadmap records: filter state must be a pure function of
+// accumulation state, with nothing hidden.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0, rgba32f) readonly uniform image2D mean_img;
+layout(set = 0, binding = 1, rgba32f) readonly uniform image2D moment_img;
+layout(set = 0, binding = 2, rgba32f) uniform image2D out_img;
+
+layout(push_constant) uniform Push {
+  uint width;
+  uint height;
+  float luma_sigma_scale;  // edge width = k * sqrt(v_center)
+  float spatial_sigma;     // spatial Gaussian sigma, pixels
+  uint samples;            // accumulation depth: the inputs store SUMS, so
+                           // the filter normalizes to means itself. A
+                           // production caller filtering the tonemapped mean
+                           // passes 1; the spike binds the live sums.
+} push;
+
+float luma(vec3 c) { return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; }
+
+void main() {
+  const ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+  if (px.x >= int(push.width) || px.y >= int(push.height)) return;
+
+  const float n = max(float(push.samples), 1.0);
+  const vec4 mc = imageLoad(mean_img, px) / n;
+  const vec4 e2 = imageLoad(moment_img, px) / n;
+  const float ml = luma(mc.rgb);
+  const float vc = max(0.0, luma(e2.rgb) - ml * ml);
+  // Edge variance: k^2 * v_center. The 1e-8 floor keeps a fully-converged
+  // center (v = 0) from rejecting every neighbor on float dust -- it still
+  // smooths identical neighbors (dm = 0 -> weight 1) and rejects real
+  // edges (dm^2 >> floor).
+  const float edge2 =
+      push.luma_sigma_scale * push.luma_sigma_scale * vc + 1e-8;
+  const float s2 = 2.0 * push.spatial_sigma * push.spatial_sigma;
+
+  vec3 acc = vec3(0.0);
+  float wsum = 0.0;
+  for (int dy = -2; dy <= 2; ++dy) {
+    for (int dx = -2; dx <= 2; ++dx) {
+      const ivec2 q = clamp(px + ivec2(dx, dy), ivec2(0),
+                            ivec2(push.width, push.height) - 1);
+      // Normalized like the center: the inputs store sums, and an
+      // unnormalized neighbor against a normalized center makes even the
+      // center weight vanish (dm = 3x the mean at 4 spp).
+      const vec4 mn = imageLoad(mean_img, q) / n;
+      const float dm = luma(mn.rgb) - ml;
+      const float w =
+          exp(-float(dx * dx + dy * dy) / s2) * exp(-dm * dm / (2.0 * edge2));
+      acc += w * mn.rgb;
+      wsum += w;
+    }
+  }
+  imageStore(out_img, px, vec4(acc / max(wsum, 1e-9), mc.a));
+}

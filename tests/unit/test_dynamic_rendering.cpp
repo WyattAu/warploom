@@ -1,12 +1,14 @@
 //! @file test_dynamic_rendering.cpp
-//! @brief Blade stage 0: dynamic-rendering negotiation + clear-only proof.
+//! @brief Blade stages 0-3: dynamic-rendering negotiation + staged migration.
 //!
 //! The device enables `dynamicRendering` (Vulkan 1.3 core, no extension)
 //! when the physical device advertises it, and the flag gates migration of
-//! the fullscreen passes in later stages. This test proves the path end to
+//! the fullscreen passes in later stages. Stage 0 proves the path end to
 //! end on a real device: begin/end a `VkRenderingInfo` with a CLEAR load
 //! op over a pre-filled image and read back the cleared pixels — no render
-//! pass object anywhere. Skips (with reason) where the feature is absent.
+//! pass object anywhere. Stages 1-2 migrate bloom then tonemap with golden
+//! parity; stage 3 migrates the scene itself (color + depth) the same way.
+//! Skips (with reason) where the feature is absent.
 //! Sabotage-checked both directions: skipping begin/end leaves the
 //! pre-fill color (fails the red assertion); a DONT_CARE load op does too.
 
@@ -527,6 +529,8 @@ TEST(DynamicRendering, UnifiedFrameWithDynamicBloomRecordsClean) {
                       h.context.device(), renderer.hdr_render_pass(),
                       renderer.hdr_format(), VK_NULL_HANDLE, true, true, false)
                   .is_ok());
+  // Baked scene pipeline bound the baked way: the scene node stays baked
+  // while bloom + tonemap go dynamic (this is the stage-2 fallback proof).
   renderer.set_pipeline(pipeline.pipeline());
 
   auto image = renderer.begin_frame();
@@ -582,6 +586,211 @@ TEST(DynamicRendering, UnifiedFrameWithDynamicBloomRecordsClean) {
 
   renderer.cleanup(h.context.device());
   pipeline.cleanup(h.context.device());
+  present_pass.cleanup(h.context.device());
+  ldr.cleanup();
+  h.cleanup();
+}
+
+// Blade stage 3 through the production path: the renderer's unified
+// scene+compose frame with the SCENE itself dynamic. Same harness, same
+// scene, same seed as UnifiedFrameWithDynamicBloomRecordsClean frame one
+// (bloom off, exposure 1.0, plain triangle) except the scene pipeline is
+// created with create_graphics_pipeline_dynamic (scene depth format,
+// test/write on -- the baked pipeline's depth state) and bound via
+// set_dynamic_scene_pipeline. Proves the migration end to end: the composed
+// frame must reproduce the baked golden hash byte-for-byte, with zero
+// validation diagnostics.
+//
+// The positive control is structural, not statistical: a dynamic-created
+// pipeline recorded inside a baked render pass is a VUID, so if the
+// renderer ignored the opt-in and recorded the scene baked, the zero-
+// diagnostics assertion would fail. Golden + clean can only mean the
+// scene recorded through vkCmdBeginRendering with depth attached.
+TEST(DynamicRendering, UnifiedFrameWithDynamicSceneMatchesGolden) {
+  DynamicRenderingHarness h;
+  if (!h.initialize()) GTEST_SKIP() << "no Vulkan device";
+  if (!h.context.has_dynamic_rendering()) {
+    h.cleanup();
+    GTEST_SKIP() << "dynamicRendering not advertised";
+  }
+
+  constexpr std::uint32_t kSize = 256U;
+  VulkanOffscreenTarget ldr;
+  ASSERT_TRUE(ldr
+                  .create(h.context.device(), h.context.physical_device(),
+                          VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &h.allocator,
+                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+                  .is_ok());
+  const VkFormat depth_format =
+      VulkanRenderPass::find_supported_depth_format(h.context.physical_device());
+  VulkanRenderPass present_pass;
+  ASSERT_TRUE(present_pass.create(h.context.device(), VK_FORMAT_B8G8R8A8_UNORM,
+                                  depth_format)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_depth_resources(h.context.device(),
+                                          h.context.physical_device(),
+                                          depth_format, kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_framebuffers(h.context.device(), {ldr.image_view()},
+                                       kSize, kSize)
+                  .is_ok());
+
+  RendererConfig config;
+  config.enable_hiz = false;
+  config.enable_hdr_compose = true;
+  config.enable_bloom = true;
+  config.enable_dynamic_rendering = true;
+  config.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
+
+  VulkanRenderer renderer;
+  const auto init =
+      renderer.initialize_headless(h.context, present_pass, kSize, kSize, config,
+                                   VK_FORMAT_B8G8R8A8_UNORM, ldr.image(),
+                                   ldr.image_view());
+  ASSERT_TRUE(init.is_ok());
+  ASSERT_TRUE(renderer.hdr_compose_active());
+
+  // Dynamic scene pipeline: same depth state as the baked scene pipeline in
+  // UnifiedFrameWithDynamicBloomRecordsClean (test on, write on, no cull),
+  // declared against the HDR color + depth formats instead of a render pass.
+  VulkanPipeline pipeline;
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  ASSERT_TRUE(pipeline
+                  .load_shader_file(h.context.device(),
+                                    shader_dir + "/triangle.vert.spv")
+                  .is_ok());
+  ASSERT_TRUE(pipeline
+                  .load_shader_file(h.context.device(),
+                                    shader_dir + "/triangle.frag.spv")
+                  .is_ok());
+  ASSERT_TRUE(pipeline
+                  .create_graphics_pipeline_dynamic(
+                      h.context.device(), renderer.hdr_format(),
+                      VK_NULL_HANDLE, false, renderer.hdr_depth_format(),
+                      true, true)
+                  .is_ok());
+  renderer.set_dynamic_scene_pipeline(pipeline.pipeline());
+
+  auto image = renderer.begin_frame();
+  ASSERT_TRUE(image.is_ok());
+  ASSERT_TRUE(renderer
+                  .record_commands(image.value(), present_pass.framebuffer(0U),
+                                   kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(renderer.submit_frame().is_ok());
+  renderer.wait_idle();
+  const auto readback = omnicpp_test::readback_swapchain_image(
+      h.context.physical_device(), h.context.device(),
+      h.context.graphics_queue(),
+      static_cast<std::uint32_t>(h.context.queue_families().graphics_family),
+      ldr.image(), VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize);
+  ASSERT_GT(readback.non_clear_pixels, 0U)
+      << "dynamic-scene composed frame came back empty";
+  // Pixel A/B against the baked scene: the golden pinned by
+  // VulkanHardware.HeadlessComposeFrameGoldenHash (same scene, exposure,
+  // size, no bloom). A scene that shades differently dynamic fails here.
+  switch (readback.canonical_hash) {
+    case 12508388375569283214ULL:  // NVIDIA (RTX 2060), fullscreen coverage fixed
+      SUCCEED();
+      break;
+    default:
+      ADD_FAILURE() << "dynamic scene diverged from the baked golden: "
+                    << "canonical_hash="
+                    << readback.canonical_hash;
+      break;
+  }
+  EXPECT_EQ(h.context.validation_error_count(), 0U);
+  EXPECT_EQ(h.context.validation_warning_count(), 0U);
+
+  renderer.cleanup(h.context.device());
+  pipeline.cleanup(h.context.device());
+  present_pass.cleanup(h.context.device());
+  ldr.cleanup();
+  h.cleanup();
+}
+
+// Blade stage 3 gate proof: a dynamic scene node's depth image is a planned
+// kind, so the R6b gate must cover it. A forged depth handle fails the
+// gate instead of rendering from an image the store does not cover -- the
+// same shape violation the color target already proves above, extended to
+// the depth the scene migration adds.
+TEST(DynamicRendering, DynamicSceneDepthCoveredByGate) {
+  DynamicRenderingHarness h;
+  if (!h.initialize()) GTEST_SKIP() << "no Vulkan device";
+  if (!h.context.has_dynamic_rendering()) {
+    h.cleanup();
+    GTEST_SKIP() << "dynamicRendering not advertised";
+  }
+
+  constexpr std::uint32_t kSize = 256U;
+  VulkanOffscreenTarget ldr;
+  ASSERT_TRUE(ldr
+                  .create(h.context.device(), h.context.physical_device(),
+                          VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &h.allocator,
+                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+                  .is_ok());
+  const VkFormat depth_format =
+      VulkanRenderPass::find_supported_depth_format(h.context.physical_device());
+  VulkanRenderPass present_pass;
+  ASSERT_TRUE(present_pass.create(h.context.device(), VK_FORMAT_B8G8R8A8_UNORM,
+                                  depth_format)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_depth_resources(h.context.device(),
+                                          h.context.physical_device(),
+                                          depth_format, kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(present_pass
+                  .create_framebuffers(h.context.device(), {ldr.image_view()},
+                                       kSize, kSize)
+                  .is_ok());
+
+  ComposeChainConfig cfg{};
+  cfg.enable_bloom = false;
+  cfg.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.enable_dynamic_rendering = true;
+  VulkanComposeChain chain;
+  ASSERT_TRUE(chain
+                  .ensure(h.context.device(), h.context.physical_device(),
+                          h.context.graphics_queue(), cfg,
+                          present_pass.render_pass(), VK_FORMAT_B8G8R8A8_UNORM,
+                          kSize, kSize)
+                  .is_ok());
+  ASSERT_TRUE(chain.ready());
+  ASSERT_TRUE(chain.dynamic_rendering_negotiated());
+
+  // Hand-built dynamic scene node: the renderer's stage-3 emission in
+  // miniature (HDR color + depth, both CLEAR, same final layouts).
+  warploom::render::GraphDynamicPass scene{};
+  scene.name = "scene";
+  scene.image = chain.scene_image();
+  scene.view = chain.scene_image_view();
+  scene.format = chain.scene_image_format();
+  scene.final_layout = chain.scene_color_final_layout();
+  scene.clear = true;
+  scene.has_depth = true;
+  scene.depth_image = chain.scene_depth_image();
+  scene.depth_view = chain.scene_depth_view();
+  scene.depth_format = chain.scene_depth_format();
+  scene.depth_final_layout = chain.scene_depth_final_layout();
+  scene.depth_clear = true;
+  scene.width = kSize;
+  scene.height = kSize;
+
+  std::vector<warploom::render::GraphNode> nodes;
+  nodes.push_back(warploom::render::GraphNode::from_dynamic(scene));
+  EXPECT_TRUE(chain.verify_frame_nodes(nodes));
+
+  // Sabotage: a depth image the plan never issued fails the gate.
+  warploom::render::GraphDynamicPass forged = scene;
+  forged.depth_image = reinterpret_cast<VkImage>(0xDEADBEEF);
+  std::vector<warploom::render::GraphNode> bad_nodes;
+  bad_nodes.push_back(warploom::render::GraphNode::from_dynamic(forged));
+  EXPECT_FALSE(chain.verify_frame_nodes(bad_nodes));
+
+  chain.destroy();
   present_pass.cleanup(h.context.device());
   ldr.cleanup();
   h.cleanup();

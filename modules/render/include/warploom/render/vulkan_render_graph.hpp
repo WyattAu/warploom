@@ -127,8 +127,9 @@ struct GraphPass {
   void* user_data{nullptr};
 };
 
-//! One dynamic-rendering pass (Blade stage 1): a single color attachment
-//! recorded with vkCmdBeginRendering — no render pass, no framebuffer.
+//! One dynamic-rendering pass (Blade stage 1: color-only compose stages;
+//! stage 3 adds the optional depth attachment for the scene pass) recorded
+//! with vkCmdBeginRendering — no render pass, no framebuffer.
 //! The compiler treats the image like a render attachment (barrier to
 //! COLOR_ATTACHMENT_OPTIMAL, tracked to final_layout) and the samples
 //! exactly like a render node's sampled images. The executor emits the
@@ -136,7 +137,11 @@ struct GraphPass {
 //! only), and ends rendering; a post-barrier materializes final_layout
 //! when it differs from COLOR_ATTACHMENT_OPTIMAL (mirroring the compute
 //! path's explicit post transition, since dynamic rendering performs no
-//! implicit end-of-pass transition).
+//! implicit end-of-pass transition). When has_depth, the depth image
+//! compiles exactly like a render depth attachment (barrier to
+//! DEPTH_STENCIL_ATTACHMENT_OPTIMAL, tracked to depth_final_layout) and
+//! the executor fills pDepthAttachment with the same CLEAR/LOAD + STORE
+//! semantics as the color target.
 struct GraphDynamicPass {
   const char* name{nullptr};
   VkImage image{VK_NULL_HANDLE};
@@ -148,6 +153,18 @@ struct GraphDynamicPass {
   //! CLEAR writes clear_value; LOAD preserves. Compose stages always CLEAR.
   bool clear{true};
   VkClearValue clear_value{};
+  //! Optional depth attachment (Blade stage 3: the scene pass). Ignored
+  //! unless has_depth; depth_view/depth_format inform the begin info and
+  //! pipeline-compatibility asserts, depth_final_layout the tracked state.
+  bool has_depth{false};
+  VkImage depth_image{VK_NULL_HANDLE};
+  VkImageView depth_view{VK_NULL_HANDLE};
+  VkFormat depth_format{VK_FORMAT_UNDEFINED};
+  VkImageLayout depth_final_layout{
+      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+  //! CLEAR writes depth_clear_value; LOAD preserves. The scene clears.
+  bool depth_clear{true};
+  VkClearValue depth_clear_value{};
   std::uint32_t width{0};
   std::uint32_t height{0};
   //! Images this pass SAMPLES (same compiler treatment as render samples).

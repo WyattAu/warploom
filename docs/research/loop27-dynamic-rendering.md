@@ -1,11 +1,13 @@
-# Loop 27: dynamic rendering for fullscreen passes (Blade stage 0)
+# Loop 27: dynamic rendering for fullscreen passes (Blade stages 0-3)
 
-Status: stages 0-2 landed 2026-11-01 on the RTX 2060. Stage 0 (this loop)
-enables the feature bit and proves begin/end on-device. Stage 1 migrates
-the compose bloom downsample; stage 2 the tonemap (present image threaded
-per call, modeled as caller-owned history). Later stages move the
-remaining fullscreen passes (PT blit, sky, UI) off baked render passes;
-each stage lands with its own re-proof.
+Status: stages 0-3 landed (0-2 on 2026-11-01, stage 3 on 2026-11-03,
+all RTX 2060). Stage 0 enables the feature bit and proves begin/end
+on-device. Stage 1 migrates the compose bloom downsample; stage 2 the
+tonemap (present image threaded per call, modeled as caller-owned
+history); stage 3 the scene node itself (color + depth, explicit
+pipeline opt-in). Later stages move the remaining passes (PT blit,
+sky, UI) off baked render passes; each stage lands with its own
+re-proof.
 
 ## Source
 
@@ -86,3 +88,33 @@ the baked golden) on frame one and a non-clear dynamic-bloom frame two,
 0 diagnostics; a wrong-final-layout sabotage fails with VUIDs plus a hash
 mismatch, then reverts. Baked callers (null present) are untouched: every
 pre-existing golden hash still green.
+
+Stage 3 (2026-11-03, RTX 2060): the scene node itself records via
+`vkCmdBeginRendering` (color + depth attachments, same CLEAR semantics and
+final layouts as the scene render pass). `GraphDynamicPass` gains an
+optional depth attachment compiling exactly like a render depth attachment
+(barrier to DEPTH_STENCIL_ATTACHMENT_OPTIMAL, tracked to
+depth_final_layout; the executor fills pDepthAttachment and materializes a
+non-attachment final layout explicitly, dst-staged for fragment AND
+compute readers since the H-Z reduction dispatches compute). The R6b gate
+and the Loop-13 derivation touch the dynamic depth, so coverage cannot
+silently lapse when the scene changes framing. The renderer's scene
+pipeline is explicit, never inferred: `set_dynamic_scene_pipeline` binds a
+dynamic-created pipeline (via the new depth-capable
+`create_graphics_pipeline_dynamic` overload) and opts the unified scene
+node into dynamic; `set_pipeline` keeps the baked node (last write wins).
+`UnifiedFrameWithDynamicSceneMatchesGolden` asserts golden parity
+(canonical hash 12508388375569283214, identical to the baked golden) with
+0 diagnostics; the control is structural -- a dynamic pipeline in a baked
+node is VUID-vkCmdDraw-renderPass-02684, so golden + clean can only mean
+the scene recorded dynamically (sabotage: binding via `set_pipeline`
+fails with exactly those 2 VUIDs, reverted). `DynamicSceneDepthCoveredByGate`
+asserts a forged dynamic-scene depth image fails the gate. Full suite
+732/732, pre-existing goldens green. Two ctest binaries fail on defects
+outside this surface (pre-existing hard gates, noted 2026-11-03):
+`warploom_core_tests` segfaults in `ReplayScrubber` teardown (null-`this`
+`ReplayCheckpoint` vector destroy; links only `warploom_core`, zero files
+in common with this diff) and `warploom_editor_tests` aborts with
+`std::bad_alloc` from a garbage-length string append in
+`InspectorPanel::rebuild` (no render frames in the stack; editor tests
+create no dynamic nodes, so the new branches are unreachable).

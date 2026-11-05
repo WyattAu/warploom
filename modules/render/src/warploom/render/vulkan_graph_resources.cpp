@@ -55,10 +55,16 @@ std::vector<FrameResource> derive_frame_resources(
         touch(s.image, pass);
       }
     } else if (node.dynamic != nullptr) {
-      // Same touch order as render (target, then samples): lifetimes are
+      // Same touch order as render (targets, then samples): lifetimes are
       // framing-independent, so the planner sees the identical sequence
-      // whether a stage records baked or dynamic.
+      // whether a stage records baked or dynamic. Blade stage 3: the
+      // scene's dynamic depth folds in exactly where its render-attachment
+      // depth would, or the scene's depth lifetime would vanish from the
+      // plan the moment the scene migrates framing.
       touch(node.dynamic->image, pass);
+      if (node.dynamic->has_depth) {
+        touch(node.dynamic->depth_image, pass);
+      }
       for (const GraphSampledImage& s : node.dynamic->sampled_images) {
         touch(s.image, pass);
       }

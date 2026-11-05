@@ -241,24 +241,30 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
 ::warploom::core::Result<void> VulkanPipeline::create_graphics_pipeline_dynamic(
     VkDevice device, VkFormat color_format,
     VkPipelineLayout pipeline_layout,
-    bool enable_backface_cull) {
+    bool enable_backface_cull, VkFormat depth_format,
+    bool enable_depth_test, bool enable_depth_write) {
 #ifdef OMNICPP_HAS_VULKAN
   VkPipelineRenderingCreateInfo rendering_info{};
   rendering_info.sType =
       VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
   rendering_info.colorAttachmentCount = 1U;
   rendering_info.pColorAttachmentFormats = &color_format;
-  rendering_info.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+  rendering_info.depthAttachmentFormat = depth_format;
   rendering_info.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
-  // Dynamic compose stages have no depth attachment: depth off, and the
-  // pipeline layout's push range is the caller's (set at create time).
+  // The pipeline layout's push range is the caller's (set at create time).
+  // Depth state mirrors the caller's flags: color-only stages (bloom,
+  // tonemap) leave the UNDEFINED default with test/write off; the scene
+  // passes its depth format with test/write on, exactly like its baked
+  // pipeline, so fragment math cannot differ by framing.
   return create_graphics_pipeline_impl(device, VK_NULL_HANDLE,
                                        &rendering_info, color_format,
-                                       pipeline_layout, false, false,
+                                       pipeline_layout, enable_depth_test,
+                                       enable_depth_write,
                                        enable_backface_cull, 0.0F, false);
 #else
   (void)device; (void)color_format; (void)pipeline_layout;
   (void)enable_backface_cull;
+  (void)depth_format; (void)enable_depth_test; (void)enable_depth_write;
   return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }

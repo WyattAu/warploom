@@ -293,6 +293,32 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
       hiz_compute_enabled_ = true;
       hiz_compute_raw_queue_ = context.compute_queue();
       hiz_compute_family_ = context.compute_family_index();
+      // Loop28 step 4: pipeline only when explicitly requested on top of
+      // an armed compute leg. The gfx->compute handoff semaphores are
+      // per-slot binaries, created once here (signalled once per graphics
+      // submit, waited once per kick — always balanced).
+      if (config_.hiz_compute_pipelined) {
+        bool semaphores_ok = true;
+        for (std::uint32_t i = 0U; i < 2U; ++i) {
+          VkSemaphoreCreateInfo gfx_done_sem_info{};
+          gfx_done_sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+          if (vkCreateSemaphore(device_, &gfx_done_sem_info, nullptr,
+                                &hiz_gfx_done_[i]) != VK_SUCCESS) {
+            semaphores_ok = false;
+            break;
+          }
+        }
+        if (semaphores_ok) {
+          hiz_pipelined_enabled_ = true;
+        } else {
+          for (std::uint32_t i = 0U; i < 2U; ++i) {
+            if (hiz_gfx_done_[i] != VK_NULL_HANDLE) {
+              vkDestroySemaphore(device_, hiz_gfx_done_[i], nullptr);
+              hiz_gfx_done_[i] = VK_NULL_HANDLE;
+            }
+          }
+        }
+      }
     }
   }
   // Compose eagerly, at the swapchain extent, rather than on the first
@@ -1097,9 +1123,23 @@ void VulkanRenderer::record_unified_frame_dynamic_node(
   auto* node = static_cast<UnifiedFrameNode*>(user_data);
   if (node == nullptr || node->renderer == nullptr) return;
   if (node->is_scene) {
-    // The scene never records dynamically: a scene dispatch on a dynamic
-    // node means the mixed node list miswired user_data. Fail loudly.
+    // Blade stage 3: a dynamic scene records the same contents as the baked
+    // one (viewport/scissor, scene draw, boundary stamp) inside the
+    // executor-owned rendering scope. record_scene_node_contents is
+    // framing-agnostic by construction -- it never begins/ends anything.
+#ifdef OMNICPP_HAS_VULKAN
+    if (!node->renderer->record_scene_node_contents(command_buffer,
+                                                     node->width,
+                                                     node->height) &&
+        node->failed != nullptr) {
+      *node->failed = true;
+    }
+#else
+    // Vulkan-off builds never record (record_commands returns early), but
+    // the callback itself must still compile: fail loudly if it ever runs.
+    (void)command_buffer;
     if (node->failed != nullptr) *node->failed = true;
+#endif
     return;
   }
   record_compose_dynamic_stage(command_buffer, pass,
@@ -1380,6 +1420,13 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
   begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(cb, &begin_info);
 
+  // Loop28 step 4, pre-scene half: in pipelined mode the cull about to
+  // record reads the packed pyramid, and the compute leg produced it a
+  // frame behind — pack it before the scene consumes it. The submit wait
+  // recorded at submit time orders the producing kick before this frame
+  // executes, so record-time completion is never the question.
+  pack_hiz_pyramid_for_cull(cb);
+
   // GPU timestamps: reset this slot's pair and write the frame-start stamp.
   // The begin_frame wait above guarantees the previous submit on this slot
   // completed, so reset and resolve are both race-free.
@@ -1454,30 +1501,64 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
     scene_pass = compose_->scene_pass();
     scene_framebuffer = compose_->scene_framebuffer();
 
+    // Blade stage 3: the scene node itself goes dynamic when dynamic
+    // rendering negotiated on AND the caller bound a dynamic-created scene
+    // pipeline (set_dynamic_scene_pipeline). The gate is a conjunction on
+    // purpose: a baked pipeline inside a dynamic node is a VUID, so the
+    // renderer never infers the pipeline's framing. Either framing declares
+    // the same HDR color + depth pair, so compile/gate intervals are
+    // identical and the proof is one golden hash.
+    const bool scene_dynamic = compose_->dynamic_rendering_negotiated() &&
+                               scene_pipeline_dynamic_;
     GraphPass scene_node{};
-    scene_node.name = "scene";
-    scene_node.render_pass = scene_pass;
-    scene_node.framebuffer = scene_framebuffer;
-    scene_node.width = width;
-    scene_node.height = height;
-    scene_node.clear_values = clear_values;
-    scene_node.clear_value_count = 2U;
-    scene_node.attachments = {
-        color_attachment(compose_->scene_image(),
-                         compose_->scene_image_view(),
-                         compose_->scene_image_format(),
-                         compose_->scene_color_final_layout()),
-        depth_attachment(compose_->scene_depth_image(),
-                         compose_->scene_depth_view(),
-                         compose_->scene_depth_format(),
-                         compose_->scene_depth_final_layout())};
+    GraphDynamicPass scene_dyn_node{};
+    if (scene_dynamic) {
+      scene_dyn_node.name = "scene";
+      scene_dyn_node.image = compose_->scene_image();
+      scene_dyn_node.view = compose_->scene_image_view();
+      scene_dyn_node.format = compose_->scene_image_format();
+      scene_dyn_node.final_layout = compose_->scene_color_final_layout();
+      scene_dyn_node.clear = true;
+      scene_dyn_node.clear_value = clear_values[0];
+      scene_dyn_node.has_depth = true;
+      scene_dyn_node.depth_image = compose_->scene_depth_image();
+      scene_dyn_node.depth_view = compose_->scene_depth_view();
+      scene_dyn_node.depth_format = compose_->scene_depth_format();
+      scene_dyn_node.depth_final_layout =
+          compose_->scene_depth_final_layout();
+      scene_dyn_node.depth_clear = true;
+      scene_dyn_node.depth_clear_value = clear_values[1];
+      scene_dyn_node.width = width;
+      scene_dyn_node.height = height;
+    } else {
+      scene_node.name = "scene";
+      scene_node.render_pass = scene_pass;
+      scene_node.framebuffer = scene_framebuffer;
+      scene_node.width = width;
+      scene_node.height = height;
+      scene_node.clear_values = clear_values;
+      scene_node.clear_value_count = 2U;
+      scene_node.attachments = {
+          color_attachment(compose_->scene_image(),
+                           compose_->scene_image_view(),
+                           compose_->scene_image_format(),
+                           compose_->scene_color_final_layout()),
+          depth_attachment(compose_->scene_depth_image(),
+                           compose_->scene_depth_view(),
+                           compose_->scene_depth_format(),
+                           compose_->scene_depth_final_layout())};
+    }
     UnifiedFrameNode scene_dispatch{};
     scene_dispatch.renderer = this;
     scene_dispatch.is_scene = true;
     scene_dispatch.width = width;
     scene_dispatch.height = height;
     scene_dispatch.failed = &unified_frame_failed;
-    scene_node.user_data = &scene_dispatch;
+    if (scene_dynamic) {
+      scene_dyn_node.user_data = &scene_dispatch;
+    } else {
+      scene_node.user_data = &scene_dispatch;
+    }
 
     // Blade stage 2: resolve the presentation image for the dynamic tonemap.
     // Real path: the swapchain image/view at this frame's index (the
@@ -1503,9 +1584,10 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
                                  compose_dyn_passes, compose_stages,
                                  compose_clear);
 
-    // Mixed node list in stage order: baked stages record through the
-    // render callback, dynamic stages (Blade stage 1: bloom) through the
-    // dynamic callback. One dispatch entry per STAGE keeps user_data
+    // Mixed node list in stage order: baked nodes record through the
+    // render callback, dynamic nodes (bloom from stage 1, tonemap from
+    // stage 2, the scene itself from stage 3) through the dynamic
+    // callback. One dispatch entry per STAGE keeps user_data
     // wiring stage-aligned whichever framing the stage chose.
     std::vector<UnifiedFrameNode> compose_dispatch(compose_stages.size());
     for (std::size_t i = 0; i < compose_stages.size(); ++i) {
@@ -1515,7 +1597,11 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
     }
     std::vector<GraphNode> nodes;
     nodes.reserve(1U + compose_stages.size());
-    nodes.push_back(GraphNode::from_render(scene_node));
+    if (scene_dynamic) {
+      nodes.push_back(GraphNode::from_dynamic(scene_dyn_node));
+    } else {
+      nodes.push_back(GraphNode::from_render(scene_node));
+    }
     {
       std::size_t bi = 0, di = 0;
       for (std::size_t i = 0; i < compose_stages.size(); ++i) {
@@ -1641,7 +1727,12 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
     record.render_height = height;
     record.tile_size = hiz_state_.tile_size();
     record.levels = hiz_state_.levels();
-    if (hiz_direct_enabled_ && !record_hiz_reduction(cb, record)) {
+    // Loop28 step 4: pipelined mode skips the inline reduce (the compute
+    // leg owns the pyramid now) but still persists the snapshot the kick
+    // at submit will reduce. Non-pipelined frames reduce inline as before.
+    if (hiz_pipelined_enabled_) {
+      record_hiz_snapshot_only(cb, record);
+    } else if (hiz_direct_enabled_ && !record_hiz_reduction(cb, record)) {
       hiz_state_.discard_frame(pending_hiz_token_);
       pending_hiz_frame_ = false;
       vkEndCommandBuffer(cb);
@@ -1687,15 +1778,17 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
   auto& frame = frames_[current_frame_];
   VkSubmitInfo submit_info{};
   submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  VkSemaphore wait_semaphores[] = {frame.image_available_semaphore};
-  VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-  // Headless: no acquire, so image_available is never signaled -- waiting on
-  // it here would deadlock the queue forever. Wait on nothing instead.
-  if (!headless_) {
-    submit_info.waitSemaphoreCount = 1;
-    submit_info.pWaitSemaphores = wait_semaphores;
-    submit_info.pWaitDstStageMask = wait_stages;
-  }
+  // Legacy-path waits are wired below (after the handoff values are
+  // known). Headless waits on nothing for image_available (never
+  // signaled — waiting would deadlock); the compute-kick timeline wait
+  // is appended when armed.
+  VkSemaphore wait_semaphores[2] = {frame.image_available_semaphore,
+                                    VK_NULL_HANDLE};
+  VkPipelineStageFlags wait_stages[2] = {
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
+  std::uint64_t legacy_wait_values[2] = {0U, 0U};
+  std::uint32_t legacy_wait_count = headless_ ? 0U : 1U;
   submit_info.commandBufferCount = 1;
   submit_info.pCommandBuffers = &frame.command_buffer;
   // Headless: render_finished is consumed by the present queue, and there is
@@ -1712,6 +1805,18 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
 
   // Timeline pacing: signal the monotonic frame counter on submit.
   const std::uint64_t signal_frame = frame_counter_ + 1;
+
+  // Loop28 step 4 handoff (shared by both submit paths): the graphics
+  // submit for a frame reusing ping-pong `slot` waits the compute kick
+  // from two frames ago (normally already signalled — the wait is
+  // ordering, not pacing), and signals gfx_done[slot] so the kick at
+  // this submit's tail may sample the snapshot this frame just wrote.
+  const bool hiz_kick = hiz_pipelined_enabled_ && pending_hiz_frame_;
+  const std::uint32_t hiz_slot =
+      hiz_kick ? pending_hiz_token_.write_index : 0U;
+  const bool hiz_slot_ok = hiz_kick && hiz_slot < 2U;
+  const std::uint64_t hiz_wait_value =
+      hiz_slot_ok ? hiz_compute_signal_[hiz_slot] : 0U;
 
   if (synchronization2_) {
     auto submit2 = reinterpret_cast<PFN_vkQueueSubmit2>(vkGetDeviceProcAddr(
@@ -1730,31 +1835,48 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
       signal_info.semaphore = render_finished_semaphores_[acquired_image_index_];
       signal_info.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
       if (headless_) signal_info.semaphore = VK_NULL_HANDLE;
+      VkSemaphoreSubmitInfo wait_infos[2] = {wait_info, {}};
+      wait_infos[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+      std::uint32_t wait_count = headless_ ? 0U : 1U;
+      if (hiz_wait_value != 0U) {
+        wait_infos[wait_count].semaphore =
+            hiz_compute_queue_.timeline_semaphore();
+        wait_infos[wait_count].value = hiz_wait_value;
+        wait_infos[wait_count].stageMask =
+            VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        ++wait_count;
+      }
+      VkSemaphoreSubmitInfo gfx_done_signal_info{};
+      gfx_done_signal_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+      if (hiz_slot_ok) {
+        gfx_done_signal_info.semaphore = hiz_gfx_done_[hiz_slot];
+        gfx_done_signal_info.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+      }
       VkSubmitInfo2 submit2_info{};
       submit2_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
       submit2_info.commandBufferInfoCount = 1;
       submit2_info.pCommandBufferInfos = &command_info;
-      if (!headless_) {
-        submit2_info.waitSemaphoreInfoCount = 1;
-        submit2_info.pWaitSemaphoreInfos = &wait_info;
-      }
-      if (headless_) {
-        submit2_info.signalSemaphoreInfoCount = 0;
-        submit2_info.pSignalSemaphoreInfos = nullptr;
-      }
-      submit2_info.signalSemaphoreInfoCount = 1;
-      submit2_info.pSignalSemaphoreInfos = &signal_info;
+      submit2_info.waitSemaphoreInfoCount = wait_count;
+      submit2_info.pWaitSemaphoreInfos = wait_count > 0U ? wait_infos : nullptr;
+      // Contiguous signal array. Headless without timeline pacing or
+      // pipelining signals nothing (render_finished is skipped there — see
+      // above); the historical headless shape is preserved by leaving the
+      // count at zero in that case rather than signalling a null handle.
+      VkSemaphoreSubmitInfo signal_infos[3] = {signal_info, {}, {}};
+      signal_infos[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+      signal_infos[2].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+      std::uint32_t signal_count = headless_ ? 0U : 1U;
       if (timeline_pacing_) {
-        VkSemaphoreSubmitInfo timeline_signal_info{};
-        timeline_signal_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-        timeline_signal_info.semaphore = timeline_semaphore_;
-        timeline_signal_info.value = signal_frame;
-        timeline_signal_info.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-        // Contiguous value array; decays to the required pointer type.
-        VkSemaphoreSubmitInfo signal_infos[2] = {signal_info, timeline_signal_info};
-        submit2_info.pSignalSemaphoreInfos = signal_infos;
-        submit2_info.signalSemaphoreInfoCount = 2;
+        signal_infos[signal_count].semaphore = timeline_semaphore_;
+        signal_infos[signal_count].value = signal_frame;
+        signal_infos[signal_count].stageMask =
+            VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        ++signal_count;
       }
+      if (hiz_slot_ok) signal_infos[signal_count++] = gfx_done_signal_info;
+      submit2_info.signalSemaphoreInfoCount = signal_count;
+      submit2_info.pSignalSemaphoreInfos =
+          signal_count > 0U ? signal_infos : nullptr;
       const VkResult result = submit2(graphics_queue_, 1, &submit2_info,
           timeline_pacing_ ? VK_NULL_HANDLE : frame.in_flight_fence);
       if (result != VK_SUCCESS) {
@@ -1766,10 +1888,20 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
       }
       frame.frame_in_flight = true;
       if (pending_hiz_frame_) {
-        hiz_pyramid_initialized_[pending_hiz_destination_index_] = true;
+        // Pipelined mode: the pyramid is the compute leg's now; the kick
+        // marks it initialized after the first reduce (proper initial
+        // layout transition), so graphics must not pre-mark it here.
+        if (!hiz_pipelined_enabled_) {
+          hiz_pyramid_initialized_[pending_hiz_destination_index_] = true;
+        }
         hiz_state_.complete_frame(pending_hiz_token_);
         pending_hiz_frame_ = false;
       }
+      // The compute kick reads the snapshot the submit above just ordered
+      // (gfx_done): same-thread submit order plus the semaphore is the
+      // cross-queue edge. No CPU wait — the timeline handoff carries the
+      // frame-behind ordering instead.
+      if (hiz_slot_ok) kick_hiz_compute_reduce(hiz_slot);
       if (timeline_pacing_) {
         frame_counter_ = signal_frame;
         image_last_frame_[acquired_image_index_] = signal_frame;
@@ -1779,16 +1911,41 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
     }
   }
 
-  // Timeline pacing on the legacy path: attach signal values via pNext chain.
-  VkSemaphore legacy_signal_semaphores[2] = {render_finished_semaphore, timeline_semaphore_};
-  std::uint64_t legacy_signal_values[2] = {0, signal_frame};
+  // Legacy path: wire the waits (image_available unless headless, plus
+  // the compute-kick timeline wait when armed) and extend the signals
+  // with gfx_done[slot] when pipelined. Binary entries in the value
+  // arrays are ignored by the driver but must be present so the counts
+  // match the semaphore arrays.
+  if (hiz_wait_value != 0U) {
+    wait_semaphores[legacy_wait_count] =
+        hiz_compute_queue_.timeline_semaphore();
+    legacy_wait_values[legacy_wait_count] = hiz_wait_value;
+    ++legacy_wait_count;
+  }
+  submit_info.waitSemaphoreCount = legacy_wait_count;
+  submit_info.pWaitSemaphores =
+      legacy_wait_count > 0U ? wait_semaphores : nullptr;
+  submit_info.pWaitDstStageMask =
+      legacy_wait_count > 0U ? wait_stages : nullptr;
+  VkSemaphore legacy_signal_semaphores[3] = {render_finished_semaphore,
+      timeline_semaphore_, VK_NULL_HANDLE};
+  std::uint64_t legacy_signal_values[3] = {0, signal_frame, 0};
   VkTimelineSemaphoreSubmitInfo timeline_submit_info{};
-  if (timeline_pacing_) {
-    timeline_submit_info.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    timeline_submit_info.signalSemaphoreValueCount = 2;
+  timeline_submit_info.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+  if (timeline_pacing_ || hiz_slot_ok || hiz_wait_value != 0U) {
+    std::uint32_t legacy_signal_count = signal_render_finished ? 1U : 0U;
+    if (timeline_pacing_) legacy_signal_count = 2U;
+    if (hiz_slot_ok) {
+      legacy_signal_semaphores[legacy_signal_count] = hiz_gfx_done_[hiz_slot];
+      legacy_signal_values[legacy_signal_count] = 0U;
+      ++legacy_signal_count;
+    }
+    timeline_submit_info.waitSemaphoreValueCount = legacy_wait_count;
+    timeline_submit_info.pWaitSemaphoreValues = legacy_wait_values;
+    timeline_submit_info.signalSemaphoreValueCount = legacy_signal_count;
     timeline_submit_info.pSignalSemaphoreValues = legacy_signal_values;
     submit_info.pNext = &timeline_submit_info;
-    submit_info.signalSemaphoreCount = 2;
+    submit_info.signalSemaphoreCount = legacy_signal_count;
     submit_info.pSignalSemaphores = legacy_signal_semaphores;
   }
 
@@ -1803,10 +1960,16 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
   }
   frame.frame_in_flight = true;
   if (pending_hiz_frame_) {
-    hiz_pyramid_initialized_[pending_hiz_destination_index_] = true;
+    // Same ownership rule as the sync2 path: only the inline (graphics)
+    // reduce marks the pyramid initialized at submit; the pipelined kick
+    // marks it after the first compute reduce.
+    if (!hiz_pipelined_enabled_) {
+      hiz_pyramid_initialized_[pending_hiz_destination_index_] = true;
+    }
     hiz_state_.complete_frame(pending_hiz_token_);
     pending_hiz_frame_ = false;
   }
+  if (hiz_slot_ok) kick_hiz_compute_reduce(hiz_slot);
   if (timeline_pacing_) {
     frame_counter_ = signal_frame;
     image_last_frame_[acquired_image_index_] = signal_frame;
@@ -2147,7 +2310,7 @@ bool VulkanRenderer::ensure_hiz_depth_snapshot(std::uint32_t slot,
 
 void VulkanRenderer::copy_hiz_depth_to_snapshot(
     VkCommandBuffer command_buffer, const HiZFrameRecord& record,
-    VkFormat snapshot_format) noexcept {
+    VkFormat snapshot_format, bool depth_from_attachment) noexcept {
   const std::uint32_t slot = record.token.write_index;
   if (command_buffer == VK_NULL_HANDLE || slot >= 2U ||
       record.depth_image == VK_NULL_HANDLE || snapshot_format == VK_FORMAT_UNDEFINED ||
@@ -2170,10 +2333,10 @@ void VulkanRenderer::copy_hiz_depth_to_snapshot(
       snapshot_format == VK_FORMAT_D24_UNORM_S8_UINT) {
     aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
   }
-  // Depth leaves the reduction in SHADER_READ_ONLY_OPTIMAL; snapshot rests
-  // there too. Bounce both through transfer layouts for the copy, then back.
-  // Freshness is per-slot: ping-pong alternates, so the sibling slot is
-  // UNDEFINED on its first use even while the global valid flag is set.
+  // Snapshot rests in SHADER_READ_ONLY_OPTIMAL. Bounce both through
+  // transfer layouts for the copy, then back. Freshness is per-slot:
+  // ping-pong alternates, so the sibling slot is UNDEFINED on its first
+  // use even while the global valid flag is set.
   const bool first_use = slot_fresh;
   // Snapshot -> TRANSFER_DST.
   VkImageMemoryBarrier snap_to_dst{};
@@ -2188,19 +2351,34 @@ void VulkanRenderer::copy_hiz_depth_to_snapshot(
   snap_to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   snap_to_dst.image = hiz_depth_snapshot_[slot];
   snap_to_dst.subresourceRange = {aspect, 0U, 1U, 0U, 1U};
-  // Depth SHADER_READ -> TRANSFER_SRC.
+  // Depth -> TRANSFER_SRC. Inline copies after the reduction (depth in
+  // SHADER_READ, sampled by the reduce shader); pipelined snapshots the
+  // depth it just rendered (still ATTACHMENT_OPTIMAL, written by the
+  // scene pass). The return edge restores whichever it borrowed.
   VkImageMemoryBarrier depth_to_src{};
   depth_to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  depth_to_src.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  depth_to_src.srcAccessMask = depth_from_attachment
+      ? static_cast<VkAccessFlags>(VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+      : static_cast<VkAccessFlags>(VK_ACCESS_SHADER_READ_BIT);
   depth_to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-  depth_to_src.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  depth_to_src.oldLayout = depth_from_attachment
+      ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+      : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   depth_to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
   depth_to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   depth_to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   depth_to_src.image = record.depth_image;
   depth_to_src.subresourceRange = {aspect, 0U, 1U, 0U, 1U};
   VkImageMemoryBarrier pre[2] = {snap_to_dst, depth_to_src};
-  vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+  // The snapshot's previous read was the compute reduce; the attachment's
+  // previous write was the scene pass. Superset stalls are safe here
+  // (one copy per frame, outside any timed section).
+  VkPipelineStageFlags pre_src = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+  if (depth_from_attachment) {
+    pre_src |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+               VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+  }
+  vkCmdPipelineBarrier(command_buffer, pre_src,
                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, nullptr, 0U,
                        nullptr, 2U, pre);
   VkImageCopy copy{};
@@ -2210,8 +2388,10 @@ void VulkanRenderer::copy_hiz_depth_to_snapshot(
   vkCmdCopyImage(command_buffer, record.depth_image,
                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, hiz_depth_snapshot_[slot],
                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1U, &copy);
-  // Both back to SHADER_READ: the reduction's declared final state, and the
-  // snapshot's resting state for step 3.
+  // Snapshot back to SHADER_READ: its resting state for step 3. Depth
+  // back to whatever was borrowed: the reduction's declared final state
+  // (inline) or the scene pass's attachment state (pipelined), whose
+  // next use is next frame's early fragment tests.
   VkImageMemoryBarrier snap_back = snap_to_dst;
   snap_back.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   snap_back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -2219,12 +2399,22 @@ void VulkanRenderer::copy_hiz_depth_to_snapshot(
   snap_back.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   VkImageMemoryBarrier depth_back = depth_to_src;
   depth_back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-  depth_back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  depth_back.dstAccessMask = depth_from_attachment
+      ? static_cast<VkAccessFlags>(
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+      : static_cast<VkAccessFlags>(VK_ACCESS_SHADER_READ_BIT);
   depth_back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-  depth_back.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  depth_back.newLayout = depth_from_attachment
+      ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+      : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   VkImageMemoryBarrier post[2] = {snap_back, depth_back};
+  VkPipelineStageFlags post_dst = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+  if (depth_from_attachment) {
+    post_dst |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+  }
   vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0U, 0U, nullptr,
+                       post_dst, 0U, 0U, nullptr,
                        0U, nullptr, 2U, post);
   hiz_last_depth_image_ = record.depth_image;
   hiz_last_depth_view_ = record.depth_view;
@@ -2270,6 +2460,63 @@ void VulkanRenderer::cleanup_hiz_pipeline_resources() noexcept {
   hiz_last_depth_view_ = VK_NULL_HANDLE;
   hiz_last_snapshot_slot_ = 2U;
   hiz_direct_enabled_ = false;
+  // Loop28 step 4: the pipeline restarts clean — in-flight work is drained
+  // by the caller's wait-idle, so no slot has a kick worth waiting for.
+  // Flags and gfx_done semaphores survive (device-level, still valid).
+  hiz_compute_signal_[0] = 0U;
+  hiz_compute_signal_[1] = 0U;
+}
+
+void VulkanRenderer::pack_hiz_pyramid_levels(
+    VkCommandBuffer command_buffer, const VulkanHiZPyramid* pyramid,
+    std::uint32_t levels, PackedPyramid& pack) noexcept {
+#ifdef OMNICPP_HAS_VULKAN
+  if (command_buffer == VK_NULL_HANDLE || pyramid == nullptr || levels == 0U ||
+      !pack.buffer.is_valid() || pack.level_offsets.size() < levels) {
+    return;
+  }
+  for (std::uint32_t level = 0;
+       level < levels && level < pack.level_dims.size(); ++level) {
+    const auto [lw, lh] = pack.level_dims[level];
+    if (lw == 0U || lh == 0U) continue;
+    VkImageMemoryBarrier to_src{};
+    to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_src.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    to_src.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_src.image = pyramid->image();
+    to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, level, 1U, 0U, 1U};
+    vkCmdPipelineBarrier(command_buffer,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, nullptr,
+                         0U, nullptr, 1U, &to_src);
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0U, 1U};
+    region.imageExtent = {lw, lh, 1U};
+    // Level 0 first, then each halved level contiguously.
+    region.bufferOffset =
+        static_cast<VkDeviceSize>(pack.level_offsets[level]) * 4U;
+    vkCmdCopyImageToBuffer(command_buffer, pyramid->image(),
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           pack.buffer.buffer, 1U, &region);
+    VkImageMemoryBarrier back = to_src;
+    back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    back.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0U, 0U,
+                         nullptr, 0U, nullptr, 1U, &back);
+  }
+#else
+  (void)command_buffer;
+  (void)pyramid;
+  (void)levels;
+  (void)pack;
+#endif
 }
 
 void VulkanRenderer::record_hiz_graph_pass(
@@ -2385,73 +2632,23 @@ bool VulkanRenderer::record_hiz_reduction(
   execute_graph(command_buffer, nodes, compiled, nullptr,
                 &VulkanRenderer::record_hiz_graph_pass);
   active_hiz_record_ = nullptr;
-  active_hiz_sets_ = nullptr;
-  const bool complete = hiz_dispatch_count_ == record.levels;
+  active_hiz_sets_ = nullptr;  const bool complete = hiz_dispatch_count_ == record.levels;
   if (complete) {
-    // B5b: pack the pyramid for the occlusion cull. The graph leaves each mip
-    // in SHADER_READ_ONLY_OPTIMAL; transition each to TRANSFER_SRC, copy, and
-    // restore. The buffer therefore holds THIS frame's pyramid, and the cull
-    // of the NEXT frame binds it -- the 1-frame latency the occlude shader's
-    // contract states. Self-contained transitions: the graph recomputes its
-    // own per frame from declared states, and these run after it.
-    const VulkanHiZPyramid* pyramid = record.destination_pyramid;
-    if (hiz_packed_.buffer.is_valid() &&
-        hiz_packed_.level_offsets.size() >= record.levels) {
-      for (std::uint32_t level = 0;
-           level < record.levels && level < hiz_packed_.level_dims.size();
-           ++level) {
-        const auto [lw, lh] = hiz_packed_.level_dims[level];
-        if (lw == 0U || lh == 0U) continue;
-        VkImageMemoryBarrier to_src{};
-        to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        to_src.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        to_src.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        to_src.image = pyramid->image();
-        to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, level, 1U, 0U, 1U};
-        vkCmdPipelineBarrier(command_buffer,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, nullptr,
-                             0U, nullptr, 1U, &to_src);
-
-        VkBufferImageCopy region{};
-        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0U, 1U};
-        region.imageExtent = {lw, lh, 1U};
-        // Level 0 first, then each halved level contiguously.
-        region.bufferOffset =
-            static_cast<VkDeviceSize>(hiz_packed_.level_offsets[level]) * 4U;
-        vkCmdCopyImageToBuffer(command_buffer, pyramid->image(),
-                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                               hiz_packed_.buffer.buffer, 1U, &region);
-
-        VkImageMemoryBarrier back = to_src;
-        back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        back.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0U, 0U,
-                             nullptr, 0U, nullptr, 1U, &back);
-      }
-      hiz_packed_.built_generation = hiz_state_.generation();
-    }
+    // B5b: pack the pyramid for the occlusion cull. The buffer holds THIS
+    // frame's pyramid, and the cull of the NEXT frame binds it -- the
+    // 1-frame latency the occlude shader's contract states.
+    pack_hiz_pyramid_levels(command_buffer, record.destination_pyramid,
+                             record.levels, hiz_packed_);
+    hiz_packed_.built_generation = hiz_state_.generation();
     // Loop28 step 2: persist the frame's live depth for a future
     // compute-queue reduce. Still graphics-queue, still same-frame -- no
     // behaviour change; the reduction above keeps sampling the live depth.
-    // Format comes from the source that owns the image (compose HDR depth
-    // under HDR compose, swapchain depth otherwise); unknown owner skips.
-    VkFormat snapshot_format = VK_FORMAT_UNDEFINED;
-    if (compose_ != nullptr && record.depth_image == compose_->scene_depth_image()) {
-      snapshot_format = compose_->scene_depth_format();
-    } else if (render_pass_resource_ != nullptr &&
-               record.depth_image == render_pass_resource_->depth_image()) {
-      snapshot_format = render_pass_resource_->depth_format();
-    }
+    // Format comes from the source that owns the image; unknown owner
+    // skips (same helper the pipelined snapshot-only path uses).
+    const VkFormat snapshot_format = hiz_snapshot_format_for_record(record);
     if (snapshot_format != VK_FORMAT_UNDEFINED) {
-      copy_hiz_depth_to_snapshot(command_buffer, record, snapshot_format);
+      copy_hiz_depth_to_snapshot(command_buffer, record, snapshot_format,
+                                 /*depth_from_attachment=*/false);
     } else {
       hiz_snapshot_valid_ = false;
     }
@@ -2462,6 +2659,10 @@ bool VulkanRenderer::record_hiz_reduction(
 struct HizComputeWork {
   VulkanRenderer* renderer{nullptr};
   HiZFrameRecord record{};
+  //! Sync proof shape packs on compute; the pipelined kick does not (the
+  //! shared pack buffer must be written by exactly one queue per frame —
+  //! graphics packs the compute pyramid pre-scene instead).
+  bool pack{true};
 };
 
 void VulkanRenderer::record_hiz_compute_work(VkCommandBuffer command_buffer,
@@ -2507,47 +2708,12 @@ void VulkanRenderer::record_hiz_compute_work(VkCommandBuffer command_buffer,
   self->active_hiz_record_ = nullptr;
   self->active_hiz_sets_ = nullptr;
   if (self->hiz_dispatch_count_ != record.levels) return;
-  // Pack on compute as well: same transitions as the graphics pack (the
-  // pyramid images are CONCURRENT, so no ownership transfer is needed).
-  const VulkanHiZPyramid* pyramid = record.destination_pyramid;
-  if (self->hiz_packed_.buffer.is_valid() &&
-      self->hiz_packed_.level_offsets.size() >= record.levels) {
-    for (std::uint32_t level = 0;
-         level < record.levels && level < self->hiz_packed_.level_dims.size();
-         ++level) {
-      const auto [lw, lh] = self->hiz_packed_.level_dims[level];
-      if (lw == 0U || lh == 0U) continue;
-      VkImageMemoryBarrier to_src{};
-      to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-      to_src.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-      to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-      to_src.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-      to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-      to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-      to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-      to_src.image = pyramid->image();
-      to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, level, 1U, 0U, 1U};
-      vkCmdPipelineBarrier(command_buffer,
-                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, nullptr,
-                           0U, nullptr, 1U, &to_src);
-      VkBufferImageCopy region{};
-      region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0U, 1U};
-      region.imageExtent = {lw, lh, 1U};
-      region.bufferOffset =
-          static_cast<VkDeviceSize>(self->hiz_packed_.level_offsets[level]) * 4U;
-      vkCmdCopyImageToBuffer(command_buffer, pyramid->image(),
-                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                             self->hiz_packed_.buffer.buffer, 1U, &region);
-      VkImageMemoryBarrier back = to_src;
-      back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-      back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-      back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-      back.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-      vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0U, 0U,
-                           nullptr, 0U, nullptr, 1U, &back);
-    }
+  // Pack on compute as well (sync proof shape; the pipelined kick skips
+  // the pack — graphics packs for the cull pre-scene instead, so the
+  // shared buffer is written by exactly one queue per frame).
+  if (work->pack) {
+    pack_hiz_pyramid_levels(command_buffer, record.destination_pyramid,
+                             record.levels, self->hiz_packed_);
   }
 #else
   (void)command_buffer;
@@ -2555,26 +2721,40 @@ void VulkanRenderer::record_hiz_compute_work(VkCommandBuffer command_buffer,
 #endif
 }
 
-::warploom::core::Result<std::uint64_t>
-VulkanRenderer::compute_reduce_hiz_snapshot(std::uint32_t slot) {
+VkFormat VulkanRenderer::hiz_snapshot_format_for_record(
+    const HiZFrameRecord& record) noexcept {
 #ifdef OMNICPP_HAS_VULKAN
-  if (!hiz_compute_enabled_ || !hiz_compute_queue_.is_initialized() ||
-      slot >= 2U || hiz_pyramids_[slot] == nullptr ||
+  if (compose_ != nullptr &&
+      record.depth_image == compose_->scene_depth_image()) {
+    return compose_->scene_depth_format();
+  }
+  if (render_pass_resource_ != nullptr &&
+      record.depth_image == render_pass_resource_->depth_image()) {
+    return render_pass_resource_->depth_format();
+  }
+#else
+  (void)record;
+#endif
+  return VK_FORMAT_UNDEFINED;
+}
+
+bool VulkanRenderer::make_hiz_compute_record(std::uint32_t slot,
+                                             HiZFrameRecord& record) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!hiz_compute_queue_.is_initialized() || slot >= 2U ||
+      hiz_pyramids_[slot] == nullptr ||
       hiz_depth_snapshot_[slot] == VK_NULL_HANDLE ||
       hiz_depth_snapshot_view_[slot] == VK_NULL_HANDLE ||
       !hiz_reduction_pipeline_ || hiz_compute_sets_[slot].empty()) {
-    return ::warploom::core::Result<std::uint64_t>::error(
-        ::warploom::core::RuntimeError::invalid_config);
+    return false;
   }
   if (!repoint_hiz_compute_sets(slot)) {
-    return ::warploom::core::Result<std::uint64_t>::error(
-        ::warploom::core::RuntimeError::vulkan_not_available);
+    return false;
   }
   // Build a snapshot-reading record mirroring the last graphics record's
   // geometry: same destination pyramid, same extent/tile/levels, depth =
   // snapshot. The plan's depth transitions then describe the snapshot's
   // actual resting state (SHADER_READ_ONLY_OPTIMAL), matching the copy.
-  HiZFrameRecord record{};
   record.token.write_index = slot;
   record.token.has_previous = false;
   record.token.previous_index = slot;
@@ -2590,10 +2770,29 @@ VulkanRenderer::compute_reduce_hiz_snapshot(std::uint32_t slot) {
   record.levels = hiz_state_.levels();
   if (record.render_width == 0U || record.render_height == 0U ||
       record.tile_size == 0U || record.levels == 0U) {
+    return false;
+  }
+  return true;
+#else
+  (void)slot;
+  (void)record;
+  return false;
+#endif
+}
+
+::warploom::core::Result<std::uint64_t>
+VulkanRenderer::compute_reduce_hiz_snapshot(std::uint32_t slot) {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!hiz_compute_enabled_) {
     return ::warploom::core::Result<std::uint64_t>::error(
         ::warploom::core::RuntimeError::invalid_config);
   }
-  HizComputeWork work{this, record};
+  HiZFrameRecord record{};
+  if (!make_hiz_compute_record(slot, record)) {
+    return ::warploom::core::Result<std::uint64_t>::error(
+        ::warploom::core::RuntimeError::invalid_config);
+  }
+  HizComputeWork work{this, record, true};
   hiz_compute_queue_.begin();
   hiz_compute_queue_.record(&VulkanRenderer::record_hiz_compute_work, &work);
   auto submitted = hiz_compute_queue_.submit();
@@ -2617,6 +2816,89 @@ VulkanRenderer::compute_reduce_hiz_snapshot(std::uint32_t slot) {
 #endif
 }
 #endif
+
+void VulkanRenderer::record_hiz_snapshot_only(
+    VkCommandBuffer command_buffer, const HiZFrameRecord& record) noexcept {
+#ifdef OMNICPP_HAS_VULKAN
+  // Loop28 step 4: the compute leg owns the pyramid now; graphics only
+  // persists the depth it just rendered. Same format derivation and same
+  // best-effort discipline as the inline path (unknown owner skips).
+  const VkFormat snapshot_format = hiz_snapshot_format_for_record(record);
+  if (snapshot_format != VK_FORMAT_UNDEFINED) {
+    // Pipelined: no inline reduce ran, so the depth is still in the
+    // attachment layout the scene pass left. Borrow and restore it.
+    copy_hiz_depth_to_snapshot(command_buffer, record, snapshot_format,
+                               /*depth_from_attachment=*/true);
+  } else {
+    hiz_snapshot_valid_ = false;
+  }
+#else
+  (void)command_buffer;
+  (void)record;
+#endif
+}
+
+void VulkanRenderer::pack_hiz_pyramid_for_cull(
+    VkCommandBuffer command_buffer) noexcept {
+#ifdef OMNICPP_HAS_VULKAN
+  // Loop28 step 4, pre-scene half: the cull reads the pack this frame, so
+  // the compute pyramid from two frames ago must be packed before the
+  // scene records. The slot is this frame's write index: the compute kick
+  // from two frames ago targeted exactly it, and the submit wait recorded
+  // below orders that kick before this frame executes. No kick yet for
+  // the slot (startup/recreate) means no valid pyramid: skip, exactly the
+  // bounded undefined-pack window the inline path has at startup.
+  if (!hiz_pipelined_enabled_ || command_buffer == VK_NULL_HANDLE) {
+    return;
+  }
+  const std::uint32_t slot = hiz_state_.write_index();
+  if (slot >= 2U || hiz_pyramids_[slot] == nullptr ||
+      hiz_compute_signal_[slot] == 0U) {
+    return;
+  }
+  pack_hiz_pyramid_levels(command_buffer, hiz_pyramids_[slot].get(),
+                           hiz_state_.levels(), hiz_packed_);
+  hiz_packed_.built_generation = hiz_state_.generation();
+#else
+  (void)command_buffer;
+#endif
+}
+
+void VulkanRenderer::kick_hiz_compute_reduce(std::uint32_t slot) noexcept {
+#ifdef OMNICPP_HAS_VULKAN
+  // Loop28 step 4, submit half: reduce the just-written snapshot on the
+  // compute queue and return immediately — no CPU wait. Ordering: the
+  // compute submit waits the per-slot gfx_done binary (signalled by the
+  // graphics submit that just wrote the snapshot); the NEXT reuse of the
+  // slot waits this kick's timeline value at graphics-submit time.
+  // On any failure the signal value stays at the previous kick (already
+  // signalled), so the next wait passes immediately and the pyramid for
+  // the slot simply stays one generation older — bounded staleness,
+  // self-healing, never a deadlock.
+  if (!hiz_pipelined_enabled_ || slot >= 2U ||
+      hiz_gfx_done_[slot] == VK_NULL_HANDLE) {
+    return;
+  }
+  HiZFrameRecord record{};
+  if (!make_hiz_compute_record(slot, record)) {
+    return;
+  }
+  HizComputeWork work{this, record, false};
+  hiz_compute_queue_.begin();
+  hiz_compute_queue_.record(&VulkanRenderer::record_hiz_compute_work, &work);
+  // Wait the graphics frame that wrote this snapshot: submission order
+  // across queues is not execution order, so the edge must be explicit.
+  auto submitted = hiz_compute_queue_.submit_waiting(
+      hiz_gfx_done_[slot], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+  if (!submitted.is_ok()) {
+    return;
+  }
+  hiz_compute_signal_[slot] = submitted.value();
+  hiz_pyramid_initialized_[slot] = true;
+#else
+  (void)slot;
+#endif
+}
 
 ::warploom::core::Result<void> VulkanRenderer::recreate_hiz_resources(
     std::uint32_t render_width, std::uint32_t render_height) {
@@ -2901,6 +3183,10 @@ void VulkanRenderer::cleanup(VkDevice device) noexcept {
       if (semaphore) vkDestroySemaphore(dev, semaphore, nullptr);
     }
     if (timeline_semaphore_) vkDestroySemaphore(dev, timeline_semaphore_, nullptr);
+    for (auto& sem : hiz_gfx_done_) {
+      if (sem != VK_NULL_HANDLE) vkDestroySemaphore(dev, sem, nullptr);
+      sem = VK_NULL_HANDLE;
+    }
     if (timestamp_pool_ != VK_NULL_HANDLE) {
       vkDestroyQueryPool(dev, timestamp_pool_, nullptr);
       timestamp_pool_ = VK_NULL_HANDLE;
@@ -2920,6 +3206,9 @@ void VulkanRenderer::cleanup(VkDevice device) noexcept {
   hiz_compute_queue_.cleanup();
   hiz_compute_available_ = false;
   hiz_compute_enabled_ = false;
+  hiz_pipelined_enabled_ = false;
+  hiz_compute_signal_[0] = 0U;
+  hiz_compute_signal_[1] = 0U;
   hiz_compute_raw_queue_ = VK_NULL_HANDLE;
   hiz_enabled_ = false;
   hiz_state_.reset();

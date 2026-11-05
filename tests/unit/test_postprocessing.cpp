@@ -944,8 +944,12 @@ TEST(VulkanHardware, ComposeChainHonoursConfiguredExposure) {
     // ensure() runs again every frame from record_commands, so re-assert after
     // a second call: the bug was in the interaction between "preserve the live
     // value" and "adopt the new config", and only re-entering can catch it.
-    dim.ensure(ctx.device(), ctx.physical_device(), ctx.graphics_queue(), cfg,
-               present.render_pass(), VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize);
+    EXPECT_TRUE(
+        dim.ensure(ctx.device(), ctx.physical_device(),
+                   ctx.graphics_queue(), cfg, present.render_pass(),
+                   VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize)
+            .is_ok())
+        << "re-ensure must succeed before exposure is re-asserted";
     EXPECT_NEAR(bright.exposure(), 2.75F, 1.0e-4F)
         << "the chain is running with an exposure of " << bright.exposure()
         << " after being configured with 2.75: ensure() overwrote the "

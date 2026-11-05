@@ -92,8 +92,8 @@ double intersect_pluecker(const Vec3& o, const Vec3& d, const Vec3 tri[3],
   const double t = (dot(n, tri[0]) - dot(n, o)) / denom;
   if (t < 0.0) return -1.0;
   // Barycentric vertex (j+2)%3 takes w_j / s.
+  // Vertex 0 is w[1] / s and is the pivot: neither bu nor bv returns it.
   const double b2 = w[0] / s;  // vertex 2
-  const double b0 = w[1] / s;  // vertex 0
   const double b1 = w[2] / s;  // vertex 1
   if (bu != nullptr) *bu = b1;  // MT u weights vertex 1
   if (bv != nullptr) *bv = b2;  // MT v weights vertex 2

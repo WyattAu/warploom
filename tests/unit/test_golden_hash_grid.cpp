@@ -281,9 +281,11 @@ void run_case(const char* name, const std::vector<Body>& bodies) {
       "[hashgrid] %-14s n=%5zu cell=%.1f pairs=%6zu | "
       "incumbent=%7.2fms challenger=%7.2fms ratio=%.2fx | "
       "probe_max=%llu probe_mean=%.2f (sink %llu)\n",
-      name, bodies.size(), cell, ch.size(), ms_inc, ms_ch,
+      name, bodies.size(), static_cast<double>(cell), ch.size(), ms_inc,
+      ms_ch,
       ms_inc / (ms_ch > 0.0 ? ms_ch : 1.0),
-      static_cast<unsigned long long>(probe_max), mean_probe,
+      static_cast<unsigned long long>(probe_max),
+      static_cast<double>(mean_probe),
       static_cast<unsigned long long>(checksum));
 
   EXPECT_EQ(ch, inc) << "candidate pair set differs for " << name;

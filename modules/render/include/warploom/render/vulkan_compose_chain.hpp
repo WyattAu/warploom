@@ -178,6 +178,12 @@ class VulkanComposeChain final {
   [[nodiscard]] bool pt_bloom_available() const noexcept {
     return pt_bloom_available_;
   }
+  //! Whether dynamic rendering negotiated on (requested AND advertised).
+  //! Blade stage 3: the renderer also consults this for the scene node --
+  //! the per-stage flag below stays the bloom-specific seam it was.
+  [[nodiscard]] bool dynamic_rendering_negotiated() const noexcept {
+    return dynamic_enabled_;
+  }
   //! Whether the bloom stage currently records dynamically. Test seam for
   //! Blade stage 1 (no device needed to assert the negotiated outcome).
   [[nodiscard]] bool dynamic_bloom() const noexcept { return dynamic_enabled_; }

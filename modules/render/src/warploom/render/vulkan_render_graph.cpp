@@ -358,7 +358,12 @@ CompiledGraph compile_graph(const std::vector<GraphNode>& nodes) {
 
     // Dynamic pass: the single color target compiles exactly like a render
     // attachment (barrier to COLOR_ATTACHMENT_OPTIMAL, tracked to
-    // final_layout); samples compile exactly like render samples.
+    // final_layout); samples compile exactly like render samples. Blade
+    // stage 3: an opted-in depth attachment compiles exactly like a render
+    // depth attachment (barrier to DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    // tracked to depth_final_layout), so depth-using later passes (H-Z
+    // reduction, shadow-map sample) see the identical state whichever
+    // framing the scene recorded.
     if (node.dynamic != nullptr) {
       const GraphDynamicPass& dyn = *node.dynamic;
       std::vector<GraphBarrier>& barriers = out.barriers_per_node[p];
@@ -366,6 +371,13 @@ CompiledGraph compile_graph(const std::vector<GraphNode>& nodes) {
         compile_attachment(states[{dyn.image, 0U}],
                            color_attachment(dyn.image, dyn.view, dyn.format,
                                             dyn.final_layout),
+                           barriers);
+      }
+      if (dyn.has_depth && dyn.depth_image != VK_NULL_HANDLE) {
+        compile_attachment(states[{dyn.depth_image, 0U}],
+                           depth_attachment(dyn.depth_image, dyn.depth_view,
+                                            dyn.depth_format,
+                                            dyn.depth_final_layout),
                            barriers);
       }
       compile_sampled_uses(states, dyn.sampled_images, barriers);
@@ -536,9 +548,10 @@ void execute_graph(
       vkCmdEndRenderPass(command_buffer);
     } else if (node.dynamic != nullptr && record_dynamic != nullptr) {
       // Dynamic node: the pre-barriers above already moved the image to
-      // COLOR_ATTACHMENT_OPTIMAL. The callback records bind + draw only;
-      // the executor owns the rendering scope, the same split as the
-      // baked path (begin/end here, draw in the callback).
+      // COLOR_ATTACHMENT_OPTIMAL (and the depth image, when present, to
+      // DEPTH_STENCIL_ATTACHMENT_OPTIMAL). The callback records bind +
+      // draw only; the executor owns the rendering scope, the same split
+      // as the baked path (begin/end here, draw in the callback).
       const GraphDynamicPass& pass = *node.dynamic;
       VkRenderingAttachmentInfo color{};
       color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -548,6 +561,20 @@ void execute_graph(
                                 : VK_ATTACHMENT_LOAD_OP_LOAD;
       color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
       color.clearValue = pass.clear_value;
+      VkRenderingAttachmentInfo depth{};
+      depth.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+      const bool use_depth =
+          pass.has_depth && pass.depth_image != VK_NULL_HANDLE &&
+          pass.depth_view != VK_NULL_HANDLE;
+      if (use_depth) {
+        depth.imageView = pass.depth_view;
+        depth.imageLayout =
+            VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depth.loadOp = pass.depth_clear ? VK_ATTACHMENT_LOAD_OP_CLEAR
+                                        : VK_ATTACHMENT_LOAD_OP_LOAD;
+        depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        depth.clearValue = pass.depth_clear_value;
+      }
       VkRenderingInfo rendering{};
       rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
       rendering.renderArea.offset = {0, 0};
@@ -555,9 +582,57 @@ void execute_graph(
       rendering.layerCount = 1U;
       rendering.colorAttachmentCount = 1U;
       rendering.pColorAttachments = &color;
+      if (use_depth) {
+        rendering.pDepthAttachment = &depth;
+      }
       vkCmdBeginRendering(command_buffer, &rendering);
       record_dynamic(command_buffer, pass, pass.user_data);
       vkCmdEndRendering(command_buffer);
+      // Depth post-transition: same reason as color (no implicit end-of-pass
+      // transition under dynamic rendering). The scene leaves depth in
+      // DEPTH_STENCIL_ATTACHMENT_OPTIMAL so this never fires there; a
+      // future sampled-depth dynamic pass materializes its final layout
+      // here. The dst stage covers fragment AND compute readers: the known
+      // in-tree depth sampler (the H-Z reduction) dispatches compute, and a
+      // fragment-only scope would not order that wait.
+      if (use_depth &&
+          pass.depth_final_layout !=
+              VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+        const bool depth_to_sampled =
+            pass.depth_final_layout ==
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkImageMemoryBarrier depth_post{};
+        depth_post.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        depth_post.srcAccessMask =
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        depth_post.dstAccessMask =
+            depth_to_sampled
+                ? VkAccessFlags{VK_ACCESS_SHADER_READ_BIT}
+                : VkAccessFlags{
+                      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT};
+        depth_post.oldLayout =
+            VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depth_post.newLayout = pass.depth_final_layout;
+        depth_post.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        depth_post.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        depth_post.image = pass.depth_image;
+        depth_post.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        depth_post.subresourceRange.baseMipLevel = 0U;
+        depth_post.subresourceRange.levelCount = 1U;
+        depth_post.subresourceRange.layerCount = 1U;
+        vkCmdPipelineBarrier(
+            command_buffer,
+            VkPipelineStageFlags{
+                VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT},
+            depth_to_sampled
+                ? VkPipelineStageFlags{
+                      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT}
+                : VkPipelineStageFlags{
+                      VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT},
+            0, 0, nullptr, 0, nullptr, 1U, &depth_post);
+      }
       // Dynamic rendering performs no implicit end-of-pass transition
       // (baked passes get it from VkRenderPass). Materialize final_layout
       // explicitly when it differs, mirroring the compute path's post

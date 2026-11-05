@@ -43,6 +43,7 @@
 #include <warploom/render/vulkan_rt_pipeline.hpp>
 #include <warploom/render/vulkan_types.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -94,6 +95,63 @@ struct PathTracerInstance {
     return inst;
   }
 };
+
+//! Adaptive mask from a variance signal (T2 build). Pure CPU function of
+//! (mean, second-moment): per-texel luma variance v = max(0, E2_luma -
+//! m_luma^2). Selection is by RANK: the top ceil(top_fraction * texels)
+//! texels by variance (stable sort desc, ties broken by texel index, so
+//! the set is a pure function of the inputs and the budget is exact even
+//! when most texels tie at zero -- the common case, since noise
+//! concentrates at discontinuities). threshold is the smallest selected
+//! variance (diagnostic only). top_fraction in (0,1]; 0 or empty input
+//! selects nothing. The caller uploads the mask and enables masked
+//! tracing; masked-out texels keep their sums while masked-in texels
+//! accumulate extra rounds.
+struct AdaptiveMask {
+  std::vector<std::uint32_t> mask{};  //!< 1 = needs extra samples, 0 = hold
+  float threshold{0.0F};              //!< variance cut that produced the mask
+  std::size_t selected{0};            //!< popcount(mask)
+};
+[[nodiscard]] inline AdaptiveMask adaptive_mask_from_variance(
+    const std::vector<float>& mean, const std::vector<float>& second_moment,
+    double top_fraction) noexcept {
+  AdaptiveMask out{};
+  const std::size_t texels = mean.size() / 4U;
+  if (texels == 0U || second_moment.size() != mean.size() ||
+      top_fraction <= 0.0) {
+    out.mask.assign(texels, 0U);
+    return out;
+  }
+  const double frac = top_fraction > 1.0 ? 1.0 : top_fraction;
+  std::vector<float> var(texels, 0.0F);
+  for (std::size_t t = 0; t < texels; ++t) {
+    double ml = 0.0;
+    double el = 0.0;
+    constexpr double w[3] = {0.2126, 0.7152, 0.0722};
+    for (std::size_t c = 0; c < 3U; ++c) {
+      const double m = static_cast<double>(mean[t * 4U + c]);
+      const double e2 = static_cast<double>(second_moment[t * 4U + c]);
+      ml += w[c] * m;
+      el += w[c] * e2;
+    }
+    double v = el - ml * ml;
+    if (!(v > 0.0)) v = 0.0;
+    var[t] = static_cast<float>(v);
+  }
+  std::vector<std::size_t> order(texels);
+  for (std::size_t t = 0; t < texels; ++t) order[t] = t;
+  std::stable_sort(order.begin(), order.end(),
+                   [&](std::size_t a, std::size_t b) { return var[a] > var[b]; });
+  std::size_t want =
+      static_cast<std::size_t>(frac * static_cast<double>(texels));
+  if (want == 0U) want = 1U;
+  if (want > texels) want = texels;
+  out.threshold = var[order[want - 1U]];
+  out.mask.assign(texels, 0U);
+  for (std::size_t k = 0; k < want; ++k) out.mask[order[k]] = 1U;
+  out.selected = want;
+  return out;
+}
 
 //! Orthonormal camera basis + position + the frame index the shaders seed
 //! their PCG stream with. All vectors point where the camera looks/looks
@@ -187,10 +245,24 @@ class VulkanPathTracer final {
   //! replays the same samples. Not const because it advances sample_count().
   //! No-ops (without touching the count) once a set_sample_target() is
   //! reached, unless clear_first restarts the sequence.
+  //!
+  //! Live-PT stepping discipline: when set_camera() detected a real camera
+  //! change since the last round, THIS round restarts the sequence even
+  //! with clear_first=false (both images cleared, count back to 1) and
+  //! bypasses the sample-target hold -- a held-complete image for a new
+  //! pose is exactly the smear this rule makes unrepresentable. The restart
+  //! is a pure function of the call sequence, so replay is unaffected:
+  //! the same calls produce the same images.
   void record_round(VkCommandBuffer command_buffer, std::uint32_t frame,
                     bool clear_first) noexcept;
 
   //! Host-visible camera upload. Takes effect on the next recorded round.
+  //! Change-detecting, not call-detecting: re-uploading identical values
+  //! (the viewport's PT camera hold, every frame) is a no-op for the
+  //! sequence, while any bitwise-differing pose/fov marks it stale and the
+  //! next record_round() restarts it. Comparison is field-wise == (so
+  //! -0.0 vs +0.0 does not restart); the frame seed word is excluded --
+  //! it advances every round by construction.
   void set_camera(const PathTracerCamera& camera) noexcept;
 
   //! Accumulation rounds recorded since the last clear. `read_mean` divides by
@@ -210,8 +282,12 @@ class VulkanPathTracer final {
     return sample_target_;
   }
   //! Forget the accumulation: the next round with clear_first=true starts a
-  //! new sequence and the count returns to 1.
-  void reset_accumulation() noexcept { samples_ = 0U; }
+  //! new sequence and the count returns to 1. Also clears a pending
+  //! camera-move restart (there is no sequence left to be stale for).
+  void reset_accumulation() noexcept {
+    samples_ = 0U;
+    camera_dirty_ = false;
+  }
 
   //! Copy the accumulation image back and divide by sample_count(). Allocates
   //! a transient host-visible buffer per call and submits on the tracer's own
@@ -227,6 +303,34 @@ class VulkanPathTracer final {
   //! Same host-side inspection contract as read_mean.
   [[nodiscard]] ::warploom::core::Result<std::vector<float>> read_second_moment() const;
 
+  //! Adaptive sampling (T2 build): masked re-trace with per-pixel counts.
+  //!
+  //! Uniform rounds maintain a per-texel count image alongside the sums
+  //! (always incremented when the sums are, so the uniform path is
+  //! unchanged and read_mean keeps dividing by sample_count()).
+  //! After computing a mask with adaptive_mask_from_variance(), the caller
+  //! uploads it and enables masking: record_round() then skips masked-out
+  //! texels (no sum, no count increment) while masked-in texels accumulate
+  //! normally. read_adaptive_mean() divides each texel by its own count,
+  //! so held texels keep their uniform mean bit-exactly. The mask is a
+  //! pure function of accumulation state; replaying the same calls
+  //! replays the same image.
+  void set_adaptive_enabled(bool enabled) noexcept;
+  [[nodiscard]] bool adaptive_enabled() const noexcept {
+    return adaptive_enabled_;
+  }
+  //! Uploads a texel mask (size must equal width*height, values 0/1).
+  //! Returns false and leaves the device mask untouched on size mismatch.
+  [[nodiscard]] bool upload_adaptive_mask(
+      const std::vector<std::uint32_t>& mask) noexcept;
+  //! Per-texel sample counts as raw uints (no divide). Same inspection
+  //! contract as read_mean (transient host buffer, private submit).
+  [[nodiscard]] ::warploom::core::Result<std::vector<std::uint32_t>>
+  read_per_pixel_counts() const;
+  //! Per-texel mean: sum[i] / max(count[i],1). Bit-identical to read_mean()
+  //! on texels whose count equals sample_count().
+  [[nodiscard]] ::warploom::core::Result<std::vector<float>> read_adaptive_mean() const;
+
   void destroy() noexcept;
 
   [[nodiscard]] bool ready() const noexcept { return ready_; }
@@ -234,6 +338,11 @@ class VulkanPathTracer final {
   [[nodiscard]] bool failed() const noexcept { return failed_; }
   [[nodiscard]] VkImage accum_image() const noexcept { return accum_image_; }
   [[nodiscard]] VkImageView accum_view() const noexcept { return accum_view_; }
+  //! Second-moment image + view (T2 denoiser spike): the same storage-image
+  //! contract as the accumulation (GENERAL, cleared/added alongside it),
+  //! so a variance-guided filter can bind the pair without a recreate.
+  [[nodiscard]] VkImage moment_image() const noexcept { return moment_image_; }
+  [[nodiscard]] VkImageView moment_view() const noexcept { return moment_view_; }
   [[nodiscard]] std::uint32_t width() const noexcept { return width_; }
   [[nodiscard]] std::uint32_t height() const noexcept { return height_; }
 
@@ -257,6 +366,10 @@ class VulkanPathTracer final {
   std::uint32_t height_{0};
   std::uint32_t max_bounces_{4};
   std::uint32_t samples_{0};
+  //! Live-PT stepping state: set by set_camera() on a real pose/fov
+  //! change, consumed (restart + clear) by the next record_round().
+  //! False by default, so every existing caller behaves exactly as before.
+  bool camera_dirty_{false};
   //! R1 stepped-PT target, 0 = unbounded. See set_sample_target().
   std::uint32_t sample_target_{0};
 
@@ -270,6 +383,19 @@ class VulkanPathTracer final {
   VkImage moment_image_{VK_NULL_HANDLE};
   VkImageView moment_view_{VK_NULL_HANDLE};
   Allocation moment_allocation_{};
+
+  //! Per-texel sample counts (r32ui storage): incremented exactly when the
+  //! sums are, cleared alongside them. Uniform rounds leave every texel at
+  //! sample_count(); masked rounds leave held texels behind, which is what
+  //! makes read_adaptive_mean() exact per texel.
+  VkImage count_image_{VK_NULL_HANDLE};
+  VkImageView count_view_{VK_NULL_HANDLE};
+  Allocation count_allocation_{};
+  //! Adaptive mask (storage buffer, one uint per texel, host-visible).
+  //! Zero-initialized at create() (mask-all-hold would freeze the image,
+  //! so masking only takes effect after an explicit upload + enable).
+  Allocation mask_allocation_{};
+  bool adaptive_enabled_{false};
 
   // Host-visible, host-coherent; mirrored into these by set_camera().
   Allocation params_allocation_{};

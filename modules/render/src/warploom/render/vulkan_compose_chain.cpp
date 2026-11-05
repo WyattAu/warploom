@@ -1536,6 +1536,15 @@ bool VulkanComposeChain::verify_frame_nodes(
       if (node.dynamic->image != VK_NULL_HANDLE) {
         if (!touch(kind_of_image(node.dynamic->image), p)) return false;
       }
+      // Blade stage 3: a dynamic scene's depth is a planned kind (the
+      // skeleton derives it from the scene's attachments), so it must be
+      // touched here too -- otherwise the depth kind goes uncovered the
+      // moment the scene migrates framing and the gate silently stops
+      // checking the depth lifetime.
+      if (node.dynamic->has_depth &&
+          node.dynamic->depth_image != VK_NULL_HANDLE) {
+        if (!touch(kind_of_image(node.dynamic->depth_image), p)) return false;
+      }
       for (const GraphSampledImage& sample : node.dynamic->sampled_images) {
         if (!touch(kind_of_image(sample.image), p)) return false;
       }

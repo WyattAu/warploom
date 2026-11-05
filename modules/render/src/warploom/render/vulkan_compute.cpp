@@ -271,6 +271,11 @@ void AsyncComputeQueue::record(void (*record_fn)(VkCommandBuffer, void*), void* 
 }
 
 ::warploom::core::Result<std::uint64_t> AsyncComputeQueue::submit() {
+  return submit_waiting(VK_NULL_HANDLE, 0U);
+}
+
+::warploom::core::Result<std::uint64_t> AsyncComputeQueue::submit_waiting(
+    VkSemaphore wait_semaphore, VkPipelineStageFlags wait_stage) {
 #ifdef OMNICPP_HAS_VULKAN
   if (!recording_) {
     return ::warploom::core::Result<std::uint64_t>::error(::warploom::core::RuntimeError::invalid_config);
@@ -290,6 +295,11 @@ void AsyncComputeQueue::record(void (*record_fn)(VkCommandBuffer, void*), void* 
   VkSubmitInfo submit{};
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submit.pNext = &timeline_submit;
+  if (wait_semaphore != VK_NULL_HANDLE) {
+    submit.waitSemaphoreCount = 1;
+    submit.pWaitSemaphores = &wait_semaphore;
+    submit.pWaitDstStageMask = &wait_stage;
+  }
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &buffer_;
   submit.signalSemaphoreCount = 1;

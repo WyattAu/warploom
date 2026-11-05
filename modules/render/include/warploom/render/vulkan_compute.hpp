@@ -128,6 +128,11 @@ public:
   //! from a ring (see kInFlight), so compute for frame N+1 can be recorded
   //! and submitted while frame N is still in flight on the consumer queue.
   [[nodiscard]] ::warploom::core::Result<std::uint64_t> submit();
+  //! Submit with one binary-semaphore wait (loop28 step 4): the compute
+  //! leg waits the graphics frame that wrote its input before executing.
+  //! VK_NULL_HANDLE waits on nothing (identical to submit()).
+  [[nodiscard]] ::warploom::core::Result<std::uint64_t> submit_waiting(
+      VkSemaphore wait_semaphore, VkPipelineStageFlags wait_stage);
 
   //! CPU-side wait for the last submission (fence). GPU consumers normally
   //! use the timeline value instead — this is for teardown and benchmarks.

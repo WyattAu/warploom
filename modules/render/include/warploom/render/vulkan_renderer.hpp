@@ -137,6 +137,15 @@ struct RendererConfig {
   //! (else silently stays on graphics); the snapshot copy still runs on
   //! graphics. Off by default: enable explicitly per run.
   bool hiz_compute_reduce{false};
+  //! Loop28 step 4: pipeline the compute leg a frame behind graphics
+  //! instead of CPU-waiting it. The graphics queue stops reducing inline:
+  //! it copies live depth to the snapshot, packs the previous compute
+  //! pyramid for the cull, submits, and the compute queue reduces the
+  //! just-written snapshot concurrently with the NEXT frame. A timeline
+  //! handoff (not a CPU wait) orders the three cross-queue edges.
+  //! Requires hiz_compute_reduce + a dedicated family; silent graphics
+  //! fallback otherwise. Off by default: enable explicitly per run.
+  bool hiz_compute_pipelined{false};
   //! Record GPU timestamp queries around each frame (2 per frame slot) and
   //! resolve the previous frame's duration on slot reuse. Zero overhead when
   //! disabled; `gpu_timing().available` reports whether the device supports
@@ -315,6 +324,13 @@ public:
   }
   [[nodiscard]] VkFormat hdr_format() const noexcept {
     return compose_ != nullptr ? compose_->hdr_format_present() : VK_FORMAT_UNDEFINED;
+  }
+  //! HDR depth format for a dynamic-created scene pipeline (Blade stage
+  //! 3): the format the dynamic scene node's pDepthAttachment carries.
+  //! UNDEFINED before the first frame, like hdr_format().
+  [[nodiscard]] VkFormat hdr_depth_format() const noexcept {
+    return compose_ != nullptr ? compose_->scene_depth_format()
+                                : VK_FORMAT_UNDEFINED;
   }
   [[nodiscard]] std::uint32_t compose_generation() const noexcept {
     return compose_ != nullptr ? compose_->generation() : 0U;
@@ -528,7 +544,25 @@ public:
 
   //! Bind the graphics pipeline used by record_commands().
   //! The pipeline must outlive any command buffer recorded with it.
-  void set_pipeline(VkPipeline pipeline) noexcept { pipeline_ = pipeline; }
+  //! Declares the pipeline baked (render-pass created): the unified scene
+  //! node records baked. Last write wins against set_dynamic_scene_pipeline.
+  void set_pipeline(VkPipeline pipeline) noexcept {
+    pipeline_ = pipeline;
+    scene_pipeline_dynamic_ = false;
+  }
+
+  //! Bind the scene pipeline AND declare it dynamic-rendering created
+  //! (via VulkanPipeline::create_graphics_pipeline_dynamic with the scene
+  //! depth format). Blade stage 3: when dynamic rendering negotiated on AND
+  //! the scene pipeline was bound here, the unified scene node records via
+  //! vkCmdBeginRendering instead of the scene render pass. The framing
+  //! mismatch (baked pipeline in a dynamic node, or vice versa) is a VUID
+  //! and shades undefined, so the renderer never infers this -- the caller
+  //! that created the pipeline states which it is. Last write wins.
+  void set_dynamic_scene_pipeline(VkPipeline pipeline) noexcept {
+    pipeline_ = pipeline;
+    scene_pipeline_dynamic_ = true;
+  }
 
   //! Application-owned scene recorder invoked by record_commands() INSIDE
   //! the render pass (after viewport/scissor), replacing the built-in
@@ -653,6 +687,25 @@ public:
   [[nodiscard]] bool hiz_compute_reduce_enabled() const noexcept {
     return hiz_compute_enabled_;
   }
+  //! True when the fire-and-forget pipelined leg is armed (explicitly
+  //! requested on top of an armed compute leg: per-slot gfx_done
+  //! semaphores created). Submit then kicks the compute reduce with a
+  //! timeline handoff instead of the CPU blocking.
+  [[nodiscard]] bool hiz_pipelined_enabled() const noexcept {
+    return hiz_pipelined_enabled_;
+  }
+  //! True when the frame loop pipelines the compute H-Z leg (step 4).
+  [[nodiscard]] bool hiz_compute_pipelined_enabled() const noexcept {
+    return hiz_pipelined_enabled_;
+  }
+  //! Timeline value the compute queue last signalled (0 before any kick).
+  //! Lets a test prove the pipelined leg was kicked asynchronously instead
+  //! of CPU-waited: N frames without wait_idle must still advance this.
+  [[nodiscard]] std::uint64_t hiz_compute_last_signal() const noexcept {
+    return hiz_compute_queue_.is_initialized()
+               ? hiz_compute_queue_.last_timeline_value()
+               : 0U;
+  }
   //! Reduce the persisted snapshot for `slot` on the compute queue
   //! (loop28 step 3, synchronous proof shape): records the same per-level
   //! dispatches the graphics path would run -- reading the snapshot view
@@ -727,20 +780,62 @@ private:
                                                std::uint32_t width,
                                                std::uint32_t height,
                                                VkFormat format) noexcept;
-  //! Copy the frame's live depth into the snapshot slot and park both in
-  //! SHADER_READ_ONLY_OPTIMAL for step 3. Best-effort: failures leave
-  //! snapshots invalid but never fail the reduction.
+  //! Copy the frame's live depth into the snapshot slot. The depth's
+  //! incoming layout depends on the caller: the inline path copies AFTER
+  //! the reduction (depth in SHADER_READ_ONLY_OPTIMAL, returned there),
+  //! the pipelined snapshot-only path copies the depth it just rendered
+  //! (still in DEPTH_STENCIL_ATTACHMENT_OPTIMAL, returned there — a pure
+  //! borrow; the compute leg never touches the live depth). Best-effort:
+  //! failures leave snapshots invalid but never fail the reduction.
   void copy_hiz_depth_to_snapshot(VkCommandBuffer command_buffer,
                                    const HiZFrameRecord& record,
-                                   VkFormat snapshot_format) noexcept;
+                                   VkFormat snapshot_format,
+                                   bool depth_from_attachment) noexcept;
 #endif
 #ifdef OMNICPP_HAS_VULKAN
   [[nodiscard]] bool record_hiz_reduction(VkCommandBuffer command_buffer,
                                            const HiZFrameRecord& record);
+  //! Loop28 step 4, record half: the snapshot copy without the inline
+  //! reduce + pack (the compute leg produces the pyramid a frame behind).
+  //! Best-effort like the copy it wraps: never fails the frame.
+  void record_hiz_snapshot_only(VkCommandBuffer command_buffer,
+                                 const HiZFrameRecord& record) noexcept;
+  //! Loop28 step 4, pre-scene half: pack the compute-produced pyramid for
+  //! the cull before the scene reads it. The slot is this frame's write
+  //! index — the compute leg kicked two frames ago wrote exactly it, and
+  //! the submit wait about to be recorded orders that write before this
+  //! frame executes. Skipped until the slot's first kick (signal == 0),
+  //! so startup/recreate frames keep whatever the pack held, same as the
+  //! one undefined-pack frame the inline path has at startup.
+  void pack_hiz_pyramid_for_cull(VkCommandBuffer command_buffer) noexcept;
+  //! Loop28 step 4, submit half: reduce the just-written snapshot for
+  //! `slot` on the compute queue WITHOUT CPU-waiting (the timeline
+  //! handoff carries the ordering). Records the signalled value so the
+  //! next reuse of the slot waits exactly this kick.
+  void kick_hiz_compute_reduce(std::uint32_t slot) noexcept;
+  //! Snapshot format owning `record.depth_image` (compose HDR depth vs
+  //! swapchain depth), or UNDEFINED when the owner is unknown. Shared by
+  //! the inline reduce path and the pipelined snapshot-only path.
+  [[nodiscard]] VkFormat
+  hiz_snapshot_format_for_record(const HiZFrameRecord& record) noexcept;
+  //! Compute-queue record for one snapshot slot (loop28 steps 3-4): the
+  //! same geometry the graphics path would reduce, reading the snapshot.
+  //! Returns false when the slot has no snapshot yet (caller skips).
+  [[nodiscard]] bool
+  make_hiz_compute_record(std::uint32_t slot, HiZFrameRecord& record);
 #endif
 
   static void record_hiz_graph_pass(VkCommandBuffer command_buffer,
                                     const GraphComputePass& pass, void* user_data);
+  //! Shared pack body (graphics inline, compute-queue, pipelined pre-scene
+  //! copy): per-mip SHADER_READ_ONLY -> TRANSFER_SRC -> copy -> back, level
+  //! 0 first at monotonic word offsets. One body so the three record paths
+  //! cannot drift (the fill_blas_geometry lesson). The caller owns
+  //! freshness (built_generation): a pack is only as new as its pyramid.
+  static void pack_hiz_pyramid_levels(VkCommandBuffer command_buffer,
+                                      const VulkanHiZPyramid* pyramid,
+                                      std::uint32_t levels,
+                                      PackedPyramid& pack) noexcept;
   void record_hiz_dispatch(VkCommandBuffer command_buffer,
                            const GraphComputePass& pass);
   //! One node of the unified scene+compose frame graph (T0): either the
@@ -780,6 +875,10 @@ private:
   VkRenderPass render_pass_{VK_NULL_HANDLE};
   VkPipelineLayout pipeline_layout_{VK_NULL_HANDLE};
   VkPipeline pipeline_{VK_NULL_HANDLE};
+  //! True when pipeline_ was bound via set_dynamic_scene_pipeline (Blade
+  //! stage 3): the unified scene node may record dynamically. False by
+  //! default, so every existing caller (baked pipelines) is untouched.
+  bool scene_pipeline_dynamic_{false};
   SceneRecordCallback scene_record_callback_{nullptr};
   void* scene_record_user_data_{nullptr};
   FramePrePassCallback frame_pre_pass_callback_{nullptr};
@@ -851,6 +950,22 @@ private:
   //! hiz_compute_available_ AND the config flag; kept as a member so the
   //! record path branches once instead of re-deriving it per frame.
   bool hiz_compute_enabled_{false};
+  //! Loop28 step 4: true when the frame loop pipelines the compute leg
+  //! (config hiz_compute_pipelined AND hiz_compute_enabled_). The record
+  //! path then skips the inline reduce (snapshot copy stays) and submit
+  //! kicks the compute reduce + hands off over the timeline semaphore.
+  bool hiz_pipelined_enabled_{false};
+  //! Timeline value the last kicked compute reduce signalled, per
+  //! ping-pong slot (0 = never kicked: nothing to wait for). The graphics
+  //! submit for a frame reusing `slot` waits this value, which orders the
+  //! snapshot overwrite, the pyramid rewrite, AND the cull's pack read
+  //! behind the compute leg that produced them — one wait, three edges.
+  std::uint64_t hiz_compute_signal_[2]{0U, 0U};
+  //! Binary gfx->compute handoff, per slot: the graphics submit signals
+  //! done[slot], the kicked compute reduce waits it before sampling the
+  //! snapshot the graphics frame just wrote. Submission order across
+  //! queues is not execution order, so this edge must be explicit.
+  VkSemaphore hiz_gfx_done_[2]{VK_NULL_HANDLE, VK_NULL_HANDLE};
   // --- Persisted per-frame H-Z depth (loop28 step 2) ---------------------
   //! The live depth attachment is overwritten by the next frame's scene
   //! render, so a compute-queue reduce (loop28 step 3) cannot read it behind

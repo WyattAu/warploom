@@ -136,3 +136,26 @@ violation on the shared buffers.
    the full migration: pipeline the compute leg a frame behind graphics
    with the timeline handoff instead of CPU-waiting (overlap, not just
    correctness) -- the spike already measured the headroom at -36..-54%.
+4. Pipelined compute leg (frame-behind, no CPU wait) -- DONE 2026-11-03
+   (this session). `RendererConfig::hiz_compute_pipelined` on top of an
+   armed compute leg: graphics records snapshot-only (no inline reduce),
+   packs the compute pyramid pre-scene; submit waits the slot's kick
+   timeline value (armed two frames prior) and signals a per-slot
+   gfx_done binary; the submit tail fire-and-forget kicks the snapshot
+   reduce on the compute queue (waits gfx_done, signals its timeline).
+   Two defects caught by the new proof, both layout-state, both invisible
+   to reasoning: (a) the snapshot copy assumed the depth in SHADER_READ
+   (true only post-reduce) -- pipelined copies pre-reduce, so the depth
+   edge borrows from DEPTH_STENCIL_ATTACHMENT and restores it (pure
+   borrow; the compute leg never touches live depth); (b) the sync2
+   submit tail dropped the pyramid-initialized mark -- restored, gated on
+   !pipelined (the kick marks it after the first compute reduce, which is
+   what makes the first kick emit the correct initial transition).
+   Proved by `HiZGraph.PipelinedComputeReduceMatchesSyncReduce`: six
+   frames with no intermediate wait_idle (waits armed on both slots from
+   frame 2), 0 diagnostics, pipelined pack non-trivial (kicks really ran)
+   and bit-identical to a synchronous re-reduce of the last snapshot.
+   No speedup is claimed for the handoff itself: the spike's -28.5%
+   (this machine, AsyncComputeSpike.ReduceOverlapsGraphics) measured
+   arrangement headroom, and the pipelined leg's overlap benefit needs a
+   frame-time A/B on a depth-heavy scene, which is not yet run.

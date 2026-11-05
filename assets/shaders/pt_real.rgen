@@ -39,7 +39,8 @@ layout(set = 0, binding = 1, std430) readonly buffer Params {
   vec4 cam_basis_u;        // camera up (unit)
   vec4 cam_basis_f;        // camera forward (unit)
   uvec4 dims;              // x = width, y = height, z = max bounces, w = sky mode
-  vec4 cam_fov;            // x = tan_half_fov, y = aspect (both 1.0 = legacy)
+  vec4 cam_fov;            // x = tan_half_fov, y = aspect (both 1.0 = legacy),
+                           // z = adaptive-mask enable (0/1), w reserved
   vec4 sky_sun;            // xyz = normalized dir toward sun (mode 1)
   vec4 sky_rayleigh;       // rgb = Rayleigh scattering coefficient (mode 1)
   vec4 sky_mie;            // x = Mie coeff, y = g asymmetry (mode 1)
@@ -47,6 +48,15 @@ layout(set = 0, binding = 1, std430) readonly buffer Params {
   vec4 sky_origin;         // xyz = surface-anchored origin (mode 1)
 };
 layout(set = 0, binding = 2) uniform accelerationStructureEXT scene;
+// Adaptive sampling (T2 build): mask buffer (one uint per texel, row-major)
+// + per-texel count image. cam_fov.z > 0.5 enables masking: masked-out
+// texels return before tracing (no sum, no count increment). Counts always
+// increment when the sums do, so the uniform path carries per-pixel counts
+// equal to the global sample count by construction.
+layout(set = 0, binding = 5, std430) readonly buffer AdaptiveMask {
+  uint mask_data[];
+};
+layout(set = 0, binding = 6, r32ui) uniform uimage2D sample_count;
 
 layout(location = 0) rayPayloadEXT vec4 payload;  // miss: w=-1; hit: (n,t)
 
@@ -94,6 +104,14 @@ void main() {
 
   const uint frame = uint(cam_pos_frame.w);
   const uint max_bounces = dims.z == 0u ? 1u : dims.z;
+
+  // Adaptive hold: masked-out texels contribute nothing this round, so the
+  // uniform prefix they carry stays bit-exact while masked-in texels refine.
+  // The index is row-major to match the host upload order.
+  if (cam_fov.z > 0.5) {
+    const uint flat_idx = pix.y * size.x + pix.x;
+    if (mask_data[flat_idx] == 0u) return;
+  }
 
   // Per-frame jitter in [-0.5, 0.5).
   uint rng = pix.x + size.x * (pix.y + size.y * frame);
@@ -145,4 +163,8 @@ void main() {
                                   vec4(radiance, 0.0));
   imageStore(moment, ivec2(pix), imageLoad(moment, ivec2(pix)) +
                                    vec4(radiance * radiance, 0.0));
+  // Per-texel count travels with the sums: one invocation owns its texel,
+  // so a plain load-add-store is deterministic (no atomics needed).
+  imageStore(sample_count, ivec2(pix),
+             uvec4(imageLoad(sample_count, ivec2(pix)).x + 1u, 0u, 0u, 0u));
 }

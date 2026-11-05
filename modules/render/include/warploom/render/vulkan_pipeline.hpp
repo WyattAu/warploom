@@ -69,14 +69,19 @@ public:
   //! a dynamic bias, or both.
   bool dynamic_depth_bias = false);
 
-  //! Create a fullscreen-triangle pipeline for dynamic rendering
-  //! (Blade stage 1): no render pass, formats declared inline via
-  //! VkPipelineRenderingCreateInfo. Depth test/write forced off — dynamic
-  //! compose stages have no depth attachment.
+  //! Create a pipeline for dynamic rendering (Blade): no render pass,
+  //! formats declared inline via VkPipelineRenderingCreateInfo. Stages
+  //! 1-2 (bloom, tonemap) use the color-only default: no depth attachment,
+  //! depth test/write off. Stage 3 (the scene) passes its depth format
+  //! with test/write on, mirroring the baked scene pipeline's depth state
+  //! so the same draw shades identically under either framing.
   [[nodiscard]] ::warploom::core::Result<void> create_graphics_pipeline_dynamic(
       VkDevice device, VkFormat color_format,
       VkPipelineLayout pipeline_layout = VK_NULL_HANDLE,
-      bool enable_backface_cull = true);
+      bool enable_backface_cull = true,
+      VkFormat depth_format = VK_FORMAT_UNDEFINED,
+      bool enable_depth_test = false,
+      bool enable_depth_write = false);
 
   //! Create a compute pipeline from the "compute" stage module (load with
   //! load_shader_stage_file(device, path, "compute") first). Requires a
