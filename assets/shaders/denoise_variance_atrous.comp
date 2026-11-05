@@ -1,7 +1,7 @@
 #version 450
 
-// denoise_variance_atrous.comp — T2 denoiser SPIKE (single variance-guided
-// à-trous iteration, no G-buffer).
+// denoise_variance_atrous.comp — T2 denoiser SPIKE (variance-guided
+// à-trous, no G-buffer; 1 iteration or K-iteration ping-pong via stride).
 //
 // Inputs: the PT mean (rgba32f) and second moment (rgba32f). Per-pixel luma
 // variance v = max(0, E2 - m^2) drives the edge-stopping width: a confident
@@ -33,10 +33,14 @@ layout(push_constant) uniform Push {
   uint height;
   float luma_sigma_scale;  // edge width = k * sqrt(v_center)
   float spatial_sigma;     // spatial Gaussian sigma, pixels
-  uint samples;            // accumulation depth: the inputs store SUMS, so
-                           // the filter normalizes to means itself. A
-                           // production caller filtering the tonemapped mean
-                           // passes 1; the spike binds the live sums.
+  uint mean_samples;       // divisor for binding 0 (4 on iteration 0 when it
+                           // binds the live accumulation SUMS, 1 once it
+                           // binds an already-normalized ping-pong image).
+  uint moment_samples;     // divisor for binding 1 (always the accumulation
+                           // depth: the moment image always holds sums).
+  uint stride;             // a-trous stride: 1 << iteration. Tap offsets are
+                           // dx*stride, dy*stride, so K iterations cover a
+                           // (4*2^K-3)^2 footprint with 25 taps each.
 } push;
 
 float luma(vec3 c) { return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; }
@@ -45,9 +49,10 @@ void main() {
   const ivec2 px = ivec2(gl_GlobalInvocationID.xy);
   if (px.x >= int(push.width) || px.y >= int(push.height)) return;
 
-  const float n = max(float(push.samples), 1.0);
-  const vec4 mc = imageLoad(mean_img, px) / n;
-  const vec4 e2 = imageLoad(moment_img, px) / n;
+  const float nm = max(float(push.mean_samples), 1.0);
+  const float ne = max(float(push.moment_samples), 1.0);
+  const vec4 mc = imageLoad(mean_img, px) / nm;
+  const vec4 e2 = imageLoad(moment_img, px) / ne;
   const float ml = luma(mc.rgb);
   const float vc = max(0.0, luma(e2.rgb) - ml * ml);
   // Edge variance: k^2 * v_center. The 1e-8 floor keeps a fully-converged
@@ -60,14 +65,16 @@ void main() {
 
   vec3 acc = vec3(0.0);
   float wsum = 0.0;
+  const int st = int(push.stride);
   for (int dy = -2; dy <= 2; ++dy) {
     for (int dx = -2; dx <= 2; ++dx) {
-      const ivec2 q = clamp(px + ivec2(dx, dy), ivec2(0),
+      const ivec2 q = clamp(px + ivec2(dx * st, dy * st), ivec2(0),
                             ivec2(push.width, push.height) - 1);
-      // Normalized like the center: the inputs store sums, and an
+      // Normalized like the center: iteration 0 inputs store sums, and an
       // unnormalized neighbor against a normalized center makes even the
-      // center weight vanish (dm = 3x the mean at 4 spp).
-      const vec4 mn = imageLoad(mean_img, q) / n;
+      // center weight vanish (dm = 3x the mean at 4 spp). Later iterations
+      // bind already-normalized images, so nm = 1 and this is a no-op.
+      const vec4 mn = imageLoad(mean_img, q) / nm;
       const float dm = luma(mn.rgb) - ml;
       const float w =
           exp(-float(dx * dx + dy * dy) / s2) * exp(-dm * dm / (2.0 * edge2));

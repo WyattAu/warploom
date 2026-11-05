@@ -210,13 +210,17 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
 - [x] **Live PT spikes** MEASURED 2026-11-03 (RTX 2060, loop29): adaptive
   justified (top 5% of pixels hold 92% of variance -- uniform spending
   wastes ~90% of rounds; pinned by `variance_concentration_spike`) and
-  variance-only a-trous buys 2.68x MSE reduction at 4spp with no G-buffer
-  (`denoise_variance_spike`, bit-identical re-dispatch pinned -- the
-  temporal-history constraint holds by construction). Next, in order:
-  adaptive build (masked re-trace + per-pixel counts), then multi-iteration
-  a-trous on the variance signal measured against the 2.68x bar, then the
-  G-buffer (normals/albedo/depth outputs) only when edges dominate the
-  residual. OIDN stays excluded by the dependency budget.
+  variance-only a-trous buys 1.67x MSE reduction at 4spp with no G-buffer
+  (corrected 2026-11-04 from the 2.68x research-spike number, which the
+  committed test's constant sky could not reproduce; `denoise_variance_spike`,
+  bit-identical re-dispatch pinned -- the temporal-history constraint holds
+  by construction). Multi-iteration CLOSED 2026-11-05 (RTX 2060, loop29
+  section 4): K=2 best 0.94x, K=3 best 0.48x -- variance-only iteration
+  diverges, residual is edge-dominated, do NOT build a variance-only filter
+  loop. Next, in order: adaptive build (masked re-trace + per-pixel
+  counts), then the G-buffer (normals/albedo/depth outputs) or a
+  per-iteration variance update -- not more iterations of the variance-only
+  filter. OIDN stays excluded by the dependency budget.
 - [ ] Path guiding / Light Tree / MBVH only on measured scene-size need.
 
 ### T3. Physics (depth without breaking replay)
@@ -372,10 +376,13 @@ Against the §5 definition, criterion by criterion:
    arc each, validator clean before the next starts.
 5. **Live PT (T2).** Stepping discipline DONE; adaptive + denoiser SPIKES
    measured (loop29) -- verdicts: adaptive justified (top5% = 92%),
-   variance-only a-trous = 2.68x at 4spp, temporal-history constraint
-   holds by construction. Remaining, in order: adaptive build, then
-   multi-iteration a-trous vs the 2.68x bar, then the G-buffer on residual
-   need. Exit: live PT on app scenes at the published budgets.
+   variance-only a-trous = 1.67x at 4spp (corrected 2026-11-04),
+   temporal-history constraint holds by construction; multi-iteration
+   CLOSED 2026-11-05 (K=2 0.94x, K=3 0.48x -- diverges, do not build).
+   Remaining, in order: adaptive build, then the G-buffer (or a
+   per-iteration variance update) on the edge-dominated residual -- never
+   more variance-only iterations. Exit: live PT on app scenes at the
+   published budgets.
 6. **Camera/light/render tracks + concurrent arms (T5).** Spec first
    (WyattAu repo survey per §6), then chrome.
 7. **E3 hardware runner, then E6 packaging (T8).** RT is the best-tested

@@ -93,10 +93,13 @@ evidence; the MSE against the reference is.
 
 Open for the full build: the G-buffer (normals exist only in the hit
 payload, albedo is a raygen constant, depth is never stored). The spike
-says: build the filter loop first (multi-iteration a-trous on the
-variance signal, still no G-buffer), measure against this 2.68x bar,
-and add the G-buffer only when edges -- not interiors -- dominate the
-residual.
+said: build the filter loop first (multi-iteration a-trous on the
+variance signal, still no G-buffer), measure against this bar, and add
+the G-buffer only when edges -- not interiors -- dominate the residual.
+That branch is now CLOSED by measurement (see section 4): K>1 diverges
+on the variance signal alone, and the residual IS edge-dominated -- so
+the next denoiser step, if taken, is the G-buffer (or a per-iteration
+variance update), not more iterations of this filter.
 
 ## Cost
 
@@ -116,3 +119,48 @@ denoise raw/best = 2.313658e-03/1.385478e-03 (1.67x), same test, same
 device, 0 validation diagnostics. The earlier pair is kept above because
 it is what the spike recorded; it is not reproducible from the committed
 test and is superseded by this one.
+
+## 4. Multi-iteration addendum (measured 2026-11-05, RTX 2060)
+
+Extension: K-iteration ping-pong with stride doubling (strides 1,2,4),
+headless, same scene and measure (4spp vs 128spp, analytic sky, 64x64
+box). The shader gains `mean_samples / moment_samples / stride` push
+words (28 B total): iteration 0 binds the live SUMS (divisor 4), later
+iterations bind normalized ping-pong images (divisor 1), while the
+moment image always binds sums (divisor 4) -- so iterations >0 guide on
+E2_orig - filtered_mean^2, a documented approximation this measurement
+owns. Barriers track each image's layout (out re-enters from
+TRANSFER_SRC_OPTIMAL, ping alternates GENERAL/TRANSFER_SRC).
+
+Result, every k swept per K (multi-iteration gets its best k, not the
+single-iteration winner's):
+
+- K=1: k=0.5 -> 1.677682e-03, k=1.0 -> 1.649923e-03,
+  k=2.0 -> 1.385478e-03 (1.67x, the standing bar).
+- K=2: k=0.5 -> 2.454145e-03 (0.94x), k=1.0 -> 4.901995e-03 (0.47x),
+  k=2.0 -> 1.154085e-02 (0.20x). Best is WORSE than raw.
+- K=3: k=0.5 -> 4.803443e-03 (0.48x), k=1.0 -> 3.377150e-02 (0.07x),
+  k=2.0 -> 1.161399e-01 (0.02x). Catastrophic at large k.
+
+Verdict: variance-only multi-iteration DIVERGES on this scene -- every
+K>1 is worse than raw at every k, and larger k hurts more. The mechanism
+is visible in the numbers: the guidance goes stale (E2_orig against an
+increasingly smooth mean keeps the edge width wide) while the footprint
+grows (9x9 at K=2, 17x17 at K=3 on a 64x64 image), so each extra round
+smears the hard edges that dominate the MSE. Do NOT build the
+render-path filter loop on the variance signal alone.
+
+Pins kept in `denoise_variance_spike`: single-iteration bar (best <
+raw*0.70, measured ratio 0.599); bit-identical re-dispatch for K=1 AND
+K=2 (temporal-history constraint extended to the chain); stride-wire
+guard K=2 (1,2) != (1,1) plus K-wire guard K=2 != K=3. Sabotage-checked:
+hardcoding stride=1 fails the stride guard and only it (K=2 vs K=3 still
+differs, correctly -- that wire is live). Bit-identity across the
+sabotage round-trip confirmed (K=2 k=2.0 1.154085e-02, K=3 k=2.0
+1.161399e-01 identical before and after).
+
+Technique status: standard a-trous ping-pong with stride doubling, minus
+the temporal and G-buffer terms that make SVGF converge; novelty none.
+The negative result is the contribution: it closes the "filter loop
+first" branch section 3 opened, with numbers from this codebase rather
+than an argument.
