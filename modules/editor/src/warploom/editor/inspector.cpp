@@ -65,7 +65,14 @@ void InspectorPanel::rebuild(
 
   // ---------------- OUTLINER ----------------
   (void)tree.add(make_label("outliner_title", "OUTLINER", 0xFF9FC4E0), panel_);
+  // T5c: the reserved render_settings object is a channel store, not scene
+  // content. Listing it would invite selecting/deleting a single row that
+  // owns every render track (deletion is already refused while
+  // referenced); keeping it out of the outliner is the design constraint.
+  const ObjectTypeDesc* reserved =
+      registry.find_by_name(kTypeRenderSettings);
   for (const auto& obj : doc.objects) {
+    if (reserved != nullptr && obj.type_id == reserved->id) continue;
     const bool selected = obj.id == selected_id;
     Widget row;
     row.kind = WidgetKind::Panel;
@@ -81,6 +88,11 @@ void InspectorPanel::rebuild(
   // ---------------- PROPERTIES (selected object) ----------------
   (void)tree.add(make_label("props_title", "PROPERTIES", 0xFF9FC4E0), panel_);
   const SceneObject* sel = doc.find(selected_id);
+  // A stale selection of the reserved object shows no property rows, the
+  // same as any selection whose object left the document.
+  if (sel != nullptr && reserved != nullptr && sel->type_id == reserved->id) {
+    sel = nullptr;
+  }
   if (sel != nullptr) {
     const auto* type = registry.find(sel->type_id);
     if (type != nullptr) {

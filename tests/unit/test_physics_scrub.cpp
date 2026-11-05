@@ -187,7 +187,8 @@ TEST(PhysicsScrub, CorruptedPhysicsCheckpointFailsWithStateUntouched) {
   // Codec layer (owns the schema): all-or-nothing commit — a failed
   // restore leaves the world AND the map exactly as they were.
   ::omnicpp::physics::PhysicsWorld world;
-  world.add_body(falling_body());
+  // Body id 0 by construction; only its presence matters to this case.
+  (void)world.add_body(falling_body());
   std::map<std::uint64_t, std::uint32_t> map{{1U, 0U}};
   const std::uint64_t n_before = world.body_count();
   EXPECT_FALSE(physics_restore_json(world, map, torn, error));
@@ -302,7 +303,8 @@ TEST(PhysicsScrub, CodecRoundTripsKnobsJointsAndCapsules) {
   capsule.orientation[3] = 0.8660254F;
   capsule.angular_velocity[2] = 2.0F;
   const std::uint32_t c1 = world.add_body(capsule);
-  world.add_distance_joint(s0, c1, 3.0F, 0.01F);
+  // Joint id unused: the snapshot must carry the CONSTRAINT, not its index.
+  (void)world.add_distance_joint(s0, c1, 3.0F, 0.01F);
   std::map<std::uint64_t, std::uint32_t> map{{7U, s0}, {9U, c1}};
 
   const std::string bytes = physics_snapshot_json(world, map);

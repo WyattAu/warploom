@@ -64,6 +64,52 @@ TEST(InspectorProjection, OutlinerListsEveryObject) {
   }
 }
 
+TEST(InspectorProjection, ReservedRenderSettingsStoreHasNoOutlinerRow) {
+  // T5c: the reserved channel store is a document object but not scene
+  // content. It must not be listed (a row would invite selecting and
+  // deleting a single object that owns every render track), and a stale
+  // selection of it shows no property rows.
+  Fixture f;
+  ::warploom::core::ControlCommand add;
+  add.kind = ::warploom::core::ControlCommand::Kind::ClipAdd;
+  add.text = "channels";
+  add.numbers[0] = 0;
+  add.numbers[1] = 4;
+  add.number_count = 2;
+  ASSERT_TRUE(f.session.on_control(add).ok);
+  ::warploom::core::ControlCommand rec;
+  rec.kind = ::warploom::core::ControlCommand::Kind::ClipRecord;
+  rec.numbers[0] = 1;
+  rec.numbers[1] = 0.0;  // creates the reserved store on demand
+  rec.text = "exposure";
+  rec.number_count = 2;
+  ASSERT_TRUE(f.session.on_control(rec).ok);
+  std::uint64_t store_id = 0;
+  for (const auto& o : f.session.document().objects) {
+    if (o.name == "render_settings") store_id = o.id;
+  }
+  ASSERT_NE(store_id, 0U);
+
+  InspectorPanel panel;
+  ui::WidgetTree tree;
+  panel.rebuild(tree, tree.root(), f.session.document(),
+                f.session.registry(), store_id, f.session.bindings());
+  EXPECT_EQ(tree.find_by_name("obj_row_" + std::to_string(store_id)),
+            ui::kInvalidWidget)
+      << "reserved render store listed in the outliner";
+  // The cube's row is still there: the filter is by type, not a blanket
+  // skip that would hide every object if it regressed.
+  EXPECT_NE(tree.find_by_name("obj_row_" + std::to_string(f.cube_id)),
+            ui::kInvalidWidget);
+  // Selected store: no property rows for it.
+  EXPECT_EQ(tree.find_by_name("prop_row_" + std::to_string(store_id) +
+                              "_exposure"),
+            ui::kInvalidWidget);
+  // Selected-but-not-content behaves like no selection, not like an empty
+  // properties list for a phantom object.
+  EXPECT_NE(tree.find_by_name("props_none"), ui::kInvalidWidget);
+}
+
 TEST(InspectorProjection, PropertiesMirrorSelectedObject) {
   Fixture f;
   InspectorPanel panel;

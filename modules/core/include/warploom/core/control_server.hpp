@@ -170,6 +170,15 @@ struct ControlCommand final {
     //                                        "available": true|false}
     SetBloom,
     GetBloom,
+    // v1.16: render-channel tracks (T5c). The reserved render_settings
+    // object's numeric channels, plus which of them a playing clip drove on
+    // the last tick. A host applies ONLY driven channels, so an untracked
+    // exposure never overwrites a socket-set one.
+    //   GetRenderConfig: no payload;
+    //     detail = JSON {"exposure":N,"bloom":N,"render_mode":N,
+    //                    "tone_map":N,"driven":["exposure",...]}
+    //   A visual host appends "applied_*" for the values it actually set.
+    GetRenderConfig,
     // v1.12: RT sub-toggles (E2/R2) — host-owned ray-query flags, live. No
     // pipeline rebuild: the RT shaders read push pad1 (bit 0 reflections,
     // bit 1 AO), so a toggle only changes the next recorded frame.
@@ -197,6 +206,28 @@ struct ControlCommand final {
     //                  restores the id cursor); detail = JSON {"ids":[...]}.
     CopySubgraph,
     PasteSubgraph,
+    // v1.15: atomic multi-property record (T5b) — one clip+object pair,
+    // every recordable property as its own track.
+    //   ClipRecordAll: numbers[0] = clip id ("clip"), numbers[1] = object
+    //                  id ("oid"); arms one RecordArm per Number property
+    //                  and per Vec3 axis (T5d state model).
+    ClipRecordAll,
+    // v1.17: PT adaptive sampling (T2) — host-owned live-PT refinement.
+    // The tracer already keeps first + second moments and per-texel counts;
+    // these commands only reach that machinery from the app. Enabling
+    // snapshots ONE mask from the current accumulation (top `fraction` of
+    // texels by luma variance, rank-selected so the budget is exact) and
+    // masked-in texels keep refining while held texels keep their uniform
+    // mean bit-exactly. Leaving PT disables it, so a re-entered stack is
+    // uniform again instead of resuming a stale mask.
+    //   SetAdaptive: numbers[0] = enabled 0/1 ("enabled", required),
+    //                numbers[1] = top fraction ("fraction", optional,
+    //                default 0.25, must lie in (0,1])
+    //   GetAdaptive: no payload; detail = JSON {"enabled":bool,
+    //                "fraction":N,"selected":N,"texels":N,
+    //                "threshold":N}
+    SetAdaptive,
+    GetAdaptive,
   };
 
   //! One entry of the public command-name table: every `Kind` maps to

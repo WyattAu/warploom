@@ -183,6 +183,73 @@ std::string EditorSession::physics_bytes() const {
   return physics_snapshot_json(physics_, physics_bodies_);
 }
 
+// ============================================================================
+// T5c: reserved render_settings object (trackable render channels)
+// ============================================================================
+
+bool EditorSession::is_render_channel(const std::string& key) noexcept {
+  return key == "exposure" || key == "bloom" || key == "render_mode" ||
+         key == "tone_map";
+}
+
+const SceneObject* EditorSession::find_render_settings() const noexcept {
+  const ObjectTypeDesc* type =
+      default_registry().find_by_name(kTypeRenderSettings);
+  if (type == nullptr) return nullptr;
+  for (const SceneObject& object : doc_.objects) {
+    if (object.type_id == type->id) return &object;
+  }
+  return nullptr;
+}
+
+SceneObject* EditorSession::ensure_render_settings(std::string& error) {
+  const ObjectTypeDesc* type =
+      default_registry().find_by_name(kTypeRenderSettings);
+  if (type == nullptr) {
+    error = "render_settings type missing from registry";
+    return nullptr;
+  }
+  for (SceneObject& object : doc_.objects) {
+    if (object.type_id == type->id) return &object;
+  }
+  std::map<std::string, PropValue> props;
+  for (const PropertyDesc& desc : type->properties) {
+    props.emplace(desc.name, desc.default_value);
+  }
+  auto spawn = std::make_unique<SpawnObjectCommand>(
+      doc_.next_object_id, type->id, "render_settings", std::move(props));
+  const std::uint64_t fresh_id = doc_.next_object_id;
+  if (!stack_.execute(std::move(spawn), error)) {
+    error = "render_settings spawn failed: " + error;
+    return nullptr;
+  }
+  return doc_.find(fresh_id);
+}
+
+EditorSession::RenderConfig EditorSession::render_config() const noexcept {
+  RenderConfig cfg{};
+  cfg.exposure_driven = (render_driven_ & 0x01U) != 0U;
+  cfg.bloom_driven = (render_driven_ & 0x02U) != 0U;
+  cfg.render_mode_driven = (render_driven_ & 0x04U) != 0U;
+  cfg.tone_map_driven = (render_driven_ & 0x08U) != 0U;
+  const SceneObject* rs = find_render_settings();
+  if (rs == nullptr) return cfg;
+  const auto get = [&](const char* key, double fallback) {
+    const auto it = rs->properties.find(key);
+    if (it == rs->properties.end() ||
+        it->second.type != PropValue::Type::Number ||
+        !std::isfinite(it->second.number)) {
+      return fallback;
+    }
+    return it->second.number;
+  };
+  cfg.exposure = get("exposure", 1.0);
+  cfg.bloom = get("bloom", 0.0);
+  cfg.render_mode = get("render_mode", 0.0);
+  cfg.tone_map = get("tone_map", 0.0);
+  return cfg;
+}
+
 void EditorSession::advance_timeline(std::uint64_t frame, double sub_frame) {
   // One body for step-hold and interpolated playback (D2b): two
   // implementations would drift. NaN fails the > 0.0 check and lands on
@@ -311,8 +378,15 @@ void EditorSession::tick_timeline(std::uint64_t frame) {
 }
 
 void EditorSession::tick_timeline_at(double frame_time, Easing easing) {
+  // T5c: driven-channel mask is recomputed every tick, never sticky: a
+  // tick that plays nothing (paused gate, clip ended, nothing armed)
+  // leaves every flag clear, so the host holds the renderer untouched.
+  render_driven_ = 0;
   // 1. Playback first: apply the armed clip's step-hold values (direct
   //    application, bindings model). Auto-stops at clip end.
+  const SceneObject* render_settings = find_render_settings();
+  const std::uint64_t render_id =
+      render_settings != nullptr ? render_settings->id : 0U;
   if (playing_) {
     const TimelineClip* clip = doc_.find_clip(playing_clip_);
     if (clip == nullptr) {
@@ -340,62 +414,77 @@ void EditorSession::tick_timeline_at(double frame_time, Easing easing) {
           } else {
             obj->properties[track.property] = value;
           }
+          // T5c host half: a playing clip writing a render channel marks
+          // it driven, so the host applies exactly the tracked channels.
+          if (render_id != 0U && track.object_id == render_id &&
+              is_render_channel(track.property)) {
+            if (track.property == "exposure") render_driven_ |= 0x01U;
+            if (track.property == "bloom") render_driven_ |= 0x02U;
+            if (track.property == "render_mode") render_driven_ |= 0x04U;
+            if (track.property == "tone_map") render_driven_ |= 0x08U;
+          }
         }
       }
     }
   }
-  // 2. Recording second: sample the CURRENT document value into the armed
-  //    track (read AFTER playback applied, so clip->same-track chains
-  //    reproduce themselves). Auto-disarms at clip end.
-  if (recording_) {
-    TimelineClip* clip = doc_.find_clip(recording_clip_);  // mutable: samples land here
-    SceneObject* obj =
-        recording_ ? doc_.find(recording_object_) : nullptr;
-    if (clip == nullptr || obj == nullptr) {
-      recording_ = false;
-    } else if (frame_time >=
-               static_cast<double>(clip->start_frame + clip->length_frames)) {
-      recording_ = false;
-    } else if (frame_time >= static_cast<double>(clip->start_frame)) {
-      std::string base;
-      int axis = -1;
-      split_axis_property(recording_property_, base, axis);
-      const auto it = obj->properties.find(base);
-      double number = 0.0;
-      bool have = false;
-      if (it != obj->properties.end()) {
-        if (axis >= 0) {
-          // Axis-suffix track: one vec3 component as the sample.
-          if (it->second.type == PropValue::Type::Vec3) {
-            number = it->second.vec[axis];
+  // 2. Recording second: sample the CURRENT document value into each armed
+  //    track in insertion order (T5d; read AFTER playback applied, so
+  //    clip->same-track chains reproduce themselves). Per-arm auto-disarm
+  //    at clip end; a dead arm (clip/object gone) is dropped, the rest
+  //    keep sampling.
+  if (!record_arms_.empty()) {
+    std::vector<RecordArm> surviving;
+    surviving.reserve(record_arms_.size());
+    for (const RecordArm& arm : record_arms_) {
+      TimelineClip* clip =
+          doc_.find_clip(arm.clip_id);  // mutable: samples land here
+      SceneObject* obj = doc_.find(arm.object_id);
+      if (clip == nullptr || obj == nullptr) continue;  // dead arm: drop
+      if (frame_time >=
+          static_cast<double>(clip->start_frame + clip->length_frames)) {
+        continue;  // past the end: per-arm disarm (T5a contract)
+      }
+      if (frame_time >= static_cast<double>(clip->start_frame)) {
+        std::string base;
+        int axis = -1;
+        split_axis_property(arm.property, base, axis);
+        const auto it = obj->properties.find(base);
+        double number = 0.0;
+        bool have = false;
+        if (it != obj->properties.end()) {
+          if (axis >= 0) {
+            // Axis-suffix track: one vec3 component as the sample.
+            if (it->second.type == PropValue::Type::Vec3) {
+              number = it->second.vec[axis];
+              have = true;
+            }
+          } else if (it->second.type == PropValue::Type::Number) {
+            number = it->second.number;
             have = true;
           }
-        } else if (it->second.type == PropValue::Type::Number) {
-          number = it->second.number;
-          have = true;
+        }
+        if (have) {
+          // Samples land on whole frame offsets by contract, so a fractional
+          // sample point floors rather than producing a fractional offset --
+          // which the sample ordering and the on-disk format both forbid.
+          const std::uint64_t offset = static_cast<std::uint64_t>(frame_time) -
+                                       clip->start_frame;
+          auto& track = clip->tracks[track_key(arm.object_id, arm.property)];
+          track.object_id = arm.object_id;
+          track.property = arm.property;
+          if (track.samples.empty() ||
+              track.samples.back().frame_offset < offset) {
+            // Resumed arms append at the next unseen offset (never duplicate
+            // a frame); the next_clip_id monotonic contract keeps save/load
+            // round-trips byte-stable through re-records.
+            track.samples.push_back(
+                ClipSample{offset, PropValue::make_number(number)});
+          }
         }
       }
-      if (have) {
-        // Samples land on whole frame offsets by contract, so a fractional
-        // sample point floors rather than producing a fractional offset --
-        // which the sample ordering and the on-disk format both forbid.
-        const std::uint64_t offset = static_cast<std::uint64_t>(frame_time) -
-                                     clip->start_frame;
-        auto& track =
-            clip->tracks[track_key(recording_object_, recording_property_)];
-        track.object_id = recording_object_;
-        track.property = recording_property_;
-        if (track.samples.empty() ||
-            track.samples.back().frame_offset < offset) {
-          // Resumed arms append at the next unseen offset (never duplicate
-          // a frame); the next_clip_id monotonic contract keeps save/load
-          // round-trips byte-stable through re-records.
-          track.samples.push_back(
-              ClipSample{offset, PropValue::make_number(number)});
-          recorded_samples_ = offset + 1;
-        }
-      }
+      surviving.push_back(arm);
     }
+    record_arms_.swap(surviving);
   }
 }
 
@@ -558,6 +647,26 @@ bool EditorSession::handle_edit(
         reply.error = "destroy_object: no object " + std::to_string(oid);
         return true;
       }
+      // T5c: the reserved object cannot be destroyed while tracks reference
+      // it — a dangling render track would silently stop applying, so the
+      // deletion is loud instead. (Unreferenced, deletion is allowed; a
+      // later clip_record recreates the object with a fresh id.)
+      if (const SceneObject* rs = find_render_settings();
+          rs != nullptr && rs->id == oid) {
+        std::size_t refs = 0;
+        for (const TimelineClip& c : doc_.clips) {
+          for (const auto& [tkey, track] : c.tracks) {
+            if (track.object_id == oid) ++refs;
+          }
+        }
+        if (refs > 0U) {
+          reply.ok = false;
+          reply.error = "destroy_object: render_settings object " +
+                        std::to_string(oid) + " is referenced by " +
+                        std::to_string(refs) + " track(s); remove them first";
+          return true;
+        }
+      }
       auto destroy = std::make_unique<DestroyObjectCommand>(oid);
       std::string error;
       if (!stack_.execute(std::move(destroy), error)) {
@@ -581,6 +690,16 @@ bool EditorSession::handle_edit(
       if (oid != 0U && doc_.find(oid) == nullptr) {
         reply.ok = false;
         reply.error = "select: no object " + std::to_string(oid);
+        return true;
+      }
+      // T5c: the reserved render-channel store is not scene content, so it
+      // is not selectable. Loud rather than silent: a client that resolves
+      // its dynamic id deserves to be told why nothing happened.
+      if (const SceneObject* reserved = find_render_settings();
+          reserved != nullptr && reserved->id == oid) {
+        reply.ok = false;
+        reply.error = "select: object " + std::to_string(oid) +
+                      " is the reserved render_settings store";
         return true;
       }
       selected_id_ = oid;
@@ -630,9 +749,14 @@ bool EditorSession::handle_edit(
         reply.error = "clip_remove failed: " + error;
         return true;
       }
-      if (recording_ && recording_clip_ == clip_id) {
-        recording_ = false;
-      }
+      // T5d: disarm-by-clip removes the matching arms only; arms on other
+      // clips keep sampling.
+      record_arms_.erase(
+          std::remove_if(record_arms_.begin(), record_arms_.end(),
+                         [&](const RecordArm& arm) {
+                           return arm.clip_id == clip_id;
+                         }),
+          record_arms_.end());
       if (playing_ && playing_clip_ == clip_id) {
         playing_ = false;
       }
@@ -945,7 +1069,7 @@ bool EditorSession::handle_edit(
       stack_ = CommandStack(doc_);
       selected_id_ = 0;
       // G3: armed clip intent does not survive a wholesale document replace.
-      recording_ = false;
+      record_arms_.clear();
       playing_ = false;
       reply.ok = true;
       reply.detail = "loaded " + command.text;
@@ -1088,13 +1212,26 @@ bool EditorSession::handle_edit(
       }
       const auto clip_id =
           static_cast<std::uint64_t>(command.numbers[0]);
-      const auto object_id =
+      auto object_id =
           static_cast<std::uint64_t>(command.numbers[1]);
       const TimelineClip* clip = doc_.find_clip(clip_id);
       if (clip == nullptr) {
         reply.ok = false;
         reply.error = "clip_record: no clip " + std::to_string(clip_id);
         return true;
+      }
+      // T5c: oid 0 + a bare render channel resolves to the reserved
+      // object, creating it on demand (undoable spawn, so replay
+      // reproduces the same id from the same checkpoint).
+      if (object_id == 0U && is_render_channel(command.text)) {
+        std::string error;
+        SceneObject* rs = ensure_render_settings(error);
+        if (rs == nullptr) {
+          reply.ok = false;
+          reply.error = "clip_record: " + error;
+          return true;
+        }
+        object_id = rs->id;
       }
       const SceneObject* obj = doc_.find(object_id);
       if (obj == nullptr) {
@@ -1117,11 +1254,21 @@ bool EditorSession::handle_edit(
                       "\" (number property or vec3 axis)";
         return true;
       }
-      recording_ = true;
-      recording_clip_ = clip_id;
-      recording_object_ = object_id;
-      recording_property_ = command.text;
-      recorded_samples_ = 0;
+      // T5d: two arms on the same track are rejected (two writers to one
+      // track is a race expressed as data); re-arming an identical track
+      // after a stop succeeds because the stop removed the arm.
+      for (const RecordArm& arm : record_arms_) {
+        if (arm.clip_id == clip_id && arm.object_id == object_id &&
+            arm.property == command.text) {
+          reply.ok = false;
+          reply.error = "clip_record: track " + std::to_string(object_id) +
+                        ":" + command.text + " already armed on clip " +
+                        std::to_string(clip_id);
+          return true;
+        }
+      }
+      record_arms_.push_back(
+          RecordArm{clip_id, object_id, command.text});
       // Existing samples on this track stay (a resumed arm appends at the
       // next unseen offset — deterministic, never duplicated).
       reply.ok = true;
@@ -1129,9 +1276,87 @@ bool EditorSession::handle_edit(
                      std::to_string(object_id) + ":" + command.text;
       return true;
     }
+    case CK::ClipRecordAll: {
+      // T5b: one clip+object pair, every recordable property as its own
+      // track (Number as-is, Vec3 as three axis tracks), armed through
+      // the T5d multi-arm model in deterministic property order (the
+      // document's property map is ordered, so replays arm identically).
+      if (command.number_count < 2U) {
+        reply.ok = false;
+        reply.error = "clip_record_all needs clip, oid";
+        return true;
+      }
+      const auto all_clip_id =
+          static_cast<std::uint64_t>(command.numbers[0]);
+      auto all_object_id =
+          static_cast<std::uint64_t>(command.numbers[1]);
+      const TimelineClip* all_clip = doc_.find_clip(all_clip_id);
+      if (all_clip == nullptr) {
+        reply.ok = false;
+        reply.error =
+            "clip_record_all: no clip " + std::to_string(all_clip_id);
+        return true;
+      }
+      // T5c: oid 0 arms every render channel (creating the object first).
+      if (all_object_id == 0U) {
+        std::string error;
+        SceneObject* rs = ensure_render_settings(error);
+        if (rs == nullptr) {
+          reply.ok = false;
+          reply.error = "clip_record_all: " + error;
+          return true;
+        }
+        all_object_id = rs->id;
+      }
+      const SceneObject* all_obj = doc_.find(all_object_id);
+      if (all_obj == nullptr) {
+        reply.ok = false;
+        reply.error = "clip_record_all: no object " +
+                      std::to_string(all_object_id);
+        return true;
+      }
+      std::vector<std::string> keys;
+      for (const auto& [pname, pvalue] : all_obj->properties) {
+        if (pvalue.type == PropValue::Type::Number) {
+          keys.push_back(pname);
+        } else if (pvalue.type == PropValue::Type::Vec3) {
+          keys.push_back(pname + ".x");
+          keys.push_back(pname + ".y");
+          keys.push_back(pname + ".z");
+        }
+      }
+      if (keys.empty()) {
+        reply.ok = false;
+        reply.error = "clip_record_all: object " +
+                      std::to_string(all_object_id) + " has no recordable";
+        return true;
+      }
+      // Atomic: any already-armed track rejects the whole command so a
+      // partial arm set never lands (the caller stops the old arms first).
+      for (const std::string& key : keys) {
+        for (const RecordArm& arm : record_arms_) {
+          if (arm.clip_id == all_clip_id && arm.object_id == all_object_id &&
+              arm.property == key) {
+            reply.ok = false;
+            reply.error = "clip_record_all: track " +
+                          std::to_string(all_object_id) + ":" + key +
+                          " already armed on clip " + std::to_string(all_clip_id);
+            return true;
+          }
+        }
+      }
+      for (const std::string& key : keys) {
+        record_arms_.push_back(RecordArm{all_clip_id, all_object_id, key});
+      }
+      reply.ok = true;
+      reply.detail = "recording clip " + std::to_string(all_clip_id) +
+                     " object " + std::to_string(all_object_id) + " (" +
+                     std::to_string(keys.size()) + " tracks)";
+      return true;
+    }
     case CK::ClipRecordStop: {
-      const bool was = recording_;
-      recording_ = false;
+      const bool was = !record_arms_.empty();
+      record_arms_.clear();
       reply.ok = true;
       reply.detail = was ? "record disarmed" : "record was not armed";
       return true;
@@ -1202,7 +1427,23 @@ bool EditorSession::handle_edit(
           out += "],\"count\":" + std::to_string(track.samples.size()) +
                  "}";
         }  // tracks
-        out += "}}";
+        // T5d: armed record tracks on this clip, sorted by (object id,
+        // property) for a deterministic report (arms sample in insertion
+        // order; the report is sorted for output). Additive: existing
+        // readers (live_proof.py) parse id/name/tracks and ignore this.
+        std::vector<std::string> armed;
+        for (const RecordArm& arm : record_arms_) {
+          if (arm.clip_id == clip.id) {
+            armed.push_back(std::to_string(arm.object_id) + ":" + arm.property);
+          }
+        }
+        std::sort(armed.begin(), armed.end());
+        out += ",\"armed\":[";
+        for (std::size_t i = 0; i < armed.size(); ++i) {
+          if (i > 0U) out += ",";
+          out += quote(armed[i]);
+        }
+        out += "]}}";
       }  // clips
       out += "]";
       reply.ok = true;
@@ -1340,6 +1581,36 @@ bool EditorSession::handle_query(
       reply.detail = doc_.node_graph.to_json();
       return true;
     }
+    case CK::GetRenderConfig: {
+      // T5c: the session owns the values (they live on the reserved
+      // render_settings object), so both hosts answer identically. "driven"
+      // names the channels a playing clip wrote on the last tick, which is
+      // what tells a host "track drove 1.0" from "nobody is driving".
+      const RenderConfig cfg = render_config();
+      std::string out = "{\"exposure\":";
+      append_number(out, cfg.exposure);
+      out += ",\"bloom\":";
+      append_number(out, cfg.bloom);
+      out += ",\"render_mode\":";
+      append_number(out, cfg.render_mode);
+      out += ",\"tone_map\":";
+      append_number(out, cfg.tone_map);
+      out += ",\"driven\":[";
+      const bool flags[4] = {cfg.exposure_driven, cfg.bloom_driven,
+                             cfg.render_mode_driven, cfg.tone_map_driven};
+      const char* names[4] = {"exposure", "bloom", "render_mode", "tone_map"};
+      bool first = true;
+      for (std::size_t i = 0; i < 4U; ++i) {
+        if (!flags[i]) continue;
+        if (!first) out += ",";
+        first = false;
+        out += quote(names[i]);
+      }
+      out += "]}";
+      reply.ok = true;
+      reply.detail = std::move(out);
+      return true;
+    }
     case CK::ListBindings: {
       std::string out = "{\"bindings\":[";
       bool first = true;
@@ -1416,6 +1687,11 @@ bool EditorSession::handle_query(
     case CK::GetPtMean:
       reply.ok = true;
       reply.detail = "pt stepped accumulation acknowledged (host executes)";
+      break;
+    case CK::SetAdaptive:
+    case CK::GetAdaptive:
+      reply.ok = true;
+      reply.detail = "pt adaptive sampling acknowledged (host executes)";
       break;
     default:
       reply.ok = false;
@@ -1606,7 +1882,7 @@ bool EditorSession::scrub_to(std::uint64_t frame, std::string& error) {
   }
   // G3: armed clip intent was aimed at the pre-warp timeline context; the
   // warp may also have replaced the clip definitions themselves.
-  recording_ = false;
+  record_arms_.clear();
   playing_ = false;
   return true;
 }

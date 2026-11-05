@@ -1226,11 +1226,15 @@ std::string SceneDocument::to_json() const {
           }
           out += '}';
         }
-        out += "]}}";  // samples array, track entry, tracks object
+        // Close the samples array and this track entry only; the tracks
+        // object and the clip entry close once, after the loop. (An older
+        // revision closed all three per track, which is identical output
+        // for a single track but malformed JSON for two or more — the
+        // second track parsed back as a clip key. Single-track goldens
+        // are byte-identical either way; multi-track round-trips pin this.)
+        out += "]}";
       }
-      // The last track's suffix closed the tracks object; an EMPTY tracks
-      // map still needs its own closer before the clip entry closes.
-      out += first_track ? "}}" : "}";
+      out += "}}";  // tracks object, clip entry
     }
     out += ']';
   }

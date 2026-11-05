@@ -71,6 +71,16 @@ PropertyRegistry& default_registry() {
         {"camera_fov", PropValue::make_number(60.0), "Vertical fov degrees"},
         {"sun_direction", PropValue::make_vec3(0.3, 0.65, 0.7),
          "Normalized sun vector"}};
+    // T5c render channels (all Number: exposure multiplier, bloom 0/1,
+    // render mode 0=forward/1=rt/2=pt, tonemap selector). Defaults are the
+    // behavior-neutral host values (exposure identity, bloom off,
+    // forward, default curve), so creating the object changes nothing
+    // until a track plays onto it.
+    const std::vector<PropertyDesc> render_settings_props{
+        {"exposure", PropValue::make_number(1.0), "Tonemap exposure"},
+        {"bloom", PropValue::make_number(0.0), "Bloom 0/1"},
+        {"render_mode", PropValue::make_number(0.0), "0=forward/1=rt/2=pt"},
+        {"tone_map", PropValue::make_number(0.0), "Tonemap selector"}};
     all_ok = registry.register_type(std::string(kTypeCube),
                                     "Axis-aligned unit cube scaled per-axis",
                                     cube_props) != 0U &&
@@ -82,16 +92,27 @@ PropertyRegistry& default_registry() {
     all_ok = registry.register_type(std::string(kTypeLight),
                                     "Omnidirectional point light", light_props) !=
                  0U &&
-             all_ok;
-    all_ok = registry.register_type(
-                 std::string(kTypeEnvironment),
+             all_ok;    all_ok = registry.register_type(std::string(kTypeEnvironment),
                  "Scene environment: singleton object holding camera and sun state",
                  env_props) != 0U &&
+             all_ok;
+    // Registered last: the four historical ids are load-bearing (see the
+    // header note), so this type appends and never inserts.
+    all_ok = registry.register_type(std::string(kTypeRenderSettings),
+                 "Render channels: singleton-ish store for timeline-driven "
+                 "exposure/bloom/mode (T5c)",
+                 render_settings_props) != 0U &&
              all_ok;
     return all_ok;
   }();
   (void)built;
   return registry;
+}
+
+bool is_render_settings_type(std::uint32_t type_id) noexcept {
+  const ObjectTypeDesc* type =
+      default_registry().find_by_name(kTypeRenderSettings);
+  return type != nullptr && type->id == type_id;
 }
 
 BridgeOutcome bridge_control_command(const ::warploom::core::ControlCommand& c,

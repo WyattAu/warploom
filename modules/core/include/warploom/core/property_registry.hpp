@@ -71,9 +71,22 @@ inline constexpr std::string_view kTypeCube = "cube";
 inline constexpr std::string_view kTypeSphere = "sphere";
 inline constexpr std::string_view kTypeLight = "light";
 inline constexpr std::string_view kTypeEnvironment = "environment";
+//! Render-channel store (T5c): a single document object of this type holds
+//! the trackable render settings as ordinary number properties
+//! (exposure, bloom, render_mode, tone_map). Registered LAST so the four
+//! historical type ids stay put — serialized documents store type_id
+//! numerically, so reordering would corrupt every existing file.
+inline constexpr std::string_view kTypeRenderSettings = "render_settings";
 
 //! Singleton environment object id (camera/sun properties live here).
 inline constexpr std::uint64_t kEnvironmentObjectId = 1;
+
+//! True when `type_id` names the reserved render-channel store (T5c). A
+//! type query, never an id constant: the object's DOCUMENT id is dynamic
+//! (it is created on demand), while its type is fixed and registry-owned.
+//! Systems that project or list document objects use this to keep the
+//! store out of scene content.
+[[nodiscard]] bool is_render_settings_type(std::uint32_t type_id) noexcept;
 
 //! Result of bridging one control command to the document.
 struct BridgeOutcome final {

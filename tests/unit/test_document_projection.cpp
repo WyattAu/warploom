@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "warploom/core/document_projection.hpp"
+#include "warploom/core/property_registry.hpp"
 
 namespace {
 
@@ -166,6 +167,32 @@ TEST(DocumentProjection, ReportsObjectsItCannotProject) {
   const auto after = projection.project(fixed);
   EXPECT_EQ(after.created, 1U);
   EXPECT_EQ(after.skipped, 0U);
+  EXPECT_TRUE(projection.projected(1U));
+}
+
+TEST(DocumentProjection, ReservedRenderSettingsStoreNeverBecomesAnEntity) {
+  // T5c: the reserved channel store lives in the document but is not scene
+  // content. It is skipped by TYPE, so it stays out of the ECS even if a
+  // future revision gives it transform-shaped properties.
+  const ObjectTypeDesc* reserved =
+      default_registry().find_by_name(kTypeRenderSettings);
+  ASSERT_NE(reserved, nullptr);
+  SceneObject store{};
+  store.id = 7U;
+  store.type_id = reserved->id;
+  store.name = "render_settings";
+  // Deliberately transform-shaped: the type filter, not the missing
+  // transform, has to be what keeps it out.
+  store.properties["position"] = PropValue::make_vec3(1.0, 2.0, 3.0);
+  store.properties["rotation"] = PropValue::make_vec3(0.0, 0.0, 0.0);
+  store.properties["scale"] = PropValue::make_vec3(1.0, 1.0, 1.0);
+
+  DocumentProjection projection;
+  const auto document = doc_with({make_cube(1U, 0.0, 0.0, 0.0), store});
+  const auto report = projection.project(document);
+  EXPECT_EQ(report.created, 1U);
+  EXPECT_EQ(report.skipped, 1U);
+  EXPECT_FALSE(projection.projected(7U));
   EXPECT_TRUE(projection.projected(1U));
 }
 

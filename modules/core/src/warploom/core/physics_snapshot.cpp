@@ -442,8 +442,10 @@ bool physics_restore_json(
     }
   }
   for (const auto& joint : parsed.joints) {
-    world.add_distance_joint(joint.a, joint.b, joint.rest_length,
-                             joint.compliance);
+    // Restore re-adds joints to a fresh world; the fresh ids are not
+    // remapped (only bodies are), so the return is discarded deliberately.
+    (void)world.add_distance_joint(joint.a, joint.b, joint.rest_length,
+                                   joint.compliance);
   }
   object_bodies = std::move(rebuilt);
   return true;

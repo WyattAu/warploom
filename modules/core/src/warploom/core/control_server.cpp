@@ -90,6 +90,13 @@ const std::vector<ControlCommand::KindName>& ControlCommand::kind_names() {
       // v1.14 subgraph copy/paste (G2).
       {Kind::CopySubgraph, "copy_subgraph"},
       {Kind::PasteSubgraph, "paste_subgraph"},
+      // v1.15 atomic multi-property record (T5b).
+      {Kind::ClipRecordAll, "clip_record_all"},
+      // v1.16 render-channel tracks (T5c).
+      {Kind::GetRenderConfig, "get_render_config"},
+      // v1.17 PT adaptive sampling (T2).
+      {Kind::SetAdaptive, "set_adaptive"},
+      {Kind::GetAdaptive, "get_adaptive"},
   };
   return kTable;
 }
@@ -353,6 +360,7 @@ namespace {
     }
     case ControlCommand::Kind::ClipRemove:
     case ControlCommand::Kind::ClipRecord:
+    case ControlCommand::Kind::ClipRecordAll:
     case ControlCommand::Kind::ClipPlay: {
       std::uint64_t clip = 0;
       if (!find_unsigned_field(line, "clip", clip)) {
@@ -360,7 +368,14 @@ namespace {
         return false;
       }
       numbers[count++] = static_cast<double>(clip);
-      if (command.kind == ControlCommand::Kind::ClipRecord) {
+      if (command.kind == ControlCommand::Kind::ClipRecordAll) {
+        std::uint64_t oid = 0;
+        if (!find_unsigned_field(line, "oid", oid)) {
+          error = "clip_record_all needs \"oid\"";
+          return false;
+        }
+        numbers[count++] = static_cast<double>(oid);
+      } else if (command.kind == ControlCommand::Kind::ClipRecord) {
         std::uint64_t oid = 0;
         if (!find_unsigned_field(line, "oid", oid)) {
           error = "clip_record needs \"oid\"";
@@ -475,6 +490,22 @@ namespace {
     case ControlCommand::Kind::SetPtSampleTarget:
       take("samples");
       break;
+    case ControlCommand::Kind::SetAdaptive: {
+      // enabled is required (a missing toggle is a mistake, not an
+      // implicit disable); fraction defaults to 0.25 like the engine test.
+      // Range-checking lives at the viewport dispatch, where the PT-state
+      // refusal also lives — the parser only guarantees the keys exist.
+      double enabled = 0.0;
+      if (!find_number_field(line, "enabled", enabled)) {
+        error = "missing \"enabled\" number field";
+        return false;
+      }
+      double fraction = 0.25;
+      (void)find_number_field(line, "fraction", fraction);
+      numbers[count++] = enabled;
+      numbers[count++] = fraction;
+      break;
+    }
     case ControlCommand::Kind::CopySubgraph:
       // Comma-separated ids ride in one string field (the flat wire format
       // has no arrays); the session parses them strictly.

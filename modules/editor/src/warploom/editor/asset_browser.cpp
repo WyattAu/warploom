@@ -23,7 +23,9 @@ std::vector<std::string> list_scene_files(const std::string& dir) {
     return out;  // missing/unreadable dir: empty panel, no exception
   }
   while (dirent* entry = ::readdir(handle)) {
-    const std::string name = entry->d_name != nullptr ? entry->d_name : "";
+    // d_name is a char array, never null; the comparison read as a guard
+    // but the compiler correctly flags it as tautological.
+    const std::string name = entry->d_name;
     if (!is_scene_file(name)) {
       continue;
     }

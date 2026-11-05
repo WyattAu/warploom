@@ -395,8 +395,14 @@ TEST_F(ControlServerTest, WireParityEveryKindParsesAndEnforcesPayloads) {
       case ControlCommand::Kind::ScrubTo:
         expect_missing = "missing \\\"frame\\\"";
         break;
+      case ControlCommand::Kind::SetAdaptive:
+        expect_missing = "missing \\\"enabled\\\"";
+        break;
       case ControlCommand::Kind::PasteSubgraph:
         expect_missing = "missing \\\"fragment\\\"";
+        break;
+      case ControlCommand::Kind::ClipRecordAll:
+        expect_missing = "missing \\\"clip\\\"";
         break;
       case ControlCommand::Kind::BindNodeProperty:
         expect_missing = "bind_node_property needs";

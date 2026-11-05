@@ -5,6 +5,8 @@
 
 #include <algorithm>
 
+#include "warploom/core/property_registry.hpp"
+
 namespace warploom::editor {
 
 using core::Entity;
@@ -95,6 +97,14 @@ ProjectionReport DocumentProjection::project(const SceneDocument& document) {
   live_ids_.clear();
   live_ids_.reserve(document.objects.size());
   for (const SceneObject& object : document.objects) {
+    // T5c: the reserved render-channel store is not scene content. It has
+    // no transform, so it would be skipped anyway, but relying on that is
+    // how a future transform-shaped channel object would silently become
+    // an entity -- say it explicitly instead.
+    if (is_render_settings_type(object.type_id)) {
+      ++report.skipped;
+      continue;
+    }
     live_ids_.push_back(object.id);
 
     const auto existing = entities_.find(object.id);

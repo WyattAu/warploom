@@ -81,7 +81,7 @@ class EditorSession final : public ::warploom::core::ControlHost {
     stack_.clear();
     bindings_.clear();
     selected_id_ = 0;
-    recording_ = false;  // G3: armed clip intent does not survive a replace
+    record_arms_.clear();  // G3: armed clip intent does not survive a replace
     playing_ = false;
   }
   //! Runs the graph evaluation, then writes every binding's current pin
@@ -211,11 +211,40 @@ class EditorSession final : public ::warploom::core::ControlHost {
   void tick_timeline_interpolated(std::uint64_t frame, double alpha,
                                   ::warploom::editor::Easing easing);
   [[nodiscard]] const TimelineClip* recording_target() const noexcept {
-    return recording_ ? doc_.find_clip(recording_clip_) : nullptr;
+    // T5d: the first armed record target (insertion order); nullptr when
+    // no record arm exists. Multi-arm state, single-target query.
+    return record_arms_.empty()
+               ? nullptr
+               : doc_.find_clip(record_arms_.front().clip_id);
+  }
+  //! Number of armed record tracks (T5d multi-arm recording).
+  [[nodiscard]] std::size_t record_arm_count() const noexcept {
+    return record_arms_.size();
   }
   [[nodiscard]] const TimelineClip* playing_clip() const noexcept {
     return playing_ ? doc_.find_clip(playing_clip_) : nullptr;
   }
+  //! Render-channel values (T5c): the reserved render_settings object's
+  //! numeric properties, read through for hosts each frame. Opaque numbers
+  //! here; the viewport maps them (render_mode 0=forward/1=rt/2=pt, bloom
+  //! 0/1, exposure multiplier, tone_map selector). Defaults are the
+  //! behavior-neutral host values, so a missing object reads identically
+  //! to a freshly created one.
+  struct RenderConfig {
+    double exposure{1.0};
+    double bloom{0.0};
+    double render_mode{0.0};
+    double tone_map{0.0};
+    //! Per-channel "a playing clip wrote this on the last tick". Hosts
+    //! apply ONLY driven channels, so an untracked channel never clobbers
+    //! a socket-set value (the E1/R4 wire contract): with no render clip
+    //! playing, nothing is driven and the renderer is left alone.
+    bool exposure_driven{false};
+    bool bloom_driven{false};
+    bool render_mode_driven{false};
+    bool tone_map_driven{false};
+  };
+  [[nodiscard]] RenderConfig render_config() const noexcept;
 
   // -- Protocol record/replay (W2, protocol v1.7) ---------------------------
   //! Begins recording protocol commands into a warploom-replay-v1 file
@@ -258,6 +287,20 @@ class EditorSession final : public ::warploom::core::ControlHost {
  private:
   [[nodiscard]] ::warploom::core::ControlReply handle_session(
       const ::warploom::core::ControlCommand& command);
+  //! The reserved render_settings instance, if the document has one
+  //! (created on demand by clip_record(All); never seeded, so pre-T5c
+  //! files read back unchanged). Identified by TYPE, never by id: the
+  //! object carries a dynamic document id like any other.
+  [[nodiscard]] const SceneObject* find_render_settings() const noexcept;
+  //! Creates the reserved object via an undoable spawn (deterministic id
+  //! from next_object_id, so replay reproduces it exactly). Returns
+  //! nullptr + error only when the registry lacks the type, which is a
+  //! programming error, not a user error.
+  [[nodiscard]] SceneObject* ensure_render_settings(std::string& error);
+  //! True when `key` names a render channel (bare Number property of the
+  //! reserved object: exposure/bloom/render_mode/tone_map).
+  [[nodiscard]] static bool is_render_channel(
+      const std::string& key) noexcept;
   //! Returns true when the kind was a query (reply filled).
   [[nodiscard]] bool handle_query(
       const ::warploom::core::ControlCommand& command,
@@ -282,12 +325,15 @@ class EditorSession final : public ::warploom::core::ControlHost {
   CommandRecorder recorder_{};  //!< W2 capture (frame-thread-only)
   bool replaying_{false};       //!< suppresses re-recording during load_replay
   std::vector<PropertyBinding> bindings_{};
-  // G3: armed clip state (session-side intent; at most one of each).
-  bool recording_{false};       //!< armed record target exists
-  std::uint64_t recording_clip_{0};
-  std::uint64_t recording_object_{0};
-  std::string recording_property_{};
-  std::uint64_t recorded_samples_{0};  //!< next sample offset (per arm)
+  // G3/T5d: armed record state (session-side intent). Playback stays a
+  // single arm; RECORDING is a vector of arms sampled in insertion order
+  // (T5d). Two arms on the same track are rejected at arm time.
+  struct RecordArm {
+    std::uint64_t clip_id{0};
+    std::uint64_t object_id{0};
+    std::string property{};  //!< track key: number property or vec3 axis
+  };
+  std::vector<RecordArm> record_arms_{};
   bool playing_{false};         //!< armed playback clip exists
   std::uint64_t playing_clip_{0};
   std::uint64_t play_started_{0};  //!< frame playback was armed at
@@ -315,6 +361,11 @@ class EditorSession final : public ::warploom::core::ControlHost {
   //! sequence through the same counter, so positions reproduce exactly.
   //! Undo does not rewind it (a new paste is a new edit, not a redo).
   std::uint32_t paste_count_{0};
+  //! T5c host half: which render channels the last tick_timeline_at wrote
+  //! via a playing clip. Recomputed every tick (never sticky across a tick
+  //! that plays nothing), so hosts can tell "track drove 1.0" from the
+  //! neutral default. Bit i: 0 exposure, 1 bloom, 2 render_mode, 3 tone_map.
+  std::uint8_t render_driven_{0};
 };
 
 }  // namespace warploom::editor

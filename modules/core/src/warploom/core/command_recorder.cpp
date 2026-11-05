@@ -40,6 +40,12 @@ using CK = ::warploom::core::ControlCommand::Kind;
     case CK::SetPtSampleTarget:
     case CK::GetPtSamples:
     case CK::GetPtMean:
+    case CK::SetAdaptive:
+    case CK::GetAdaptive:
+    // v1.16: the session owns these values (they live on the reserved
+    // render_settings object, whose edits ARE recorded), so a read-back
+    // adds nothing to the log and repeated reads must not grow a capture.
+    case CK::GetRenderConfig:
       return false;
     case CK::SpawnCube:
     case CK::SetProperty:
@@ -64,6 +70,7 @@ using CK = ::warploom::core::ControlCommand::Kind;
     case CK::ClipRemove:
     case CK::ClipMove:
     case CK::ClipRecord:
+    case CK::ClipRecordAll:
     case CK::ClipRecordStop:
     case CK::ClipPlay:
     case CK::ClipStop:
