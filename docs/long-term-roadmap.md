@@ -221,6 +221,19 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
   counts), then the G-buffer (normals/albedo/depth outputs) or a
   per-iteration variance update -- not more iterations of the variance-only
   filter. OIDN stays excluded by the dependency budget.
+- [x] **G-buffer emission (first half)** DONE 2026-11-05 (RTX 2060): the
+  rgen writes a first-hit normal+depth image (binding 7, rgb = faceforward
+  world normal, a = hit t, miss = (0,0,0,-1); overwritten per unmasked
+  round, masked-out texels keep the round that traced them -- same hold
+  contract as the sums). Tracer-side only: storage image through the same
+  creation path, descriptor, barriers/clear/destroy, `read_gbuffer()`.
+  Pinned by `gbuffer_first_hit_normal_depth` (triangle scene: 300 hit /
+  724 miss texels, unit normals, miss encoding exact, radiance
+  cross-checked both directions, bit-identical re-dispatch;
+  sabotage-checked -- store deleted fails on the miss-mean assertions).
+  Albedo deliberately NOT emitted (uniform grey scene: zero signal until
+  materials vary). No filter consumes it yet -- emission first, consumer
+  (edge-stopped a-trous on the normal/depth signal) second.
 - [ ] Path guiding / Light Tree / MBVH only on measured scene-size need.
 
 ### T3. Physics (depth without breaking replay)
@@ -379,10 +392,11 @@ Against the §5 definition, criterion by criterion:
    variance-only a-trous = 1.67x at 4spp (corrected 2026-11-04),
    temporal-history constraint holds by construction; multi-iteration
    CLOSED 2026-11-05 (K=2 0.94x, K=3 0.48x -- diverges, do not build).
-   Remaining, in order: adaptive build, then the G-buffer (or a
-   per-iteration variance update) on the edge-dominated residual -- never
-   more variance-only iterations. Exit: live PT on app scenes at the
-   published budgets.
+   Remaining, in order: adaptive build (engine + one-shot mask live;
+   iterative re-masking open), then the edge-stopped filter consuming the
+   G-buffer (emitted 2026-11-05) or a per-iteration variance update on the
+   edge-dominated residual -- never more variance-only iterations. Exit:
+   live PT on app scenes at the published budgets.
 6. **Camera/light/render tracks + concurrent arms (T5).** Spec first
    (WyattAu repo survey per §6), then chrome.
 7. **E3 hardware runner, then E6 packaging (T8).** RT is the best-tested

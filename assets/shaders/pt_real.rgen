@@ -57,6 +57,14 @@ layout(set = 0, binding = 5, std430) readonly buffer AdaptiveMask {
   uint mask_data[];
 };
 layout(set = 0, binding = 6, r32ui) uniform uimage2D sample_count;
+// First-hit G-buffer (T2 denoiser input): rgb = first-bounce world normal
+// (faceforward, normalized), a = hit t, or (0,0,0,-1) on a miss.
+// Overwritten every unmasked round -- geometry signal, not an accumulation.
+// Masked-out texels return before the store, so a held texel keeps the
+// G-buffer of the round that traced it (same hold contract as the sums).
+// Albedo is deliberately NOT emitted: the scene albedo is one uniform grey
+// constant, so an albedo image would carry zero signal until materials vary.
+layout(set = 0, binding = 7, rgba32f) uniform image2D gbuffer;
 
 layout(location = 0) rayPayloadEXT vec4 payload;  // miss: w=-1; hit: (n,t)
 
@@ -126,11 +134,19 @@ void main() {
 
   vec3 radiance = vec3(0.0);
   vec3 throughput = vec3(1.0);
+  vec3 g_normal = vec3(0.0);
+  float g_t = -1.0;
+  bool g_hit = false;
 
   for (uint bounce = 0u; bounce < max_bounces; ++bounce) {
     payload = vec4(0.0, 0.0, 0.0, -1.0);
     traceRayEXT(scene, gl_RayFlagsOpaqueEXT, 0xffu, 0u, 0u, 0u,
                 origin, kEps, dir, 1.0e30, 0);
+    if (bounce == 0u && payload.w >= 0.0) {
+      g_normal = normalize(payload.xyz);
+      g_t = payload.w;
+      g_hit = true;
+    }
     if (payload.w < 0.0) {            // miss -> sky, path ends
       // Mode 0 keeps the legacy constant-white sky every exact probe pins.
       // Mode 1 evaluates the shared analytic model (same definition the
@@ -167,4 +183,8 @@ void main() {
   // so a plain load-add-store is deterministic (no atomics needed).
   imageStore(sample_count, ivec2(pix),
              uvec4(imageLoad(sample_count, ivec2(pix)).x + 1u, 0u, 0u, 0u));
+  // Geometry signal, overwritten per round (no accumulation): texels the
+  // adaptive hold skins keep the entry of the round that traced them.
+  imageStore(gbuffer, ivec2(pix),
+             g_hit ? vec4(g_normal, g_t) : vec4(0.0, 0.0, 0.0, -1.0));
 }

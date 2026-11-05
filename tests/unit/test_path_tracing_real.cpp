@@ -3569,6 +3569,160 @@ TEST(path_tracing_real, adaptive_masked_rounds_hold_unmasked_bit_exact) {
   ctx.cleanup();
 }
 
+//! T2 G-buffer emission: first-hit normal + depth overwritten per round.
+//!
+//! One isolated triangle in the void: hit texels must carry a unit
+//! faceforward normal (here exactly +Z) and a positive t, miss texels the
+//! exact clear encoding (0,0,0,-1) -- cross-checked against the independent
+//! radiance signal (miss == white sky, hit <= grey albedo). A second
+//! identical frame-0 round must reproduce the image bit-exactly (the
+//! G-buffer is a pure function of pose + frame seed, which replay needs).
+//! Sabotage-checked: deleting the rgen store leaves the clear value
+//! everywhere, so no hit texel can pass.
+TEST(path_tracing_real, gbuffer_first_hit_normal_depth) {
+  omnicpp::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("OmniCppPtGbuffer", true).is_ok());
+  if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+  const std::uint32_t side = 32U;
+  const std::size_t texels = static_cast<std::size_t>(side) * side;
+
+  omnicpp::render::VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+
+  // Single triangle at z=0 facing +Z (soup: 3 verts, 1 tri).
+  const std::vector<float> tri = {-2.0F, -2.0F, 0.0F, 2.0F, -2.0F, 0.0F,
+                                  0.0F, 2.0F, 0.0F};
+  auto geo = alloc.create_buffer(tri.size() * sizeof(float),
+                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  std::memcpy(geo.value().mapped, tri.data(), tri.size() * sizeof(float));
+  VkBufferDeviceAddressInfo ai{};
+  ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  ai.buffer = geo.value().buffer;
+
+  omnicpp::render::PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.width = side;
+  cfg.height = side;
+  cfg.max_bounces = 4U;
+  omnicpp::render::PathTracerMesh mesh{};
+  mesh.vertex_buffer_address = static_cast<std::uint64_t>(
+      vkGetBufferDeviceAddress(ctx.device(), &ai));
+  mesh.triangle_count = 1U;
+  mesh.max_vertex = 2U;
+  cfg.meshes = {mesh};
+  cfg.instances = {
+      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 1.0F)};
+
+  omnicpp::render::VulkanPathTracer tracer;
+  ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
+                            ctx.graphics_queue(), qf, alloc, cfg)
+                  .is_ok());
+  omnicpp::render::PathTracerCamera cam{};
+  cam.position = {0.0F, 0.6F, 2.6F};
+  cam.forward = {0.0F, -0.2F, -1.0F};
+  cam.right = {1.0F, 0.0F, 0.0F};
+  cam.up = {0.0F, 1.0F, 0.0F};
+  tracer.set_camera(cam);
+
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+      ctx.device(), qf);
+  ASSERT_TRUE(pool.is_ok());
+  const auto run_round = [&](std::uint32_t frame, bool clear) {
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    EXPECT_TRUE(cbr.is_ok());
+    if (!cbr.is_ok()) return;
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    tracer.record_round(cb, frame, clear);
+    EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    VkFence fence{};
+    VkFenceCreateInfo fi{};
+    fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    vkCreateFence(ctx.device(), &fi, nullptr, &fence);
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1U;
+    si.pCommandBuffers = &cb;
+    EXPECT_EQ(vkQueueSubmit(ctx.graphics_queue(), 1, &si, fence), VK_SUCCESS);
+    EXPECT_EQ(vkWaitForFences(ctx.device(), 1, &fence, VK_TRUE, UINT64_MAX),
+              VK_SUCCESS);
+    vkDestroyFence(ctx.device(), fence, nullptr);
+  };
+
+  tracer.reset_accumulation();
+  run_round(0U, true);
+  auto mean = tracer.read_mean();
+  auto gbuf = tracer.read_gbuffer();
+  ASSERT_TRUE(mean.is_ok());
+  ASSERT_TRUE(gbuf.is_ok());
+  ASSERT_EQ(gbuf.value().size(), texels * 4U);
+
+  std::size_t hits = 0U;
+  std::size_t misses = 0U;
+  for (std::size_t t = 0; t < texels; ++t) {
+    const float nx = gbuf.value()[t * 4U + 0U];
+    const float ny = gbuf.value()[t * 4U + 1U];
+    const float nz = gbuf.value()[t * 4U + 2U];
+    const float tt = gbuf.value()[t * 4U + 3U];
+    const float mr = mean.value()[t * 4U + 0U];
+    if (tt >= 0.0F) {
+      ++hits;
+      // Unit faceforward normal, here exactly +Z (flat triangle), positive t.
+      const double len = std::sqrt(static_cast<double>(nx * nx + ny * ny + nz * nz));
+      EXPECT_NEAR(len, 1.0, 1e-5) << "texel " << t;
+      EXPECT_GT(nz, 0.9F) << "texel " << t;
+      EXPECT_GT(tt, 0.0F) << "texel " << t;
+      EXPECT_LT(tt, 100.0F) << "texel " << t;
+      // Independent signal: a hit attenuates by the grey albedo at least once.
+      EXPECT_LT(mr, 0.9F) << "texel " << t;
+      EXPECT_GT(mr, 0.0F) << "texel " << t;
+    } else {
+      ++misses;
+      EXPECT_FLOAT_EQ(nx, 0.0F) << "texel " << t;
+      EXPECT_FLOAT_EQ(ny, 0.0F) << "texel " << t;
+      EXPECT_FLOAT_EQ(nz, 0.0F) << "texel " << t;
+      EXPECT_FLOAT_EQ(tt, -1.0F) << "texel " << t;
+      // Independent signal: a miss is exactly the constant white sky.
+      EXPECT_FLOAT_EQ(mr, 1.0F) << "texel " << t;
+      EXPECT_FLOAT_EQ(mean.value()[t * 4U + 1U], 1.0F) << "texel " << t;
+      EXPECT_FLOAT_EQ(mean.value()[t * 4U + 2U], 1.0F) << "texel " << t;
+    }
+  }
+  EXPECT_GT(hits, 0U) << "triangle covers nothing: test is vacuous";
+  EXPECT_GT(misses, 0U) << "triangle covers everything: miss path untested";
+  std::printf("LoopT2 gbuffer: texels=%zu hits=%zu misses=%zu\n", texels, hits,
+              misses);
+
+  // Determinism: the same frame-0 round reproduces the image bit-exactly.
+  tracer.reset_accumulation();
+  run_round(0U, true);
+  auto gbuf2 = tracer.read_gbuffer();
+  ASSERT_TRUE(gbuf2.is_ok());
+  EXPECT_EQ(std::memcmp(gbuf.value().data(), gbuf2.value().data(),
+                        gbuf.value().size() * sizeof(float)),
+            0)
+      << "G-buffer is not a pure function of (pose, frame)";
+
+  EXPECT_EQ(ctx.validation_error_count(), 0U);
+  EXPECT_EQ(ctx.validation_warning_count(), 0U);
+  tracer.destroy();
+  vkDestroyCommandPool(ctx.device(), pool.value(), nullptr);
+  auto keep_geo = geo.value();
+  alloc.destroy_allocation(keep_geo);
+  alloc.cleanup();
+  ctx.cleanup();
+}
+
 #else  // !WARPLOOM_HAS_VULKAN
 
 TEST(path_tracing_real, disabled_without_vulkan) {

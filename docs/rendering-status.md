@@ -131,7 +131,10 @@ Two honest caveats on the ray tracing:
   so the budget is exact) and the tracer refines only masked-in texels,
   with held texels keeping their uniform mean bit-exactly (pinned headlessly
   by `adaptive_masked_rounds_hold_unmasked_bit_exact`); leaving PT disables
-  it so a re-entered stack is uniform again. Measured on the RTX 2060 at
+  it so a re-entered stack is uniform again. The tracer also emits a
+  first-hit G-buffer (rgb = world normal, a = hit t, miss = (0,0,0,-1),
+  overwritten per round; pinned by `gbuffer_first_hit_normal_depth`) --
+  emission only, no filter consumes it yet. Measured on the RTX 2060 at
   1000x600: fraction=0.25 selected exactly 150000/600000 texels. Gate
   (2026-11-05): the viewport half of e1 currently cannot run to completion
   on EITHER this tree or HEAD -- both die at the first real resize

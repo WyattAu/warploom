@@ -343,6 +343,15 @@ class VulkanPathTracer final {
   //! so a variance-guided filter can bind the pair without a recreate.
   [[nodiscard]] VkImage moment_image() const noexcept { return moment_image_; }
   [[nodiscard]] VkImageView moment_view() const noexcept { return moment_view_; }
+  //! First-hit G-buffer image + view (T2 denoiser input): rgba32f storage,
+  //! rgb = first-bounce world normal, a = hit t (-1 on miss). Overwritten
+  //! (not accumulated) every unmasked round, cleared alongside the sums.
+  //! No filter consumes it yet -- emission first, consumer second.
+  [[nodiscard]] VkImage gbuffer_image() const noexcept { return gbuffer_image_; }
+  [[nodiscard]] VkImageView gbuffer_view() const noexcept { return gbuffer_view_; }
+  //! Raw G-buffer texels (no divide: the image is overwritten, not summed).
+  //! Same host-side inspection contract as read_mean.
+  [[nodiscard]] ::warploom::core::Result<std::vector<float>> read_gbuffer() const;
   [[nodiscard]] std::uint32_t width() const noexcept { return width_; }
   [[nodiscard]] std::uint32_t height() const noexcept { return height_; }
 
@@ -383,6 +392,13 @@ class VulkanPathTracer final {
   VkImage moment_image_{VK_NULL_HANDLE};
   VkImageView moment_view_{VK_NULL_HANDLE};
   Allocation moment_allocation_{};
+
+  //! First-hit G-buffer (rgba32f storage): same extent/format/usage as the
+  //! accumulation so the readback path is shared. Overwritten per round,
+  //! not added -- barriers and clears travel with the other three images.
+  VkImage gbuffer_image_{VK_NULL_HANDLE};
+  VkImageView gbuffer_view_{VK_NULL_HANDLE};
+  Allocation gbuffer_allocation_{};
 
   //! Per-texel sample counts (r32ui storage): incremented exactly when the
   //! sums are, cleared alongside them. Uniform rounds leave every texel at

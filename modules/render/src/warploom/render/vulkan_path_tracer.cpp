@@ -182,6 +182,13 @@ struct TracerGpuParams {
   if (!make_storage_image(moment_image_, moment_view_, moment_allocation_)) {
     return ::warploom::core::Result<void>::ok();  // refuse() already ran
   }
+  // ---- First-hit G-buffer image (rgba32f storage, same creation path) ----
+  // Geometry signal for the T2 denoiser: normal + depth overwritten every
+  // unmasked round. A second copy of the creation block would be a second
+  // place for the usage flags to drift, so it goes through the same helper.
+  if (!make_storage_image(gbuffer_image_, gbuffer_view_, gbuffer_allocation_)) {
+    return ::warploom::core::Result<void>::ok();  // refuse() already ran
+  }
   // ---- Per-texel count image (r32ui storage) + adaptive mask buffer ------
   // The count travels with the sums (cleared/incremented together) so the
   // uniform path carries per-pixel counts equal to sample_count() by
@@ -426,8 +433,9 @@ struct TracerGpuParams {
 
   // ---- Descriptor set: 0 accum, 1 params, 2 TLAS, 3 instances, 4 moment ----
   // T2 adaptive: 5 = mask storage buffer (raygen), 6 = count storage image
-  // (raygen). The rgen skips masked-out texels and increments the count
-  // exactly when it adds to the sums.
+  // (raygen). T2 G-buffer: 7 = first-hit normal+depth storage image
+  // (raygen, overwritten per round). The rgen skips masked-out texels and
+  // increments the count exactly when it adds to the sums.
   descriptor_manager_ = std::make_unique<VulkanDescriptorManager>();
   if (!descriptor_manager_->initialize(device_).is_ok()) {
     return refuse("descriptor manager failed");
@@ -446,6 +454,8 @@ struct TracerGpuParams {
        {0, 5, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         VK_SHADER_STAGE_RAYGEN_BIT_KHR},
        {0, 6, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+       {0, 7, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         VK_SHADER_STAGE_RAYGEN_BIT_KHR}},
       1U);
   if (!layout.is_ok()) return refuse("descriptor layout failed");
@@ -538,6 +548,10 @@ struct TracerGpuParams {
       !descriptor_manager_
            ->write_image(descriptor_set_, 6U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                          VK_NULL_HANDLE, count_view_, VK_IMAGE_LAYOUT_GENERAL, 0U)
+           .is_ok() ||
+      !descriptor_manager_
+           ->write_image(descriptor_set_, 7U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                         VK_NULL_HANDLE, gbuffer_view_, VK_IMAGE_LAYOUT_GENERAL, 0U)
            .is_ok()) {
     return refuse("descriptor write failed");
   }
@@ -592,21 +606,24 @@ void VulkanPathTracer::record_round([[maybe_unused]] VkCommandBuffer command_buf
   barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  // All accumulation targets travel together: the moment + count images get
-  // the same barrier shapes as the accumulation, with only .image
-  // differing. A single-image barrier here would leave the moment image's
-  // layout and visibility to chance -- the same silent-race class as the
-  // missing SHADER_READ bit below (no validation diagnostic, wrong
-  // picture). The count image joins the same trio: it is cleared and
-  // incremented exactly when the sums are.
+  // All accumulation targets travel together: the moment + count + G-buffer
+  // images get the same barrier shapes as the accumulation, with only
+  // .image differing. A single-image barrier here would leave the moment
+  // image's layout and visibility to chance -- the same silent-race class
+  // as the missing SHADER_READ bit below (no validation diagnostic, wrong
+  // picture). The count image joins the same group: it is cleared and
+  // incremented exactly when the sums are. The G-buffer joins it too: it
+  // is overwritten (not accumulated) every unmasked round, so it needs
+  // the same layout transitions and write visibility, just no add.
   const auto emit_all = [&](const VkImageMemoryBarrier& shape,
                             VkPipelineStageFlags src, VkPipelineStageFlags dst) {
-    VkImageMemoryBarrier trio[3] = {shape, shape, shape};
-    trio[0].image = accum_image_;
-    trio[1].image = moment_image_;
-    trio[2].image = count_image_;
+    VkImageMemoryBarrier group[4] = {shape, shape, shape, shape};
+    group[0].image = accum_image_;
+    group[1].image = moment_image_;
+    group[2].image = count_image_;
+    group[3].image = gbuffer_image_;
     vkCmdPipelineBarrier(command_buffer, src, dst, 0, 0, nullptr, 0, nullptr,
-                         3, trio);
+                         4, group);
   };
   // A camera move clears exactly like clear_first: same barriers, same
   // zeroes, same count restart. One code path for both, so the restarted
@@ -624,6 +641,16 @@ void VulkanPathTracer::record_round([[maybe_unused]] VkCommandBuffer command_buf
                          &black, 1, &range);
     vkCmdClearColorImage(command_buffer, moment_image_, VK_IMAGE_LAYOUT_GENERAL,
                          &black, 1, &range);
+    // G-buffer clear = the miss encoding: no normal, t = -1. A round that
+    // traces then overwrites every unmasked texel, so this value survives
+    // only where nothing was traced.
+    VkClearColorValue gclear{};
+    gclear.float32[0] = 0.0F;
+    gclear.float32[1] = 0.0F;
+    gclear.float32[2] = 0.0F;
+    gclear.float32[3] = -1.0F;
+    vkCmdClearColorImage(command_buffer, gbuffer_image_, VK_IMAGE_LAYOUT_GENERAL,
+                         &gclear, 1, &range);
     VkClearColorValue zero_count{};
     zero_count.uint32[0] = 0U;
     vkCmdClearColorImage(command_buffer, count_image_, VK_IMAGE_LAYOUT_GENERAL,
@@ -858,6 +885,19 @@ void VulkanPathTracer::set_camera([[maybe_unused]] const PathTracerCamera& camer
 #endif
 }
 
+::warploom::core::Result<std::vector<float>> VulkanPathTracer::read_gbuffer()
+    const {
+#ifdef OMNICPP_HAS_VULKAN
+  // No divide: the G-buffer is overwritten per round, not accumulated.
+  // read_image_sum copies WITHOUT dividing, which is exactly the raw
+  // texel contract here -- shared path, not a second copy sequence.
+  return read_image_sum(gbuffer_image_);
+#else
+  return ::warploom::core::Result<std::vector<float>>::error(
+      ::warploom::core::RuntimeError::vulkan_not_available);
+#endif
+}
+
 void VulkanPathTracer::set_adaptive_enabled(
     [[maybe_unused]] bool enabled) noexcept {
 #ifdef OMNICPP_HAS_VULKAN
@@ -1031,6 +1071,7 @@ void VulkanPathTracer::destroy_resources() noexcept {
     if (accum_allocation_.is_valid()) allocator_->destroy_allocation(accum_allocation_);
     if (moment_allocation_.is_valid()) allocator_->destroy_allocation(moment_allocation_);
     if (count_allocation_.is_valid()) allocator_->destroy_allocation(count_allocation_);
+    if (gbuffer_allocation_.is_valid()) allocator_->destroy_allocation(gbuffer_allocation_);
     if (mask_allocation_.is_valid()) allocator_->destroy_allocation(mask_allocation_);
   }
   blas_list_.clear();
@@ -1040,6 +1081,7 @@ void VulkanPathTracer::destroy_resources() noexcept {
   accum_allocation_ = Allocation{};
   moment_allocation_ = Allocation{};
   count_allocation_ = Allocation{};
+  gbuffer_allocation_ = Allocation{};
   mask_allocation_ = Allocation{};
   tlas_ = TopLevelAS{};
 
@@ -1066,6 +1108,14 @@ void VulkanPathTracer::destroy_resources() noexcept {
   if (count_image_ != VK_NULL_HANDLE) {
     vkDestroyImage(device_, count_image_, nullptr);
     count_image_ = VK_NULL_HANDLE;
+  }
+  if (gbuffer_view_ != VK_NULL_HANDLE) {
+    vkDestroyImageView(device_, gbuffer_view_, nullptr);
+    gbuffer_view_ = VK_NULL_HANDLE;
+  }
+  if (gbuffer_image_ != VK_NULL_HANDLE) {
+    vkDestroyImage(device_, gbuffer_image_, nullptr);
+    gbuffer_image_ = VK_NULL_HANDLE;
   }
 #endif
   width_ = 0;
