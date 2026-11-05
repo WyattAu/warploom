@@ -1087,11 +1087,20 @@ declares a slot 3.
      correlation with 0% unwritten pixels (the 75%-coverage bug is fixed); the
      coverage property is pinned by a sabotage-validated test.
 
-   What is *not* met is PT usability, and the docs say so: no denoiser (a
-   deliberate v1 deferral -- pause-to-converge is the shipped story, see the
-   comparison matrix §5), no adaptive sampling, a cubes-only scene, and bloom
-   does not layer on the PT source. Those are post-0.1 feature steps, not
-   correctness gaps in what 0.1 claims.
+   What is *not* met is PT usability, and the docs say so: no denoiser in the
+   render path (a deliberate v1 deferral -- pause-to-converge is the shipped
+   story, see the comparison matrix §5; the filter itself is a measured spike
+   pinned at 1.67x) and adaptive sampling reachable but opt-in
+   (`set_adaptive`/`get_adaptive`, v1.17: one variance snapshot from the live
+   accumulation, exact-budget rank selection -- 150000/600000 texels at 0.25
+   on the RTX 2060 at 1000x600 -- with a uniform stack on re-entry). Two
+   clauses this paragraph
+   used to carry are no longer true and are removed: the scene is not
+   cubes-only (`setup_path_tracing` snapshots the live `scene.objects`, one
+   mesh per category, with a rebuild when that count changes), and bloom does
+   layer on the PT source
+   (`VulkanHardware.PathTracedFrameLayersBloom`). Those are post-0.1 feature
+   steps, not correctness gaps in what 0.1 claims.
 
 It commits to a scope, not a date.
 
@@ -1788,4 +1797,42 @@ still-open environment-light gap recorded above.
 Honest state now: the tracer is proven correct in situ and headlessly, and
 the capture path is verified end-to-end (0.9994 rank correlation with the
 accumulation, 0% unwritten pixels). What remains for PT is usability rather
-than correctness: no denoiser, no adaptive sampling, and the cubes-only scene.
+than correctness: no denoiser in the render path, adaptive sampling reachable
+but opt-in (`set_adaptive`/`get_adaptive`, v1.17), and PT's camera is
+deliberately held while it accumulates.
+
+**PT scene coverage is a snapshot, and it now stays in step with the scene.**
+`setup_path_tracing` walks `scene.objects` and uploads one mesh per category
+(cube, ground, mannequin imports, city parts, merged sponza), so the tracer
+traces what the raster path draws. The acceleration structure is built once,
+though, so a structural edit after the build (spawn/destroy/undo over the
+socket) left it tracing geometry that no longer existed. The stack is now
+rebuilt when the object count differs from the count it was built with.
+Measured live on the RTX 2060: build over 11 objects, spawn a 12th, leave PT
+and re-enter -- the sabotaged build (check disabled) prints no rebuild line
+and keeps the 11-object snapshot, the fixed build prints
+`PT snapshot is stale (11 -> 12 scene objects); rebuilding` and rebuilds over
+12 objects / 11 meshes (the new cube reuses the cube mesh, which is why the
+mesh count is the check that matters), 0 validation diagnostics, and e1 +
+t5c stay 58/58 + 24/24 on the refactored leave path.
+
+**PT adaptive sampling is now app-reachable (v1.17), and it stays honest.**
+`set_adaptive` requires PT mode (refused outside it, like the stepped-target
+command), requires `enabled`, takes an optional `fraction` defaulting to 0.25
+and rejects anything outside (0,1]; enabling snapshots one mask from the
+current accumulation and uploads it, disabling returns the tracer to uniform.
+Leaving PT clears the mask -- measured: enable at 0.5 on the 1280x720 stack
+(460800/921600 selected, exact half), leave PT, `get_adaptive` reads back
+enabled=false/selected=0, re-enter PT, still uniform -- so a re-entered stack
+never resumes a stale mask. `get_adaptive` reports the live flag plus the mask that was uploaded
+(enabled/fraction/selected/texels/threshold). Measured on the RTX 2060:
+fraction=0.25 over the 1000x600 stack selected exactly 150000/600000 texels
+(the rank budget is exact even when most variances tie at zero), and the wire
+round-trips 9/9 where runnable -- 7 visual checks green on the viewport, 2
+parser checks green on headless (`all` 105/105, up from 103). Gate, recorded
+not papered over: the viewport half of e1 currently cannot complete on
+EITHER this tree or HEAD -- both die at the first real resize with
+`frame presentation failed` while ~5.3 of 6.1 GiB VRAM is held by other
+processes -- so the e1 total is 64 PASS / 0 FAIL *before* that pre-existing
+failure, not a completed run. The unit suite is unaffected: 738/738 and
+ctest 6/6 on the same tree.

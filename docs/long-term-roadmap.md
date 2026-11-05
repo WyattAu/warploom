@@ -117,8 +117,18 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
   (routing + node-list gate + sabotage + mixed-graph execute, 0
   diagnostics) and `DynamicRendering.UnifiedFrameWithDynamicBloomRecordsClean`
   (production unified frame, golden-hash parity with the baked path, 0
-  diagnostics). Remaining passes (sky, UI) migrate in later stages,
-  each with its own re-proof (see loop27).
+  diagnostics). Stage 3 DONE 2026-11-03 (RTX 2060): the scene node itself
+  goes dynamic (color + depth; `GraphDynamicPass.has_depth`, gate +
+  derivation cover the dynamic depth, explicit `set_dynamic_scene_pipeline`
+  opt-in so a baked pipeline can never land in a dynamic node). Proven by
+  `DynamicRendering.UnifiedFrameWithDynamicSceneMatchesGolden` (same
+  canonical hash 12508388375569283214 as the baked golden, 0 diagnostics;
+  control is structural -- the sabotage direction fails with
+  VUID-vkCmdDraw-renderPass-02684) and
+  `DynamicRendering.DynamicSceneDepthCoveredByGate` (forged dynamic depth
+  fails the R6b gate). Full suite 732/732. Remaining passes (PT blit,
+  sky, UI) migrate in later stages, each with its own re-proof
+  (see loop27).
 - [x] **Perf budgets as gates (T0).** Per-config frame budgets
   (default, bloom, nohdr, gd, rt, node, pt, scale10k, phys4k, phys8k) in
   docs/perf-budgets.json from real GPU timing; `analyze_telemetry.py
@@ -188,11 +198,25 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
   PT-only AND the mean rises; sabotage-forcing the raster path reproduces
   the old black-slot frame and fails it; 0 diagnostics). Raster path
   untouched (own shader, own sets, golden hashes green).
-- [ ] **Live PT: adaptive sampling** (Cycles 0.01 / Karma Pixel Oracle
-  pattern; fixed-budget win) then **in-tree à-trous/SVGF over the
-  existing G-buffer** with the recorded constraint: temporal-history
-  validation must be a pure function of accumulation state or it breaks
-  deterministic stepping. OIDN stays excluded by the dependency budget.
+- [x] **Live PT stepping discipline** DONE 2026-11-03 (RTX 2060): a camera
+  move auto-restarts the sequence (both images, through the sample-target
+  hold); identical re-uploads don't. Pinned by
+  `path_tracing_real.camera_move_restarts_sequence` (counts, forced-vs-
+  explicit bit-identity, sabotage both directions) -- the pose-smear is
+  unrepresentable through the API. Recorded finding: the replay contract
+  is per tracer instance (cross-tracer bit identity does NOT hold: two
+  identically-configured tracers differ on 132/4096 floats -- per-tracer
+  AS builds resolve edge ties differently).
+- [x] **Live PT spikes** MEASURED 2026-11-03 (RTX 2060, loop29): adaptive
+  justified (top 5% of pixels hold 92% of variance -- uniform spending
+  wastes ~90% of rounds; pinned by `variance_concentration_spike`) and
+  variance-only a-trous buys 2.68x MSE reduction at 4spp with no G-buffer
+  (`denoise_variance_spike`, bit-identical re-dispatch pinned -- the
+  temporal-history constraint holds by construction). Next, in order:
+  adaptive build (masked re-trace + per-pixel counts), then multi-iteration
+  a-trous on the variance signal measured against the 2.68x bar, then the
+  G-buffer (normals/albedo/depth outputs) only when edges dominate the
+  residual. OIDN stays excluded by the dependency budget.
 - [ ] Path guiding / Light Tree / MBVH only on measured scene-size need.
 
 ### T3. Physics (depth without breaking replay)
@@ -346,10 +370,12 @@ Against the §5 definition, criterion by criterion:
    forward, record, closing-hash-verified re-apply).
 4. **Rotation, then joints, then capsule + sleeping (T3).** One design
    arc each, validator clean before the next starts.
-5. **Live PT: per-frame stepping discipline, adaptive sampling, then the
-   denoiser (T2).** Spike à-trous/SVGF against the temporal-history
-   constraint first; build only what the spike justifies. Exit: live PT
-   on app scenes at the published budgets.
+5. **Live PT (T2).** Stepping discipline DONE; adaptive + denoiser SPIKES
+   measured (loop29) -- verdicts: adaptive justified (top5% = 92%),
+   variance-only a-trous = 2.68x at 4spp, temporal-history constraint
+   holds by construction. Remaining, in order: adaptive build, then
+   multi-iteration a-trous vs the 2.68x bar, then the G-buffer on residual
+   need. Exit: live PT on app scenes at the published budgets.
 6. **Camera/light/render tracks + concurrent arms (T5).** Spec first
    (WyattAu repo survey per §6), then chrome.
 7. **E3 hardware runner, then E6 packaging (T8).** RT is the best-tested

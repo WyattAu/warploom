@@ -14,6 +14,13 @@ Proofs (run against hardware per docs/roadmap.md verification discipline):
          step ticks, play it back step-held after a clip_move, verify
          clips_info shape and that scrub warps disarm record/playback.
          Exit proof for G3 core.
+  t5c -- render-channel tracks (protocol v1.16): arm a track on the
+         reserved render_settings object through the wire, drive the
+         channel, play it back, and read the driven mask through
+         get_render_config. On a visual host the reply also carries the
+         values the host actually applied, so the track -> renderer
+         mapping is observed rather than inferred. Any host: an armed
+         track pins the reserved object against destruction.
 
 Usage:
   tools/live_proof.py w1 --sock /tmp/omnicpp_hw.sock
@@ -431,6 +438,28 @@ def proof_e1(c):
         m2 = c.cmd(cmd="get_pt_mean", id=663).get("detail", "")
         check("stepped pt repeats exactly", m1 == m2 and '"mean":' in m2,
               f"{m1} vs {m2}")
+        # T2 adaptive (v1.17): one variance snapshot from the 16-sample
+        # accumulation, rank-selected so a 0.25 top fraction is EXACTLY a
+        # quarter of the texels even when most variances tie at zero.
+        r = c.cmd(cmd="set_adaptive", id=669, enabled=1, fraction=0.25)
+        check("set_adaptive on ok", r.get("ok") is True, str(r))
+        g = c.detail(cmd="get_adaptive", id=670)
+        check("adaptive reports enabled",
+              g.get("enabled") is True, str(g))
+        check("adaptive selects exactly one quarter",
+              g.get("selected", 0) > 0
+              and g.get("selected", 0) * 4 == g.get("texels", -1),
+              str(g))
+        r = c.cmd(cmd="set_adaptive", id=671, enabled=1, fraction=2)
+        check("adaptive fraction >1 rejected",
+              r.get("ok") is False and "fraction" in r.get("error", ""),
+              str(r))
+        r = c.cmd(cmd="set_adaptive", id=672, enabled=0)
+        check("set_adaptive off ok", r.get("ok") is True, str(r))
+        g = c.detail(cmd="get_adaptive", id=673)
+        check("adaptive reads back off",
+              g.get("enabled") is False and g.get("selected", -1) == 0,
+              str(g))
         r = c.cmd(cmd="set_render_mode", id=664, mode="forward")
         check("leave pt after determinism ok", r.get("ok") is True, str(r))
         r = c.cmd(cmd="set_pt_sample_target", id=667, samples=16)
@@ -440,6 +469,18 @@ def proof_e1(c):
         r = c.cmd(cmd="set_pt_sample_target", id=668)
         check("pt target without arg rejected",
               r.get("ok") is False, str(r))
+        r = c.cmd(cmd="set_adaptive", id=674, enabled=1, fraction=0.25)
+        check("set_adaptive refused outside pt",
+              r.get("ok") is False and "PT mode" in r.get("error", ""),
+              str(r))
+    # Parser-level guard (both hosts): a missing toggle is rejected before
+    # any dispatch, so no host can read it as an implicit disable.
+    r = c.cmd(cmd="set_adaptive", id=675)
+    check("adaptive without enabled rejected",
+          r.get("ok") is False and "enabled" in r.get("error", ""),
+          str(r))
+    r = c.cmd(cmd="get_adaptive", id=676)
+    check("get_adaptive ok", r.get("ok") is True, str(r))
 
     # E2/R4 bloom. Same host-owned class as above; the interesting part is
     # that toggling it must NOT rebuild anything, which the viewport's
@@ -580,16 +621,120 @@ def proof_e1(c):
     check("sim steps after mode churn", r.get("ok") is True, str(r))
 
 
+def proof_t5c(c):
+    """T5c render-channel tracks (protocol v1.16).
+
+    Session-side behaviour is host-independent, so this runs on both hosts:
+    the reserved render_settings object is created by an arm, a channel is
+    recorded and played back, and get_render_config reports the values plus
+    which channels a playing clip drove on the last tick. A visual host
+    appends applied_exposure/applied_bloom/applied_mode, which is the
+    observable half of the track -> renderer mapping.
+    """
+    print("T5c: render-channel tracks over the wire")
+    is_visual_host = c.welcome.get("snapshot", {}).get("render_mode") is not None
+
+    cfg = c.detail(cmd="get_render_config", id=680)
+    check("get_render_config ok",
+          isinstance(cfg, dict) and "exposure" in cfg, str(cfg))
+    check("render config starts undriven", cfg.get("driven") == [], str(cfg))
+
+    r = c.cmd(cmd="clip_add", id=681, name="t5c", frame=0, length=1000000)
+    check("clip_add t5c", r.get("ok") is True, str(r))
+    clip_id = int(r["detail"].rsplit(" ", 1)[1])
+
+    before = c.detail(cmd="list_objects", id=682)
+    check("no render_settings object yet",
+          all(o["name"] != "render_settings" for o in before["objects"]),
+          str(before["objects"])[:200])
+    # oid 0 + a bare render channel resolves to the reserved object and
+    # creates it on demand (undoable spawn).
+    r = c.cmd(cmd="clip_record", id=683, clip=clip_id, oid=0, key="exposure")
+    check("clip_record oid=0 exposure armed",
+          r.get("ok") is True and "recording clip" in r.get("detail", ""),
+          str(r))
+    after = c.detail(cmd="list_objects", id=684)
+    rs = [o for o in after["objects"] if o["name"] == "render_settings"]
+    check("arm created the reserved object exactly once", len(rs) == 1, str(rs))
+    rs_id = rs[0]["id"] if rs else 0
+
+    # Drive the channel, then tick: the sample captures the driven value
+    # (not the default), which is what makes the playback check meaningful.
+    r = c.cmd(cmd="set_property", id=685, object="render_settings",
+              key="exposure", x=2.5)
+    check("set exposure channel", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="step", id=686, ticks=2)
+    check("step during record", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_record_stop", id=687)
+    check("record stop", r.get("ok") is True, str(r))
+
+    info = c.detail(cmd="clips_info", id=688)
+    mine = [k for k in info if k["name"] == "t5c"]
+    check("clips_info has t5c", len(mine) == 1, str(info)[:300])
+    exp_key = str(rs_id) + ":exposure"
+    check("exposure track keyed on the reserved id",
+          len(mine) == 1 and exp_key in mine[0]["tracks"],
+          str(mine[0]["tracks"]) if mine else "")
+    check("recorded the driven value",
+          len(mine) == 1 and mine[0]["tracks"].get(exp_key, {}).get("count", 0)
+          >= 1 and
+          abs(mine[0]["tracks"][exp_key]["samples"][-1] - 2.5) < 1e-9,
+          str(mine[0]["tracks"]) if mine else "")
+
+    # Armment pins the reserved object: destroying it would silently kill
+    # every render track, so the deletion is refused by name.
+    r = c.cmd(cmd="destroy_object", id=689, oid=rs_id)
+    check("referenced render_settings cannot be destroyed",
+          r.get("ok") is False and "referenced by" in r.get("error", ""),
+          str(r))
+
+    # Playback: reset the channel to the default so a value reappearing
+    # proves the track wrote it, not that it was never changed.
+    r = c.cmd(cmd="set_property", id=690, object="render_settings",
+              key="exposure", x=1.0)
+    check("reset exposure to default", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_play", id=691, clip=clip_id)
+    check("clip_play t5c", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="step", id=692, ticks=1)
+    check("step during playback", r.get("ok") is True, str(r))
+    cfg = c.detail(cmd="get_render_config", id=693)
+    check("playback landed on the channel",
+          abs(float(cfg.get("exposure", 0.0)) - 2.5) < 1e-9, str(cfg))
+    check("playing clip marks exposure driven",
+          "exposure" in cfg.get("driven", []), str(cfg))
+    if is_visual_host:
+        applied = float(cfg.get("applied_exposure", 0.0))
+        check("host applied the driven exposure", abs(applied - 2.5) < 1e-3,
+              str(cfg))
+    r = c.cmd(cmd="clip_stop", id=694)
+    check("clip_stop t5c", r.get("ok") is True, str(r))
+    # After the clip stops nothing is driven, so the host must stop
+    # overriding the channel (a sticky flag would clobber socket control).
+    r = c.cmd(cmd="step", id=695, ticks=1)
+    cfg = c.detail(cmd="get_render_config", id=696)
+    check("stopped clip drives nothing", cfg.get("driven") == [], str(cfg))
+    r = c.cmd(cmd="set_property", id=697, object="render_settings",
+              key="exposure", x=1.0)
+    check("restore exposure", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_remove", id=698, clip=clip_id)
+    check("clip_remove t5c", r.get("ok") is True, str(r))
+    # With no tracks left the object is deletable again: the guard is about
+    # dangling tracks, not about the object being special.
+    r = c.cmd(cmd="destroy_object", id=699, oid=rs_id)
+    check("unreferenced render_settings is deletable",
+          r.get("ok") is True, str(r))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "proof", choices=["w1", "g1", "w2", "g3", "e1", "all"])
+        "proof", choices=["w1", "g1", "w2", "g3", "e1", "t5c", "all"])
     parser.add_argument("--sock", default="/tmp/omnicpp_hw.sock")
     parser.add_argument("--sock-a", default="/tmp/omnicpp_w2a.sock")
     parser.add_argument("--sock-b", default="/tmp/omnicpp_w2b.sock")
     args = parser.parse_args()
 
-    if args.proof in ("w1", "g1", "e1", "all"):
+    if args.proof in ("w1", "g1", "e1", "t5c", "all"):
         c = Client(args.sock)
         if args.proof in ("w1", "all"):
             proof_w1(c)
@@ -597,6 +742,10 @@ def main():
             proof_g1(c)
         if args.proof in ("e1", "all"):
             proof_e1(c)
+        if args.proof in ("t5c", "all"):
+            # Frame-counter independent: the clip spans [0, 1e6), so this
+            # runs correctly on a fresh host and after the e1 churn alike.
+            proof_t5c(c)
     if args.proof in ("w2", "all"):
         proof_w2(Client(args.sock_a), Client(args.sock_b))
     if args.proof in ("g3", "all"):

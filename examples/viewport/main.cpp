@@ -822,12 +822,24 @@ struct ViewportApp {
     //! Forwarded to the tracer; the pre-pass additionally skips the submit
     //! while held so a converged image costs no GPU work.
     std::uint32_t pt_sample_target{0U};
+    //! T2 adaptive state (v1.17): the live-PT refinement snapshot. fraction
+    //! is the last requested top fraction (0 = off); selected/threshold are
+    //! the mask that enable call uploaded. Stored here (not on the tracer)
+    //! so get_adaptive can report the wire request without a device read.
+    double pt_adaptive_fraction{0.0};
+    std::size_t pt_adaptive_selected{0U};
+    float pt_adaptive_threshold{0.0F};
   // --- R1b: path tracing -------------------------------------------------
   //! Path-tracing mode ("pt"). Same build-once/cache discipline as the RT
   //! stack, for the same reason: a mode switch must never leave a half-built
   //! stack behind.
   bool pt_mode{false};
   bool pt_stack_built{false};
+  //! `scene.objects.size()` when the PT stack was built. The acceleration
+  //! structure is a snapshot, so a structural edit after the build (spawn,
+  //! destroy, undo over the socket) leaves the tracer drawing geometry the
+  //! raster path no longer has; the count is the cheap staleness signal.
+  std::size_t pt_snapshot_objects{0};
   //! PT mode transitions are REQUESTED here and APPLIED on the render thread.
   //! 1 = enter PT, -1 = leave. The reason is not tidiness: VulkanMemoryAllocator
   //! has no lock, and the render thread allocates every frame, so building the
@@ -851,11 +863,10 @@ struct ViewportApp {
   //! stops improving, so the tracer is reset instead of drifting forever.
   static constexpr std::uint32_t kPtMaxSamples = 4096U;
   //! Latest camera (set by the scene update, consumed by the PT pre-pass).
-  //! Framebuffer extent the PT accumulation image is sized to. Captured from
-  //! the swapchain when the stack is first built; a window resize does not
-  //! rebuild the stack (there is no resize handler for the PT path yet), so
-  //! the tracer renders at the extent it was built with and the tonemap
-  //! samples it 1:1. Recorded so the mismatch is visible rather than silent.
+  //! Extent the PT accumulation image is sized to. Captured from the
+  //! swapchain when the stack is built; `apply_resize` rebuilds the stack at
+  //! the new extent (rebuild_path_tracing), so the tonemap still samples it
+  //! 1:1. Recorded so a mismatch would be visible rather than silent.
   std::uint32_t pt_extent_width{0};
   std::uint32_t pt_extent_height{0};
   std::array<float, 3> pt_eye{{0.0F, 2.0F, 5.0F}};
@@ -1284,6 +1295,29 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
             ",\"available\":" +
             (app_.renderer.compose_bloom_available() ? "true" : "false") + "}";
         break;
+      case CK::GetRenderConfig: {
+        // T5c: the session answers the values and the driven mask; the visual
+        // host appends what it ACTUALLY applied, so the host half is
+        // observable over the wire rather than inferred from a frame. A
+        // driven channel the host could not apply (bloom with compose off)
+        // shows up as a mismatch here, which is the point of reporting both.
+        reply = app_.editor.on_control(command);
+        if (!reply.ok) break;
+        std::string detail = reply.detail;
+        const std::size_t close = detail.rfind('}');
+        char buffer[128];
+        std::snprintf(buffer, sizeof(buffer),
+                      ",\"applied_exposure\":%.6f,\"applied_bloom\":%s,"
+                      "\"applied_mode\":\"%s\"",
+                      static_cast<double>(app_.renderer.compose_exposure()),
+                      app_.renderer.compose_bloom_enabled() ? "true" : "false",
+                      app_.pt_mode ? "pt" : (app_.rt_mode ? "rt" : "forward"));
+        if (close != std::string::npos) {
+          detail.insert(close, buffer);
+          reply.detail = std::move(detail);
+        }
+        break;
+      }
       case CK::SetRtReflections: {
         // R2 (v1.12): push-constant flag, lands on the next recorded frame.
         // RT mode is NOT required to accept it (the flag is inert without
@@ -1384,6 +1418,90 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
         char buf[64];
         std::snprintf(buf, sizeof(buf), "{\"mean\":%.9g}",
                       n > 0U ? sum / static_cast<double>(n) : 0.0);
+        reply.detail = buf;
+        break;
+      }
+      case CK::SetAdaptive: {
+        // T2 (v1.17): app-reachable adaptive refinement. Enabling snapshots
+        // ONE mask from the CURRENT accumulation (top `fraction` of texels
+        // by luma variance, rank-selected so the budget is exact) and the
+        // tracer then refines only masked-in texels; held texels keep their
+        // uniform mean bit-exactly (pinned headlessly by
+        // adaptive_masked_rounds_hold_unmasked_bit_exact). Runs here, on the
+        // render thread between frames, like get_pt_mean's readbacks — the
+        // allocator is untouched (mask buffer + param word only) but the
+        // queue is submitted + idled, so it must not run mid-record.
+        if (command.number_count < 1U) {
+          reply.ok = false;
+          reply.error = "set_adaptive needs enabled=0|1";
+          break;
+        }
+        if (!app_.pt_mode || app_.pt_tracer == nullptr ||
+            !app_.pt_tracer->ready()) {
+          reply.ok = false;
+          reply.error = "set_adaptive needs PT mode (WARPLOOM_PT=1)";
+          break;
+        }
+        const bool want = command.numbers[0] != 0.0;
+        if (!want) {
+          app_.pt_tracer->set_adaptive_enabled(false);
+          app_.pt_adaptive_fraction = 0.0;
+          app_.pt_adaptive_selected = 0U;
+          app_.pt_adaptive_threshold = 0.0F;
+          reply.detail = "adaptive off";
+          break;
+        }
+        const double fraction = command.number_count > 1U
+                                    ? command.numbers[1]
+                                    : 0.25;
+        if (!std::isfinite(fraction) || fraction <= 0.0 || fraction > 1.0) {
+          reply.ok = false;
+          reply.error = "set_adaptive needs fraction in (0,1]";
+          break;
+        }
+        const auto mean = app_.pt_tracer->read_mean();
+        const auto moment = app_.pt_tracer->read_second_moment();
+        if (!mean.is_ok() || !moment.is_ok()) {
+          reply.ok = false;
+          reply.error = "adaptive readback failed";
+          break;
+        }
+        const auto mask = omnicpp::render::adaptive_mask_from_variance(
+            mean.value(), moment.value(), fraction);
+        if (!app_.pt_tracer->upload_adaptive_mask(mask.mask)) {
+          reply.ok = false;
+          reply.error = "adaptive mask upload failed";
+          break;
+        }
+        app_.pt_tracer->set_adaptive_enabled(true);
+        app_.pt_adaptive_fraction = fraction;
+        app_.pt_adaptive_selected = mask.selected;
+        app_.pt_adaptive_threshold = mask.threshold;
+        char buf[160];
+        std::snprintf(buf, sizeof(buf),
+                      "adaptive on (fraction=%.4g, selected=%zu/%zu, "
+                      "threshold=%.6g)",
+                      fraction, mask.selected, mask.mask.size(),
+                      static_cast<double>(mask.threshold));
+        reply.detail = buf;
+        break;
+      }
+      case CK::GetAdaptive: {
+        const bool enabled = app_.pt_tracer != nullptr &&
+                             app_.pt_tracer->adaptive_enabled();
+        const std::uint64_t texels =
+            (app_.pt_tracer != nullptr)
+                ? static_cast<std::uint64_t>(app_.pt_tracer->width()) *
+                      static_cast<std::uint64_t>(app_.pt_tracer->height())
+                : 0U;
+        char buf[192];
+        std::snprintf(buf, sizeof(buf),
+                      "{\"enabled\":%s,\"fraction\":%.6g,\"selected\":%llu,"
+                      "\"texels\":%llu,\"threshold\":%.6g}",
+                      enabled ? "true" : "false", app_.pt_adaptive_fraction,
+                      static_cast<unsigned long long>(app_.pt_adaptive_selected),
+                      static_cast<unsigned long long>(texels),
+                      static_cast<double>(app_.pt_adaptive_threshold));
         reply.detail = buf;
         break;
       }
@@ -4252,6 +4370,9 @@ void destroy_path_tracing(ViewportApp& app) {
   app.pt_frame = 0U;
   app.pt_stack_built = false;
   app.pt_mode = false;
+  app.pt_adaptive_fraction = 0.0;
+  app.pt_adaptive_selected = 0U;
+  app.pt_adaptive_threshold = 0.0F;
 }
 
 //! Frame pre-pass hook: one accumulation round per rendered frame. Runs
@@ -6474,6 +6595,50 @@ void tick_node_editor(ViewportApp& app) {
   }
 }
 
+//! T5c host half: timeline-driven render channels. Runs on the render
+//! thread right after tick_session, so the values land before the NEXT
+//! frame's record (the tick itself runs after this frame's submit -- same
+//! one-frame latency as every other session-driven visual). ONLY channels
+//! a playing clip wrote this tick are applied: with no render clip
+//! playing nothing is driven and the renderer is left alone, which is
+//! what keeps a recorded exposure from clobbering the E1/R4 socket path
+//! (set_exposure/set_bloom) on every frame. render_mode 0/1/2 maps onto
+//! the same transitions as the SetRenderMode socket verb (pt via the
+//! render-thread request; rt builds the cached stack on demand).
+//! tone_map has no renderer knob yet, so the channel records and plays
+//! session-side but has no host effect (stated, not silent).
+void apply_timeline_render_config(ViewportApp& app) {
+  const auto cfg = app.editor.render_config();
+  if (cfg.exposure_driven && std::isfinite(cfg.exposure)) {
+    const float e = std::clamp(static_cast<float>(cfg.exposure), 0.01F, 100.0F);
+    app.renderer.set_exposure(e);
+    if (app.capture_chain != nullptr) app.capture_chain->set_exposure(e);
+  }
+  if (cfg.bloom_driven) {
+    const bool want = cfg.bloom != 0.0;
+    // Best-effort like the frame loop it runs in: when compose is off
+    // there is no bloom stage to switch, and a timeline track must not
+    // fail a frame the way a socket verb can fail a reply.
+    (void)app.renderer.set_bloom_enabled(want);
+    if (app.capture_chain != nullptr) {
+      (void)app.capture_chain->set_bloom_enabled(want);
+    }
+  }
+  if (cfg.render_mode_driven) {
+    const int mode = static_cast<int>(cfg.render_mode);
+    if (mode == 2) {
+      app.pt_request_.store(1);
+    } else {
+      if (mode == 1 && !app.rt_stack_built) {
+        if (setup_rt_shadows(app)) app.rt_stack_built = true;
+      }
+      if (mode == 1 && app.rt_stack_built) app.rt_mode = true;
+      if (mode != 1) app.rt_mode = false;
+      app.pt_request_.store(-1);
+    }
+  }
+}
+
 //! Session tick, same call the headless host makes. C2 used to call
 //! sync_graph only, so the viewport never ticked its timeline -- a clip
 //! played in the viewport did nothing while the same document played
@@ -7116,7 +7281,45 @@ void ViewportApp::run() {
     // on this thread because the allocator is not thread-safe.
     {
       const int want = pt_request_.exchange(0);
+      // Leaving PT is ONE body: the rebuild path below and the wire command
+      // must clear the same three consumers, or one of them keeps sampling an
+      // accumulation image that destroy_path_tracing is about to free.
+      const auto leave_pt = [&]() {
+        if (!pt_mode) return;
+        pt_mode = false;
+        // Leaving PT returns the stack to uniform: a re-entered stack must
+        // not resume a mask computed from a previous accumulation window.
+        if (pt_tracer != nullptr) pt_tracer->set_adaptive_enabled(false);
+        pt_adaptive_fraction = 0.0;
+        pt_adaptive_selected = 0U;
+        pt_adaptive_threshold = 0.0F;
+        pt_hold_camera = false;
+        renderer.set_external_tonemap_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
+        renderer.set_compose_inverse_samples(1.0F);
+        if (capture_chain != nullptr && capture_chain->ready()) {
+          capture_chain->set_external_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
+          capture_chain->set_inverse_samples(1.0F);
+        }
+        if (pt_pre_pass_index != static_cast<std::size_t>(-1)) {
+          renderer.remove_frame_pre_pass_callback(pt_pre_pass_index);
+          pt_pre_pass_index = static_cast<std::size_t>(-1);
+        }
+      };
       if (want == 1) {
+        // The PT acceleration structure is a SNAPSHOT of scene.objects, and
+        // the object list is what document edits (spawn_cube, destroy, undo
+        // over the socket) change. Reusing a stale stack traces geometry the
+        // raster path no longer draws, so rebuild instead of reusing it.
+        if (pt_stack_built && pt_snapshot_objects != scene.objects.size()) {
+          std::fprintf(stderr,
+                       "viewport: PT snapshot is stale (%zu -> %zu scene "
+                       "objects); rebuilding\n",
+                       pt_snapshot_objects, scene.objects.size());
+          leave_pt();
+          destroy_path_tracing(*this);
+          pt_stack_built = false;
+          pt_frame = 0U;
+        }
         if (!pt_stack_built) {
           if (scene.objects.empty()) {
             // The object list is (re)built per frame inside record_scene_into,
@@ -7126,6 +7329,10 @@ void ViewportApp::run() {
             pt_request_.store(1);
           } else if (setup_path_tracing(*this)) {
             pt_stack_built = true;
+            pt_snapshot_objects = scene.objects.size();
+            pt_adaptive_fraction = 0.0;
+            pt_adaptive_selected = 0U;
+            pt_adaptive_threshold = 0.0F;
             std::fprintf(stderr,
                          "viewport: PT stack built over %zu scene objects "
                          "(%zu meshes)\n",
@@ -7159,20 +7366,7 @@ void ViewportApp::run() {
               renderer.add_frame_pre_pass_callback(record_pt_round_cb, this);
         }
       } else if (want == -1) {
-        if (pt_mode) {
-          pt_mode = false;
-          pt_hold_camera = false;
-          renderer.set_external_tonemap_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
-          renderer.set_compose_inverse_samples(1.0F);
-          if (capture_chain != nullptr && capture_chain->ready()) {
-            capture_chain->set_external_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
-            capture_chain->set_inverse_samples(1.0F);
-          }
-          if (pt_pre_pass_index != static_cast<std::size_t>(-1)) {
-            renderer.remove_frame_pre_pass_callback(pt_pre_pass_index);
-            pt_pre_pass_index = static_cast<std::size_t>(-1);
-          }
-        }
+        leave_pt();
         pt_frame = 0U;
       }
     }
@@ -7234,6 +7428,8 @@ void ViewportApp::run() {
     // run instruction, matching the headless host, so wire-driven
     // record/playback advance under step control while paused.
     tick_session(*this, control_paused() && !step_released, step_sub_frame);
+    // T5c: timeline-driven render channels land on the next recorded frame.
+    apply_timeline_render_config(*this);
     // Input tick: poll drivers (virtual script when present), let the
     // camera respond, and log consumed events for auditability.
     input.begin_tick();

@@ -16,7 +16,7 @@ and compose stages through the module's own entry points; the
 "untested in production" gap this page used to warn about is closed.
 
 Proof runs under the Khronos validation layer. The full suite
-(693 tests, `warploom_unit_tests`) passes on an RTX 2060 (default
+(738 tests, `warploom_unit_tests`) passes on an RTX 2060 (default
 preset, measured 2026-11-01); the Vulkan tests enable the layer and
 assert their own validation error/warning counts, so the green run is
 also the 0-diagnostics evidence. On CI's Mesa lavapipe software Vulkan,
@@ -124,7 +124,28 @@ Two honest caveats on the ray tracing:
   `set_viewport_size`. Bloom layers on the PT source since 2026-11-01 (the
   PT bright-pass divides the accumulation by n before the Karis threshold;
   `VulkanHardware.PathTracedFrameLayersBloom`). What is still narrow: no
-  app-scene integration (one cube + slab).
+  denoiser in the render path (the filter is a measured spike, pinned at
+  1.67x on the test scene); adaptive sampling is reachable but opt-in:
+  `set_adaptive`/`get_adaptive` (protocol v1.17) snapshot ONE variance mask
+  from the live accumulation (top fraction by luma variance, rank-selected
+  so the budget is exact) and the tracer refines only masked-in texels,
+  with held texels keeping their uniform mean bit-exactly (pinned headlessly
+  by `adaptive_masked_rounds_hold_unmasked_bit_exact`); leaving PT disables
+  it so a re-entered stack is uniform again. Measured on the RTX 2060 at
+  1000x600: fraction=0.25 selected exactly 150000/600000 texels. Gate
+  (2026-11-05): the viewport half of e1 currently cannot run to completion
+  on EITHER this tree or HEAD -- both die at the first real resize
+  (`resized to 1000x600`, then `frame presentation failed`) with ~5.3/6.1
+  GiB VRAM held by other processes. The 7 visual adaptive checks pass 7/7
+  before that pre-existing failure; the 2 parser-level checks pass on the
+  headless `all` run (105/105). App-scene coverage is no
+  longer a gap: `setup_path_tracing` walks `scene.objects` and uploads one
+  mesh per category (cube, ground, each mannequin import, each city part,
+  merged sponza, all nameable by `mesh_index`), falling back to the cube
+  pair only when nothing drawable exists -- and a stack built from that
+  snapshot is rebuilt when the object count changes, so a cube spawned over
+  the socket is traced after the next `set_render_mode("pt")` instead of
+  leaving the tracer on a scene the raster path no longer draws.
 
 ## Determinism
 
@@ -135,8 +156,8 @@ The one subsystem that needs no caveat.
 | Fixed-step scheduler, state hash, replay | yes | yes | 8 scrubber tests + 23-assertion socket proof |
 | Document save/load, atomic write, undo boundaries | yes | yes | protocol-path test + 16-assertion proof |
 | Protocol record/replay (`warploom-replay-v1`) | yes | yes | `test_command_recorder`, 19-assertion two-instance proof |
-| Timeline clips as document entities | yes | no | 8 tests + 27-assertion proof; the widget has no app caller |
-| Live socket proof harness  + `e1` (render mode/exposure/bloom/RT-toggle/PT-stepped wire contract)| — | — | `tools/live_proof.py all` → **80/80 assertions** headless; the visual-host half (payload validation + bloom read-back + RT-sub-toggle round-trip + stepped-PT determinism round-trip: enter pt, target 16, poll to 16, mean M1, leave + re-enter, repeat to 16, M2 == M1 bitwise) passed on the RTX 2060 viewport, 58/58 e1, 0 diagnostics |
+| Timeline clips as document entities | yes | yes | 20 tests in `modules/core/tests/test_timeline.cpp` (5 re-run green when these rows were corrected) + the `g3` assertions inside `tools/live_proof.py all`; the widget has had an app caller since G3-B (`ClipTimelineView` above the W1 scrub strip) |
+| Live socket proof harness  + `e1` (render mode/exposure/bloom/RT-toggle/PT-stepped wire contract)| — | — | `tools/live_proof.py all` → **103/103 assertions** headless (measured 2026-11-05, three fresh hosts: w1, g1, e1 and t5c on one, then w2 across two); the visual-host half (payload validation + bloom read-back + RT-sub-toggle round-trip + stepped-PT determinism round-trip: enter pt, target 16, poll to 16, mean M1, leave + re-enter, repeat to 16, M2 == M1 bitwise) passed on the RTX 2060 viewport, 58/58 e1, plus `t5c` 24/24 there, 0 diagnostics in the viewport log |
 
 **The determinism story stops at physics.** The viewport steps physics in
 the wall-clock frame loop rather than the fixed tick, the headless host
@@ -167,10 +188,10 @@ unimplemented.
 | Clips as document entities, schema v3 | yes |
 | Undoable clip add / remove / move, protocol v1.8 | yes |
 | Record and playback with auto-disarm, axis-suffix properties | yes |
-| **Interpolation** | no — `TimelineClip::evaluate` takes the last sample at or before the frame, so playback steps between keys |
-| Easing / curves | no |
-| Concurrent record and play tracks | no — both arms are single scalars |
-| Camera, light and render-property tracks | no |
+| **Interpolation** | yes — `TimelineClip::evaluate_at` lerps between bracketing samples, and the live tick interpolates whenever the host supplies a sub-frame fraction (`FrameInput::sub_frame` → `advance_timeline` → `Easing::Linear`). Whole-frame ticks keep `Easing::Step`, which is the pre-interpolation behaviour and is what replays use, so an existing recording still reproduces its original run. Pinned by `SceneDocument.StepModeAtWholeFramesReproducesEvaluateExactly`, `LinearInterpolationIsMonotonicBetweenKeys` and `TimelineSession.SubFrameFractionRecordsAndReplaysDeterministically` |
+| Easing / curves | partial — `Easing` has Step/Linear/SmoothStep/EaseIn/EaseOut and `apply_easing` implements all of them with exact endpoints, pinned by `EasingEndpointsAreExactAndOrderingDiffers`. What is missing is *selection*: no document field and no wire command stores a per-clip easing, so the app can only reach Linear (live) and Step (whole frames) |
+| Concurrent record and play tracks | yes — one record arm set and one play arm per clip, armed in insertion order and sampled in that order; two arms on the same track are rejected at arm time. Pinned by `TimelineSession.ConcurrentRecordAndPlayArmsBoth`, `ConcurrentArmsSurviveReplay` and `ConcurrentRecordArmsAreIndependent` |
+| Camera, light and render-property tracks | camera yes, render-property yes, light no — `clip_record_all` (v1.15) arms every recordable property of one object, pinned on a camera pose (`eye`/`target`/`fov`, save/load byte-identical); render channels (exposure, bloom, render mode) go through the reserved `render_settings` object and onto `RenderConfig`'s `*_driven` flags (v1.16, `get_render_config`), pinned session-side and live by `tools/live_proof.py t5c`; lights have no track path |
 | Clip strip widget in the app | yes — `ClipTimelineView` rebuild/sync above the W1 scrub strip; block drag commits ClipMove through the session queue, live-proven 60→84 with undo/redo |
 
 ## What closing the gaps means
@@ -238,8 +259,13 @@ What remains, in priority order:
    mesh_index (0xFFFFFFFF = identity, bit-for-bit backward compatible),
    proven by `shared_mesh_renders_identically` (shared BLAS bit-identical
    to duplicate BLASes; wrong mapping and out-of-range index both fail).
-   Still open: the viewport still traces the hardcoded pair (app-scene
-   geometry has no PT path yet).3. The document timeline is decoupled from the UI panel: `tick_session()`
+   App-scene coverage then landed (see the PT caveat above): the viewport
+   snapshots `scene.objects` into one PT mesh per category and rebuilds the
+   stack when that object count changes -- measured live on the RTX 2060,
+   spawn-before-build traces 11 objects, a 12th spawned after the build
+   leaves a stale stack (the sabotaged build re-enters PT and keeps 11, with
+   no rebuild line), and the fixed build reports `stale (11 -> 12)` and
+   rebuilds over 12 with 0 validation diagnostics.3. The document timeline is decoupled from the UI panel: `tick_session()`
    runs `editor.tick()` on every rendered frame whether or not the node
    editor is visible (previously it lived inside `tick_node_editor()`, so
    clip playback and recording were inert with the editor off). A
@@ -280,5 +306,7 @@ What remains, in priority order:
   destroys.
 - **Viewport clip dispatch (fixed):** the viewport now delegates all eight
   timeline-clip control kinds. The wire table parsed them; the dispatch switch
-  did not, so the viewport answered "unhandled command". The session tick is
-  still coupled to the node editor's visibility -- open.
+  did not, so the viewport answered "unhandled command". The session tick was
+  also coupled to the node editor's visibility at the time; that is fixed too
+  (`tick_session()` runs on every rendered frame, item 3 above), so this
+  paragraph has no open half.
