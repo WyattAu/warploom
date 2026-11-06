@@ -45,10 +45,12 @@ sanitizer presets on the current tree: asan-ubsan physics/session 29/29
 plus core 22/22 and editor 48/48 with 0 diagnostics, and tsan
 physics/session/control 39/39 plus core 22/22 and editor 48/48 with 0
 data races — the new index arithmetic rides the same verified presets
-rather than a fresh claim. The Vulkan-off headless-debug-clang leg
-likewise recompiles the touched headers clean (0 warnings) with the
-same subset green — the tree configuration that bit before stays
-covered around the new code.
+rather than a fresh claim.The Vulkan-off
+headless-debug-clang leg likewise recompiles the touched headers clean
+(0 warnings, re-verified after the loop55-59 solver changes) with the
+same subset green (29/29) — the tree configuration that bit before
+stays covered around the new code. All three non-default presets show
+0 warnings on the touched files.
 
 The one-count-per-compiler trap almost survived this re-run: the
 `headless-debug-clang` CI leg reported 104 clang-only warnings, all of the
