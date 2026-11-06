@@ -65,10 +65,15 @@ Phase A fixed the substrate so those were addressable; Phases B–D used it.
 - [x] **A8 CI builds the viewport** — every job previously set
       `WARPLOOM_BUILD_EXAMPLES=OFF`.
 
-Remaining known debt, deliberately not hidden: `format-check` fails,
-because 194 of 195 files do not match `.clang-format`; and
-`WARPLOOM_WARNINGS_AS_ERRORS` defaults OFF against ~270 real warnings.
-Both are the next campaigns, not this one.
+Update 2026-11-06 (loop43): both campaigns this paragraph named are
+CLOSED — E4 paid the warning debt (all presets 0 warnings on clang and
+GCC; sanitizer legs at 0 diagnostics, 0 leaks, 0 races) and E5 greened
+the format gate (0 warnings across all sources, `format-check` in CI).
+What is still literally true is the default: `WARPLOOM_WARNINGS_AS_ERRORS`
+remains OFF (`cmake/CompilerFlags.cmake:20`, read today). With the debt
+paid that default masks nothing, but no workflow in this repository sets
+it ON, so a future warning enters silently until a strict build catches
+it. That is the remaining debt: one CI line, not ~270 warnings.
 
 ## Phase B — one render path
 
