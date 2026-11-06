@@ -885,9 +885,12 @@ TEST(PhysicsWorld, FastBodyTunnelsOnSomePhasesR3Gate) {
   constexpr float kR = 1.0f;       // static obstacle radius
   constexpr float kR2 = 0.1f;      // projectile radius
   constexpr float kWindow = kR + kR2;
-  constexpr float kDt = 1.0f / 60.0f;
+  // Gate-local name: the file-scope kDt is 1/120, and this gate needs the
+  // 3.3 m/step travel that 1/60 gives (a test-scope kDt shadowed it, which
+  // -Wshadow caught on clang).
+  constexpr float kGateDt = 1.0f / 60.0f;
   constexpr float kStepTravel = 3.0f * kWindow;  // S = 3W > W: misses exist
-  constexpr float kSpeed = kStepTravel / kDt;    // 198 m/s at this dt
+  constexpr float kSpeed = kStepTravel / kGateDt;  // 198 m/s at this dt
   constexpr int kPhases = 12;
   constexpr int kSteps = 10;  // -10 + 10*3.3 clears the obstacle on every phase
 
@@ -911,7 +914,7 @@ TEST(PhysicsWorld, FastBodyTunnelsOnSomePhasesR3Gate) {
       shot.restitution = 0.0f;  // approach killed on contact: cross vs return
       shot.velocity[0] = kSpeed;
       (void)w.add_body(shot);
-      for (int i = 0; i < kSteps; ++i) w.step(kDt);
+      for (int i = 0; i < kSteps; ++i) w.step(kGateDt);
       final_xv.emplace_back(w.body(1).position[0], w.body(1).velocity[0]);
     }
     return final_xv;
@@ -919,7 +922,7 @@ TEST(PhysicsWorld, FastBodyTunnelsOnSomePhasesR3Gate) {
 
   const std::vector<std::pair<float, float>> first = run_sweep();
   int tunneled = 0;
-  for (const auto [x, vx] : first) {
+  for (const auto& [x, vx] : first) {
     if (x > kR) {
       ++tunneled;  // through: clean miss, or far-side ejection at full speed
       EXPECT_GT(vx, 0.0f) << "tunneled but stopped: third mechanism?";

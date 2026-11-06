@@ -184,6 +184,14 @@ LDFLAGS="-Wl,--as-needed -Wl,--no-undefined -Wl,-z,relro -Wl,-z,now"
 | `-z,relro` | Relocation read-only | Makes some sections read-only after relocation |
 | `-z,now` | Bind symbols immediately | Binds all symbols at load time (no lazy binding) |
 
+> Determinism note: `-march=native` trades cross-machine replay
+> determinism for speed. Native codegen may select different vector code
+> paths than another machine's build, changing floating-point rounding
+> order inside a tick — a recording made here can diverge on other CPUs
+> even with the project's global `-ffp-contract=off`. Keep a
+> default-preset build around for replay verification; use these flags
+> for iteration speed.
+
 ---
 
 ## CachyOS GCC Build Instructions
