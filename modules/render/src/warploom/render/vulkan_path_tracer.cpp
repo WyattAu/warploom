@@ -519,6 +519,81 @@ struct TracerGpuParams {
     return refuse("SBT write failed");
   }
 
+  // ---- Denoised-mean output image (same creation path: the tonemap will ----
+  // ---- sample it, so it needs the SAMPLED bit like the accumulation) -----
+  if (!make_storage_image(denoise_image_, denoise_view_, denoise_allocation_)) {
+    return ::warploom::core::Result<void>::ok();  // refuse() already ran
+  }
+
+  // ---- Denoise compute pipeline + descriptor set ---------------------------
+  // Bindings 0-3 mirror the spike shader's (sums, moment, G-buffer, out);
+  // binding 4 is the count image, the one way this shader differs from
+  // denoise_edge_atrous: per-texel divisors instead of scalar counts.
+  auto denoise_layout = descriptor_manager_->create_layout(
+      {{0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_SHADER_STAGE_COMPUTE_BIT},
+       {0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_SHADER_STAGE_COMPUTE_BIT},
+       {0, 2, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_SHADER_STAGE_COMPUTE_BIT},
+       {0, 3, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_SHADER_STAGE_COMPUTE_BIT},
+       {0, 4, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_SHADER_STAGE_COMPUTE_BIT}},
+      1U);
+  if (!denoise_layout.is_ok()) return refuse("denoise layout failed");
+  denoise_layout_ = denoise_layout.value();
+  auto denoise_set = descriptor_manager_->allocate_set(denoise_layout_);
+  if (!denoise_set.is_ok()) return refuse("denoise set failed");
+  denoise_set_ = denoise_set.value();
+  if (!denoise_pipeline_
+           .load_shader_stage_file(
+               device_, shader_dir_ + "/denoise_edge_counts.comp.spv",
+               "compute")
+           .is_ok()) {
+    return refuse("denoise shader load failed");
+  }
+  {
+    const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 28U};
+    if (!denoise_pipeline_
+             .create_pipeline_layout(device_, &denoise_layout_, 1, &push)
+             .is_ok()) {
+      return refuse("denoise pipeline layout failed");
+    }
+  }
+  if (!denoise_pipeline_.create_compute_pipeline(device_, denoise_pipeline_.pipeline_layout())
+           .is_ok()) {
+    return refuse("denoise pipeline creation failed");
+  }
+  if (!descriptor_manager_
+           ->write_image(denoise_set_, 0U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                         VK_NULL_HANDLE, accum_view_, VK_IMAGE_LAYOUT_GENERAL,
+                         0U)
+           .is_ok() ||
+      !descriptor_manager_
+           ->write_image(denoise_set_, 1U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                         VK_NULL_HANDLE, moment_view_, VK_IMAGE_LAYOUT_GENERAL,
+                         0U)
+           .is_ok() ||
+      !descriptor_manager_
+           ->write_image(denoise_set_, 2U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                         VK_NULL_HANDLE, gbuffer_view_, VK_IMAGE_LAYOUT_GENERAL,
+                         0U)
+           .is_ok() ||
+      !descriptor_manager_
+           ->write_image(denoise_set_, 3U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                         VK_NULL_HANDLE, denoise_view_, VK_IMAGE_LAYOUT_GENERAL,
+                         0U)
+           .is_ok() ||
+      !descriptor_manager_
+           ->write_image(denoise_set_, 4U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                         VK_NULL_HANDLE, count_view_, VK_IMAGE_LAYOUT_GENERAL,
+                         0U)
+           .is_ok()) {
+    return refuse("denoise descriptor write failed");
+  }
+  denoise_laid_out_ = false;
+
   // ---- Descriptor writes (the AS descriptor only after the build submitted) -
   if (!descriptor_manager_
            ->write_image(descriptor_set_, 0U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
@@ -704,6 +779,104 @@ void VulkanPathTracer::record_round([[maybe_unused]] VkCommandBuffer command_buf
     ++samples_;
   }
 #endif
+}
+
+void VulkanPathTracer::record_denoise([[maybe_unused]] VkCommandBuffer command_buffer) noexcept {
+#ifdef OMNICPP_HAS_VULKAN
+  if (!ready_ || command_buffer == VK_NULL_HANDLE) return;
+
+  // Input scope: the round's trace writes (storage images, GENERAL). The
+  // count image was cleared by TRANSFER like the sums, so its last write
+  // may be either -- cover both source stages, exactly like the spike's
+  // barrier_inputs (RT | TRANSFER -> COMPUTE read).
+  VkImageMemoryBarrier in{};
+  in.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  in.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+  in.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  in.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+  in.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+  in.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  in.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  in.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  VkImageMemoryBarrier ins[4] = {in, in, in, in};
+  ins[0].image = accum_image_;
+  ins[1].image = moment_image_;
+  ins[2].image = gbuffer_image_;
+  ins[3].image = count_image_;
+  vkCmdPipelineBarrier(command_buffer,
+                       VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
+                           VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                       0, nullptr, 4, ins);
+
+  // First dispatch lays the output out of UNDEFINED; it persists GENERAL
+  // across frames (same lifetime rule as the accumulation), so later
+  // dispatches only need the execution edge, not the transition.
+  if (!denoise_laid_out_) {
+    VkImageMemoryBarrier prep{};
+    prep.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    prep.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    prep.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    prep.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    prep.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    prep.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    prep.image = denoise_image_;
+    prep.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &prep);
+    denoise_laid_out_ = true;
+  }
+
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    denoise_pipeline_.pipeline());
+  VkDescriptorSet set = denoise_set_;
+  vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          denoise_pipeline_.pipeline_layout(), 0, 1, &set, 0,
+                          nullptr);
+  // Measured-best loop30 widths (k=2.0, spatial=1.5; normal stop inert on
+  // planar scenes so 0.1 is the sweep middle; depth=1.0 separates
+  // silhouettes), stride 1: the single-iteration pin. No tuning API: the
+  // values are a measured result, baked where the measurement lives.
+  struct DenoisePush {
+    std::uint32_t w, h;
+    float k, sigma, ns, ds;
+    std::uint32_t stride;
+  };
+  static_assert(sizeof(DenoisePush) == 28U, "push layout drifted");
+  const DenoisePush p{width_, height_, 2.0F, 1.5F, 0.1F, 1.0F, 1U};
+  vkCmdPushConstants(command_buffer, denoise_pipeline_.pipeline_layout(),
+                     VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DenoisePush), &p);
+  vkCmdDispatch(command_buffer, (width_ + 7U) / 8U, (height_ + 7U) / 8U, 1U);
+
+  // Output scope: GENERAL -> GENERAL, compute-write visible to a later
+  // shader read (the tonemap samples it) and to transfer (read_denoised).
+  // The compose chain's own source-scope barrier (updated to the compute
+  // stage when the viewport points the external source here) chains the
+  // cross-submit capture read; this barrier keeps the object safe for
+  // standalone callers and orders the same-submit tonemap.
+  VkImageMemoryBarrier out{};
+  out.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  out.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  out.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+  out.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+  out.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+  out.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  out.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  out.image = denoise_image_;
+  out.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                           VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       0, 0, nullptr, 0, nullptr, 1, &out);
+#endif
+}
+
+::warploom::core::Result<std::vector<float>> VulkanPathTracer::read_denoised() const {
+  // The denoised image holds a filtered MEAN, not sums: copy without
+  // dividing, exactly like read_gbuffer.
+  return read_image_sum(denoise_image_);
 }
 
 void VulkanPathTracer::set_camera([[maybe_unused]] const PathTracerCamera& camera) noexcept {
@@ -1069,16 +1242,21 @@ void VulkanPathTracer::destroy_resources() noexcept {
     if (instance_allocation_.is_valid()) allocator_->destroy_allocation(instance_allocation_);
     if (sbt_allocation_.is_valid()) allocator_->destroy_allocation(sbt_allocation_);
     if (accum_allocation_.is_valid()) allocator_->destroy_allocation(accum_allocation_);
+    if (denoise_allocation_.is_valid()) allocator_->destroy_allocation(denoise_allocation_);
     if (moment_allocation_.is_valid()) allocator_->destroy_allocation(moment_allocation_);
     if (count_allocation_.is_valid()) allocator_->destroy_allocation(count_allocation_);
     if (gbuffer_allocation_.is_valid()) allocator_->destroy_allocation(gbuffer_allocation_);
     if (mask_allocation_.is_valid()) allocator_->destroy_allocation(mask_allocation_);
   }
+  denoise_pipeline_.cleanup(device_);
+  denoise_layout_ = VK_NULL_HANDLE;
+  denoise_set_ = VK_NULL_HANDLE;
   blas_list_.clear();
   params_allocation_ = Allocation{};
   instance_allocation_ = Allocation{};
   sbt_allocation_ = Allocation{};
   accum_allocation_ = Allocation{};
+  denoise_allocation_ = Allocation{};
   moment_allocation_ = Allocation{};
   count_allocation_ = Allocation{};
   gbuffer_allocation_ = Allocation{};
@@ -1092,6 +1270,14 @@ void VulkanPathTracer::destroy_resources() noexcept {
   if (accum_image_ != VK_NULL_HANDLE) {
     vkDestroyImage(device_, accum_image_, nullptr);
     accum_image_ = VK_NULL_HANDLE;
+  }
+  if (denoise_view_ != VK_NULL_HANDLE) {
+    vkDestroyImageView(device_, denoise_view_, nullptr);
+    denoise_view_ = VK_NULL_HANDLE;
+  }
+  if (denoise_image_ != VK_NULL_HANDLE) {
+    vkDestroyImage(device_, denoise_image_, nullptr);
+    denoise_image_ = VK_NULL_HANDLE;
   }
   if (moment_view_ != VK_NULL_HANDLE) {
     vkDestroyImageView(device_, moment_view_, nullptr);
@@ -1123,6 +1309,8 @@ void VulkanPathTracer::destroy_resources() noexcept {
   samples_ = 0;
   camera_dirty_ = false;
   adaptive_enabled_ = false;
+  denoise_enabled_ = false;
+  denoise_laid_out_ = false;
 }
 
 void VulkanPathTracer::destroy() noexcept {

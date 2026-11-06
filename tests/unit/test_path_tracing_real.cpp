@@ -3943,6 +3943,623 @@ TEST(path_tracing_real, denoise_edge_gbuffer_spike) {
   ctx.cleanup();
 }
 
+//! T2 render-path consumer: the tracer's record_denoise() (count-sourced
+//! edge-stopped a-trous) must reproduce the spike shader bit-exactly on a
+//! uniform accumulation -- the new shader differs from
+//! denoise_edge_atrous.comp ONLY in the divisor source (count image vs
+//! scalar push), so identical inputs must give identical texels. The
+//! old-shader dispatch below is the equivalence instrument, not a second
+//! pin: it runs the frozen spike shader with the baked widths
+//! (k=2.0/sigma=1.5/ns=0.1/ds=1.0, the engine's baked values) over the
+//! same 4spp accumulation and the outputs must be bit-identical.
+TEST(path_tracing_real, denoise_render_path_uniform_parity) {
+  omnicpp::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("OmniCppPtDenoisePath", true).is_ok());
+  if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+  const std::uint32_t side = 64U;
+  constexpr std::uint32_t kNoisyFrames = 4U;
+  constexpr std::uint32_t kRefFrames = 128U;
+
+  omnicpp::render::VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+
+  const std::vector<float> box = {
+      -0.5F, -0.5F, -0.5F,  -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,  -0.5F, -0.5F, -0.5F,
+      -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, -0.5F, 0.5F,  -0.5F, -0.5F, -0.5F};
+  auto geo = alloc.create_buffer(box.size() * sizeof(float),
+                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  std::memcpy(geo.value().mapped, box.data(), box.size() * sizeof(float));
+  VkBufferDeviceAddressInfo ai{};
+  ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  ai.buffer = geo.value().buffer;
+
+  omnicpp::render::PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.width = side;
+  cfg.height = side;
+  cfg.max_bounces = 4U;
+  cfg.sky.mode = 1U;
+  omnicpp::render::PathTracerMesh cube{};
+  cube.vertex_buffer_address = static_cast<std::uint64_t>(
+      vkGetBufferDeviceAddress(ctx.device(), &ai));
+  cube.triangle_count = 12U;
+  cube.max_vertex = 35U;
+  cfg.meshes = {cube};
+  cfg.instances = {
+      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+
+  omnicpp::render::VulkanPathTracer tracer;
+  ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
+                            ctx.graphics_queue(), qf, alloc, cfg)
+                  .is_ok());
+  omnicpp::render::PathTracerCamera cam{};
+  cam.position = {0.0F, 0.6F, 2.6F};
+  cam.forward = {0.0F, -0.2F, -1.0F};
+  cam.right = {1.0F, 0.0F, 0.0F};
+  cam.up = {0.0F, 1.0F, 0.0F};
+  tracer.set_camera(cam);
+
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+      ctx.device(), qf);
+  ASSERT_TRUE(pool.is_ok());
+  const auto submit_wait = [&](VkCommandBuffer cb) {
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1U;
+    si.pCommandBuffers = &cb;
+    EXPECT_EQ(vkQueueSubmit(ctx.graphics_queue(), 1, &si, VK_NULL_HANDLE),
+              VK_SUCCESS);
+    EXPECT_EQ(vkQueueWaitIdle(ctx.graphics_queue()), VK_SUCCESS);
+  };
+  const auto record_rounds = [&](std::uint32_t frames) {
+    for (std::uint32_t r = 0; r < frames; ++r) {
+      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+          ctx.device(), pool.value());
+      EXPECT_TRUE(cbr.is_ok());
+      if (!cbr.is_ok()) return;
+      VkCommandBuffer cb = cbr.value();
+      VkCommandBufferBeginInfo bi{};
+      bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+      tracer.record_round(cb, r, r == 0U);
+      EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+      submit_wait(cb);
+      vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+    }
+  };
+  const auto record_denoise_once = [&]() {
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    EXPECT_TRUE(cbr.is_ok());
+    if (!cbr.is_ok()) return;
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    tracer.record_denoise(cb);
+    EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+  };
+
+  record_rounds(kNoisyFrames);
+  EXPECT_EQ(tracer.sample_count(), kNoisyFrames);
+  // Denoise disabled by default: a fresh tracer tonemaps the raw
+  // accumulation, exactly the pre-consumer behaviour.
+  EXPECT_FALSE(tracer.denoise_enabled());
+  tracer.set_denoise_enabled(true);
+  EXPECT_TRUE(tracer.denoise_enabled());
+  record_denoise_once();
+  auto denoised = tracer.read_denoised();
+  ASSERT_TRUE(denoised.is_ok());
+
+  // Old-shader equivalence dispatch: the frozen spike shader with the
+  // baked widths over the same accumulation.
+  std::vector<float> old_img;
+  {
+    VkImage out_img{VK_NULL_HANDLE};
+    VkImageView out_view{VK_NULL_HANDLE};
+    VkImageCreateInfo ii{};
+    ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    ii.extent = {side, side, 1};
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+               VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    ASSERT_EQ(vkCreateImage(ctx.device(), &ii, nullptr, &out_img), VK_SUCCESS);
+    auto mem = alloc.bind_image(out_img, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    ASSERT_TRUE(mem.is_ok());
+    VkImageViewCreateInfo vi{};
+    vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vi.image = out_img;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    ASSERT_EQ(vkCreateImageView(ctx.device(), &vi, nullptr, &out_view),
+              VK_SUCCESS);
+    auto buf = alloc.create_buffer(
+        static_cast<VkDeviceSize>(side) * side * 16U,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    ASSERT_TRUE(buf.is_ok());
+    omnicpp::render::VulkanDescriptorManager mgr;
+    ASSERT_TRUE(mgr.initialize(ctx.device()).is_ok());
+    std::vector<omnicpp::render::ReflectedBinding> b(4);
+    for (std::uint32_t k = 0; k < 4U; ++k) {
+      b[k] = {0, k, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_SHADER_STAGE_COMPUTE_BIT};
+    }
+    auto layout = mgr.create_layout(b, 1);
+    ASSERT_TRUE(layout.is_ok());
+    auto set = mgr.allocate_set(layout.value());
+    ASSERT_TRUE(set.is_ok());
+    ASSERT_TRUE(mgr.write_image(set.value(), 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                VK_NULL_HANDLE, tracer.accum_view(),
+                                VK_IMAGE_LAYOUT_GENERAL)
+                    .is_ok());
+    ASSERT_TRUE(mgr.write_image(set.value(), 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                VK_NULL_HANDLE, tracer.moment_view(),
+                                VK_IMAGE_LAYOUT_GENERAL)
+                    .is_ok());
+    ASSERT_TRUE(mgr.write_image(set.value(), 2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                VK_NULL_HANDLE, tracer.gbuffer_view(),
+                                VK_IMAGE_LAYOUT_GENERAL)
+                    .is_ok());
+    ASSERT_TRUE(mgr.write_image(set.value(), 3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                VK_NULL_HANDLE, out_view, VK_IMAGE_LAYOUT_GENERAL)
+                    .is_ok());
+    omnicpp::render::VulkanPipeline pipe;
+    const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
+    ASSERT_TRUE(pipe.load_shader_stage_file(
+        ctx.device(), shader_dir + "/denoise_edge_atrous.comp.spv", "compute")
+                    .is_ok());
+    const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 36U};
+    ASSERT_TRUE(pipe.create_pipeline_layout(ctx.device(), &layout.value(), 1, &push)
+                    .is_ok());
+    ASSERT_TRUE(pipe.create_compute_pipeline(ctx.device(), pipe.pipeline_layout())
+                    .is_ok());
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    ASSERT_TRUE(cbr.is_ok());
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    ASSERT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    VkImageMemoryBarrier pre{};
+    pre.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    pre.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+    pre.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    pre.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    pre.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    pre.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    pre.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    pre.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkImageMemoryBarrier pres[3] = {pre, pre, pre};
+    pres[0].image = tracer.accum_image();
+    pres[1].image = tracer.moment_image();
+    pres[2].image = tracer.gbuffer_image();
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 3, pres);
+    VkImageMemoryBarrier prep{};
+    prep.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    prep.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    prep.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    prep.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    prep.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    prep.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    prep.image = out_img;
+    prep.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &prep);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe.pipeline());
+    VkDescriptorSet ds = set.value();
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            pipe.pipeline_layout(), 0, 1, &ds, 0, nullptr);
+    struct OldPush {
+      std::uint32_t w, h;
+      float kk, sigma, nsigma, dsigma;
+      std::uint32_t mean_n, moment_n, stride;
+    };
+    OldPush p{side, side, 2.0F, 1.5F, 0.1F, 1.0F, kNoisyFrames, kNoisyFrames,
+              1U};
+    vkCmdPushConstants(cb, pipe.pipeline_layout(), VK_SHADER_STAGE_COMPUTE_BIT,
+                       0, sizeof(OldPush), &p);
+    vkCmdDispatch(cb, (side + 7U) / 8U, (side + 7U) / 8U, 1);
+    VkImageMemoryBarrier post{};
+    post.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    post.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    post.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    post.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    post.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    post.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    post.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    post.image = out_img;
+    post.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &post);
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {side, side, 1};
+    vkCmdCopyImageToBuffer(cb, out_img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           buf.value().buffer, 1, &region);
+    ASSERT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+    old_img.assign(static_cast<std::size_t>(side) * side * 4U, 0.0F);
+    std::memcpy(old_img.data(), buf.value().mapped,
+                old_img.size() * sizeof(float));
+    pipe.cleanup(ctx.device());
+    mgr.cleanup();
+    vkDestroyImageView(ctx.device(), out_view, nullptr);
+    vkDestroyImage(ctx.device(), out_img, nullptr);
+    auto keep_mem = mem.value();
+    alloc.destroy_allocation(keep_mem);
+    auto bb = buf.value();
+    alloc.destroy_allocation(bb);
+  }
+  // THE parity: count-sourced divisors == scalar divisors on uniform input.
+  EXPECT_EQ(std::memcmp(denoised.value().data(), old_img.data(),
+                        old_img.size() * sizeof(float)),
+            0)
+      << "render-path denoiser diverged from the spike shader on uniform input";
+
+  // Purity: re-dispatching over unchanged inputs reproduces bit-exactly.
+  record_denoise_once();
+  auto denoised2 = tracer.read_denoised();
+  ASSERT_TRUE(denoised2.is_ok());
+  EXPECT_EQ(std::memcmp(denoised.value().data(), denoised2.value().data(),
+                        denoised2.value().size() * sizeof(float)),
+            0)
+      << "record_denoise is not a pure function of its inputs";
+
+  // Follows inputs: one more round moves the accumulation, so the filter
+  // must move too (a frozen/stale output would match the first dispatch).
+  record_rounds(1U);
+  record_denoise_once();
+  auto denoised3 = tracer.read_denoised();
+  ASSERT_TRUE(denoised3.is_ok());
+  EXPECT_NE(std::memcmp(denoised.value().data(), denoised3.value().data(),
+                        denoised3.value().size() * sizeof(float)),
+            0)
+      << "denoised output did not follow the accumulation";
+
+  // Efficacy: the loop30 pin (< raw*0.70, measured 0.577x) through the
+  // engine path, not the spike's inline dispatch.
+  tracer.reset_accumulation();
+  record_rounds(kRefFrames);
+  auto ref = tracer.read_mean();
+  ASSERT_TRUE(ref.is_ok());
+  tracer.reset_accumulation();
+  record_rounds(kNoisyFrames);
+  record_denoise_once();
+  auto den = tracer.read_denoised();
+  ASSERT_TRUE(den.is_ok());
+  auto raw4 = tracer.read_mean();
+  ASSERT_TRUE(raw4.is_ok());
+  constexpr double w[3] = {0.2126, 0.7152, 0.0722};
+  const auto luma_mse = [&](const std::vector<float>& img) {
+    const std::size_t texels = ref.value().size() / 4U;
+    double sse = 0.0;
+    for (std::size_t t = 0; t < texels; ++t) {
+      double a = 0.0;
+      double b = 0.0;
+      for (std::size_t c = 0; c < 3U; ++c) {
+        a += w[c] * static_cast<double>(img[t * 4U + c]);
+        b += w[c] * static_cast<double>(ref.value()[t * 4U + c]);
+      }
+      const double d = a - b;
+      sse += d * d;
+    }
+    return sse / static_cast<double>(texels);
+  };
+  const double raw_mse = luma_mse(raw4.value());
+  const double den_mse = luma_mse(den.value());
+  std::printf("LoopT2 denoise path: raw=%.6e denoised=%.6e (raw %.2fx)\n",
+              raw_mse, den_mse, raw_mse / den_mse);
+  EXPECT_LT(den_mse, raw_mse * 0.70)
+      << "render-path denoiser stopped earning its keep";
+
+  // Re-entrancy: the viewport resize path calls create() on a LIVE tracer.
+  // A cleanup that leaves a dangling compute-shader handle behind refuses
+  // the rebuild here (has_stage sees the stale handle) -- the exact
+  // failure that killed the live e1 resize before the fix. The rebuilt
+  // stack must be usable, including the denoiser.
+  ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
+                            ctx.graphics_queue(), qf, alloc, cfg)
+                  .is_ok());
+  EXPECT_TRUE(tracer.ready());
+  tracer.set_camera(cam);
+  tracer.set_denoise_enabled(true);
+  record_rounds(kNoisyFrames);
+  record_denoise_once();
+  auto den_rebuilt = tracer.read_denoised();
+  ASSERT_TRUE(den_rebuilt.is_ok());
+  // Same calls, same image: the rebuilt stack reproduces the first
+  // dispatch bit-exactly (the seed is a pure function of (pixel, frame)).
+  EXPECT_EQ(std::memcmp(den.value().data(), den_rebuilt.value().data(),
+                        den_rebuilt.value().size() * sizeof(float)),
+            0)
+      << "rebuilt tracer diverged from the first build";
+
+  EXPECT_EQ(ctx.validation_error_count(), 0U);
+  EXPECT_EQ(ctx.validation_warning_count(), 0U);
+  tracer.destroy();
+  vkDestroyCommandPool(ctx.device(), pool.value(), nullptr);
+  auto keep_geo = geo.value();
+  alloc.destroy_allocation(keep_geo);
+  alloc.cleanup();
+  ctx.cleanup();
+}
+
+//! T2 render-path consumer under adaptive masking: the count-sourced
+//! divisors must keep held texels exact through the FILTER, not just
+//! through the host readback. After a 4-uniform + mask(0.25) + 4-masked
+//! sequence, record_denoise() filters the per-texel mean; the denoised
+//! MSE must beat the adaptive-raw MSE (the filter earns its keep on the
+//! masked stack too), true geometry must beat uniform-overwritten
+//! geometry (binding 4's counts and binding 2's edges are both live),
+//! and an all-held zero stack must filter to exact zeros (no garbage
+//! from the output image's first layout transition).
+TEST(path_tracing_real, denoise_render_path_adaptive) {
+  omnicpp::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("OmniCppPtDenoiseAdapt", true).is_ok());
+  if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+  const std::uint32_t side = 64U;
+  constexpr std::uint32_t kPrefix = 4U;
+  constexpr std::uint32_t kMasked = 4U;
+  constexpr std::uint32_t kRefFrames = 128U;
+
+  omnicpp::render::VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+
+  const std::vector<float> box = {
+      -0.5F, -0.5F, -0.5F,  -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,  -0.5F, -0.5F, -0.5F,
+      -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, -0.5F, 0.5F,  -0.5F, -0.5F, -0.5F};
+  auto geo = alloc.create_buffer(box.size() * sizeof(float),
+                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  std::memcpy(geo.value().mapped, box.data(), box.size() * sizeof(float));
+  VkBufferDeviceAddressInfo ai{};
+  ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  ai.buffer = geo.value().buffer;
+
+  omnicpp::render::PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.width = side;
+  cfg.height = side;
+  cfg.max_bounces = 4U;
+  cfg.sky.mode = 1U;
+  omnicpp::render::PathTracerMesh cube{};
+  cube.vertex_buffer_address = static_cast<std::uint64_t>(
+      vkGetBufferDeviceAddress(ctx.device(), &ai));
+  cube.triangle_count = 12U;
+  cube.max_vertex = 35U;
+  cfg.meshes = {cube};
+  cfg.instances = {
+      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+
+  omnicpp::render::VulkanPathTracer tracer;
+  ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
+                            ctx.graphics_queue(), qf, alloc, cfg)
+                  .is_ok());
+  omnicpp::render::PathTracerCamera cam{};
+  cam.position = {0.0F, 0.6F, 2.6F};
+  cam.forward = {0.0F, -0.2F, -1.0F};
+  cam.right = {1.0F, 0.0F, 0.0F};
+  cam.up = {0.0F, 1.0F, 0.0F};
+  tracer.set_camera(cam);
+
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+      ctx.device(), qf);
+  ASSERT_TRUE(pool.is_ok());
+  const auto submit_wait = [&](VkCommandBuffer cb) {
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1U;
+    si.pCommandBuffers = &cb;
+    EXPECT_EQ(vkQueueSubmit(ctx.graphics_queue(), 1, &si, VK_NULL_HANDLE),
+              VK_SUCCESS);
+    EXPECT_EQ(vkQueueWaitIdle(ctx.graphics_queue()), VK_SUCCESS);
+  };
+  const auto record_rounds = [&](std::uint32_t frames, bool clear_first) {
+    for (std::uint32_t r = 0; r < frames; ++r) {
+      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+          ctx.device(), pool.value());
+      EXPECT_TRUE(cbr.is_ok());
+      if (!cbr.is_ok()) return;
+      VkCommandBuffer cb = cbr.value();
+      VkCommandBufferBeginInfo bi{};
+      bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+      tracer.record_round(cb, r, r == 0U && clear_first);
+      EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+      submit_wait(cb);
+      vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+    }
+  };
+  const auto record_denoise_once = [&]() {
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    EXPECT_TRUE(cbr.is_ok());
+    if (!cbr.is_ok()) return;
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    tracer.record_denoise(cb);
+    EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+  };
+
+  record_rounds(kPrefix, true);
+  auto mean = tracer.read_mean();
+  auto moment = tracer.read_second_moment();
+  ASSERT_TRUE(mean.is_ok() && moment.is_ok());
+  const auto mask =
+      omnicpp::render::adaptive_mask_from_variance(mean.value(),
+                                                   moment.value(), 0.25);
+  EXPECT_TRUE(tracer.upload_adaptive_mask(mask.mask));
+  tracer.set_adaptive_enabled(true);
+  record_rounds(kMasked, false);
+  auto adapt_raw = tracer.read_adaptive_mean();
+  ASSERT_TRUE(adapt_raw.is_ok());
+
+  tracer.set_denoise_enabled(true);
+  record_denoise_once();
+  auto den_true = tracer.read_denoised();
+  ASSERT_TRUE(den_true.is_ok());
+
+  // Geometry-live sabotage: overwrite the G-buffer with uniform geometry
+  // (no edges to stop on), over the SAME adaptive stack the true-geometry
+  // dispatch just filtered. A dead geometry binding returns the true-geo
+  // answer here instead; live geometry must change it AND cost MSE.
+  // (The overwrite runs before the reference below because the reference
+  // re-traces and would replace the stack under test.)
+  {
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    ASSERT_TRUE(cbr.is_ok());
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    ASSERT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    VkImageMemoryBarrier to_transfer{};
+    to_transfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_transfer.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    to_transfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_transfer.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    to_transfer.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    to_transfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_transfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_transfer.image = tracer.gbuffer_image();
+    to_transfer.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
+                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &to_transfer);
+    VkClearColorValue uni{};
+    uni.float32[0] = 0.0F;
+    uni.float32[1] = 0.0F;
+    uni.float32[2] = 1.0F;
+    uni.float32[3] = 1.0F;
+    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(cb, tracer.gbuffer_image(), VK_IMAGE_LAYOUT_GENERAL,
+                         &uni, 1, &range);
+    VkImageMemoryBarrier to_shader = to_transfer;
+    to_shader.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_shader.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &to_shader);
+    ASSERT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+  }
+  record_denoise_once();
+  auto den_uni = tracer.read_denoised();
+  ASSERT_TRUE(den_uni.is_ok());
+  EXPECT_NE(std::memcmp(den_true.value().data(), den_uni.value().data(),
+                        den_uni.value().size() * sizeof(float)),
+            0)
+      << "uniform geometry identical to true: geometry binding is decorative";
+
+  // Reference for the MSEs (re-traced after the sabotage, so the stack
+  // under test above is untouched by it).
+  tracer.set_adaptive_enabled(false);
+  tracer.reset_accumulation();
+  record_rounds(kRefFrames, true);
+  auto ref = tracer.read_mean();
+  ASSERT_TRUE(ref.is_ok());
+  constexpr double w[3] = {0.2126, 0.7152, 0.0722};
+  const auto luma_mse = [&](const std::vector<float>& img) {
+    const std::size_t texels = ref.value().size() / 4U;
+    double sse = 0.0;
+    for (std::size_t t = 0; t < texels; ++t) {
+      double a = 0.0;
+      double b = 0.0;
+      for (std::size_t c = 0; c < 3U; ++c) {
+        a += w[c] * static_cast<double>(img[t * 4U + c]);
+        b += w[c] * static_cast<double>(ref.value()[t * 4U + c]);
+      }
+      const double d = a - b;
+      sse += d * d;
+    }
+    return sse / static_cast<double>(texels);
+  };
+  const double adapt_raw_mse = luma_mse(adapt_raw.value());
+  const double den_true_mse = luma_mse(den_true.value());
+  const double den_uni_mse = luma_mse(den_uni.value());
+  std::printf("LoopT2 denoise adaptive: raw-adaptive=%.6e denoised=%.6e "
+              "uniform-geometry=%.6e\n",
+              adapt_raw_mse, den_true_mse, den_uni_mse);
+  // Measured 2026-11-06 on the RTX 2060 (64x64 box, 4-uniform + mask(0.25)
+  // + 4-masked): raw-adaptive 2.313659e-03 (held texels dominate), denoised
+  // 1.334325e-03 (0.577x raw -- the same 1.73x the uniform spike measured,
+  // to 3e-9), uniform-geometry 1.385475e-03 (collapses onto variance-only
+  // 1.385478e-03, the loop30 geometry-blind equivalence through the new
+  // shader). Pins mirror loop30's margins: 0.70 on raw, 0.99 on the
+  // geometry-blind answer (measured 0.963, the same 4% depth-stop gain).
+  EXPECT_LT(den_true_mse, adapt_raw_mse * 0.70)
+      << "denoiser stopped earning its keep on the masked stack";
+  EXPECT_LT(den_true_mse, den_uni_mse * 0.99)
+      << "edge stops earned nothing over geometry-blind filtering";
+
+  // Zero-state: an all-held zero stack filters to exact zeros -- the
+  // output image's first layout transition leaves no garbage texels, and
+  // max(count, 1) keeps the 0/0 texels defined.
+  tracer.reset_accumulation();
+  EXPECT_TRUE(tracer.upload_adaptive_mask(
+      std::vector<std::uint32_t>(static_cast<std::size_t>(side) * side, 0U)));
+  tracer.set_adaptive_enabled(true);
+  record_rounds(2U, true);
+  record_denoise_once();
+  auto den_zero = tracer.read_denoised();
+  ASSERT_TRUE(den_zero.is_ok());
+  for (std::size_t i = 0; i < den_zero.value().size(); ++i) {
+    EXPECT_EQ(den_zero.value()[i], 0.0F) << "nonzero denoised texel " << i;
+  }
+
+  EXPECT_EQ(ctx.validation_error_count(), 0U);
+  EXPECT_EQ(ctx.validation_warning_count(), 0U);
+  tracer.destroy();
+  vkDestroyCommandPool(ctx.device(), pool.value(), nullptr);
+  auto keep_geo = geo.value();
+  alloc.destroy_allocation(keep_geo);
+  alloc.cleanup();
+  ctx.cleanup();
+}
+
 //! T2 adaptive build: masked re-trace with per-pixel counts.
 //!
 //! After a uniform prefix, a variance mask (top 25%) selects texels for

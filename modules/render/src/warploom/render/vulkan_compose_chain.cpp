@@ -813,10 +813,13 @@ void record_compose_dynamic_stage(VkCommandBuffer command_buffer,
 #endif
 }
 
-void VulkanComposeChain::set_external_source(VkImage image,
-                                             VkImageView view) noexcept {
+void VulkanComposeChain::set_external_source(VkImage image, VkImageView view,
+                                             VkAccessFlags src_access,
+                                             VkPipelineStageFlags src_stage) noexcept {
   external_image_ = image;
   external_view_ = view;
+  external_src_access_ = src_access;
+  external_src_stage_ = src_stage;
   // Written HERE rather than only in ensure(): ensure() has normally already
   // run by the time an application knows its source, and a set still holding
   // the fallback view keeps tonemapping the chain's own unused HDR image -- a
@@ -957,9 +960,8 @@ void VulkanComposeChain::build_graph_passes(
       down.samples[0].image = external_image_;
       down.samples[0].used_layout = VK_IMAGE_LAYOUT_GENERAL;
       down.samples[0].initial_layout = VK_IMAGE_LAYOUT_GENERAL;
-      down.samples[0].initial_access = VK_ACCESS_SHADER_WRITE_BIT;
-      down.samples[0].initial_stage =
-          VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+      down.samples[0].initial_access = external_src_access_;
+      down.samples[0].initial_stage = external_src_stage_;
     } else {
       down.samples[0].image = hdr_target_->image();
       down.samples[0].used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1041,9 +1043,8 @@ void VulkanComposeChain::build_graph_passes(
     // SHADER_WRITE -> TRANSFER_READ, which does not cover a SHADER read at
     // all, and the graph's barrier -- the one that would have covered it --
     // had no source scope. So nothing ordered it.
-    tonemap.samples[0].initial_access = VK_ACCESS_SHADER_WRITE_BIT;
-    tonemap.samples[0].initial_stage =
-        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+    tonemap.samples[0].initial_access = external_src_access_;
+    tonemap.samples[0].initial_stage = external_src_stage_;
   } else {
     tonemap.samples[0].initial_layout = hdr_from_scene;
     tonemap.samples[0].initial_access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;

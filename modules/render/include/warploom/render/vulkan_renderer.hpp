@@ -294,9 +294,13 @@ public:
   //! R1b: tonemap from an external HDR source instead of this renderer's HDR
   //! intermediate -- the path tracer's accumulation image. The caller owns the
   //! image and must keep it alive; pass VK_NULL_HANDLE to go back to the
-  //! normal path. No-op when compose is off.
-  void set_external_tonemap_source(VkImage image, VkImageView view) noexcept {
-    if (compose_ != nullptr) compose_->set_external_source(image, view);
+  //! normal path. No-op when compose is off. The producer scope travels to
+  //! the chain (T2 denoiser: a compute dispatch writes the filtered mean).
+  void set_external_tonemap_source(VkImage image, VkImageView view,
+                                   VkAccessFlags src_access = VK_ACCESS_SHADER_WRITE_BIT,
+                                   VkPipelineStageFlags src_stage =
+                                       VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR) noexcept {
+    if (compose_ != nullptr) compose_->set_external_source(image, view, src_access, src_stage);
   }
   //! 1 / accumulated sample count, multiplied into the tonemap. 1.0f is the
   //! raster default and is an exact no-op there.

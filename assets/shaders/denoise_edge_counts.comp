@@ -1,0 +1,110 @@
+#version 450
+
+// denoise_edge_counts.comp — T2 denoiser RENDER-PATH consumer: edge-stopped
+// single-iteration a-trous guided by variance AND the first-hit G-buffer,
+// with per-texel divisors from the count image.
+//
+// Provenance (AGENTS.md research discipline): same two claims as the spike
+// pair it promotes into the render path —
+//   - Dammertz, Sewtz, Hanika, Lensch. "Edge-Avoiding A-Trous Wavelet
+//     Transform for fast Global Illumination Filtering." Proc. HPG 2010.
+//     Claim borrowed: an a-trous tap weight multiplies a spatial Gaussian
+//     by edge-stopping terms from geometry buffers.
+//   - Schied et al. "Spatiotemporal Variance-Guided Filtering." Proc. HPG
+//     2017, DOI 10.1145/3105762.3105770. Claim borrowed: per-pixel luminance
+//     variance drives the filter width (edge = k*sqrt(v_center)).
+// This shader differs from denoise_edge_atrous.comp in ONE way: the sums
+// (bindings 0, 1) are divided per texel by the count image (binding 4)
+// instead of by scalar push-constant counts. On a uniform accumulation
+// every count equals the scalar sample count, so the output is
+// bit-identical to the spike shader's (pinned headlessly by
+// denoise_render_path_uniform_parity); under adaptive masking the held
+// texels keep their own (older, smaller) counts, so the filtered mean and
+// the variance stay exact per texel instead of dividing held sums by the
+// live sample count. A scalar-count shader cannot express that without
+// re-dividing on the host, which is why this is a new shader and not a
+// push-constant change. Novelty assessment: none — same textbook pairing,
+// count-sourced divisors.
+//
+// G-buffer contract (pt_real.rgen binding 7): rgb = first-bounce world
+// normal (faceforward, normalized), a = hit t, miss = (0,0,0,-1).
+//
+// Weight: w = spatial * luma * normal * depth (same as the spike).
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0, rgba32f) readonly uniform image2D sums_img;
+layout(set = 0, binding = 1, rgba32f) readonly uniform image2D moment_img;
+layout(set = 0, binding = 2, rgba32f) readonly uniform image2D gbuffer_img;
+layout(set = 0, binding = 3, rgba32f) uniform image2D out_img;
+layout(set = 0, binding = 4, r32ui) readonly uniform uimage2D count_img;
+
+layout(push_constant) uniform Push {
+  uint width;
+  uint height;
+  float luma_sigma_scale;  // edge width = k * sqrt(v_center)
+  float spatial_sigma;     // spatial Gaussian sigma, pixels
+  float normal_sigma;      // angle stop: 1-dot scale (~0.1 = ~25 deg)
+  float relative_depth_sigma;  // relative-depth stop
+  uint stride;             // a-trous stride (1 for the single-iteration pin)
+} push;
+
+float luma(vec3 c) { return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; }
+
+void main() {
+  const ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+  if (px.x >= int(push.width) || px.y >= int(push.height)) return;
+
+  // Per-texel divisor: max(count, 1) matches read_adaptive_mean's contract
+  // (a texel masked out before its first round holds sum 0 / count 0 and
+  // reads 0, exactly like the host path).
+  const float nc = max(float(imageLoad(count_img, px).r), 1.0);
+  const vec4 mc = imageLoad(sums_img, px) / nc;
+  const vec4 e2 = imageLoad(moment_img, px) / nc;
+  const vec4 gc = imageLoad(gbuffer_img, px);
+  const float ml = luma(mc.rgb);
+  const float vc = max(0.0, luma(e2.rgb) - ml * ml);
+  const float edge2 =
+      push.luma_sigma_scale * push.luma_sigma_scale * vc + 1e-8;
+  const float s2 = 2.0 * push.spatial_sigma * push.spatial_sigma;
+  const float ns2 = 2.0 * push.normal_sigma * push.normal_sigma;
+  const float ds2 =
+      2.0 * push.relative_depth_sigma * push.relative_depth_sigma;
+  const vec3 nrm_c = gc.rgb;
+  const float tc = gc.a;
+  const bool c_miss = tc < 0.0;
+
+  vec3 acc = vec3(0.0);
+  float wsum = 0.0;
+  const int st = int(push.stride);
+  for (int dy = -2; dy <= 2; ++dy) {
+    for (int dx = -2; dx <= 2; ++dx) {
+      const ivec2 q = clamp(px + ivec2(dx * st, dy * st), ivec2(0),
+                            ivec2(push.width, push.height) - 1);
+      const float nq = max(float(imageLoad(count_img, q).r), 1.0);
+      const vec4 mn = imageLoad(sums_img, q) / nq;
+      const vec4 gn = imageLoad(gbuffer_img, q);
+      const float dm = luma(mn.rgb) - ml;
+      float w = exp(-float(dx * dx + dy * dy) / s2) *
+                exp(-dm * dm / (2.0 * edge2));
+      // Geometry stop: sky filters with sky, never across a silhouette.
+      const vec3 nn = gn.rgb;
+      const float tn = gn.a;
+      const bool n_miss = tn < 0.0;
+      float w_geo = 1.0;
+      if (c_miss || n_miss) {
+        w_geo = (c_miss && n_miss) ? 1.0 : 0.0;
+      } else {
+        const float dot_nn = clamp(dot(nrm_c, nn), -1.0, 1.0);
+        const float one_minus = 1.0 - dot_nn;
+        const float rel = (tc - tn) / max(tc, 1e-3);
+        w_geo = exp(-one_minus * one_minus / ns2) *
+                exp(-rel * rel / ds2);
+      }
+      w *= w_geo;
+      acc += w * mn.rgb;
+      wsum += w;
+    }
+  }
+  imageStore(out_img, px, vec4(acc / max(wsum, 1e-9), mc.a));
+}

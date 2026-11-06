@@ -42,6 +42,9 @@ using CK = ::warploom::core::ControlCommand::Kind;
     case CK::GetPtMean:
     case CK::SetAdaptive:
     case CK::GetAdaptive:
+    case CK::SetDenoise:
+    case CK::GetDenoise:
+    case CK::GetDenoisedMean:
     // v1.16: the session owns these values (they live on the reserved
     // render_settings object, whose edits ARE recorded), so a read-back
     // adds nothing to the log and repeated reads must not grow a capture.

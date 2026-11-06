@@ -228,6 +228,18 @@ struct ControlCommand final {
     //                "threshold":N}
     SetAdaptive,
     GetAdaptive,
+    // v1.18: PT render-path denoiser (T2) -- the count-sourced edge-stopped
+    // a-trous filter over (sums, second moment, G-buffer). Enabling points
+    // the tonemap at the filtered MEAN (inverse_samples becomes 1) instead
+    // of the raw sums; disabling returns to the raw accumulation. Leaving
+    // PT disables it with the stack.
+    //   SetDenoise: numbers[0] = enabled 0/1 ("enabled", required)
+    //   GetDenoise: no payload; detail = JSON {"enabled":bool}
+    //   GetDenoisedMean: no payload; detail = JSON {"mean":...} over the
+    //                    filtered mean (vs GetPtMean over the raw sums)
+    SetDenoise,
+    GetDenoise,
+    GetDenoisedMean,
   };
 
   //! One entry of the public command-name table: every `Kind` maps to

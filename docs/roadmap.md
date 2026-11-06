@@ -1850,3 +1850,22 @@ re-running: e1 69/69 on the viewport INCLUDING the resize round trip
 18/18 on headless. A binary that predates the headers is evidence of
 nothing -- the same lesson as the stale-binary phantom in AGENTS.md,
 second instance. The unit suite on the same tree: 741/741 and ctest 6/6.
+
+T2 render-path consumer (loop31) CLOSED 2026-11-06: `record_denoise()`
+in the tracer (count-sourced edge-stopped a-trous; the ONE shader change
+the render path needs is per-texel divisors, so adaptive-held texels
+stay exact), `set_denoise`/`get_denoise`/`get_denoised_mean` (v1.18),
+tonemap divisor 1 on the filtered mean, compose producer scope travelling
+with the image (compute-write when denoised). Measured: uniform
+2.313658e-03 -> 1.334328e-03 (bit-identical to the loop30 spike through
+the engine path, pinned by `denoise_render_path_uniform_parity`);
+adaptive 2.313659e-03 -> 1.334325e-03 with geometry-blind collapsing onto
+variance-only (pinned by `denoise_render_path_adaptive`). Live: e1 79/79
+on the viewport (10 new checks incl. the resize rebuild), `all` 108/108
+headless. Found on the way: `VulkanPipeline::cleanup` never nulled
+`compute_shader_`, so the resize re-create refused and killed the live e1
+at the first resize -- the suite never re-creates a tracer, so a new
+re-create pin does; sabotage round-tripped (revert -> pin fails with the
+production message -> re-apply). Full suite 743/743, ctest 6/6, 0
+warnings, 0 validation diagnostics. Research: docs/research/loop31-
+render-path-denoiser.md.

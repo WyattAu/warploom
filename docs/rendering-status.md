@@ -141,10 +141,15 @@ Two honest caveats on the ray tracing:
   first-hit G-buffer (rgb = world normal, a = hit t, miss = (0,0,0,-1),
   overwritten per round; pinned by `gbuffer_first_hit_normal_depth`), and
   an edge-stopped single-iteration a-trous over (mean, moment, G-buffer)
-  is spiked headlessly at 1.73x over raw (1.04x over variance-only; the
-  gain is the depth stop at silhouettes, normals inert on planar scenes;
-  pinned by `denoise_edge_gbuffer_spike`) -- still no render-path
-  consumer. Measured on the RTX 2060 at
+  is live in the render path at 1.73x over raw (1.04x over variance-only;
+  the gain is the depth stop at silhouettes, normals inert on planar
+  scenes): `record_denoise()` on the tracer (count-sourced divisors, so
+  adaptive-held texels stay exact; bit-identical to the spike on uniform
+  input), toggled by `set_denoise`/`get_denoise` (v1.18) with the tonemap
+  divisor switching to 1, `get_denoised_mean` for the A/B. Pinned by
+  `denoise_render_path_uniform_parity` +
+  `denoise_render_path_adaptive`; e1 carries 10 denoise checks (on/off,
+  reads-back, differs-from-raw, refused-outside-PT, resize rebuilt). Measured on the RTX 2060 at
   1000x600: fraction=0.25 selected exactly 150000/600000 texels. Gate
   CLEARED 2026-11-06: e1 runs 69/69 on the viewport including the resize
   round trip (down/back, sim steps after) at ~5.1/6.1 GiB VRAM, 18/18 on

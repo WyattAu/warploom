@@ -504,6 +504,7 @@ void VulkanPipeline::cleanup(VkDevice device) noexcept {
   layout_ = nullptr;
   vertex_shader_ = nullptr;
   fragment_shader_ = nullptr;
+  compute_shader_ = nullptr;
   owns_layout_ = false;
 }
 

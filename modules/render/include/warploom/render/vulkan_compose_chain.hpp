@@ -275,7 +275,19 @@ class VulkanComposeChain final {
   //! tonemapping the chain's own (unused) HDR image forever. That failure is
   //! invisible: the frame is stable, non-black, and completely unaffected by
   //! the source it was pointed at.
-  void set_external_source(VkImage image, VkImageView view) noexcept;
+  //!
+  //! src_access/src_stage describe the producer that wrote the source this
+  //! frame, for the graph's source-scope barrier. Default is the tracer's
+  //! ray-trace write; a caller that filters the accumulation first (the T2
+  //! denoiser's compute dispatch) passes COMPUTE/SHADER_WRITE instead, so
+  //! the same-submit tonemap AND the cross-submit capture read stay
+  //! ordered. A wrong scope here is silent (a zero-scope barrier is legal
+  //! and orders nothing), so the scope travels with the image, not as a
+  //! separate call that can drift from it.
+  void set_external_source(VkImage image, VkImageView view,
+                           VkAccessFlags src_access = VK_ACCESS_SHADER_WRITE_BIT,
+                           VkPipelineStageFlags src_stage =
+                               VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR) noexcept;
   [[nodiscard]] bool using_external_source() const noexcept {
     return external_image_ != VK_NULL_HANDLE;
   }
@@ -399,6 +411,11 @@ class VulkanComposeChain final {
   //! External HDR source image + view (the path tracer's accumulation image).
   VkImage external_image_{VK_NULL_HANDLE};
   VkImageView external_view_{VK_NULL_HANDLE};
+  //! Producer scope for the external source's barrier (see set_external_-
+  //! source): the ray-trace write by default, the denoise compute dispatch
+  //! when the viewport points the source at the filtered mean.
+  VkAccessFlags external_src_access_{VK_ACCESS_SHADER_WRITE_BIT};
+  VkPipelineStageFlags external_src_stage_{VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR};
   //! Presentation image + view of the frame being built (Blade stage 2).
   //! Cached from build_graph_passes' parameters because kind_of_image()
   //! maps handles to kinds and the swapchain image is caller-owned: the

@@ -1693,6 +1693,12 @@ bool EditorSession::handle_query(
       reply.ok = true;
       reply.detail = "pt adaptive sampling acknowledged (host executes)";
       break;
+    case CK::SetDenoise:
+    case CK::GetDenoise:
+    case CK::GetDenoisedMean:
+      reply.ok = true;
+      reply.detail = "pt denoiser acknowledged (host executes)";
+      break;
     default:
       reply.ok = false;
       reply.error = "unhandled command";

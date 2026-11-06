@@ -471,6 +471,25 @@ def proof_e1(c):
         check("adaptive reads back off",
               g.get("enabled") is False and g.get("selected", -1) == 0,
               str(g))
+        # T2 render-path denoiser (v1.18): the stack is held at 16 samples,
+        # so enabling filters a frozen accumulation -- the denoised mean is
+        # stable and must differ from the raw mean (the filter smooths).
+        m_raw = c.cmd(cmd="get_pt_mean", id=684).get("detail", "")
+        r = c.cmd(cmd="set_denoise", id=681, enabled=1)
+        check("set_denoise on ok", r.get("ok") is True, str(r))
+        g = c.detail(cmd="get_denoise", id=682)
+        check("denoise reads back on",
+              g.get("enabled") is True, str(g))
+        m_den = c.cmd(cmd="get_denoised_mean", id=683).get("detail", "")
+        check("denoised mean reads back", '"mean":' in m_den, m_den)
+        check("denoised mean differs from raw",
+              m_raw != m_den and '"mean":' in m_raw,
+              f"{m_raw} vs {m_den}")
+        r = c.cmd(cmd="set_denoise", id=685, enabled=0)
+        check("set_denoise off ok", r.get("ok") is True, str(r))
+        g = c.detail(cmd="get_denoise", id=686)
+        check("denoise reads back off",
+              g.get("enabled") is False, str(g))
         r = c.cmd(cmd="set_render_mode", id=664, mode="forward")
         check("leave pt after determinism ok", r.get("ok") is True, str(r))
         r = c.cmd(cmd="set_pt_sample_target", id=667, samples=16)
@@ -484,6 +503,10 @@ def proof_e1(c):
         check("set_adaptive refused outside pt",
               r.get("ok") is False and "PT mode" in r.get("error", ""),
               str(r))
+        r = c.cmd(cmd="set_denoise", id=687, enabled=1)
+        check("set_denoise refused outside pt",
+              r.get("ok") is False and "PT mode" in r.get("error", ""),
+              str(r))
     # Parser-level guard (both hosts): a missing toggle is rejected before
     # any dispatch, so no host can read it as an implicit disable.
     r = c.cmd(cmd="set_adaptive", id=675)
@@ -492,6 +515,14 @@ def proof_e1(c):
           str(r))
     r = c.cmd(cmd="get_adaptive", id=676)
     check("get_adaptive ok", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="set_denoise", id=688)
+    check("denoise without enabled rejected",
+          r.get("ok") is False and "enabled" in r.get("error", ""),
+          str(r))
+    r = c.cmd(cmd="get_denoise", id=689)
+    check("get_denoise ok", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="get_denoised_mean", id=690)
+    check("get_denoised_mean ok", r.get("ok") is True, str(r))
 
     # E2/R4 bloom. Same host-owned class as above; the interesting part is
     # that toggling it must NOT rebuild anything, which the viewport's

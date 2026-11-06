@@ -304,6 +304,13 @@ constexpr std::uint32_t kGdObjectCount = 4U;
 constexpr std::uint32_t kGdMaxInstances = 16384U;
 
 struct ViewportApp;
+//! Points both compose chains at the live PT source: the denoised mean
+//! (compute-producer scope) when the v1.18 filter is on, the raw
+//! accumulation (ray-trace-producer scope) otherwise. Called on every
+//! transition that changes which image the tonemap must sample (PT entry,
+//! resize rebuild, denoise toggle) -- never per frame, mirroring the
+//! set_external_source discipline.
+void point_tonemap_at_pt_source(ViewportApp& app);
 bool setup_rt_shadows(ViewportApp& app);
 bool setup_path_tracing(ViewportApp& app);
 void destroy_path_tracing(ViewportApp& app);
@@ -829,6 +836,11 @@ struct ViewportApp {
     double pt_adaptive_fraction{0.0};
     std::size_t pt_adaptive_selected{0U};
     float pt_adaptive_threshold{0.0F};
+    //! T2 render-path denoiser (v1.18): filter the accumulation before the
+    //! tonemap. pending forces one dispatch even while the sample target
+    //! holds (enabling onto a held stack must still filter it once).
+    bool pt_denoise{false};
+    bool pt_denoise_pending{false};
   // --- R1b: path tracing -------------------------------------------------
   //! Path-tracing mode ("pt"). Same build-once/cache discipline as the RT
   //! stack, for the same reason: a mode switch must never leave a half-built
@@ -1486,6 +1498,66 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
         reply.detail = buf;
         break;
       }
+      case CK::SetDenoise: {
+        // T2 (v1.18): app-reachable render-path denoiser. Enabling points
+        // both compose chains at the FILTERED MEAN (compute-producer
+        // scope, inverse_samples = 1); disabling returns to the raw sums.
+        // The first dispatch is forced by pt_denoise_pending even while
+        // the sample target holds, and the per-frame hook keeps the
+        // divisor right as the count grows. Runs between frames like the
+        // adaptive snapshot, so the descriptor writes are transition-safe.
+        if (command.number_count < 1U) {
+          reply.ok = false;
+          reply.error = "set_denoise needs enabled=0|1";
+          break;
+        }
+        if (!app_.pt_mode || app_.pt_tracer == nullptr ||
+            !app_.pt_tracer->ready()) {
+          reply.ok = false;
+          reply.error = "set_denoise needs PT mode (WARPLOOM_PT=1)";
+          break;
+        }
+        const bool want = command.numbers[0] != 0.0;
+        app_.pt_tracer->set_denoise_enabled(want);
+        app_.pt_denoise = want;
+        app_.pt_denoise_pending = true;
+        point_tonemap_at_pt_source(app_);
+        reply.detail = want ? "denoise on" : "denoise off";
+        break;
+      }
+      case CK::GetDenoise: {
+        const bool enabled = app_.pt_tracer != nullptr &&
+                             app_.pt_tracer->denoise_enabled();
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "{\"enabled\":%s}",
+                      enabled ? "true" : "false");
+        reply.detail = buf;
+        break;
+      }
+      case CK::GetDenoisedMean: {
+        // Mean luma of the FILTERED mean (vs GetPtMean over the raw sums).
+        // Same fixed-order reduction, so equal stacks report bitwise-
+        // identical text and the live A/B (raw vs filtered) is exact.
+        double sum = 0.0;
+        std::uint64_t n = 0U;
+        if (app_.pt_tracer != nullptr && app_.pt_tracer->ready()) {
+          const auto den = app_.pt_tracer->read_denoised();
+          if (den.is_ok()) {
+            const auto& v = den.value();
+            for (std::size_t i = 0U; i + 2U < v.size(); i += 4U) {
+              sum += (static_cast<double>(v[i]) + static_cast<double>(v[i + 1U]) +
+                      static_cast<double>(v[i + 2U])) /
+                     3.0;
+              ++n;
+            }
+          }
+        }
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "{\"mean\":%.9g}",
+                      n > 0U ? sum / static_cast<double>(n) : 0.0);
+        reply.detail = buf;
+        break;
+      }
       case CK::GetAdaptive: {
         const bool enabled = app_.pt_tracer != nullptr &&
                              app_.pt_tracer->adaptive_enabled();
@@ -1917,12 +1989,12 @@ bool setup_wm_delete_protocol(ViewportApp& app) {
     // the handle, so it must be re-pointed at the new image, not discovered
     // later. If the rebuild failed, clear them instead of leaving them stale.
     if (app.pt_mode && app.pt_tracer != nullptr && app.pt_tracer->ready()) {
-      app.renderer.set_external_tonemap_source(app.pt_tracer->accum_image(),
-                                               app.pt_tracer->accum_view());
-      if (app.capture_chain != nullptr && app.capture_chain->ready()) {
-        app.capture_chain->set_external_source(app.pt_tracer->accum_image(),
-                                               app.pt_tracer->accum_view());
-      }
+      // create() rebuilt every tracer image (denoised included), so the
+      // chains must be re-pointed at the new handles -- and a fresh
+      // denoised image needs one forced dispatch before the tonemap may
+      // sample it.
+      app.pt_denoise_pending = true;
+      point_tonemap_at_pt_source(app);
     } else {
       app.renderer.set_external_tonemap_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
       if (app.capture_chain != nullptr && app.capture_chain->ready()) {
@@ -4346,8 +4418,37 @@ bool setup_path_tracing(ViewportApp& app) {
   // A re-entered PT mode rebuilds the tracer: re-apply the live target so
   // a stepped session survives the round trip (the tracer default is 0).
   app.pt_tracer->set_sample_target(app.pt_sample_target);
+  // create() is re-entrant and resets the tracer-side toggle: re-apply the
+  // app-side one, and force one filter dispatch so the tonemap never
+  // samples an undispatched (UNDEFINED) denoised image.
+  app.pt_tracer->set_denoise_enabled(app.pt_denoise);
+  app.pt_denoise_pending = true;
   app.pt_frame = 0U;
   return true;
+}
+
+void point_tonemap_at_pt_source(ViewportApp& app) {
+  if (!app.pt_mode || app.pt_tracer == nullptr ||
+      !app.pt_tracer->ready()) {
+    return;
+  }
+  if (app.pt_denoise) {
+    app.renderer.set_external_tonemap_source(
+        app.pt_tracer->denoised_image(), app.pt_tracer->denoised_view(),
+        VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    if (app.capture_chain != nullptr && app.capture_chain->ready()) {
+      app.capture_chain->set_external_source(
+          app.pt_tracer->denoised_image(), app.pt_tracer->denoised_view(),
+          VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    }
+  } else {
+    app.renderer.set_external_tonemap_source(app.pt_tracer->accum_image(),
+                                             app.pt_tracer->accum_view());
+    if (app.capture_chain != nullptr && app.capture_chain->ready()) {
+      app.capture_chain->set_external_source(app.pt_tracer->accum_image(),
+                                              app.pt_tracer->accum_view());
+    }
+  }
 }
 
 //! Release the PT geometry buffers (one per mesh; see setup_path_tracing for
@@ -4360,6 +4461,8 @@ void destroy_pt_geometry(ViewportApp& app) {
 }
 
 void destroy_path_tracing(ViewportApp& app) {
+  app.pt_denoise = false;
+  app.pt_denoise_pending = false;
   app.renderer.set_external_tonemap_source(VK_NULL_HANDLE, VK_NULL_HANDLE);
   app.renderer.set_compose_inverse_samples(1.0F);
   if (app.pt_tracer != nullptr) {
@@ -4451,9 +4554,17 @@ bool record_pt_round_cb(VkCommandBuffer command_buffer, std::uint32_t,
   }
   // read_mean divides by the sample count; the tonemap needs the same 1/n, on
   // BOTH compose instances (the live chain and the capture chain), or a
-  // captured frame would show the raw growing sum.
-  const float inv =
-      1.0F / static_cast<float>(std::max(1U, app.pt_tracer->sample_count()));
+  // captured frame would show the raw growing sum. The denoised image
+  // already holds a MEAN, so its divisor is 1 -- selected here, per frame,
+  // because the count grows under the toggle.
+  if (app.pt_denoise && (!held || app.pt_denoise_pending)) {
+    app.pt_tracer->record_denoise(command_buffer);
+    app.pt_denoise_pending = false;
+  }
+  const float inv = app.pt_denoise
+                        ? 1.0F
+                        : 1.0F / static_cast<float>(std::max(
+                                         1U, app.pt_tracer->sample_count()));
   app.renderer.set_compose_inverse_samples(inv);
   if (app.capture_chain != nullptr && app.capture_chain->ready()) {
     app.capture_chain->set_inverse_samples(inv);
@@ -7351,17 +7462,13 @@ void ViewportApp::run() {
           pt_held_eye = pt_eye;
           pt_held_target = pt_target;
           pt_held_up = pt_up;
-          renderer.set_external_tonemap_source(pt_tracer->accum_image(),
-                                              pt_tracer->accum_view());
           // The capture chain is a SECOND compose instance (B3b): it would
           // otherwise tonemap its own (unused, black) HDR intermediate and
           // report a blank frame for a viewport that is visibly path traced.
           // Pointing it at the same accumulation image is read-only sharing,
-          // which is exactly what the live chain does.
-          if (capture_chain != nullptr && capture_chain->ready()) {
-            capture_chain->set_external_source(pt_tracer->accum_image(),
-                                               pt_tracer->accum_view());
-          }
+          // which is exactly what the live chain does. The helper selects
+          // the denoised mean instead when the v1.18 filter is on.
+          point_tonemap_at_pt_source(*this);
           pt_pre_pass_index =
               renderer.add_frame_pre_pass_callback(record_pt_round_cb, this);
         }

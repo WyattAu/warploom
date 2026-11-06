@@ -97,6 +97,9 @@ const std::vector<ControlCommand::KindName>& ControlCommand::kind_names() {
       // v1.17 PT adaptive sampling (T2).
       {Kind::SetAdaptive, "set_adaptive"},
       {Kind::GetAdaptive, "get_adaptive"},
+      {Kind::SetDenoise, "set_denoise"},
+      {Kind::GetDenoise, "get_denoise"},
+      {Kind::GetDenoisedMean, "get_denoised_mean"},
   };
   return kTable;
 }
@@ -490,6 +493,18 @@ namespace {
     case ControlCommand::Kind::SetPtSampleTarget:
       take("samples");
       break;
+    case ControlCommand::Kind::SetDenoise: {
+      // enabled is required (a missing toggle is a mistake, not an
+      // implicit disable) -- the set_adaptive precedent, not the take()
+      // default-zero shape, so the refusal holds on every host.
+      double enabled = 0.0;
+      if (!find_number_field(line, "enabled", enabled)) {
+        error = "missing \"enabled\" number field";
+        return false;
+      }
+      numbers[count++] = enabled;
+      break;
+    }
     case ControlCommand::Kind::SetAdaptive: {
       // enabled is required (a missing toggle is a mistake, not an
       // implicit disable); fraction defaults to 0.25 like the engine test.

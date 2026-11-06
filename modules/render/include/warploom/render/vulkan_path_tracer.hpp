@@ -40,6 +40,7 @@
 #include <warploom/core/deterministic_runtime.hpp>
 #include <warploom/render/vulkan_acceleration_structure.hpp>
 #include <warploom/render/vulkan_memory_allocator.hpp>
+#include <warploom/render/vulkan_pipeline.hpp>
 #include <warploom/render/vulkan_rt_pipeline.hpp>
 #include <warploom/render/vulkan_types.hpp>
 
@@ -346,9 +347,44 @@ class VulkanPathTracer final {
   //! First-hit G-buffer image + view (T2 denoiser input): rgba32f storage,
   //! rgb = first-bounce world normal, a = hit t (-1 on miss). Overwritten
   //! (not accumulated) every unmasked round, cleared alongside the sums.
-  //! No filter consumes it yet -- emission first, consumer second.
+  //! Consumed by record_denoise() below (the render-path filter).
   [[nodiscard]] VkImage gbuffer_image() const noexcept { return gbuffer_image_; }
   [[nodiscard]] VkImageView gbuffer_view() const noexcept { return gbuffer_view_; }
+  //! Render-path denoiser (T2 consumer): single-iteration edge-stopped
+  //! a-trous over (sums, second moment, G-buffer) with per-texel divisors
+  //! from the count image, dispatched by record_denoise(). On a uniform
+  //! accumulation the output is bit-identical to the
+  //! denoise_edge_atrous spike shader (pinned by
+  //! denoise_render_path_uniform_parity); under adaptive masking the
+  //! per-texel counts keep held texels exact. The output holds a filtered
+  //! MEAN (not sums), so a consumer tonemaps it with inverse_samples = 1.
+  //! Filter widths are the measured-best loop30 values (k=2.0,
+  //! spatial=1.5, normal=0.1, depth=1.0, stride=1); there is no tuning
+  //! API because the parameter selection is a measured result, not a
+  //! caller preference.
+  void set_denoise_enabled(bool enabled) noexcept {
+    denoise_enabled_ = enabled;
+  }
+  [[nodiscard]] bool denoise_enabled() const noexcept {
+    return denoise_enabled_;
+  }
+  //! Records one filter dispatch over the CURRENT accumulation state.
+  //! The caller records this after record_round() in the same command
+  //! buffer (the input barrier orders the round's trace writes); the
+  //! output barrier leaves the denoised image readable by a shader read
+  //! (tonemap) and by transfer (read_denoised). No-op when not ready.
+  //! Pure function of (sums, moment, gbuffer, counts): re-dispatching over
+  //! unchanged inputs reproduces the image bit-exactly.
+  void record_denoise(VkCommandBuffer command_buffer) noexcept;
+  [[nodiscard]] VkImage denoised_image() const noexcept {
+    return denoise_image_;
+  }
+  [[nodiscard]] VkImageView denoised_view() const noexcept {
+    return denoise_view_;
+  }
+  //! Host readback of the denoised MEAN (no divide: the image already
+  //! holds a filtered mean). Same inspection contract as read_mean.
+  [[nodiscard]] ::warploom::core::Result<std::vector<float>> read_denoised() const;
   //! Raw G-buffer texels (no divide: the image is overwritten, not summed).
   //! Same host-side inspection contract as read_mean.
   [[nodiscard]] ::warploom::core::Result<std::vector<float>> read_gbuffer() const;
@@ -399,6 +435,26 @@ class VulkanPathTracer final {
   VkImage gbuffer_image_{VK_NULL_HANDLE};
   VkImageView gbuffer_view_{VK_NULL_HANDLE};
   Allocation gbuffer_allocation_{};
+
+  //! Denoised-mean image + view (T2 render-path consumer): rgba32f
+  //! storage, same extent as the accumulation. Overwritten per dispatch,
+  //! never accumulated. Built in create() alongside the stack (sized in
+  //! pixels, so resize/recreate rebuilds it with the tracer).
+  VkImage denoise_image_{VK_NULL_HANDLE};
+  VkImageView denoise_view_{VK_NULL_HANDLE};
+  Allocation denoise_allocation_{};
+  //! Denoise compute pipeline + descriptor set (bindings 0-3 mirror the
+  //! spike shader's, 4 = the count image for per-texel divisors).
+  VulkanPipeline denoise_pipeline_{};
+  VkDescriptorSetLayout denoise_layout_{VK_NULL_HANDLE};
+  VkDescriptorSet denoise_set_{VK_NULL_HANDLE};
+  //! First record_denoise() lays the output out of UNDEFINED; later ones
+  //! find it GENERAL. Pure function of the call sequence, so replay is
+  //! unaffected. Reset by create()/destroy (new image, new layout).
+  bool denoise_laid_out_{false};
+  //! Render-path filter toggle. Default off: every existing caller
+  //! tonemaps the raw accumulation exactly as before.
+  bool denoise_enabled_{false};
 
   //! Per-texel sample counts (r32ui storage): incremented exactly when the
   //! sums are, cleared alongside them. Uniform rounds leave every texel at

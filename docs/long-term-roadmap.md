@@ -413,12 +413,15 @@ Against the §5 definition, criterion by criterion:
    headlessly by `adaptive_iterative_remask_refines_new_texels`, live
    re-snapshot checks in e1 69/69 with the resize round trip -- the old
    e1 resize gate was a STALE viewport binary vs the new render .so, an
-   ODR segfault misread as VRAM pressure; rebuilt, green). Next: the
-   RENDER-PATH consumer of the two measured spikes (variance-only 1.67x
-   + edge-stopped 1.73x, loop29/30) or a per-iteration variance update --
-   never more variance-only iterations. Open spikes: normal-term on a
-   curved scene, multi-iteration WITH geometry guidance (only
-   variance-only iteration is closed). Exit: live PT on app scenes at
+   ODR segfault misread as VRAM pressure; rebuilt, green).   Next: the RENDER-PATH consumer LANDED 2026-11-06 (loop31) --
+   `record_denoise()` in the tracer, `set_denoise` (v1.18), 1.73x
+   uniform + same 4% geometry gain on the masked stack, e1 79/79 with
+   the resize rebuild. Found on the way: `VulkanPipeline::cleanup`
+   never nulled `compute_shader_`, so the resize re-create refused --
+   the suite never re-creates a tracer, so a new pin does. Open
+   spikes: normal-term on a curved scene, multi-iteration WITH
+   geometry guidance (only variance-only iteration is closed), or a
+   per-iteration variance update instead. Exit: live PT on app scenes at
    the published budgets.
 6. **Camera/light/render tracks + concurrent arms (T5).** Spec first
    (WyattAu repo survey per §6), then chrome.
