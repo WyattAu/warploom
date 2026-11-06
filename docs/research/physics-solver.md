@@ -103,7 +103,10 @@ order structurally). Measured: 0/12 cross, every phase shows a contact
 event (the 4 historical clean misses now fire speculative contacts), the
 4 colliding phases keep near-face + rebound to 1e-3 (2e-5/1.5e-4 measured
 gaps — different op sequences, same physics), swept grid agrees with
-all-pairs at 200/600/1200 with TOI traffic. Gate sabotage-validated
+all-pairs at 200/600/1200 with TOI traffic (mixed sphere/capsule scene
+since loop61 — every other fast body is a capsule, so the bound-keyed
+gathering and the segment TOI path are covered at scale, not just the
+gate's two-body case). Gate sabotage-validated
 (TOI suppressed fails the gate; revert re-greens). Limits, documented in
 code: spheres only, stiff rewind under compliance, penetration 0 so no
 island edges (conservative).

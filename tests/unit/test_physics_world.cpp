@@ -349,6 +349,14 @@ TEST(PhysicsWorld, BroadphaseAgreesWithAllPairsAtSeveralScales) {
       b.restitution = 0.3F + 0.2F * std::fmod(f * 0.023F, 1.0F);
       if (speculative && i % 25U == 0U) {
         b.velocity[0] = (i % 50U == 0U) ? 30.0F : -30.0F;
+        // Every other fast body is a capsule: the swept grid keys on
+        // bound (= radius + half-height) and the TOI path runs the
+        // segment narrowphase, so the agreement must hold for mixed
+        // shapes too — not just the sphere path the gate covers.
+        if (i % 50U == 0U) {
+          b.shape = omnicpp::physics::BodyShape::Capsule;
+          b.half_height = 0.4F;
+        }
       }
       (void)world.add_body(b);
     }
