@@ -579,6 +579,115 @@ def proof_cnc(c):
     check("resume restores free run", r.get("ok") is True, str(r))
 
 
+def poll_phys_y(c, pid, oid, timeout_s=120):
+    """Poll get_physics_body until it answers (ticks may still be landing
+    on a threaded host); returns (y, raw_detail)."""
+    import time as _t
+    y, raw = None, ""
+    for _ in range(timeout_s // 2):
+        r = c.cmd(cmd="get_physics_body", id=pid, oid=oid)
+        if r.get("ok") is True:
+            try:
+                info = json.loads(r["detail"])
+                y, raw = float(info["pos"][1]), r["detail"]
+                break
+            except (KeyError, ValueError, TypeError):
+                pass
+        _t.sleep(2)
+    return y, raw
+
+
+def proof_phys(c):
+    print("PHYS: session physics over the wire")
+    # D1 demo-story half at the session layer: the only sim the wire can
+    # drive (the viewport's gd scene runs an app-local world; this leg pins
+    # the capture-blessed session sim). Pause-first like g3/cnc; every
+    # assertion frame-relative. Rest height is the body radius (0.5).
+    r = c.cmd(cmd="pause", id=200)
+    check("pause freezes the frame", r.get("ok") is True, str(r))
+    base = c.detail(cmd="list_objects", id=201)
+    base_names = [o["name"] for o in base["objects"]]
+    # Checkpoint before anything exists: the re-run below scrubs here and
+    # must reproduce the drop bit-identically (string-equal pos JSON).
+    r = c.cmd(cmd="scrub_start", id=202, frame=1000007)
+    check("scrub_start phys base", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="spawn_cube", id=203, x=0, y=5, z=0, size=1.0)
+    check("spawn drop cube", r.get("ok") is True, str(r))
+    after = c.detail(cmd="list_objects", id=204)
+    new = [o for o in after["objects"] if o["name"] not in base_names]
+    check("one new object", len(new) == 1, str(new))
+    oid = new[0]["id"]
+    # The query discriminates: no body yet is an error, never at-origin.
+    r = c.cmd(cmd="get_physics_body", id=205, oid=oid)
+    check("query before attach rejected",
+          r.get("ok") is False and "no physics body" in r.get("error", ""),
+          str(r))
+    # One tick projects the spawn; attach needs the projection (same
+    # requirement the session unit test pins).
+    r = c.cmd(cmd="step", id=217, ticks=1)
+    check("step 1 (project spawn)", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="spawn_physics_body", id=206, oid=oid)
+    check("attach body", r.get("ok") is True and
+          "spawned physics body" in r.get("detail", ""), str(r))
+    # One body per object: the world has no removal, so a second attach
+    # would orphan the first into an invisible collider.
+    r = c.cmd(cmd="spawn_physics_body", id=207, oid=oid)
+    check("double attach rejected",
+          r.get("ok") is False and "already has a body" in r.get("error", ""),
+          str(r))
+    y, raw = poll_phys_y(c, 208, oid)
+    check("attached at authored height",
+          y is not None and abs(y - 5.0) < 1e-9, str(raw))
+    r = c.cmd(cmd="step", id=209, ticks=10)
+    check("step 10 (fall)", r.get("ok") is True, str(r))
+    y, raw = poll_phys_y(c, 218, oid)
+    check("ticks move the sim",
+          y is not None and y < 4.9 and y >= 0.0, str(raw))
+    r = c.cmd(cmd="step", id=210, ticks=600)
+    check("step 600 (settle)", r.get("ok") is True, str(r))
+    y1, raw1 = poll_phys_y(c, 219, oid)
+    check("settled on the ground plane",
+          y1 is not None and abs(y1 - 0.5) < 0.05, str(raw1))
+    pos1 = json.loads(raw1)["pos"] if raw1 else None
+    # Scrub back past the spawn: the cube is gone AND the body is gone
+    # (scrub restores physics from the checkpoint — T4a over the wire).
+    r = c.cmd(cmd="scrub_to", id=211, frame=1000007)
+    check("scrub_to phys base", r.get("ok") is True, str(r))
+    back = c.detail(cmd="list_objects", id=220)
+    check("cube gone after warp",
+          all(o["name"] not in [n for n in [new[0]["name"]]]
+              for o in back["objects"]),
+          str(back["count"]))
+    r = c.cmd(cmd="get_physics_body", id=221, oid=oid)
+    check("body gone after warp",
+          r.get("ok") is False and "no physics body" in r.get("error", ""),
+          str(r))
+    # Identical second run: same tick sequence, must reproduce to the
+    # string (shortest-round-trip floats, deterministic sim).
+    r = c.cmd(cmd="spawn_cube", id=212, x=0, y=5, z=0, size=1.0)
+    check("re-spawn drop cube", r.get("ok") is True, str(r))
+    again = c.detail(cmd="list_objects", id=213)
+    new2 = [o for o in again["objects"] if o["name"] not in base_names]
+    check("one new object again", len(new2) == 1, str(new2))
+    oid2 = new2[0]["id"]
+    r = c.cmd(cmd="step", id=222, ticks=1)
+    check("step 1 (project re-spawn)", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="spawn_physics_body", id=214, oid=oid2)
+    check("re-attach body", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="step", id=223, ticks=10)
+    check("step 10 (fall again)", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="step", id=215, ticks=600)
+    check("step 600 (settle again)", r.get("ok") is True, str(r))
+    y2, raw2 = poll_phys_y(c, 224, oid2)
+    check("settled again", y2 is not None and abs(y2 - 0.5) < 0.05,
+          str(raw2))
+    pos2 = json.loads(raw2)["pos"] if raw2 else None
+    check("drop replays bit-identically", pos1 == pos2 and pos1 is not None,
+          "%s vs %s" % (pos1, pos2))
+    r = c.cmd(cmd="resume", id=216)
+    check("resume restores free run", r.get("ok") is True, str(r))
+
+
 def proof_e1(c):
     """E1/E2 live protocol proofs: render mode + exposure.
 
@@ -1069,13 +1178,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "proof", choices=["w1", "g1", "w2", "g3", "e1", "t5c", "cnc",
-                            "all"])
+                            "phys", "all"])
     parser.add_argument("--sock", default="/tmp/omnicpp_hw.sock")
     parser.add_argument("--sock-a", default="/tmp/omnicpp_w2a.sock")
     parser.add_argument("--sock-b", default="/tmp/omnicpp_w2b.sock")
     args = parser.parse_args()
 
-    if args.proof in ("w1", "g1", "e1", "t5c", "cnc", "all"):
+    if args.proof in ("w1", "g1", "e1", "t5c", "cnc", "phys", "all"):
         c = Client(args.sock)
         if args.proof in ("w1", "all"):
             proof_w1(c)
@@ -1092,6 +1201,10 @@ def main():
             # (viewport) host: the queue-vs-tick races this pins only
             # exist where a free-running frame loop meets wire steps.
             proof_cnc(c)
+        if args.proof in ("phys", "all"):
+            # D1 session sim over the wire. Headless-capable (no visuals);
+            # on `all` it runs on the main host like cnc.
+            proof_phys(c)
     if args.proof in ("w2", "all"):
         proof_w2(Client(args.sock_a), Client(args.sock_b))
     if args.proof in ("g3", "all"):

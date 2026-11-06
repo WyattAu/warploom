@@ -1071,6 +1071,12 @@ bool EditorSession::handle_edit(
       // G3: armed clip intent does not survive a wholesale document replace.
       record_arms_.clear();
       playing_ = false;
+      // v1.19: session physics is the same class of intent — bodies
+      // reference pre-load object ids, so a replace must not leave ghosts
+      // simulating invisibly. (load_replay resets from its checkpoint; a
+      // document load has no checkpoint, so it clears.)
+      physics_.clear_bodies();
+      physics_bodies_.clear();
       reply.ok = true;
       reply.detail = "loaded " + command.text;
       return true;
@@ -1459,6 +1465,62 @@ bool EditorSession::handle_edit(
       reply.detail = std::move(out);
       return true;
     }
+    // v1.19 session physics (D1 demo story): attach the object to the
+    // session's PhysicsWorld at its authored transform. Session-side intent
+    // like clip arms (not undoable, capture-recorded, scrub-restored).
+    // One body per object: the world has no removal, so a second attach
+    // would orphan the first into an invisible collider (T5d precedent).
+    case CK::SpawnPhysicsBody: {
+      if (command.number_count < 7U) {
+        reply.ok = false;
+        reply.error = "spawn_physics_body needs oid, radius, inverse_mass,"
+                      " restitution, vx, vy, vz";
+        return true;
+      }
+      const auto object_id = static_cast<std::uint64_t>(command.numbers[0]);
+      const SceneObject* obj = doc_.find(object_id);
+      if (obj == nullptr) {
+        reply.ok = false;
+        reply.error = "spawn_physics_body: no object " +
+                      std::to_string(object_id);
+        return true;
+      }
+      const auto prop_it = obj->properties.find("position");
+      if (prop_it == obj->properties.end() ||
+          prop_it->second.type != PropValue::Type::Vec3) {
+        reply.ok = false;
+        reply.error = "spawn_physics_body: object " +
+                      std::to_string(object_id) + " has no vec3 position";
+        return true;
+      }
+      if (physics_body_for(object_id) != nullptr) {
+        reply.ok = false;
+        reply.error = "spawn_physics_body: object " +
+                      std::to_string(object_id) + " already has a body";
+        return true;
+      }
+      ::warploom::physics::PhysicsBody body{};
+      body.position[0] = static_cast<float>(prop_it->second.vec[0]);
+      body.position[1] = static_cast<float>(prop_it->second.vec[1]);
+      body.position[2] = static_cast<float>(prop_it->second.vec[2]);
+      body.velocity[0] = static_cast<float>(command.numbers[4]);
+      body.velocity[1] = static_cast<float>(command.numbers[5]);
+      body.velocity[2] = static_cast<float>(command.numbers[6]);
+      body.radius = static_cast<float>(command.numbers[1]);
+      body.inverse_mass = static_cast<float>(command.numbers[2]);
+      body.restitution = static_cast<float>(command.numbers[3]);
+      if (!spawn_physics_body(object_id, body)) {
+        reply.ok = false;
+        reply.error = "spawn_physics_body: object " +
+                      std::to_string(object_id) +
+                      " is not projected yet (tick once after spawn)";
+        return true;
+      }
+      reply.ok = true;
+      reply.detail = "spawned physics body for object " +
+                     std::to_string(object_id);
+      return true;
+    }
     case CK::BindNodeProperty: {
       if (command.number_count < 2U || command.text.empty() ||
           command.text2.empty()) {
@@ -1552,6 +1614,46 @@ bool EditorSession::handle_query(
       }
       reply.ok = true;
       reply.detail = object_to_json(*obj);
+      return true;
+    }
+    // v1.19: live body state for the D1 wire demo. A missing body is an
+    // error, not an empty report — an empty report would read as "at rest
+    // at origin", the same vacuity the cnc sentinel guards against.
+    case CK::GetPhysicsBody: {
+      if (command.number_count < 1U) {
+        reply.ok = false;
+        reply.error = "get_physics_body needs \"oid\"";
+        return true;
+      }
+      const auto oid = static_cast<std::uint64_t>(command.numbers[0]);
+      const ::warploom::physics::PhysicsBody* body = physics_body_for(oid);
+      if (body == nullptr) {
+        reply.ok = false;
+        reply.error = "get_physics_body: no physics body for object " +
+                      std::to_string(oid);
+        return true;
+      }
+      std::string out = "{\"oid\":";
+      out += std::to_string(oid);
+      out += ",\"pos\":[";
+      append_float(out, body->position[0]);
+      out += ",";
+      append_float(out, body->position[1]);
+      out += ",";
+      append_float(out, body->position[2]);
+      out += "],\"vel\":[";
+      append_float(out, body->velocity[0]);
+      out += ",";
+      append_float(out, body->velocity[1]);
+      out += ",";
+      append_float(out, body->velocity[2]);
+      out += "],\"radius\":";
+      append_float(out, body->radius);
+      out += ",\"restitution\":";
+      append_float(out, body->restitution);
+      out += "}";
+      reply.ok = true;
+      reply.detail = std::move(out);
       return true;
     }
     case CK::Schema: {

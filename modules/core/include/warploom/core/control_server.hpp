@@ -240,6 +240,23 @@ struct ControlCommand final {
     SetDenoise,
     GetDenoise,
     GetDenoisedMean,
+    // v1.19: session physics over the wire (D1 demo story). Bodies live in
+    // the session's PhysicsWorld (capture-recorded, scrub-restored); creation
+    // is session-side intent like clip arms, not an undoable document edit.
+    // Position is the object's authored transform; only the dynamic
+    // parameters ride the wire.
+    //   SpawnPhysicsBody: numbers[0] = object id ("oid", required),
+    //                     numbers[1] = radius ("radius", default 0.5),
+    //                     numbers[2] = inverse mass ("inverse_mass",
+    //                     default 1; 0 = static),
+    //                     numbers[3] = restitution ("restitution",
+    //                     default 0.4),
+    //                     numbers[4..6] = velocity ("vx","vy","vz",
+    //                     default 0).
+    //   GetPhysicsBody:   numbers[0] = object id ("oid", required);
+    //                     detail = JSON {oid,pos,vel,radius,restitution}.
+    SpawnPhysicsBody,
+    GetPhysicsBody,
   };
 
   //! One entry of the public command-name table: every `Kind` maps to

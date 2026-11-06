@@ -398,6 +398,10 @@ TEST_F(ControlServerTest, WireParityEveryKindParsesAndEnforcesPayloads) {
       case ControlCommand::Kind::SetAdaptive:
         expect_missing = "missing \\\"enabled\\\"";
         break;
+      case ControlCommand::Kind::SpawnPhysicsBody:
+      case ControlCommand::Kind::GetPhysicsBody:
+        expect_missing = "missing \\\"oid\\\"";
+        break;
       case ControlCommand::Kind::PasteSubgraph:
         expect_missing = "missing \\\"fragment\\\"";
         break;

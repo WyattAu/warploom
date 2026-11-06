@@ -10,10 +10,12 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 
+#include "warploom/core/control_server.hpp"
 #include "warploom/core/document_projection.hpp"
 #include "warploom/core/editor_session.hpp"
 
@@ -523,4 +525,93 @@ TEST(SessionTick, PhysicsFloatsSerialiseShortAndExactly) {
                   live->velocity[0]);
   EXPECT_FLOAT_EQ(std::strtof(token_after("\"radius\"").c_str(), nullptr),
                   live->radius);
+}
+// ----------------------------------------------------------------------------
+// v1.19: session physics over the wire (D1 demo story)
+// ----------------------------------------------------------------------------
+
+namespace {
+
+//! A dispatch-level command: the parser is covered by the table invariant
+//! (test_control_server) and the live leg; here the numbers layout the
+//! parser guarantees is built by hand.
+::omnicpp::core::ControlCommand phys_cmd(
+    ::omnicpp::core::ControlCommand::Kind kind, std::uint64_t oid) {
+  ::omnicpp::core::ControlCommand cmd{};
+  cmd.kind = kind;
+  cmd.numbers[0] = static_cast<double>(oid);
+  cmd.numbers[1] = 0.5;   // radius
+  cmd.numbers[2] = 1.0;   // inverse_mass
+  cmd.numbers[3] = 0.4;   // restitution
+  cmd.numbers[4] = 0.0;   // vx
+  cmd.numbers[5] = 0.0;   // vy
+  cmd.numbers[6] = 0.0;   // vz
+  cmd.number_count = 7U;
+  return cmd;
+}
+
+}  // namespace
+
+TEST(SessionPhysicsWire, SpawnFallsQuerySeesItLoadClears) {
+  using Kind = ::omnicpp::core::ControlCommand::Kind;
+  EditorSession session{};
+  seed_cube(session);  // object 1 at (1, 2, 3)
+  (void)session.tick({0U, kDt, 0.0, false});  // project before attaching
+
+  // Unknown object: rejected, nothing attached.
+  auto bad = phys_cmd(Kind::SpawnPhysicsBody, 999U);
+  auto r = session.on_control(bad);
+  EXPECT_FALSE(r.ok) << r.detail;
+  EXPECT_NE(r.error.find("no object"), std::string::npos) << r.error;
+  EXPECT_EQ(session.physics_body_for(999U), nullptr);
+
+  // Spawn at the authored transform with wire defaults.
+  auto spawn = phys_cmd(Kind::SpawnPhysicsBody, 1U);
+  r = session.on_control(spawn);
+  ASSERT_TRUE(r.ok) << r.error;
+  const auto* body = session.physics_body_for(1U);
+  ASSERT_NE(body, nullptr);
+  EXPECT_FLOAT_EQ(body->position[0], 1.0F);
+  EXPECT_FLOAT_EQ(body->position[1], 2.0F);
+
+  // One body per object: the world has no removal, so a second attach
+  // would orphan the first into an invisible collider.
+  r = session.on_control(spawn);
+  EXPECT_FALSE(r.ok) << r.detail;
+  EXPECT_NE(r.error.find("already has a body"), std::string::npos) << r.error;
+
+  // A minute of ticks: gravity pulls the authored height down, and the
+  // query reports the simulated pose, not the authored one.
+  for (std::uint64_t f = 1U; f <= 60U; ++f) {
+    (void)session.tick({f, kDt, 0.0, false});
+  }
+  auto get = phys_cmd(Kind::GetPhysicsBody, 1U);
+  get.number_count = 1U;
+  r = session.on_control(get);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_NE(r.detail.find("\"pos\""), std::string::npos) << r.detail;
+  EXPECT_LT(session.physics_body_for(1U)->position[1], 2.0F);
+
+  // Unknown body query: an error, never an at-origin report.
+  auto noget = phys_cmd(Kind::GetPhysicsBody, 999U);
+  noget.number_count = 1U;
+  r = session.on_control(noget);
+  EXPECT_FALSE(r.ok) << r.detail;
+  EXPECT_NE(r.error.find("no physics body"), std::string::npos) << r.error;
+
+  // A document load is a wholesale replace: session bodies reference
+  // pre-load ids, so they clear instead of haunting the new document.
+  const char* path = "/tmp/session_physics_wire_test.json";
+  ::omnicpp::core::ControlCommand save{};
+  save.kind = Kind::SaveDocument;
+  save.text = path;
+  r = session.on_control(save);
+  ASSERT_TRUE(r.ok) << r.error;
+  ::omnicpp::core::ControlCommand load{};
+  load.kind = Kind::LoadDocument;
+  load.text = path;
+  r = session.on_control(load);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(session.physics_body_for(1U), nullptr);
+  std::remove(path);
 }

@@ -100,6 +100,9 @@ const std::vector<ControlCommand::KindName>& ControlCommand::kind_names() {
       {Kind::SetDenoise, "set_denoise"},
       {Kind::GetDenoise, "get_denoise"},
       {Kind::GetDenoisedMean, "get_denoised_mean"},
+      // v1.19 session physics (D1).
+      {Kind::SpawnPhysicsBody, "spawn_physics_body"},
+      {Kind::GetPhysicsBody, "get_physics_body"},
   };
   return kTable;
 }
@@ -284,6 +287,7 @@ namespace {
       break;
     case ControlCommand::Kind::GetObject:
     case ControlCommand::Kind::DestroyObject:
+    case ControlCommand::Kind::GetPhysicsBody:
     case ControlCommand::Kind::Select: {
       std::uint64_t oid = 0;
       if (!find_unsigned_field(line, "oid", oid)) {
@@ -291,6 +295,33 @@ namespace {
         return false;
       }
       numbers[count++] = static_cast<double>(oid);
+      break;
+    }
+    case ControlCommand::Kind::SpawnPhysicsBody: {
+      // v1.19: the object must exist (checked at dispatch); only the
+      // dynamic parameters ride the wire, each defaulted like NodeAdd's x/y.
+      std::uint64_t oid = 0;
+      if (!find_unsigned_field(line, "oid", oid)) {
+        error = "missing \"oid\" unsigned field";
+        return false;
+      }
+      numbers[count++] = static_cast<double>(oid);
+      double radius = 0.5;
+      (void)find_number_field(line, "radius", radius);
+      numbers[count++] = radius;
+      double inverse_mass = 1.0;
+      (void)find_number_field(line, "inverse_mass", inverse_mass);
+      numbers[count++] = inverse_mass;
+      double restitution = 0.4;
+      (void)find_number_field(line, "restitution", restitution);
+      numbers[count++] = restitution;
+      double vx = 0.0, vy = 0.0, vz = 0.0;
+      (void)find_number_field(line, "vx", vx);
+      (void)find_number_field(line, "vy", vy);
+      (void)find_number_field(line, "vz", vz);
+      numbers[count++] = vx;
+      numbers[count++] = vy;
+      numbers[count++] = vz;
       break;
     }
     case ControlCommand::Kind::SetProperty:

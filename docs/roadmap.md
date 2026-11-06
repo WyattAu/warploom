@@ -1098,8 +1098,11 @@ declares a slot 3.
 2. **Modules real** — the viewport and tests consume installed packages; no
    monolithic target. **Met** (S5, A3).
 3. **Demo story works** — record, replay, scrub, save/load, proven over the
-   live protocol. **Met** for the render/document timeline; D1 (real physics)
-   remains open.
+   live protocol. **Met** for the render/document timeline; the session sim
+   joined it in loop49 (v1.19 `spawn_physics_body` / `get_physics_body`:
+   spawn, step, query, scrub, and bit-identical re-drop over the wire;
+   save/load body-clear pinned at dispatch level). D1 (real physics in the
+   viewport demo scene) remains open.
 4. **Signature render feature** — R1 path tracing, toggleable in the
    viewport. **Met.** "Offline-quality stepped PT" runs through the
    deterministic record/replay machinery: pause, accumulate, read back the
