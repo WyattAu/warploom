@@ -1,0 +1,100 @@
+#version 450
+
+// denoise_moment_smooth.comp — T2 denoiser SPIKE, loop34: variance-BLIND
+// spatial x geometry smoother for the second-moment (E2) image.
+//
+// Provenance (AGENTS.md research discipline):
+//   - Dammertz, Sewtz, Hanika, Lensch. "Edge-Avoiding A-Trous Wavelet
+//     Transform for fast Global Illumination Filtering." Proc. High
+//     Performance Graphics (HPG) 2010. Claim borrowed: an a-trous tap
+//     weight multiplies a spatial Gaussian by geometry stops, so smoothing
+//     stops at silhouettes. Checked: HPG best-paper list + Ulm preprint.
+//   - Schied, Kaplanyan, Wyman, Patney, Chaitanya, Burgess, Liu,
+//     Dachsbacher, Lefohn, Salvi. "Spatiotemporal Variance-Guided
+//     Filtering." Proc. HPG 2017, DOI 10.1145/3105762.3105770. Claim
+//     borrowed: the filter width comes from per-pixel luminance variance.
+//     This pass is deliberately variance-BLIND: it smooths E2 so the NEXT
+//     iteration can recompute v = E2smooth - Mfiltered^2 instead of guiding
+//     on the stale E2orig the loop33 verdict indicts (K=2/k=2 edge ==
+//     variance-only to 2% -- no spatial stop fixes a width that is wrong).
+// Novelty assessment: none. A geometry-stopped Gaussian is textbook; the
+// measurement (does the update save iteration 2?) is the contribution.
+// Fit/cost: a pure function of (moment, gbuffer) -- no RNG, no atomics,
+// no cross-invocation communication, so the temporal-history constraint
+// holds by construction (bit-identical re-dispatch pinned). One 5x5 tap
+// footprint, same determinism contract as the sibling spikes.
+//
+// G-buffer contract (pt_real.rgen binding 7): rgb = first-hit world normal
+// (faceforward, normalized), a = hit t, miss = (0,0,0,-1). Same
+// silhouette rule as denoise_edge_atrous.comp: sky smooths with sky,
+// never across a silhouette.
+//
+// Weight: w = spatial * normal * depth (NO luma term -- the E2 image's
+// own "variance" luma(E2) - luma(E2)^2 is meaningless: it clamps to zero
+// wherever luma(E2) >= 1, which is exactly the sky this scene is full of,
+// so reusing the edge shader with a huge k would silently no-op on the
+// sky. This shader exists because that reuse is wrong.)
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0, rgba32f) readonly uniform image2D moment_img;
+layout(set = 0, binding = 1, rgba32f) readonly uniform image2D gbuffer_img;
+layout(set = 0, binding = 2, rgba32f) uniform image2D out_img;
+
+layout(push_constant) uniform Push {
+  uint width;
+  uint height;
+  float spatial_sigma;     // spatial Gaussian sigma, pixels
+  float normal_sigma;      // angle stop: 1-dot scale (~0.1 = ~25 deg)
+  float depth_sigma;       // relative-depth stop (~0.3 = 30% depth change)
+  uint moment_samples;     // divisor for binding 0 (sums depth)
+  uint stride;             // a-trous stride (1 for the loop34 spike)
+} push;
+
+void main() {
+  const ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+  if (px.x >= int(push.width) || px.y >= int(push.height)) return;
+
+  const float nm = max(float(push.moment_samples), 1.0);
+  const vec4 ec = imageLoad(moment_img, px) / nm;
+  const vec4 gc = imageLoad(gbuffer_img, px);
+  const float s2 = 2.0 * push.spatial_sigma * push.spatial_sigma;
+  const float ns2 = 2.0 * push.normal_sigma * push.normal_sigma;
+  const float ds2 = 2.0 * push.depth_sigma * push.depth_sigma;
+  const vec3 nc = gc.rgb;
+  const float tc = gc.a;
+  const bool c_miss = tc < 0.0;
+
+  vec3 acc = vec3(0.0);
+  float wsum = 0.0;
+  const int st = int(push.stride);
+  for (int dy = -2; dy <= 2; ++dy) {
+    for (int dx = -2; dx <= 2; ++dx) {
+      const ivec2 q = clamp(px + ivec2(dx * st, dy * st), ivec2(0),
+                            ivec2(push.width, push.height) - 1);
+      const vec4 en = imageLoad(moment_img, q) / nm;
+      const vec4 gn = imageLoad(gbuffer_img, q);
+      float w = exp(-float(dx * dx + dy * dy) / s2);
+      // Geometry stop: identical silhouette rule to the mean path, so the
+      // smoothed E2 describes the same segmentation the next iteration
+      // filters. Sky smooths with sky, never across a silhouette.
+      const vec3 nn = gn.rgb;
+      const float tn = gn.a;
+      const bool n_miss = tn < 0.0;
+      float w_geo = 1.0;
+      if (c_miss || n_miss) {
+        w_geo = (c_miss && n_miss) ? 1.0 : 0.0;
+      } else {
+        const float dot_nn = clamp(dot(nc, nn), -1.0, 1.0);
+        const float one_minus = 1.0 - dot_nn;
+        const float rel = (tc - tn) / max(tc, 1e-3);
+        w_geo = exp(-one_minus * one_minus / ns2) *
+                exp(-rel * rel / ds2);
+      }
+      w *= w_geo;
+      acc += w * en.rgb;
+      wsum += w;
+    }
+  }
+  imageStore(out_img, px, vec4(acc / max(wsum, 1e-9), ec.a));
+}

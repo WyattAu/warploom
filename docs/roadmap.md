@@ -1903,3 +1903,35 @@ compared K=2-uniform against K=1-variance and failed on its own guard
 stays the v1 filter. Full suite 745/745, ctest 6/6, 0 warnings, 0
 validation diagnostics. Research: docs/research/loop33-
 edge-iteration-diverges.md.
+
+Per-iteration variance update (loop34) CLOSED 2026-11-06 as a negative:
+recomputing the guide per iteration (variance-blind spatial x geometry E2
+smoother in new `denoise_moment_smooth.comp`, it1 on v = E2smooth - M1^2,
+it0 fixed at the loop30 best) beats the stale form at every k (1.24x at
+k=0.5, 2.1x at k=1.0, 3.8x at k=2.0 -- the width correction matters most
+where the stale width is most wrong) but K=2 best 2.673007e-03 is 0.50x
+of K=1 and 0.87x of raw: the 9x9 footprint smears hard edges faster than
+corrected widths can compensate, and the non-monotonic k ladder (k=1.0
+worse than both 0.5 and 2.0) says interplay, not a tunable optimum.
+Pinned by `denoise_edge_variance_update_spike`: K=1 reproduces the loop30
+bar EXACTLY (1.334328e-03); smoother characterized host-side (E2 DC ratio
+1.0018, neighbor energy 0.79x); chain purity, update-live, guide-live
+(zero guide), smoother-geometry, K-wire, stride-wire, chain geometry-wire
+both legs K-matched; 0 validation diagnostics. Sabotage battery, each
+failing exactly its observers: updated:=stale guide fails only update-live;
+updated:=zero guide fails only guide-live; uniform-geometry smoother leg
+fails only smoother-geometry; delta-kernel smoother (sigma 1e-9, output ==
+E2 bit-exactly) fails exactly the three smoother-output observers; zeroed
+smoother input fails exactly the three E2s-value observers; revert restores
+all six MSEs bit-exactly. Traps recorded: reusing the edge shader with a
+huge k to smooth E2 was rejected before any dispatch -- E2's
+pseudo-variance clamps to zero wherever luma(E2) >= 1 (the sky), so the
+smoother is variance-blind by necessity; and an over-stopped smoother
+(ns/ds 1e-9) is a no-op sabotage because sky-sky taps bypass geometry
+stops by design -- sigma 1e-9 is the collapse that validates the energy
+pin. Multi-iteration is now closed in all three forms (variance-only s4,
+edge-stopped loop33, variance-updated here); single-iteration stands as the
+v1 filter and no further denoiser spikes are queued -- the next denoiser
+work waits on a live-PT consumer need, not another filter variant. Full
+suite 746/746, ctest 6/6, 0 warnings, 0 validation diagnostics.
+Research: docs/research/loop34-variance-update.md.

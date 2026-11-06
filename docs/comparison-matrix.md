@@ -169,7 +169,7 @@ Stated precisely, because "measured" and "designed" are different things here.
 **Measured on this machine (RTX 2060, `default` preset):** 629 unit tests green
 under `VK_LAYER_KHRONOS_validation=1` with 0 diagnostics and 0 leaked objects;
 ctest 6/6; ASan/UBSan 555 (594 ran, 39 skipped because the sanitizer preset
-builds `WARPLOOM_USE_VULKAN=OFF`); 74 shader sources compile; live protocol
+builds `WARPLOOM_USE_VULKAN=OFF`); 80 shader sources compile; live protocol
 proofs 76/76 headless and 28/28 on a visual host; the viewport matrix
 (hdr, bloom, rt+bloom, no-hdr, node editor, pt) re-run after the fullscreen
 fix, all six clean with 0 validation diagnostics; clang and GCC both

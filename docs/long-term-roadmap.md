@@ -418,13 +418,16 @@ Against the §5 definition, criterion by criterion:
    uniform + same 4% geometry gain on the masked stack, e1 79/79 with
    the resize rebuild. Found on the way: `VulkanPipeline::cleanup`
    never nulled `compute_shader_`, so the resize re-create refused --
-   the suite never re-creates a tracer, so a new pin does.   Open spikes: the per-iteration variance update (undecided, not
-   started). Multi-iteration is CLOSED in both forms 2026-11-06
-   (loop33): edge-stopped K=2/K=3 diverge exactly like variance-only
-   (K=2 best 0.58x of K=1 / 1.01x raw, K=3 0.51x raw; K=2/k=2 edge ==
+   the   suite never re-creates a tracer, so a new pin does.   Multi-iteration is CLOSED in all three forms 2026-11-06
+   (loop33 edge-stopped K=2/K=3 diverge exactly like variance-only:
+   K=2 best 0.58x of K=1 / 1.01x raw, K=3 0.51x raw; K=2/k=2 edge ==
    s4 variance to 2% -- at large k the stale variance width dominates
-   and perfect edge stops change nothing). No render-path loop; the
-   single-iteration v1 filter stands. The normal-term spike CLOSED 2026-11-06
+   and perfect edge stops change nothing; loop34 variance-updated:
+   per-iteration E2 re-smoothing beats stale 1.24x-3.8x same-k but K=2
+   best is still 0.50x of K=1 / 0.87x raw -- footprint growth dominates
+   corrected widths). No render-path loop; the
+   single-iteration v1 filter stands, and no further denoiser spikes are
+   queued. The normal-term spike CLOSED 2026-11-06
    (loop32): tessellated sphere r=0.5, best edge 0.970x var (1.03x) /
    0.496x raw, gain composition INVERTED vs planar (ns sweep moves 2%,
    ds flat -- normal weight live, depth inert; pinned by an ns-slope

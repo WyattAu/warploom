@@ -126,7 +126,7 @@ small enough to live here, and moving it is a natural early split.
 
 Nothing is claimed without these, on the `default` preset:
 
-- fresh `git clone` → `cmake --preset default` → build → 74 shaders compile
+- fresh `git clone` → `cmake --preset default` → build → 80 shaders compile
 - `ctest` 6/6
 - full unit suite under `VK_LAYER_KHRONOS_validation`: 0 diagnostics, 0 leaks
 - `tools/live_proof.py all` over real sockets: 80/80 headless, plus the visual-host half of `e1` (E1 added eight: render mode and exposure wire contract; E2/R4 added three: set_bloom/get_bloom round-trip on the headless host, and R1b added the pt mode round-trip -- applied, back to forward, re-entered, left again -- on the viewport. The bloom payload-validation and read-back assertions are the visual-host half of the E1 proof -- they run when the harness detects a viewport, where the toggle was exercised live on the RTX 2060: on, reads back on, off, reads back off, missing-arg rejected. R2 added two headless get_oks plus the visual-host toggle round-trip: rt mode entered at runtime via set_render_mode, on/reads-back-on/off/reads-back-off/missing-arg-rejected for both set_rt_reflections and set_rt_ao, then back to forward. R1 added two headless get_oks (get_pt_samples/get_pt_mean) plus the visual-host determinism round-trip: enter pt, set target 16, poll to 16 samples, read mean M1, leave + re-enter, repeat to 16, M2 == M1 bitwise, then back to forward; target-missing-arg rejected and set-refused-outside-PT also round-tripped)

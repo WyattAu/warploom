@@ -5207,6 +5207,913 @@ TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
   ctx.cleanup();
 }
 
+//! Loop34: per-iteration variance update -- the open alternative the loop33
+//! verdict leaves standing. Loop33 showed edge-stopped K=2/K=3 diverge
+//! exactly like variance-only (K=2/k=2 edge == s4 to 2%): the mechanism is
+//! the STALE variance guide (E2_orig minus an increasingly smooth mean
+//! keeps every width wide while the footprint grows). The obvious rescue is
+//! to recompute the guide per iteration: smooth E2 with the same
+//! spatial x geometry kernel (variance-blind -- the E2 image's own
+//! pseudo-variance clamps to zero wherever luma(E2) >= 1, i.e. the sky, so
+//! reusing the edge shader with a huge k would silently no-op there; that
+//! reuse was considered and rejected, and denoise_moment_smooth.comp
+//! exists because of it), then run iteration 1 on v = E2smooth - M1^2.
+//! Scene + measure are identical to loop29 s4 / loop30 / loop33 (box,
+//! 64x64, 4spp vs 128spp, analytic sky -- K=1/k=2.0 must reproduce the
+//! loop30 bar, which validates the chain harness end to end). it0 is fixed
+//! at the loop30 best (k=2.0); it1 sweeps k s4-style on BOTH legs (stale
+//! E2orig vs updated E2smooth), so the verdict is a same-k comparison.
+//! Whether the update saves iteration 2 is a MEASUREMENT this run reports,
+//! not a pin this run asserts -- the structural pins below (chain purity,
+//! update-live, guide-live, smoother-geometry, smoother DC + noise,
+//! K-wire, stride-wire, geometry-wire, all K-matched where the loop33
+//! trap applies) are what stop a dead chain from passing silently.
+TEST(path_tracing_real, denoise_edge_variance_update_spike) {
+  omnicpp::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("OmniCppPtVarUpdateSpike", true).is_ok());
+  if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+  const std::uint32_t side = 64U;
+  constexpr std::uint32_t kNoisyFrames = 4U;
+  constexpr std::uint32_t kRefFrames = 128U;
+
+  omnicpp::render::VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+
+  const std::vector<float> box = {
+      -0.5F, -0.5F, -0.5F,  -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,  -0.5F, -0.5F, -0.5F,
+      -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, -0.5F, 0.5F,  -0.5F, -0.5F, -0.5F};
+  auto geo = alloc.create_buffer(box.size() * sizeof(float),
+                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  std::memcpy(geo.value().mapped, box.data(), box.size() * sizeof(float));
+  VkBufferDeviceAddressInfo ai{};
+  ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  ai.buffer = geo.value().buffer;
+
+  omnicpp::render::PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.width = side;
+  cfg.height = side;
+  cfg.max_bounces = 4U;
+  cfg.sky.mode = 1U;
+  omnicpp::render::PathTracerMesh cube{};
+  cube.vertex_buffer_address = static_cast<std::uint64_t>(
+      vkGetBufferDeviceAddress(ctx.device(), &ai));
+  cube.triangle_count = 12U;
+  cube.max_vertex = 35U;
+  cfg.meshes = {cube};
+  cfg.instances = {
+      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+
+  omnicpp::render::VulkanPathTracer tracer;
+  ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
+                            ctx.graphics_queue(), qf, alloc, cfg)
+                  .is_ok());
+  omnicpp::render::PathTracerCamera cam{};
+  cam.position = {0.0F, 0.6F, 2.6F};
+  cam.forward = {0.0F, -0.2F, -1.0F};
+  cam.right = {1.0F, 0.0F, 0.0F};
+  cam.up = {0.0F, 1.0F, 0.0F};
+  tracer.set_camera(cam);
+
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+      ctx.device(), qf);
+  ASSERT_TRUE(pool.is_ok());
+  const auto submit_wait = [&](VkCommandBuffer cb) {
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1U;
+    si.pCommandBuffers = &cb;
+    EXPECT_EQ(vkQueueSubmit(ctx.graphics_queue(), 1, &si, VK_NULL_HANDLE),
+              VK_SUCCESS);
+    EXPECT_EQ(vkQueueWaitIdle(ctx.graphics_queue()), VK_SUCCESS);
+  };
+  const auto record_rounds = [&](std::uint32_t frames) {
+    for (std::uint32_t r = 0; r < frames; ++r) {
+      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+          ctx.device(), pool.value());
+      EXPECT_TRUE(cbr.is_ok());
+      if (!cbr.is_ok()) return;
+      VkCommandBuffer cb = cbr.value();
+      VkCommandBufferBeginInfo bi{};
+      bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+      tracer.record_round(cb, r, r == 0U);
+      EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+      submit_wait(cb);
+      vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+    }
+  };
+
+  record_rounds(kNoisyFrames);
+  EXPECT_EQ(tracer.sample_count(), kNoisyFrames);
+  auto noisy = tracer.read_mean();
+  ASSERT_TRUE(noisy.is_ok());
+
+  // Output image helper: rgba32f storage + transfer readback through a
+  // host-visible buffer.
+  struct OutBuf {
+    VkImage img{VK_NULL_HANDLE};
+    VkImageView view{VK_NULL_HANDLE};
+    omnicpp::render::Allocation mem{};
+    omnicpp::render::Allocation buf{};
+  };
+  auto make_out = [&]() {
+    OutBuf o{};
+    VkImageCreateInfo ii{};
+    ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    ii.extent = {side, side, 1};
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+               VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    EXPECT_EQ(vkCreateImage(ctx.device(), &ii, nullptr, &o.img), VK_SUCCESS);
+    auto mem = alloc.bind_image(o.img, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    EXPECT_TRUE(mem.is_ok());
+    o.mem = mem.value();
+    VkImageViewCreateInfo vi{};
+    vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vi.image = o.img;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    EXPECT_EQ(vkCreateImageView(ctx.device(), &vi, nullptr, &o.view), VK_SUCCESS);
+    auto buf = alloc.create_buffer(
+        static_cast<VkDeviceSize>(side) * side * 16U,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    EXPECT_TRUE(buf.is_ok());
+    o.buf = buf.value();
+    return o;
+  };
+  OutBuf var_out = make_out();
+  // Uniform-geometry control: (0,0,1,+1). Zeroed guide: all zeros, so the
+  // guided iteration sees vc = 0 everywhere (edge2 = 1e-8 -- output is the
+  // center texel, no smoothing) and must differ from the E2s-guided chain.
+  OutBuf uni_geo = make_out();
+  OutBuf zero_geo = make_out();
+  {
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    ASSERT_TRUE(cbr.is_ok());
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    ASSERT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    for (OutBuf* o : {&uni_geo, &zero_geo}) {
+      VkImageMemoryBarrier pre{};
+      pre.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      pre.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+      pre.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      pre.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      pre.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      pre.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      pre.image = o->img;
+      pre.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                           nullptr, 1, &pre);
+    }
+    VkClearColorValue v{};
+    v.float32[0] = 0.0F;
+    v.float32[1] = 0.0F;
+    v.float32[2] = 1.0F;
+    v.float32[3] = 1.0F;
+    VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(cb, uni_geo.img, VK_IMAGE_LAYOUT_GENERAL, &v, 1,
+                         &range);
+    VkClearColorValue z{};
+    z.float32[0] = 0.0F;
+    z.float32[1] = 0.0F;
+    z.float32[2] = 0.0F;
+    z.float32[3] = 0.0F;
+    vkCmdClearColorImage(cb, zero_geo.img, VK_IMAGE_LAYOUT_GENERAL, &z, 1,
+                         &range);
+    ASSERT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+  }
+
+  OutBuf ping = make_out();
+  OutBuf pong = make_out();
+  OutBuf e2sm = make_out();
+  // First-touch: ping/pong/e2sm enter GENERAL once and never leave it
+  // outside finish_out's internal round-trip (which returns to GENERAL),
+  // so every iteration dispatch sees GENERAL on all three sides. All
+  // dispatches are idle-separated submits, so no inter-dispatch barriers
+  // are needed beyond the layout contract.
+  {
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    ASSERT_TRUE(cbr.is_ok());
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    ASSERT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    VkImageMemoryBarrier first[3]{};
+    VkImage outs[3] = {ping.img, pong.img, e2sm.img};
+    for (int f = 0; f < 3; ++f) {
+      first[f].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      first[f].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+      first[f].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      first[f].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      first[f].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      first[f].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      first[f].image = outs[f];
+      first[f].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    }
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 3, first);
+    ASSERT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+  }
+
+  // Staging buffer for the host-side copy of the moment (E2 sums) image.
+  auto mbuf_r = alloc.create_buffer(
+      static_cast<VkDeviceSize>(side) * side * 16U,
+      VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(mbuf_r.is_ok());
+  auto mbuf = mbuf_r.value();
+  const auto copy_moment = [&]() {
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    EXPECT_TRUE(cbr.is_ok());
+    if (!cbr.is_ok()) return;
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    VkImageMemoryBarrier to_src{};
+    to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_src.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    to_src.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_src.image = tracer.moment_image();
+    to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(cb,
+                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &to_src);
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {side, side, 1};
+    vkCmdCopyImageToBuffer(cb, tracer.moment_image(),
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, mbuf.buffer, 1,
+                           &region);
+    VkImageMemoryBarrier ret{};
+    ret.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    ret.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    ret.dstAccessMask =
+        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    ret.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    ret.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    ret.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ret.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ret.image = tracer.moment_image();
+    ret.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &ret);
+    EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+  };
+  copy_moment();
+  std::vector<float> e2_sums(static_cast<std::size_t>(side) * side * 4U);
+  std::memcpy(e2_sums.data(), mbuf.mapped, e2_sums.size() * sizeof(float));
+  // Normalized E2 (sums depth 4) + its host-side characterization: the
+  // smoother must preserve DC while strictly reducing neighbor energy.
+  const auto luma3 = [](float r, float g, float b) {
+    return 0.2126 * static_cast<double>(r) + 0.7152 * static_cast<double>(g) +
+           0.0722 * static_cast<double>(b);
+  };
+  std::vector<float> e2_norm(e2_sums.size());
+  for (std::size_t i = 0; i < e2_sums.size(); ++i)
+    e2_norm[i] = e2_sums[i] / static_cast<float>(kNoisyFrames);
+  const auto mean_luma = [&](const std::vector<float>& img) {
+    double s = 0.0;
+    const std::size_t texels = img.size() / 4U;
+    for (std::size_t t = 0; t < texels; ++t)
+      s += luma3(img[t * 4U], img[t * 4U + 1U], img[t * 4U + 2U]);
+    return s / static_cast<double>(texels);
+  };
+  const auto neighbor_energy = [&](const std::vector<float>& img) {
+    double e = 0.0;
+    for (std::uint32_t y = 0; y < side; ++y) {
+      for (std::uint32_t x = 0; x < side; ++x) {
+        const std::size_t t = static_cast<std::size_t>(y) * side + x;
+        const double lc =
+            luma3(img[t * 4U], img[t * 4U + 1U], img[t * 4U + 2U]);
+        if (x + 1U < side) {
+          const std::size_t r = t + 1U;
+          const double lr =
+              luma3(img[r * 4U], img[r * 4U + 1U], img[r * 4U + 2U]);
+          const double d = lc - lr;
+          e += d * d;
+        }
+        if (y + 1U < side) {
+          const std::size_t dwn = t + side;
+          const double ld = luma3(img[dwn * 4U], img[dwn * 4U + 1U],
+                                  img[dwn * 4U + 2U]);
+          const double d = lc - ld;
+          e += d * d;
+        }
+      }
+    }
+    return e;
+  };
+  const double e2_mean = mean_luma(e2_norm);
+  const double e2_energy = neighbor_energy(e2_norm);
+  std::printf("LoopT2 var-update spike: E2 mean %.6e neighbor-energy %.6e\n",
+              e2_mean, e2_energy);
+
+  omnicpp::render::VulkanDescriptorManager var_mgr, edge_mgr, smooth_mgr;
+  ASSERT_TRUE(var_mgr.initialize(ctx.device()).is_ok());
+  ASSERT_TRUE(edge_mgr.initialize(ctx.device()).is_ok());
+  ASSERT_TRUE(smooth_mgr.initialize(ctx.device()).is_ok());
+  std::vector<omnicpp::render::ReflectedBinding> var_b(3);
+  for (std::uint32_t b = 0; b < 3U; ++b) {
+    var_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                VK_SHADER_STAGE_COMPUTE_BIT};
+  }
+  auto var_layout = var_mgr.create_layout(var_b, 1);
+  ASSERT_TRUE(var_layout.is_ok());
+  auto var_set = var_mgr.allocate_set(var_layout.value());
+  ASSERT_TRUE(var_set.is_ok());
+  ASSERT_TRUE(var_mgr.write_image(var_set.value(), 0,
+                                  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_NULL_HANDLE,
+                                  tracer.accum_view(), VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+  ASSERT_TRUE(var_mgr.write_image(var_set.value(), 1,
+                                  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_NULL_HANDLE,
+                                  tracer.moment_view(), VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+  ASSERT_TRUE(var_mgr.write_image(var_set.value(), 2,
+                                  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_NULL_HANDLE,
+                                  var_out.view, VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+  std::vector<omnicpp::render::ReflectedBinding> edge_b(4);
+  for (std::uint32_t b = 0; b < 4U; ++b) {
+    edge_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                 VK_SHADER_STAGE_COMPUTE_BIT};
+  }
+  auto edge_layout = edge_mgr.create_layout(edge_b, 1);
+  ASSERT_TRUE(edge_layout.is_ok());
+  auto edge_set = edge_mgr.allocate_set(edge_layout.value());
+  ASSERT_TRUE(edge_set.is_ok());
+  ASSERT_TRUE(edge_mgr.write_image(edge_set.value(), 0,
+                                   VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                   VK_NULL_HANDLE, tracer.accum_view(),
+                                   VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+  ASSERT_TRUE(edge_mgr.write_image(edge_set.value(), 1,
+                                   VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                   VK_NULL_HANDLE, tracer.moment_view(),
+                                   VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+  // Bindings 0/1/2/3 (mean input, variance guide, G-buffer, output) are
+  // rebound every iteration: mean alternates sums/ping, the guide
+  // alternates E2-sums/E2-smooth/zero, G-buffer true vs uniform.
+  ASSERT_TRUE(edge_mgr.write_image(edge_set.value(), 3,
+                                   VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                   VK_NULL_HANDLE, ping.view,
+                                   VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+  std::vector<omnicpp::render::ReflectedBinding> smooth_b(3);
+  for (std::uint32_t b = 0; b < 3U; ++b) {
+    smooth_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                   VK_SHADER_STAGE_COMPUTE_BIT};
+  }
+  auto smooth_layout = smooth_mgr.create_layout(smooth_b, 1);
+  ASSERT_TRUE(smooth_layout.is_ok());
+  auto smooth_set = smooth_mgr.allocate_set(smooth_layout.value());
+  ASSERT_TRUE(smooth_set.is_ok());
+  ASSERT_TRUE(smooth_mgr.write_image(smooth_set.value(), 0,
+                                     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                     VK_NULL_HANDLE, tracer.moment_view(),
+                                     VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+  ASSERT_TRUE(smooth_mgr.write_image(smooth_set.value(), 2,
+                                     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                     VK_NULL_HANDLE, e2sm.view,
+                                     VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  omnicpp::render::VulkanPipeline var_pipe, edge_pipe, smooth_pipe;
+  {
+    const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 28U};
+    ASSERT_TRUE(var_pipe.load_shader_stage_file(
+        ctx.device(), shader_dir + "/denoise_variance_atrous.comp.spv",
+        "compute").is_ok());
+    ASSERT_TRUE(var_pipe.create_pipeline_layout(ctx.device(),
+                                                &var_layout.value(), 1, &push)
+                    .is_ok());
+    ASSERT_TRUE(var_pipe.create_compute_pipeline(ctx.device(),
+                                                 var_pipe.pipeline_layout())
+                    .is_ok());
+  }
+  {
+    const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 36U};
+    ASSERT_TRUE(edge_pipe.load_shader_stage_file(
+        ctx.device(), shader_dir + "/denoise_edge_atrous.comp.spv",
+        "compute").is_ok());
+    ASSERT_TRUE(edge_pipe.create_pipeline_layout(ctx.device(),
+                                                &edge_layout.value(), 1, &push)
+                    .is_ok());
+    ASSERT_TRUE(edge_pipe.create_compute_pipeline(ctx.device(),
+                                                  edge_pipe.pipeline_layout())
+                    .is_ok());
+  }
+  {
+    const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 28U};
+    ASSERT_TRUE(smooth_pipe.load_shader_stage_file(
+        ctx.device(), shader_dir + "/denoise_moment_smooth.comp.spv",
+        "compute").is_ok());
+    ASSERT_TRUE(smooth_pipe.create_pipeline_layout(
+        ctx.device(), &smooth_layout.value(), 1, &push)
+                    .is_ok());
+    ASSERT_TRUE(smooth_pipe.create_compute_pipeline(
+        ctx.device(), smooth_pipe.pipeline_layout())
+                    .is_ok());
+  }
+
+  // PT inputs barrier shared by every dispatch: accum + moment + gbuffer
+  // GENERAL->GENERAL (they hold the accumulation, not UNDEFINED).
+  const auto barrier_inputs = [&](VkCommandBuffer cb) {
+    VkImageMemoryBarrier pre{};
+    pre.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    pre.srcAccessMask =
+        VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+    pre.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    pre.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    pre.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    pre.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    pre.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    pre.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkImageMemoryBarrier pres[3] = {pre, pre, pre};
+    pres[0].image = tracer.accum_image();
+    pres[1].image = tracer.moment_image();
+    pres[2].image = tracer.gbuffer_image();
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 3, pres);
+  };
+  const auto prep_out = [&](VkCommandBuffer cb, VkImage img) {
+    VkImageMemoryBarrier b{};
+    b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    b.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.image = img;
+    b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &b);
+  };
+  const auto finish_out = [&](VkCommandBuffer cb, VkImage img, VkBuffer buf) {
+    VkImageMemoryBarrier post{};
+    post.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    post.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    post.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    post.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    post.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    post.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    post.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    post.image = img;
+    post.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &post);
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {side, side, 1};
+    vkCmdCopyImageToBuffer(cb, img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           buf, 1, &region);
+    // Return to GENERAL: ping-pong/smooth images live in GENERAL
+    // permanently, so the next iteration (or chain) needs no layout
+    // tracking.
+    VkImageMemoryBarrier ret{};
+    ret.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    ret.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    ret.dstAccessMask =
+        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    ret.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    ret.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    ret.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ret.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ret.image = img;
+    ret.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &ret);
+  };
+  const auto dispatch_var = [&](float k, OutBuf& out) {
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    EXPECT_TRUE(cbr.is_ok());
+    if (!cbr.is_ok()) return;
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    barrier_inputs(cb);
+    prep_out(cb, out.img);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, var_pipe.pipeline());
+    VkDescriptorSet ds = var_set.value();
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            var_pipe.pipeline_layout(), 0, 1, &ds, 0, nullptr);
+    struct Push {
+      std::uint32_t w, h;
+      float kk, sigma;
+      std::uint32_t mean_n, moment_n, stride;
+    };
+    Push p{side, side, k, 1.5F, kNoisyFrames, kNoisyFrames, 1U};
+    vkCmdPushConstants(cb, var_pipe.pipeline_layout(),
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(Push), &p);
+    vkCmdDispatch(cb, (side + 7U) / 8U, (side + 7U) / 8U, 1);
+    finish_out(cb, out.img, out.buf.buffer);
+    EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+  };
+  // One edge-stopped iteration with a rebindable variance guide. it0 binds
+  // the live SUMS (mean_n = 4) and the E2 SUMS (guide_n = 4); later
+  // iterations bind a normalized mean (mean_n = 1) and either the E2 SUMS
+  // (guide_n = 4 -- the loop33 stale form), the smoothed E2 (guide_n = 1
+  // -- the loop34 update), or the zeroed image (guide_n = 1, the
+  // guide-live control). Binding 2 (geometry) is rebound too, so the
+  // uniform control runs the identical path.
+  const auto dispatch_iter = [&](VkImage in_img, VkImageView in_view,
+                                 std::uint32_t mean_n, VkImage guide_img,
+                                 VkImageView guide_view, std::uint32_t guide_n,
+                                 float k, float nsigma, float dsigma,
+                                 std::uint32_t stride, VkImageView gview,
+                                 OutBuf& out, bool first, bool last) {
+    EXPECT_TRUE(edge_mgr.write_image(edge_set.value(), 0,
+                                     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                     VK_NULL_HANDLE, in_view,
+                                     VK_IMAGE_LAYOUT_GENERAL)
+                    .is_ok());
+    EXPECT_TRUE(edge_mgr.write_image(edge_set.value(), 1,
+                                     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                     VK_NULL_HANDLE, guide_view,
+                                     VK_IMAGE_LAYOUT_GENERAL)
+                    .is_ok());
+    EXPECT_TRUE(edge_mgr.write_image(edge_set.value(), 2,
+                                     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                     VK_NULL_HANDLE, gview,
+                                     VK_IMAGE_LAYOUT_GENERAL)
+                    .is_ok());
+    EXPECT_TRUE(edge_mgr.write_image(edge_set.value(), 3,
+                                     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                     VK_NULL_HANDLE, out.view,
+                                     VK_IMAGE_LAYOUT_GENERAL)
+                    .is_ok());
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    EXPECT_TRUE(cbr.is_ok());
+    if (!cbr.is_ok()) return;
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    if (first) {
+      barrier_inputs(cb);
+    } else {
+      // Ping-pong / smoothed inputs: GENERAL already (first-touch +
+      // finish_out's return trip); declare the compute read on BOTH the
+      // mean input and the guide image (the smoother wrote E2s in an
+      // earlier idle-separated submit, the clear wrote the zero guide).
+      VkImageMemoryBarrier g{};
+      g.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      g.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+      g.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      g.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+      g.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      g.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      g.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      g.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      VkImageMemoryBarrier gs[2] = {g, g};
+      gs[0].image = in_img;
+      gs[1].image = guide_img;
+      vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                                   VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                           0, nullptr, 2, gs);
+    }
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      edge_pipe.pipeline());
+    VkDescriptorSet eds = edge_set.value();
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            edge_pipe.pipeline_layout(), 0, 1, &eds, 0,
+                            nullptr);
+    struct Push {
+      std::uint32_t w, h;
+      float kk, sigma, nsigma, dsigma;
+      std::uint32_t mean_n, moment_n, stride;
+    };
+    Push p{side, side, k, 1.5F, nsigma, dsigma, mean_n, guide_n, stride};
+    vkCmdPushConstants(cb, edge_pipe.pipeline_layout(),
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(Push), &p);
+    vkCmdDispatch(cb, (side + 7U) / 8U, (side + 7U) / 8U, 1);
+    if (last) finish_out(cb, out.img, out.buf.buffer);
+    EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+  };
+  // One variance-blind E2 smoothing pass (the update instrument). The
+  // moment image always binds sums (moment_n = 4); the output holds the
+  // NORMALIZED smoothed E2, so the guided iteration binds it with
+  // guide_n = 1. Binding 1 (geometry) is rebound every call, so the
+  // uniform control runs the identical path.
+  const auto dispatch_smooth = [&](VkImageView gview, OutBuf& out) {
+    EXPECT_TRUE(smooth_mgr.write_image(smooth_set.value(), 1,
+                                       VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                       VK_NULL_HANDLE, gview,
+                                       VK_IMAGE_LAYOUT_GENERAL)
+                    .is_ok());
+    EXPECT_TRUE(smooth_mgr.write_image(smooth_set.value(), 2,
+                                       VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                       VK_NULL_HANDLE, out.view,
+                                       VK_IMAGE_LAYOUT_GENERAL)
+                    .is_ok());
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    EXPECT_TRUE(cbr.is_ok());
+    if (!cbr.is_ok()) return;
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    barrier_inputs(cb);
+    {
+      // e2sm output: GENERAL already (first-touch / return trip); declare
+      // the compute write over the previous chain's contents.
+      VkImageMemoryBarrier g{};
+      g.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      g.srcAccessMask =
+          VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+      g.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      g.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+      g.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      g.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      g.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      g.image = out.img;
+      g.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                                   VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                           0, nullptr, 1, &g);
+    }
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      smooth_pipe.pipeline());
+    VkDescriptorSet ds = smooth_set.value();
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            smooth_pipe.pipeline_layout(), 0, 1, &ds, 0,
+                            nullptr);
+    struct Push {
+      std::uint32_t w, h;
+      float sigma, nsigma, dsigma;
+      std::uint32_t moment_n, stride;
+    };
+    Push p{side, side, 1.5F, 0.1F, 1.0F, kNoisyFrames, 1U};
+    vkCmdPushConstants(cb, smooth_pipe.pipeline_layout(),
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(Push), &p);
+    vkCmdDispatch(cb, (side + 7U) / 8U, (side + 7U) / 8U, 1);
+    finish_out(cb, out.img, out.buf.buffer);
+    EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+  };
+  const auto read_out = [&](OutBuf& out) {
+    std::vector<float> v(static_cast<std::size_t>(side) * side * 4U);
+    std::memcpy(v.data(), out.buf.mapped, v.size() * sizeof(float));
+    return v;
+  };
+
+  dispatch_var(2.0F, var_out);
+  const std::vector<float> var_img = read_out(var_out);
+  // K=1 (the loop30 single-iteration filter) in-harness, then the it0 leg
+  // both chains share: k=2.0/ns=0.1/ds=1.0 over the live sums.
+  dispatch_iter(tracer.accum_image(), tracer.accum_view(), kNoisyFrames,
+                tracer.moment_image(), tracer.moment_view(), kNoisyFrames,
+                2.0F, 0.1F, 1.0F, 1U, tracer.gbuffer_view(), ping, true, true);
+  const std::vector<float> k1_img = read_out(ping);
+  dispatch_iter(tracer.accum_image(), tracer.accum_view(), kNoisyFrames,
+                tracer.moment_image(), tracer.moment_view(), kNoisyFrames,
+                2.0F, 0.1F, 1.0F, 1U, tracer.gbuffer_view(), ping, true, false);
+  // it1 legs. Stale binds the E2 SUMS (guide_n = 4 -- the loop33 form);
+  // updated binds the smoothed E2 (guide_n = 1 -- the loop34 question).
+  // it0's M1 sits in ping; it1 outputs land in pong. Smoothed E2 legs are
+  // stashed to host vectors as they run (e2sm is reused across legs).
+  dispatch_smooth(tracer.gbuffer_view(), e2sm);
+  const std::vector<float> e2s_true = read_out(e2sm);
+  struct ChainCase {
+    const char* leg;
+    float k;
+    std::vector<float> img;
+  };
+  std::vector<ChainCase> cases;
+  for (float k : {0.5F, 1.0F, 2.0F}) {
+    dispatch_iter(ping.img, ping.view, 1U, e2sm.img, e2sm.view, 1U, k, 0.1F,
+                  1.0F, 2U, tracer.gbuffer_view(), pong, false, true);
+    cases.push_back({"updated", k, read_out(pong)});
+  }
+  for (float k : {0.5F, 1.0F, 2.0F}) {
+    dispatch_iter(ping.img, ping.view, 1U, tracer.moment_image(),
+                  tracer.moment_view(), kNoisyFrames, k, 0.1F, 1.0F, 2U,
+                  tracer.gbuffer_view(), pong, false, true);
+    cases.push_back({"stale", k, read_out(pong)});
+  }
+  // Stride-wire for the updated chain: strides (1,2) must differ from
+  // (1,1) -- stride doubling must be live in the updated form too.
+  dispatch_iter(ping.img, ping.view, 1U, e2sm.img, e2sm.view, 1U, 2.0F, 0.1F,
+                1.0F, 1U, tracer.gbuffer_view(), pong, false, true);
+  const std::vector<float> upd_stride11 = read_out(pong);
+  // Guide-live control: the zero guide (vc = 0 everywhere) must change
+  // the answer -- a guided iteration ignoring binding 1 returns the
+  // updated image here instead.
+  dispatch_iter(ping.img, ping.view, 1U, zero_geo.img, zero_geo.view, 1U,
+                2.0F, 0.1F, 1.0F, 2U, tracer.gbuffer_view(), pong, false,
+                true);
+  const std::vector<float> zero_guide_img = read_out(pong);
+  // Smoother-geometry leg: uniform geometry through the smoother must
+  // DIFFER -- a smoother ignoring its gbuffer returns the true answer.
+  dispatch_smooth(uni_geo.view, e2sm);
+  const std::vector<float> e2s_uni = read_out(e2sm);
+  // Chain geometry-wire legs, K-matched (the loop33 trap: a K=2 uniform
+  // chain is a different algorithm than K=1 variance-only, so both legs
+  // run the full updated K=2 chain).
+  dispatch_iter(tracer.accum_image(), tracer.accum_view(), kNoisyFrames,
+                tracer.moment_image(), tracer.moment_view(), kNoisyFrames,
+                2.0F, 0.1F, 1.0F, 1U, uni_geo.view, ping, true, false);
+  dispatch_iter(ping.img, ping.view, 1U, e2sm.img, e2sm.view, 1U, 2.0F, 0.1F,
+                1.0F, 2U, uni_geo.view, pong, false, true);
+  const std::vector<float> uni_upd = read_out(pong);
+  // Temporal-history pin for the updated chain: it0 + smooth + it1(k=2.0)
+  // re-dispatched after the sweep (inputs unchanged since the trace) must
+  // be bit-identical -- the updated chain is a pure function of inputs.
+  dispatch_iter(tracer.accum_image(), tracer.accum_view(), kNoisyFrames,
+                tracer.moment_image(), tracer.moment_view(), kNoisyFrames,
+                2.0F, 0.1F, 1.0F, 1U, tracer.gbuffer_view(), ping, true, false);
+  dispatch_smooth(tracer.gbuffer_view(), e2sm);
+  dispatch_iter(ping.img, ping.view, 1U, e2sm.img, e2sm.view, 1U, 2.0F, 0.1F,
+                1.0F, 2U, tracer.gbuffer_view(), pong, false, true);
+  const std::vector<float> upd_rep = read_out(pong);
+  // Smoother characterization (host-side, on the normalized E2): DC
+  // preservation + strict noise-energy reduction. A copy instead of a
+  // smoother fails the energy pin; zeros fail the DC pin.
+  const double e2s_mean = mean_luma(e2s_true);
+  const double e2s_energy = neighbor_energy(e2s_true);
+  std::printf("LoopT2 var-update spike: E2s mean %.6e (E2 %.6e, ratio %.4f) "
+              "energy %.6e (E2 %.6e, ratio %.4f)\n",
+              e2s_mean, e2_mean, e2s_mean / std::max(e2_mean, 1e-30),
+              e2s_energy, e2_energy, e2s_energy / std::max(e2_energy, 1e-30));
+  EXPECT_LT(std::fabs(e2s_mean - e2_mean) / std::max(e2_mean, 1e-30), 0.02)
+      << "smoother does not preserve E2 DC: smoothed " << e2s_mean
+      << " vs original " << e2_mean;
+  EXPECT_LT(e2s_energy, e2_energy * 0.99)
+      << "smoother does not reduce E2 neighbor energy: " << e2s_energy
+      << " vs " << e2_energy;
+  // Wire pins, all structural.
+  EXPECT_EQ(std::memcmp(cases[2].img.data(), upd_rep.data(),
+                        upd_rep.size() * sizeof(float)),
+            0)
+      << "updated chain is not a pure function of its inputs";
+  EXPECT_NE(std::memcmp(cases[2].img.data(), cases[5].img.data(),
+                        cases[5].img.size() * sizeof(float)),
+            0)
+      << "updated K=2 matches stale K=2: the update changes nothing";
+  EXPECT_NE(std::memcmp(cases[2].img.data(), zero_guide_img.data(),
+                        zero_guide_img.size() * sizeof(float)),
+            0)
+      << "zero guide matches E2s guide: binding 1 is decorative";
+  EXPECT_NE(std::memcmp(e2s_true.data(), e2s_uni.data(),
+                        e2s_uni.size() * sizeof(float)),
+            0)
+      << "uniform-geometry E2s matches true-geometry E2s: the smoother "
+         "ignores its gbuffer";
+  EXPECT_NE(std::memcmp(cases[2].img.data(), k1_img.data(),
+                        k1_img.size() * sizeof(float)),
+            0)
+      << "K=2 updated matches K=1: iteration 1 is a no-op";
+  EXPECT_NE(std::memcmp(cases[2].img.data(), upd_stride11.data(),
+                        upd_stride11.size() * sizeof(float)),
+            0)
+      << "stride doubling is dead in the updated chain: (1,2) matches (1,1)";
+  EXPECT_NE(std::memcmp(cases[2].img.data(), uni_upd.data(),
+                        uni_upd.size() * sizeof(float)),
+            0)
+      << "uniform K=2 updated chain matches true: binding 2 dropped after "
+         "iteration 0";
+
+  tracer.reset_accumulation();
+  record_rounds(kRefFrames);
+  EXPECT_EQ(tracer.sample_count(), kRefFrames);
+  auto ref = tracer.read_mean();
+  ASSERT_TRUE(ref.is_ok());
+  const auto luma_mse = [&](const std::vector<float>& img) {
+    constexpr double w[3] = {0.2126, 0.7152, 0.0722};
+    const std::size_t texels = ref.value().size() / 4U;
+    double sse = 0.0;
+    for (std::size_t t = 0; t < texels; ++t) {
+      double a = 0.0;
+      double b = 0.0;
+      for (std::size_t c = 0; c < 3U; ++c) {
+        a += w[c] * static_cast<double>(img[t * 4U + c]);
+        b += w[c] * static_cast<double>(ref.value()[t * 4U + c]);
+      }
+      const double d = a - b;
+      sse += d * d;
+    }
+    return sse / static_cast<double>(texels);
+  };
+  const double raw_mse = luma_mse(noisy.value());
+  const double var_mse = luma_mse(var_img);
+  // Same-k efficacy table: stale (loop33 form) vs updated (loop34 form).
+  // Whether the update saves iteration 2 is a MEASUREMENT this run
+  // reports, not a pin this run asserts -- except K=1, which IS the
+  // loop30 single-iteration filter and must reproduce its bars in-harness
+  // (0.963x var, 0.577x raw).
+  for (const ChainCase& c : cases) {
+    const double m = luma_mse(c.img);
+    std::printf("LoopT2 var-update spike: %s K=2 k=%.1f MSE=%.6e (var %.2fx)\n",
+                c.leg, static_cast<double>(c.k), m, var_mse / m);
+  }
+  double upd_best = 1e30;
+  double stale_best = 1e30;
+  for (const ChainCase& c : cases) {
+    const double m = luma_mse(c.img);
+    if (std::strcmp(c.leg, "updated") == 0) upd_best = std::min(upd_best, m);
+    if (std::strcmp(c.leg, "stale") == 0) stale_best = std::min(stale_best, m);
+  }
+  const double k1_mse = luma_mse(k1_img);
+  std::printf("LoopT2 var-update spike: raw %.6e var %.6e K=1 %.6e; best "
+              "updated %.6e (%.2fx K=1, %.2fx raw) vs best stale %.6e\n",
+              raw_mse, var_mse, k1_mse, upd_best, k1_mse / upd_best,
+              raw_mse / upd_best, stale_best);
+  EXPECT_LT(k1_mse, raw_mse * 0.70)
+      << "K=1 stopped reproducing the single-iteration bar: " << k1_mse
+      << " vs raw " << raw_mse;
+  EXPECT_LT(k1_mse, var_mse * 0.99)
+      << "K=1 stopped reproducing the single-iteration bar: K=1 " << k1_mse
+      << " vs variance-only " << var_mse;
+
+  EXPECT_EQ(ctx.validation_error_count(), 0U);
+  EXPECT_EQ(ctx.validation_warning_count(), 0U);
+  var_pipe.cleanup(ctx.device());
+  edge_pipe.cleanup(ctx.device());
+  smooth_pipe.cleanup(ctx.device());
+  var_mgr.cleanup();
+  edge_mgr.cleanup();
+  smooth_mgr.cleanup();
+  for (OutBuf* o : {&var_out, &ping, &pong, &uni_geo, &zero_geo, &e2sm}) {
+    vkDestroyImageView(ctx.device(), o->view, nullptr);
+    vkDestroyImage(ctx.device(), o->img, nullptr);
+    alloc.destroy_allocation(o->mem);
+    auto b = o->buf;
+    alloc.destroy_allocation(b);
+  }
+  alloc.destroy_allocation(mbuf);
+  tracer.destroy();
+  vkDestroyCommandPool(ctx.device(), pool.value(), nullptr);
+  auto keep_geo = geo.value();
+  alloc.destroy_allocation(keep_geo);
+  alloc.cleanup();
+  ctx.cleanup();
+}
+
 //! T2 render-path consumer: the tracer's record_denoise() (count-sourced
 //! edge-stopped a-trous) must reproduce the spike shader bit-exactly on a
 //! uniform accumulation -- the new shader differs from
