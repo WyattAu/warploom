@@ -144,6 +144,9 @@ work.
   albedo. This is what the matrix implies: a denoiser needs a G-buffer, and
   Warploom already builds one for the raster path. It is implementable at this
   dependency budget and is the honest counter to "no denoiser".
+  BUILT 2026-11-06 (`record_denoise`, v1.18: edge-stopped single-iteration
+  à-trous over mean/moment/G-buffer, 1.73x over raw, live via `set_denoise`)
+  — this option won; multi-iteration closed as do-not-build (loops 33/34).
 - **Denoise by construction**, à la Lumen. Radically more work: it changes the
   architecture rather than adding a pass, and the payoff depends on solving
   radiosity problems Warploom has not started.

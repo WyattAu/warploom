@@ -1096,13 +1096,15 @@ declares a slot 3.
      correlation with 0% unwritten pixels (the 75%-coverage bug is fixed); the
      coverage property is pinned by a sabotage-validated test.
 
-   What is *not* met is PT usability, and the docs say so: no denoiser in the
-   render path (a deliberate v1 deferral -- pause-to-converge is the shipped
-   story, see the comparison matrix §5; the filter itself is a measured spike
-   pinned at 1.67x) and adaptive sampling reachable but opt-in
-   (`set_adaptive`/`get_adaptive`, v1.17: one variance snapshot from the live
-   accumulation, exact-budget rank selection -- 150000/600000 texels at 0.25
-   on the RTX 2060 at 1000x600 -- with a uniform stack on re-entry). Two
+   What is *not* met is PT usability at budgets, and the docs say so: the
+   render-path denoiser is landed (`record_denoise`, v1.18: edge-stopped
+   single-iteration a-trous, 1.73x over raw on the test scene, 10 live e1
+   checks) and adaptive sampling is live with iterative re-masking
+   (`set_adaptive`/`get_adaptive`, v1.17: exact-budget rank selection --
+   150000/600000 texels at 0.25 on the RTX 2060 at 1000x600 -- with a
+   uniform stack on re-entry) -- the v1 deferral is over, pause-to-converge
+   plus the in-stack filter is the shipped story. What remains is the
+   app-scene budget proof, not the machinery. Two
    clauses this paragraph
    used to carry are no longer true and are removed: the scene is not
    cubes-only (`setup_path_tracing` snapshots the live `scene.objects`, one
@@ -1805,10 +1807,13 @@ still-open environment-light gap recorded above.
 
 Honest state now: the tracer is proven correct in situ and headlessly, and
 the capture path is verified end-to-end (0.9994 rank correlation with the
-accumulation, 0% unwritten pixels). What remains for PT is usability rather
-than correctness: no denoiser in the render path, adaptive sampling reachable
-but opt-in (`set_adaptive`/`get_adaptive`, v1.17), and PT's camera is
-deliberately held while it accumulates.
+accumulation, 0% unwritten pixels). Usability machinery is landed too: the
+render-path denoiser (v1.18) and adaptive sampling with iterative re-masking
+(v1.17) are both live over the socket and pinned headlessly. What remains
+for PT is budgets and deforming geometry rather than correctness or
+usability: the app-scene budget proof is unmeasured, skinned PT stays
+rigid-placement only, and PT's camera is deliberately held while it
+accumulates.
 
 **PT scene coverage is a snapshot, and it now stays in step with the scene.**
 `setup_path_tracing` walks `scene.objects` and uploads one mesh per category

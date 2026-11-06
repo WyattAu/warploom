@@ -111,7 +111,8 @@ Two verification milestones worth knowing when reading the Proof column:
 | HDR intermediate + exposure | yes | yes | `WARPLOOM_EXPOSURE=<float>` at start-up and `set_exposure` over the control socket (v1.9); the configured value is pinned by `ComposeChainHonoursConfiguredExposure` |
 | Deferred / G-buffer, MSAA | no | no | every image is `VK_SAMPLE_COUNT_1_BIT` |
 | CSM / cascaded shadow maps | no | no | single 2048² map |
-| SSAO, SSR, TAA, denoiser, volumetrics | no | no | — |
+| SSAO, SSR, TAA, volumetrics | no | no | — |
+| Edge-stopped single-iteration à-trous denoiser (render path) | yes | yes — `set_denoise`/`get_denoise` (v1.18), `get_denoised_mean` for the A/B; refused outside PT mode, re-applied after resize | `record_denoise()` on the tracer (count-sourced divisors, bit-identical to the spike on uniform input), pinned by `denoise_render_path_uniform_parity` + `denoise_render_path_adaptive`; `denoise_edge_curved_spike` closes the normal term (planar scenes: depth stop carries, normals inert); e1 carries 10 live denoise checks |
 | Compressed textures beyond RGBA8 | partial | no | KTX2 BC1/BC3 decode in-tree to RGBA8 (loop 24); GPU-native compressed upload deferred |
 
 ## Ray tracing
@@ -146,9 +147,13 @@ Two honest caveats on the ray tracing:
   the next recorded frame, no rebuild. What still cannot be toggled is R3
   (GPU-driven skinned scenes).
 
-- **Path tracing is a third render mode, and it is narrow.** It traces the
-  cubes-scene cube + ground slab at the swapchain extent captured when the
-  stack was built, accumulates one sample per rendered frame, and tonemaps the
+- **Path tracing is a third render mode, and it is narrow.** It traces a
+  static snapshot of the live app scene at the swapchain extent captured
+  when the stack was built — the canonical cube + ground slab plus every
+  mannequin import in bind pose, every city part pre-baked world-space,
+  and the merged sponza landmark (empty soups skipped; `examples/viewport/
+  main.cpp` PT geometry block mirrors the RT shadow stack's BLAS set) —
+  accumulates one sample per rendered frame, and tonemaps the
   accumulation image directly. It also **holds the camera** while active (a
   moving view averages a smear rather than converging). A resize rebuilds the
   accumulation and re-points both compose chains, so the mode survives

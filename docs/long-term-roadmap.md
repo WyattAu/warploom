@@ -64,17 +64,22 @@ fingerprint stability, byte-identical replays).
   proof), true Duff ONB + Faceforward normals with a committed
   normal-visualization orientation proof, clip strip in the viewport with
   live drag + undo/redo proof, KTX2 BC1/BC3 decode in-tree.
-- **Known gaps:** PT is a static snapshot (app-scene geometry landed --
+- **Known gaps (revised 2026-11-06 — the pre-T5c wording below survived
+  four landed legs, which is why this bullet is rewritten, not patched):**
+  PT is a static snapshot (app-scene geometry landed --
   mannequin/city/sponza traced, actors frozen mid-stride, skinned parts in
   bind pose placed by model*bone; no live/deforming PT); PT + bloom layers
   since 2026-11-01 (bright-pass over the accumulation sum x 1/n, additive
-  post-curve like raster); no denoiser (deliberate v1 deferral, decision recorded);
-  no adaptive sampling; transient planner (R6a) unwired — R6b unblocked
-  by Loop 13 graph-derived lifetimes but still to wire; physics has no
-  rotation/joints, capsule/sleeping/velocity-update partially open;
-  scrub restores document, not physics; sub-frame fraction in the protocol
-  since 2026-11-03 (T4b: parsed + validated, forwarded by both hosts,
-  recorded, replayed deterministically); no hardware CI runner (RT tests
+  post-curve like raster); render-path denoiser LANDED (v1.18,
+  `record_denoise`, 1.73x over raw, 10 live e1 checks) and adaptive
+  sampling LIVE with iterative re-masking (v1.17) — the deferral is over,
+  the app-scene budget proof is what is missing; transient aliasing LANDED
+  (R6b: plan-derived `VulkanTransientStore`, 4-of-10 elision on-device);
+  physics has rotation + joints + capsule + island sleeping +
+  velocity-from-position (loops 2/3, sabotage-checked) — speculative
+  contacts, MGPBD and warm-start stay out by design; scrub restores
+  physics bit-identically (T4a) and the sub-frame fraction travels the
+  protocol end to end (T4b); no hardware CI runner (RT tests
   skip on lavapipe); WASM/
   Wayland/adoption (E6) open.
 
@@ -353,11 +358,19 @@ demand), OIDN (budget-excluded), BRep kernel (spike only).
 
 Against the §5 definition, criterion by criterion:
 
-1. **PT live + denoiser + adaptive, on app scenes, at budgets: FAR.**
-   Pause-to-converge on app scenes is real; PT + bloom layers. Missing:
-   per-frame live stepping discipline, adaptive sampling, and the whole
-   in-tree denoiser (à-trous/SVGF spike → implementation is the single
-   biggest item left). Skinned/deforming PT is rigid-placement only.
+1. **PT live + denoiser + adaptive, on app scenes, at budgets: MEDIUM.**
+   Pause-to-converge on app scenes is real; PT + bloom layers; stepped
+   PT (v1.13, reset + target K + poll, wire-level mean equality), adaptive
+   sampling (v1.17, one exact-budget variance snapshot + iterative
+   re-masking, live in e1) and the in-tree render-path denoiser (v1.18,
+   `record_denoise`, 1.73x over raw / 1.04x over variance-only on the
+   test scene, 10 live e1 checks) are all landed and live-proven — the
+   2026-11-01 FAR assessment predates all three. Remaining for the v1
+   exit: the app-scene budget proof (live PT + denoise + adaptive on
+   city/mannequin scenes against the published `pt` budget in
+   `docs/perf-budgets.json`), and multi-iteration is CLOSED as do-not-
+   build (loops 33/34: K=2/K=3 diverge). Skinned/deforming PT is
+   rigid-placement only.
 2. **Deterministic tick + replay + scrub incl. physics: NEAR.** T4a DONE
    2026-11-03: checkpoints (ring + file) carry the full solver state;
    scrub restores physics bit-identically; re-apply re-simulates with the
@@ -369,9 +382,14 @@ Against the §5 definition, criterion by criterion:
    property-track machinery, render tracks are T5c end to end, and
    concurrent record + play is live-proven (`proof_cnc`, 2026-11-06) —
    the session contract was already T5a, the wire leg was what was missing.
-4. **Physics spheres + capsules + rotation + joints + sleeping: MEDIUM-FAR.**
-   Grid broadphase pinned with speedups; rotation and joints are each a
-   design arc (loops 2/3 researched, not built); capsule/sleeping partial.
+4. **Physics spheres + capsules + rotation + joints + sleeping: NEAR.**
+   Grid broadphase pinned with speedups (2.10x at 1k, 2.89x at 4k, 2.92x
+   at 8k); rotation + joints + capsule + island sleeping + restitution
+   threshold all landed and sabotage-checked (loops 2/3, 2026-10-31) —
+   the "researched, not built" clause predates the build. Staying out
+   by design, not by backlog: speculative contacts (needs a tunneling
+   proof as trigger), MGPBD (no deformables), warm-start (breaks
+   snapshot replay).
 5. **Content pipeline: NEAR.** glTF + KTX2 decode + asset browser done;
    only GPU-native upload on the VRAM trigger remains.
 6. **One render path, aliasing on-device, matrix green: NEAR-DONE.** R6b
