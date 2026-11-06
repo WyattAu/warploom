@@ -196,6 +196,25 @@ class PhysicsWorld final {
     return restitution_threshold_;
   }
 
+  //! Speculative (swept) contacts (D1, R3 gate). When on, sphere-sphere
+  //! detection also tests the swept segment start->end from the frozen
+  //! snapshot: a pair whose centers pass within r1+r2 mid-substep emits a
+  //! TOI contact that rewinds the overshoot and kills the approach, so a
+  //! fast body stops at the wall instead of tunneling. Default OFF, like
+  //! every other solver staging flag: the discrete path is then textually
+  //! untouched and existing replays reproduce bit-identically.
+  //! Limits (documented, not silent): spheres only — capsule pairs stay
+  //! discrete; the rewind is stiff even under contact compliance; under
+  //! velocity-from-position the derived velocities include the TOI landing
+  //! by construction. Speculative contacts carry penetration 0, so they
+  //! never form island edges (a touched island stays awake — conservative).
+  void set_speculative_contacts(bool on) noexcept {
+    speculative_contacts_ = on;
+  }
+  [[nodiscard]] bool speculative_contacts() const noexcept {
+    return speculative_contacts_;
+  }
+
   //! Island sleep speed threshold in m/s (D1, Jolt's per-step rebuild
   //! pattern). Each step_single rebuilds islands by union-find over the
   //! frozen contact graph and puts an island to sleep when every dynamic
@@ -508,11 +527,11 @@ class PhysicsWorld final {
       }
 
       solve_contacts_.clear();
-      rebuild_candidate_pairs();
+      rebuild_candidate_pairs(dt);
       for (const std::pair<std::uint32_t, std::uint32_t>& pair :
            candidate_pairs_) {
         ContactSolve solve{};
-        if (narrowphase_pair(pair.first, pair.second, solve)) {
+        if (narrowphase_pair(pair.first, pair.second, solve, dt)) {
           solve_contacts_.push_back(solve);
         }
       }
@@ -556,6 +575,37 @@ class PhysicsWorld final {
       // order (deterministic). With no joints this loop is empty and the
       // pass is the historical one.
       for (std::uint32_t pass = 0; pass < solver_iterations_; ++pass) {
+        // Speculative rewind (pass 0 only): place the pair back at its TOI
+        // configuration by removing the relative overshoot split by inverse
+        // mass. Passes 1+ use the generic residual path below: after a TOI
+        // landing the residual is ~0 along n, so they skip — the same
+        // mechanism that settles discrete pairs. Sleep-pinned endpoints
+        // contribute 0 mass exactly like the discrete branch.
+        if (pass == 0U) {
+          for (std::size_t ci = 0; ci < solve_contacts_.size(); ++ci) {
+            const ContactSolve& solve = solve_contacts_[ci];
+            if (!solve.speculative) continue;
+            PhysicsBody& a = bodies_[solve.a];
+            PhysicsBody& b = bodies_[solve.b];
+            const float inv_a =
+                is_asleep(solve.a) ? 0.0f : a.inverse_mass;
+            const float inv_b =
+                is_asleep(solve.b) ? 0.0f : b.inverse_mass;
+            const float inv_eff = inv_a + inv_b;
+            if (inv_eff <= 0.0f) continue;  // both pinned
+            // W points from TOI to end (overshoot direction); the rewind
+            // moves the pair back along it, so a takes +W and b takes -W
+            // (relative change -W, center-of-mass preserving).
+            const float fa = inv_a / inv_eff;
+            const float fb = inv_b / inv_eff;
+            a.position[0] += solve.wx * fa;
+            a.position[1] += solve.wy * fa;
+            a.position[2] += solve.wz * fa;
+            b.position[0] -= solve.wx * fb;
+            b.position[1] -= solve.wy * fb;
+            b.position[2] -= solve.wz * fb;
+          }
+        }
         for (std::size_t ji = 0; ji < joints_.size(); ++ji) {
           const DistanceJoint& joint = joints_[ji];
           if (joint.a == joint.b || joint.a >= bodies_.size() ||
@@ -900,6 +950,14 @@ class PhysicsWorld final {
   //! One resolved contact, computed from the snapshot and then applied.
   //! r_a/r_b are the contact-point lever arms (world frame) for the torque
   //! side effect on spin; the linear solve is unchanged by them.
+  //! A speculative contact (R3/D1) stopped mid-flight: `speculative` marks
+  //! a TOI rewind instead of a separation. `penetration` is 0 (touching at
+  //! TOI, so no island edge — conservative: a speculatively touched island
+  //! stays awake), and (wx, wy, wz) is the relative overshoot vector from
+  //! the TOI configuration to the snapshot end configuration. Pass 0
+  //! rewinds it split by inverse mass (center-of-mass preserving; exact
+  //! for a static obstacle or head-on equal masses); the impulse then
+  //! kills the approach velocity exactly like a discrete contact.
   struct ContactSolve {
     std::uint32_t a{0};
     std::uint32_t b{0};
@@ -910,6 +968,8 @@ class PhysicsWorld final {
     float vel_n{0.0f};
     float rax{0.0f}, ray{0.0f}, raz{0.0f};
     float rbx{0.0f}, rby{0.0f}, rbz{0.0f};
+    bool speculative{false};
+    float wx{0.0f}, wy{0.0f}, wz{0.0f};
   };
   //! Exact pre-integration pose+velocity of one body (the sleeper restore
   //! source and the rest-test input). Radii/masses/shapes are immutable
@@ -988,8 +1048,10 @@ class PhysicsWorld final {
   //! segment points. Returns false when separated or both static. A
   //! bounding-sphere precheck (centers vs bound sum) runs first — it can
   //! only reject pairs the exact test would reject.
-  bool narrowphase_pair(std::size_t i, std::size_t j,
-                        ContactSolve& solve) noexcept {
+  //! Substep length h locates each body's segment start (p - v*h) for the
+  //! swept test; the discrete path ignores it.
+  bool narrowphase_pair(std::size_t i, std::size_t j, ContactSolve& solve,
+                        float h) noexcept {
     const SolveSnapshot& a = solve_snapshot_[i];
     const SolveSnapshot& b = solve_snapshot_[j];
     const float inv_sum = a.inverse_mass + b.inverse_mass;
@@ -1002,27 +1064,102 @@ class PhysicsWorld final {
       const float dz = b.pz - a.pz;
       const float dist_sq = dx * dx + dy * dy + dz * dz;
       const float min_dist = a.radius + b.radius;
-      if (dist_sq >= min_dist * min_dist) return false;
-      solve.a = static_cast<std::uint32_t>(i);
-      solve.b = static_cast<std::uint32_t>(j);
-      const float dist = std::sqrt(dist_sq);
-      // Degenerate: coincident centers -> separate along +Y.
-      solve.nx = dist > 1e-8f ? dx / dist : 0.0f;
-      solve.ny = dist > 1e-8f ? dy / dist : 1.0f;
-      solve.nz = dist > 1e-8f ? dz / dist : 0.0f;
-      solve.penetration = min_dist - dist;
-      solve.inv_sum = inv_sum;
-      solve.restitution = 0.5f * (a.restitution + b.restitution);
-      solve.vel_n = (b.vx - a.vx) * solve.nx + (b.vy - a.vy) * solve.ny +
-                    (b.vz - a.vz) * solve.nz;
-      // Lever arms: contact point on a's surface along +n.
-      solve.rax = solve.nx * a.radius;
-      solve.ray = solve.ny * a.radius;
-      solve.raz = solve.nz * a.radius;
-      solve.rbx = solve.nx * -b.radius;
-      solve.rby = solve.ny * -b.radius;
-      solve.rbz = solve.nz * -b.radius;
-      return true;
+      if (min_dist <= 0.0f) return false;
+      // Relative segment c0 -> c1 over the substep, from snapshot end
+      // positions p and velocities v: c0 = (pb - vb*h) - (pa - va*h),
+      // c1 = (dx, dy, dz) above.
+      const float c0x = (b.px - b.vx * h) - (a.px - a.vx * h);
+      const float c0y = (b.py - b.vy * h) - (a.py - a.vy * h);
+      const float c0z = (b.pz - b.vz * h) - (a.pz - a.vz * h);
+      const float c0sq = c0x * c0x + c0y * c0y + c0z * c0z;
+      const float r_sq = min_dist * min_dist;
+      // The discrete contact, computed once and returned for every
+      // end-inside pair the swept rule does not own. Verbatim historical
+      // arithmetic, so flag-off behavior (and start-inside overlap with
+      // flag on) is bit-identical to before.
+      const auto discrete = [&]() {
+        solve.a = static_cast<std::uint32_t>(i);
+        solve.b = static_cast<std::uint32_t>(j);
+        const float dist = std::sqrt(dist_sq);
+        // Degenerate: coincident centers -> separate along +Y.
+        solve.nx = dist > 1e-8f ? dx / dist : 0.0f;
+        solve.ny = dist > 1e-8f ? dy / dist : 1.0f;
+        solve.nz = dist > 1e-8f ? dz / dist : 0.0f;
+        solve.penetration = min_dist - dist;
+        solve.inv_sum = inv_sum;
+        solve.restitution = 0.5f * (a.restitution + b.restitution);
+        solve.vel_n = (b.vx - a.vx) * solve.nx + (b.vy - a.vy) * solve.ny +
+                      (b.vz - a.vz) * solve.nz;
+        // Lever arms: contact point on a's surface along +n.
+        solve.rax = solve.nx * a.radius;
+        solve.ray = solve.ny * a.radius;
+        solve.raz = solve.nz * a.radius;
+        solve.rbx = solve.nx * -b.radius;
+        solve.rby = solve.ny * -b.radius;
+        solve.rbz = solve.nz * -b.radius;
+      };
+      // Swept (speculative) TOI contact. Owns pairs that ENTERED mid-step
+      // (start outside, end inside or through): the discrete end-normal
+      // points the wrong way for far-half samples (separating along it
+      // exits the far side — the ejection mechanism), so TOI rewind +
+      // approach-kill is the correct response. Start-inside pairs stay
+      // discrete (resting/continuing overlap); start-overlap/end-
+      // separated pairs keep the historical miss (solving the exit root
+      // would glue a legitimately separating pair back).
+      const bool crossed = dist_sq < r_sq && c0sq > r_sq;
+      if (speculative_contacts_ && (crossed || dist_sq >= r_sq) &&
+          c0sq > r_sq) {
+        const float ddx = dx - c0x;
+        const float ddy = dy - c0y;
+        const float ddz = dz - c0z;
+        const float a2 = ddx * ddx + ddy * ddy + ddz * ddz;
+        const float bq = c0x * ddx + c0y * ddy + c0z * ddz;
+        float s = -1.0f;
+        if (a2 > 0.0f && bq < 0.0f) {
+          const float disc = bq * bq - a2 * (c0sq - r_sq);
+          if (disc >= 0.0f) s = (-bq - std::sqrt(disc)) / a2;
+        }
+        if (s >= 0.0f && s <= 1.0f) {
+          // TOI configuration: centers exactly min_dist apart along n.
+          const float cx = c0x + ddx * s;
+          const float cy = c0y + ddy * s;
+          const float cz = c0z + ddz * s;
+          solve.a = static_cast<std::uint32_t>(i);
+          solve.b = static_cast<std::uint32_t>(j);
+          solve.nx = cx / min_dist;
+          solve.ny = cy / min_dist;
+          solve.nz = cz / min_dist;
+          solve.penetration = 0.0f;  // touching at TOI; never an island edge
+          solve.inv_sum = inv_sum;
+          solve.restitution = 0.5f * (a.restitution + b.restitution);
+          solve.vel_n = (b.vx - a.vx) * solve.nx + (b.vy - a.vy) * solve.ny +
+                        (b.vz - a.vz) * solve.nz;
+          if (solve.vel_n < 0.0f) {
+            solve.rax = solve.nx * a.radius;
+            solve.ray = solve.ny * a.radius;
+            solve.raz = solve.nz * a.radius;
+            solve.rbx = solve.nx * -b.radius;
+            solve.rby = solve.ny * -b.radius;
+            solve.rbz = solve.nz * -b.radius;
+            // Relative overshoot from TOI to segment end; pass 0 rewinds
+            // it split by inverse mass (COM-preserving; exact against a
+            // static obstacle or head-on equal masses).
+            const float k = 1.0f - s;
+            solve.speculative = true;
+            solve.wx = ddx * k;
+            solve.wy = ddy * k;
+            solve.wz = ddz * k;
+            return true;
+          }
+          // At TOI but separating (float dust on a grazing entry): fall
+          // through to discrete/miss below.
+        }
+      }
+      if (dist_sq < r_sq) {
+        discrete();
+        return true;
+      }
+      return false;
     }
     // Capsule-involved: endpoints in world frame, then closest points.
     float aux = 0.0F, auy = 1.0F, auz = 0.0F;
@@ -1090,7 +1227,7 @@ class PhysicsWorld final {
   //! Determinism is why this is a sorted vector rather than a hash grid walked
   //! in bucket order: hash iteration order is unspecified, and the contact set
   //! is order-sensitive once corrections are applied.
-  void rebuild_candidate_pairs() noexcept {
+  void rebuild_candidate_pairs(float h) noexcept {
     candidate_pairs_.clear();
     const std::size_t count = solve_snapshot_.size();
     if (count < 2U) return;
@@ -1125,11 +1262,44 @@ class PhysicsWorld final {
 
     grid_.reserve_for(count);
     grid_.clear_frame();
-    for (std::size_t i = 0; i < count; ++i) {
-      const SolveSnapshot& body = solve_snapshot_[i];
-      grid_
-          .insert({cell_of(body.px), cell_of(body.py), cell_of(body.pz)})
-          .members.push_back(static_cast<std::uint32_t>(i));
+    // Swept footprints (speculative mode): each body occupies every cell
+    // its bound-sphere sweep touches, so a pair whose paths cross is
+    // guaranteed a shared cell. A swept pair overlaps at some point X; X
+    // is within bound_a of a's segment and within bound_b of b's segment,
+    // so both bodies' swept ranges contain cell(X). The bound sphere
+    // conservatively covers capsules (bound = radius + half-height).
+    // Discrete mode keeps the historical single-cell insert verbatim.
+    std::vector<CellRange> ranges{};
+    if (speculative_contacts_) {
+      ranges.resize(count);
+      for (std::size_t i = 0; i < count; ++i) {
+        const SolveSnapshot& body = solve_snapshot_[i];
+        const float sx = body.px - body.vx * h;
+        const float sy = body.py - body.vy * h;
+        const float sz = body.pz - body.vz * h;
+        CellRange& r = ranges[i];
+        r.lox = cell_of((sx < body.px ? sx : body.px) - body.bound);
+        r.hix = cell_of((sx > body.px ? sx : body.px) + body.bound);
+        r.loy = cell_of((sy < body.py ? sy : body.py) - body.bound);
+        r.hiy = cell_of((sy > body.py ? sy : body.py) + body.bound);
+        r.loz = cell_of((sz < body.pz ? sz : body.pz) - body.bound);
+        r.hiz = cell_of((sz > body.pz ? sz : body.pz) + body.bound);
+        for (std::int64_t cx = r.lox; cx <= r.hix; ++cx) {
+          for (std::int64_t cy = r.loy; cy <= r.hiy; ++cy) {
+            for (std::int64_t cz = r.loz; cz <= r.hiz; ++cz) {
+              grid_.insert({cx, cy, cz})
+                  .members.push_back(static_cast<std::uint32_t>(i));
+            }
+          }
+        }
+      }
+    } else {
+      for (std::size_t i = 0; i < count; ++i) {
+        const SolveSnapshot& body = solve_snapshot_[i];
+        grid_
+            .insert({cell_of(body.px), cell_of(body.py), cell_of(body.pz)})
+            .members.push_back(static_cast<std::uint32_t>(i));
+      }
     }
 
     static constexpr std::int64_t kOffsets[27][3] = {
@@ -1140,8 +1310,41 @@ class PhysicsWorld final {
         {1, -1, 1},   {1, 0, -1},   {1, 0, 0},   {1, 0, 1},   {1, 1, -1},
         {1, 1, 0},    {1, 1, 1}};
 
+    // Swept query mirrors the swept insert: body i scans its own swept
+    // range, so any pair sharing a swept cell is found by min(i, j)'s scan
+    // (the other endpoint's insert covered that cell by the argument
+    // above). Discrete mode keeps the historical 27-neighbourhood walk.
+    // A swept pair can share SEVERAL cells and would be emitted once per
+    // shared cell; the trailing sort+unique collapses those (the discrete
+    // path emits each pair once, so unique is a no-op there).
+    const auto emit_cell =
+        [&](const BroadphaseGrid::Slot* slot, std::size_t i,
+            bool& overflowed) {
+          if (slot == nullptr) return;
+          for (const std::uint32_t other : slot->members) {
+            if (other <= i)
+              continue;  // forward pairs only, so each appears once
+            candidate_pairs_.emplace_back(static_cast<std::uint32_t>(i),
+                                          other);
+            if (candidate_pairs_.size() >= kBroadphaseMaxCandidates) {
+              overflowed = true;
+              return;
+            }
+          }
+        };
     bool overflowed = false;
     for (std::size_t i = 0; i < count && !overflowed; ++i) {
+      if (speculative_contacts_) {
+        const CellRange& r = ranges[i];
+        for (std::int64_t cx = r.lox; cx <= r.hix && !overflowed; ++cx) {
+          for (std::int64_t cy = r.loy; cy <= r.hiy && !overflowed; ++cy) {
+            for (std::int64_t cz = r.loz; cz <= r.hiz && !overflowed; ++cz) {
+              emit_cell(grid_.find({cx, cy, cz}), i, overflowed);
+            }
+          }
+        }
+        continue;
+      }
       const SolveSnapshot& body = solve_snapshot_[i];
       const std::int64_t cx = cell_of(body.px);
       const std::int64_t cy = cell_of(body.py);
@@ -1178,6 +1381,13 @@ class PhysicsWorld final {
     }
 
     std::sort(candidate_pairs_.begin(), candidate_pairs_.end());
+    // A swept pair can share several cells and is emitted once per shared
+    // cell; collapse those. The discrete path emits each pair exactly once
+    // (one insert cell, one query hit), so this is a no-op there — the
+    // trailing output is byte-equal with or without it.
+    candidate_pairs_.erase(
+        std::unique(candidate_pairs_.begin(), candidate_pairs_.end()),
+        candidate_pairs_.end());
   }
 
   //! 64-bit FNV-1a over all body positions: the determinism fingerprint
@@ -1399,6 +1609,13 @@ class PhysicsWorld final {
       return x == o.x && y == o.y && z == o.z;
     }
   };
+  //! Swept cell range for one body (speculative mode): the integer cells
+  //! intersecting [min(start, end) - bound, max(start, end) + bound].
+  struct CellRange {
+    std::int64_t lox{0}, hix{0};
+    std::int64_t loy{0}, hiy{0};
+    std::int64_t loz{0}, hiz{0};
+  };
   //! Flat open-addressing cell table keyed by a golden-ratio (Knuth MMIX
   //! 2^64/phi) multiplicative mix with linear probing (trial #608,
   //! ADR-004). Same occupancy and same i-ascending 27-neighbourhood walk as
@@ -1484,6 +1701,7 @@ class PhysicsWorld final {
   std::uint64_t determinism_violations_{0};  //!< Mismatches seen while on.
   float restitution_threshold_{0.0f};   //!< Bounce cutoff speed, 0 = always.
   float sleep_threshold_{0.0f};         //!< Island sleep speed, 0 = never.
+  bool speculative_contacts_{false};    //!< Swept TOI contacts, 0 = discrete.
   //! Minimum penetration for a contact to join islands. Dust is ~1e-8,
   //! genuine rest ~1e-4; see the build_islands comment.
   static constexpr float kSleepEdgeMinPenetration = 1e-5F;

@@ -328,9 +328,16 @@ TEST(PhysicsWorld, BroadphaseAgreesWithAllPairsAtSeveralScales) {
   // Same scatter as the determinism test, but stepped at three densities. The
   // old failure needed enough bodies in flight for a correction to push one
   // body into another it had not been paired with.
-  const auto run = [](std::size_t count, bool force_all_pairs) {
+  // Speculative mode runs the same comparison on a hotter scene (every 25th
+  // body at +/-30 m/s, 0.5 m/step against 0.2-0.5 radii, so TOI traffic
+  // flows through the swept grid): the swept gatherer must yield exactly
+  // the narrowphase-positive set the all-pairs scan yields, at every
+  // scale. Order is structural — both paths end at the same trailing sort.
+  const auto run = [](std::size_t count, bool force_all_pairs,
+                       bool speculative) {
     omnicpp::physics::PhysicsWorld world(-9.81F);
     world.set_force_all_pairs(force_all_pairs);
+    if (speculative) world.set_speculative_contacts(true);
     for (std::size_t i = 0; i < count; ++i) {
       omnicpp::physics::PhysicsBody b;
       const float f = static_cast<float>(i);
@@ -339,6 +346,9 @@ TEST(PhysicsWorld, BroadphaseAgreesWithAllPairsAtSeveralScales) {
       b.position[2] = -10.0F + std::fmod(f * 0.53F, 20.0F);
       b.radius = 0.2F + 0.3F * std::fmod(f * 0.017F, 1.0F);
       b.restitution = 0.3F + 0.2F * std::fmod(f * 0.023F, 1.0F);
+      if (speculative && i % 25U == 0U) {
+        b.velocity[0] = (i % 50U == 0U) ? 30.0F : -30.0F;
+      }
       (void)world.add_body(b);
     }
     for (std::size_t step = 0; step < static_cast<std::size_t>(60); ++step) world.step(1.0F / 60.0F);
@@ -347,8 +357,11 @@ TEST(PhysicsWorld, BroadphaseAgreesWithAllPairsAtSeveralScales) {
 
   for (const std::size_t count : {std::size_t{200}, std::size_t{600},
                                   std::size_t{1200}}) {
-    EXPECT_EQ(run(count, false), run(count, true))
+    EXPECT_EQ(run(count, false, false), run(count, true, false))
         << "broadphase diverged from all-pairs at " << count << " bodies";
+    EXPECT_EQ(run(count, false, true), run(count, true, true))
+        << "swept broadphase diverged from all-pairs at " << count
+        << " bodies";
   }
 }
 
@@ -863,25 +876,23 @@ TEST(PhysicsWorld, Trial638ComplianceIndependentOfSubstepCount) {
   EXPECT_NEAR(s4, s1, 1.0e-5F);
 }
 
-// R3 acceptance gate (docs/research/physics-solver.md R3): the solver
-// integrates then detects on post-step positions, so a body whose per-step
-// travel S exceeds the contact window W = r1 + r2 tunnels on some phases —
-// the exact class speculative contacts fix. Measured 2026-11-06: 8/12
-// tunnel, by TWO mechanisms (phase trajectories traced, not assumed):
-// (1) clean misses — no post-step sample lands in the window (phases 5-8);
-// (2) far-side ejections — the sample lands just past center (phases 1-4),
-//     the positional projection exits the NEAR side of the motion, which is
-//     the FAR side of the obstacle, and the contact is already separating
-//     so no impulse fires: full speed is kept (198 m/s in and out, the
-//     position jumps 0.175 -> 1.1 while velocity never changes). The solver
-//     does not merely miss fast bodies; on far-half samples it throws them
-//     through. Colliding phases (0, 9-11) project to the near face and
-//     rebound slowly (Baumgarte bias: 198 -> -39.6 m/s on the phase-0 trace).
-// Both bounds are load-bearing: >= 1 proves the tunnel class exists (the R3
-// trigger), < 12 proves detection still fires on near-half samples (a broken
-// detector would miss every phase). Speculative contacts must drive the
-// count to 0/12 without changing the colliding phases' outcome.
-TEST(PhysicsWorld, FastBodyTunnelsOnSomePhasesR3Gate) {
+// R3 fix gate (docs/research/physics-solver.md R3; was
+// FastBodyTunnelsOnSomePhasesR3Gate). History: the solver integrates then
+// detects on post-step positions, so travel S > window W tunneled on 8/12
+// phases by two traced mechanisms: (1) clean misses — no post-step sample
+// in the window (phases 5-8); (2) far-side ejections — the sample lands
+// just past center (phases 1-4), the projection exits the near side of the
+// motion (the obstacle's far side), and the separating contact draws no
+// impulse: 198 m/s in and out. Colliding phases (0, 9-11) project to the
+// near face and rebound (198 -> -39.6 m/s on the phase-0 trace).
+// With speculative contacts on, all 8 must stop at the near face (0/12
+// cross) while the 4 colliding phases reproduce bit-identically — the flag
+// adds pairs only where the discrete test finds none. Per research R3, the
+// mechanism is pinned by per-phase contact TELEMETRY, not just final
+// poses: ejections and misses are indistinguishable post-hoc, so every
+// phase must show a contact event (the 4 historical clean misses going
+// from zero events to a speculative one is the fix made visible).
+TEST(PhysicsWorld, SpeculativeContactsStopFastBodyCrossing) {
   constexpr float kR = 1.0f;       // static obstacle radius
   constexpr float kR2 = 0.1f;      // projectile radius
   constexpr float kWindow = kR + kR2;
@@ -894,48 +905,68 @@ TEST(PhysicsWorld, FastBodyTunnelsOnSomePhasesR3Gate) {
   constexpr int kPhases = 12;
   constexpr int kSteps = 10;  // -10 + 10*3.3 clears the obstacle on every phase
 
-  auto run_sweep = []() {
-    std::vector<std::pair<float, float>> final_xv;
-    final_xv.reserve(kPhases);
-    for (int p = 0; p < kPhases; ++p) {
-      PhysicsWorld w(/*gravity=*/0.0f);
-      PhysicsBody wall;
-      wall.position[0] = 0.0f;
-      wall.position[1] = 5.0f;  // well clear of the y = 0 plane
-      wall.radius = kR;
-      wall.inverse_mass = 0.0f;  // static
-      (void)w.add_body(wall);
-      PhysicsBody shot;
-      const float phase = static_cast<float>(p) * kStepTravel /
-                          static_cast<float>(kPhases);
-      shot.position[0] = -10.0f + phase;
-      shot.position[1] = 5.0f;
-      shot.radius = kR2;
-      shot.restitution = 0.0f;  // approach killed on contact: cross vs return
-      shot.velocity[0] = kSpeed;
-      (void)w.add_body(shot);
-      for (int i = 0; i < kSteps; ++i) w.step(kGateDt);
-      final_xv.emplace_back(w.body(1).position[0], w.body(1).velocity[0]);
+  struct PhaseOut {
+    float x{0.0f};
+    float vx{0.0f};
+    bool contacted{false};
+  };
+  auto run_phase = [](int p, bool speculative) {
+    PhysicsWorld w(/*gravity=*/0.0f);
+    if (speculative) w.set_speculative_contacts(true);
+    PhysicsBody wall;
+    wall.position[0] = 0.0f;
+    wall.position[1] = 5.0f;  // well clear of the y = 0 plane
+    wall.radius = kR;
+    wall.inverse_mass = 0.0f;  // static
+    (void)w.add_body(wall);
+    PhysicsBody shot;
+    const float phase = static_cast<float>(p) * kStepTravel /
+                        static_cast<float>(kPhases);
+    shot.position[0] = -10.0f + phase;
+    shot.position[1] = 5.0f;
+    shot.radius = kR2;
+    shot.restitution = 0.0f;  // approach killed on contact: cross vs return
+    shot.velocity[0] = kSpeed;
+    (void)w.add_body(shot);
+    PhaseOut out{};
+    for (int i = 0; i < kSteps; ++i) {
+      w.step(kGateDt);
+      if (!w.contacts().empty()) out.contacted = true;
     }
-    return final_xv;
+    out.x = w.body(1).position[0];
+    out.vx = w.body(1).velocity[0];
+    return out;
   };
 
-  const std::vector<std::pair<float, float>> first = run_sweep();
-  int tunneled = 0;
-  for (const auto& [x, vx] : first) {
-    if (x > kR) {
-      ++tunneled;  // through: clean miss, or far-side ejection at full speed
-      EXPECT_GT(vx, 0.0f) << "tunneled but stopped: third mechanism?";
-    } else {
-      // Collided phases never cross: projected to the near face, rebounding
-      // slowly. Velocity pins the mechanism — a far-side ejection keeps full
-      // forward speed, a true capture returns.
-      EXPECT_LT(x, 0.0f) << "final x = " << x;
-      EXPECT_LE(vx, 0.0f) << "collided but still advancing: " << vx;
-    }
+  // The flag is what fixes it: discrete still tunnels (the old trigger,
+  // kept alive as the off-mode pin so the gate cannot pass vacuously).
+  int tunneled_off = 0;
+  for (int p = 0; p < kPhases; ++p) {
+    if (run_phase(p, false).x > kR) ++tunneled_off;
   }
-  EXPECT_GE(tunneled, 1) << "no phase tunneled: R3 has no trigger";
-  EXPECT_LT(tunneled, kPhases) << "every phase tunneled: detector is broken";
-  // Replay-clean by construction: the sweep is a pure function of constants.
-  EXPECT_EQ(run_sweep(), first);
+  EXPECT_GE(tunneled_off, 1) << "off-mode trigger gone: gate pins nothing";
+  // Fix mode: no phase crosses, every phase interacted, approach dead.
+  // vx bound is 1e-3, not 0: the impulse cancels 198 m/s in float32, so a
+  // stopped shot keeps a ~1e-5 residual — three orders below still counts
+  // as stopped against the +198 it kept while tunneling.
+  for (int p = 0; p < kPhases; ++p) {
+    const PhaseOut on = run_phase(p, true);
+    EXPECT_TRUE(on.contacted) << "phase " << p << " passed silently";
+    EXPECT_LT(on.x, 0.0f) << "phase " << p << " crossed: x = " << on.x;
+    EXPECT_LE(on.vx, 1e-3f) << "phase " << p << " advancing: vx = " << on.vx;
+  }
+  // Colliding phases (a post-step sample lands in the window) keep their
+  // outcome: near-face landing, same rebound. TOI rewind + impulse uses a
+  // different op sequence than discrete separation + impulse (TOI sqrt,
+  // path rewind), so the pin is 1e-3 agreement, not bits — measured gaps
+  // 2e-5 (x) and 1.5e-4 (vx) on phase 0, three orders below the -39.6 m/s
+  // bounce and the metre-scale geometry. The bounce floor (vx < -1) pins
+  // the outcome is unchanged, not merely non-crossing.
+  for (const int p : {0, 9, 10, 11}) {
+    const PhaseOut off = run_phase(p, false);
+    const PhaseOut on = run_phase(p, true);
+    EXPECT_NEAR(on.x, off.x, 1e-3f) << "phase " << p;
+    EXPECT_NEAR(on.vx, off.vx, 1e-3f) << "phase " << p;
+    EXPECT_LT(on.vx, -1.0f) << "phase " << p << " lost its bounce";
+  }
 }

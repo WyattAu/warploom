@@ -90,8 +90,23 @@ kept; colliders project to the near face and rebound via the bias). The
 trigger is met and the failure is sharper than "misses fast bodies": on
 far-half samples the solver throws the body through. Speculative contacts
 must drive the count to 0/12 without changing the colliding phases'
-near-face outcome; per-step contact telemetry (not final poses) is how the
-fix is verified, since ejections and misses are indistinguishable post-hoc.
+near-face outcome;per-step contact telemetry (not final poses) is how the fix is verified,
+since ejections and misses are indistinguishable post-hoc.
+
+**Outcome (loop52).** Landed as an opt-in (`set_speculative_contacts`,
+default off): frozen-snapshot swept test for sphere-sphere (entry root of
+|c0 + d*s| = R; start-inside pairs stay discrete, exit root deliberately
+unsolved), TOI rewind split by inverse mass in pass 0, snapshot impulse
+unchanged. The grid query grows by v·dt exactly as predicted (swept
+insert + swept query, trailing sort+unique keeps grid order == nested
+order structurally). Measured: 0/12 cross, every phase shows a contact
+event (the 4 historical clean misses now fire speculative contacts), the
+4 colliding phases keep near-face + rebound to 1e-3 (2e-5/1.5e-4 measured
+gaps — different op sequences, same physics), swept grid agrees with
+all-pairs at 200/600/1200 with TOI traffic. Gate sabotage-validated
+(TOI suppressed fails the gate; revert re-greens). Limits, documented in
+code: spheres only, stiff rewind under compliance, penetration 0 so no
+island edges (conservative).
 
 ## R4. Islands and sleeping (Jolt's answer to our "no sleep" gap)
 
