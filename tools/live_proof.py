@@ -684,6 +684,33 @@ def proof_phys(c):
     pos2 = json.loads(raw2)["pos"] if raw2 else None
     check("drop replays bit-identically", pos1 == pos2 and pos1 is not None,
           "%s vs %s" % (pos1, pos2))
+    # Save/load round-trip over the wire: a document load is a wholesale
+    # replace, so session bodies (which reference pre-load ids) clear
+    # while the document survives. g1 pins the document half (including
+    # missing-file rejection and sha256 round-trip); this pins the sim
+    # half through the same plumbing. The dispatch-level clear is
+    # unit-pinned (SessionPhysicsWire); this is the wire path with real
+    # paths riding `path=`.
+    save_path = "/tmp/live_proof_phys_save.json"
+    if os.path.exists(save_path):
+        os.remove(save_path)
+    r = c.cmd(cmd="save_document", id=225, path=save_path)
+    check("save with live body", r.get("ok") is True, str(r))
+    y, raw = poll_phys_y(c, 226, oid2)
+    check("body live before load",
+          y is not None and abs(y - 0.5) < 0.05, str(raw))
+    r = c.cmd(cmd="load_document", id=227, path=save_path)
+    check("load clears session sim", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="get_physics_body", id=228, oid=oid2)
+    check("body gone after load",
+          r.get("ok") is False and "no physics body" in r.get("error", ""),
+          str(r))
+    back = c.detail(cmd="list_objects", id=229)
+    check("document survived the load",
+          any(o["name"] == new2[0]["name"] for o in back["objects"]),
+          str(back["count"]))
+    if os.path.exists(save_path):
+        os.remove(save_path)
     r = c.cmd(cmd="resume", id=216)
     check("resume restores free run", r.get("ok") is True, str(r))
 
