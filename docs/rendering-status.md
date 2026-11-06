@@ -43,7 +43,10 @@ same tree is 747/747 with ctest 6/6. Loop49 (wire physics) and loop52
 (speculative contacts, swept grid) re-verified under the asan-ubsan preset
 on the current tree: physics/session/control subset 38/38, core 22/22,
 editor 48/48, 0 diagnostics — the new index arithmetic rides the same
-verified preset rather than a fresh claim.
+verified preset rather than a fresh claim. The Vulkan-off
+headless-debug-clang leg likewise recompiles the touched headers clean
+(0 warnings) with the same 38/38 green — the tree configuration that
+bit before stays covered around the new code.
 
 The one-count-per-compiler trap almost survived this re-run: the
 `headless-debug-clang` CI leg reported 104 clang-only warnings, all of the
