@@ -89,7 +89,7 @@ using omnicpp::render::SceneMatrix;
   }
 }
 
-constexpr std::uint32_t kCubeIndices[36] = {
+[[maybe_unused]] constexpr std::uint32_t kCubeIndices[36] = {
     0, 3, 1, 1, 3, 2,  // -z
     4, 5, 7, 5, 6, 7,  // +z
     0, 1, 4, 1, 5, 4,  // -y

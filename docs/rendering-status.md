@@ -41,13 +41,20 @@ core 22, editor 48, ui 19, runtime 10, ctest 6/6, with **0** ASan/UBSan
 diagnostics, **0** leaks and **0** TSan warnings. The `default` preset on the
 same tree is 747/747 with ctest 6/6.
 
-Still not warning-free, and not claimed to be: the `headless-debug-clang` CI
-leg reports 104 clang-only warnings, all of the same shape — a Vulkan-only
-private field or file-scope constant that is unreferenced once
-`WARPLOOM_USE_VULKAN=OFF`. GCC has no `-Wunused-private-field`, so the GCC
-pass to zero could never see them; that is the "one compiler measures one
-compiler" trap again, and paying it is the next campaign rather than a
-silent exception.
+The one-count-per-compiler trap almost survived this re-run: the
+`headless-debug-clang` CI leg reported 104 clang-only warnings, all of the
+same shape — a Vulkan-only private field or file-scope constant that is
+unreferenced once `WARPLOOM_USE_VULKAN=OFF`. GCC has no
+`-Wunused-private-field`, so the GCC pass to zero could never see them.
+Paid with the established `[[maybe_unused]]` idiom (already used in this
+tree for Vulkan-only parameters and test helpers): 104 annotations over 21
+files, every one a mechanical add to a line the compiler pointed at.
+Measured after: the clang leg builds with 0 warnings and runs the same
+counts — unit 673 (626 pass, 47 Vulkan-only skips), core 22, editor 48, ui
+19, runtime 10. The `default` tree on the same source is 747/747 with ctest
+6/6, so none of the annotations masks a genuinely dead member — that tree
+uses every one of them. A/B is exactly the two builds: 104 before, 0
+after, no test count moved.
 
 Two verification milestones worth knowing when reading the Proof column:
 

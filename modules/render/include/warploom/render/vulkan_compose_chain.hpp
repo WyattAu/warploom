@@ -357,11 +357,11 @@ class VulkanComposeChain final {
   // allocated from allocator_, so they must be destroyed before it.
   // VulkanOffscreenTarget's destructor releases its own device handles, so the
   // targets come first.
-  VkDevice device_{VK_NULL_HANDLE};
-  VkPhysicalDevice physical_device_{VK_NULL_HANDLE};
-  VkQueue graphics_queue_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkDevice device_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkPhysicalDevice physical_device_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkQueue graphics_queue_{VK_NULL_HANDLE};
   ComposeChainConfig config_{};
-  VkRenderPass present_pass_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkRenderPass present_pass_{VK_NULL_HANDLE};
   VkFormat present_format_{VK_FORMAT_UNDEFINED};
 
   std::unique_ptr<VulkanMemoryAllocator> allocator_;
@@ -380,9 +380,9 @@ class VulkanComposeChain final {
   std::unique_ptr<VulkanPipeline> compose_dynamic_pipeline_;
   std::unique_ptr<VulkanOffscreenTarget> hdr_target_;
   std::unique_ptr<VulkanOffscreenTarget> bloom_target_;
-  VkDescriptorSetLayout compose_layout_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkDescriptorSetLayout compose_layout_{VK_NULL_HANDLE};
   VkSampler hdr_sampler_{VK_NULL_HANDLE};
-  VkSampler linear_sampler_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkSampler linear_sampler_{VK_NULL_HANDLE};
   //! 1x1 black texture bound to the bloom slot when bloom is disabled, so
   //! tonemap_fxaa.frag keeps a single shader for both configurations.
   struct BlackTexture {
@@ -390,14 +390,14 @@ class VulkanComposeChain final {
     VkImageView view{VK_NULL_HANDLE};
     VkDeviceMemory memory{VK_NULL_HANDLE};
   } black_texture_{};
-  VkDescriptorSet compose_set_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkDescriptorSet compose_set_{VK_NULL_HANDLE};
   //! Second tonemap set, identical except binding 1 points at the 1x1 black
   //! texture instead of the bloom target. The bloom toggle picks between two
   //! PRE-WRITTEN sets rather than rewriting a descriptor at runtime: the two
   //! images are both already in SHADER_READ_ONLY_OPTIMAL for the whole frame,
   //! so neither transition needs a barrier and neither write can race a frame
   //! still in flight. That is what makes the toggle a pure re-record.
-  VkDescriptorSet compose_set_nobloom_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkDescriptorSet compose_set_nobloom_{VK_NULL_HANDLE};
   //! Tonemap set bound to the external source (see set_external_source), with
   //! the black bloom slot (PT without bloom). When PT + bloom layer, the
   //! chain binds compose_set_external_bloom_ instead: same source at
@@ -422,14 +422,14 @@ class VulkanComposeChain final {
   //! member lives exactly as long as the built passes (one synchronous
   //! build/verify/execute), the same lifetime rule as compose_push_.
   VkImage present_image_{VK_NULL_HANDLE};
-  VkImageView present_view_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkImageView present_view_{VK_NULL_HANDLE};
   float inverse_samples_{1.0F};
   //! One-sampler layout/set for the bloom bright-pass. It reads the HDR scene,
   //! which in the two-binding compose layout is binding 0 -- where binding 1
   //! (the bloom input the tonemap samples) would instead be. So it needs its
   //! own one-binding set, pointed at the scene.
-  VkDescriptorSetLayout bloom_stage_layout_{VK_NULL_HANDLE};
-  VkDescriptorSet bloom_down_set_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkDescriptorSetLayout bloom_stage_layout_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkDescriptorSet bloom_down_set_{VK_NULL_HANDLE};
   //! PT-variant bloom set: same one-binding layout, pointed at the external
   //! accumulation in GENERAL (PT + bloom layering). Written by
   //! set_external_source() and ensure(), exactly like the tonemap's

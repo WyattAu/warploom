@@ -22,13 +22,13 @@ namespace warploom::render {
 namespace {
 //! Timestamps recorded per frame in flight. One at the start of the command
 //! buffer, then one after each stage, so consecutive pairs bracket a segment.
-constexpr std::uint32_t kGpuStampsPerFrame = 6U;
-constexpr std::uint32_t kStampFrameStart = 0U;
-constexpr std::uint32_t kStampAfterPrePass = 1U;
-constexpr std::uint32_t kStampAfterScene = 2U;
-constexpr std::uint32_t kStampAfterCompose = 3U;
-constexpr std::uint32_t kStampAfterHZ = 4U;
-constexpr std::uint32_t kStampFrameEnd = 5U;
+[[maybe_unused]] constexpr std::uint32_t kGpuStampsPerFrame = 6U;
+[[maybe_unused]] constexpr std::uint32_t kStampFrameStart = 0U;
+[[maybe_unused]] constexpr std::uint32_t kStampAfterPrePass = 1U;
+[[maybe_unused]] constexpr std::uint32_t kStampAfterScene = 2U;
+[[maybe_unused]] constexpr std::uint32_t kStampAfterCompose = 3U;
+[[maybe_unused]] constexpr std::uint32_t kStampAfterHZ = 4U;
+[[maybe_unused]] constexpr std::uint32_t kStampFrameEnd = 5U;
 }  // namespace
 
 const char* to_string(GpuSegment segment) noexcept {

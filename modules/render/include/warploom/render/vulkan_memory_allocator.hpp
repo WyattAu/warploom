@@ -110,7 +110,7 @@ private:
   //! bufferDeviceAddress. When true, every allocation carries
   //! VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT so SHADER_DEVICE_ADDRESS buffers
   //! are addressable (VUID 03339).
-  bool supports_buffer_device_address_{false};
+  [[maybe_unused]] bool supports_buffer_device_address_{false};
 
   //! Buffer handles owned by live allocations (created by create_buffer);
   //! destroyed by cleanup() so a dropped allocator never leaks VkBuffers.
@@ -197,7 +197,7 @@ private:
   VkDeviceSize head_{0};                 //!< Next byte to hand out.
   VkCommandPool command_pool_{VK_NULL_HANDLE};
   VkCommandBuffer command_buffer_{VK_NULL_HANDLE};
-  bool recording_{false};
+  [[maybe_unused]] bool recording_{false};
   std::vector<InFlight> in_flight_;
   // Ranges handed out by acquire() since the last submit(); submit() attaches
   // them to the batch fence so wrap-around waits cover exactly what is live.

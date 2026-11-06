@@ -29,7 +29,7 @@ using omnicpp_test::readback_swapchain_image;
 
 namespace {
 
-constexpr std::uint32_t kSize = 256U;
+[[maybe_unused]] constexpr std::uint32_t kSize = 256U;
 
 
 }  // namespace

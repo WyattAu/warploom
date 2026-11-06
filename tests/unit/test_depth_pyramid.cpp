@@ -46,20 +46,20 @@ constexpr std::uint32_t kTilesX = kSize / kTile;
 constexpr std::uint32_t kTilesY = kSize / kTile;
 constexpr std::uint32_t kInstances = 2U;
 
-constexpr std::uint32_t kWordInstanceCount = 0U;
-constexpr std::uint32_t kWordCursor = 1U;
-constexpr std::uint32_t kWordTilesX = 2U;
-constexpr std::uint32_t kWordTilesY = 3U;
-constexpr std::uint32_t kWordStatsAccepted = 4U;
-constexpr std::uint32_t kWordStatsFrustum = 5U;
-constexpr std::uint32_t kWordStatsOccluded = 6U;
+[[maybe_unused]] constexpr std::uint32_t kWordInstanceCount = 0U;
+[[maybe_unused]] constexpr std::uint32_t kWordCursor = 1U;
+[[maybe_unused]] constexpr std::uint32_t kWordTilesX = 2U;
+[[maybe_unused]] constexpr std::uint32_t kWordTilesY = 3U;
+[[maybe_unused]] constexpr std::uint32_t kWordStatsAccepted = 4U;
+[[maybe_unused]] constexpr std::uint32_t kWordStatsFrustum = 5U;
+[[maybe_unused]] constexpr std::uint32_t kWordStatsOccluded = 6U;
 // Pyramid starts at word 12: its byte offset (48) must stay a multiple of the
 // 16-byte minStorageBufferOffsetAlignment for the sub-range descriptor write.
 constexpr std::uint32_t kWordPyramid = 12U;
 constexpr std::uint32_t kSphereOff = kWordPyramid + kTilesX * kTilesY;
 constexpr std::uint32_t kLodOff = kSphereOff + 4U * kInstances;
 constexpr std::uint32_t kComp0Off = kLodOff + kInstances;
-constexpr std::uint32_t kCullWords = kComp0Off + kInstances;
+[[maybe_unused]] constexpr std::uint32_t kCullWords = kComp0Off + kInstances;
 
 [[maybe_unused]] std::uint32_t bits(float f) {
   std::uint32_t u;

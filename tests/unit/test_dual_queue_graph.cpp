@@ -39,19 +39,19 @@ using omnicpp_test::readback_swapchain_image;
 
 namespace {
 
-constexpr std::uint32_t kSize = 256U;
-constexpr std::uint32_t kFrames = 3;   // steady-state overlap demo
+[[maybe_unused]] constexpr std::uint32_t kSize = 256U;
+[[maybe_unused]] constexpr std::uint32_t kFrames = 3;   // steady-state overlap demo
 constexpr std::uint32_t kCubes = 2;    // instances per frame
 
 // Ring A (compute output): identity list words [0..kCubes), then 8 data
 // words per instance — the layout gpu_objects.vert resolves through
 // comp_offset=0.
-constexpr std::uint32_t kRingAWords = kCubes + kCubes * 8U;
+[[maybe_unused]] constexpr std::uint32_t kRingAWords = kCubes + kCubes * 8U;
 // Ring B (cull payload): [0] instance_count, [1] compaction cursor,
 // [2..25] 6 frustum planes x 4 words, [26..33] spheres, [34..35] compacted.
 constexpr std::uint32_t kSphereOffB = 26U;
 constexpr std::uint32_t kCompactOffB = kSphereOffB + 4U * kCubes;
-constexpr std::uint32_t kRingBWords = kCompactOffB + kCubes;
+[[maybe_unused]] constexpr std::uint32_t kRingBWords = kCompactOffB + kCubes;
 
 [[maybe_unused]] std::uint32_t bits(float f) {
   std::uint32_t u;

@@ -25,13 +25,13 @@ namespace {
 
 constexpr std::uint32_t kSize = 256U;
 constexpr std::uint32_t kTile = 32U;
-constexpr std::uint32_t kPyramidWidth = kSize / kTile;
-constexpr std::uint32_t kLevels = 4U;
-constexpr std::uint32_t kSceneCount = 3U;
+[[maybe_unused]] constexpr std::uint32_t kPyramidWidth = kSize / kTile;
+[[maybe_unused]] constexpr std::uint32_t kLevels = 4U;
+[[maybe_unused]] constexpr std::uint32_t kSceneCount = 3U;
 constexpr std::uint32_t kCullCount = 2U;
 constexpr std::uint32_t kSphereOffset = 8U;
 constexpr std::uint32_t kCompactOffset = kSphereOffset + kCullCount * 4U;
-constexpr std::uint32_t kCullWords = kCompactOffset + kCullCount;
+[[maybe_unused]] constexpr std::uint32_t kCullWords = kCompactOffset + kCullCount;
 
 [[maybe_unused]] std::uint32_t bits(float value) {
   std::uint32_t out = 0;

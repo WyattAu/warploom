@@ -185,6 +185,16 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   `-Wunused-function`, `-Wconversion`). A "four presets are clean" claim is
   only as good as the last time someone built the fourth one.
 
+  The same re-run then caught the per-compiler version of the same trap: the
+  `headless-debug-clang` leg reported 104 warnings GCC has no equivalent of
+  (`-Wunused-private-field` for Vulkan-only members, `-Wunused-const-variable`
+  for fixture constants that only Vulkan tests read). Paid with
+  `[[maybe_unused]]` over 21 files -- the idiom this tree already used for
+  Vulkan-only parameters -- measured 104 -> 0, no test count moved (default
+  still 747/747, so no annotation hides a genuinely dead member). GCC
+  "clean" and clang "clean" are different statements; a campaign that
+  pays one has measured one.
+
   Along the way both compilers also paid `-Wunused-result` (86, hid a
   deadlock), `-Wsign-conversion` (104), `-Wshorten-64-to-32` (24),
   `-Wdouble-promotion` (37), `-Wmissing-field-initializers` (21),

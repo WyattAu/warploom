@@ -35,8 +35,8 @@ namespace {
 
 constexpr std::uint32_t kSize = 256U;
 constexpr std::uint32_t kTile = 32U;
-constexpr std::uint32_t kPyramidWidth = kSize / kTile;  // 8
-constexpr float kClearDepth = 0.5f;
+[[maybe_unused]] constexpr std::uint32_t kPyramidWidth = kSize / kTile;  // 8
+[[maybe_unused]] constexpr float kClearDepth = 0.5f;
 
 #ifdef WARPLOOM_HAS_VULKAN
 

@@ -27,20 +27,20 @@ namespace {
 
 // All types here resolve via vulkan_types.hpp in Vulkan-off builds.
 
-constexpr std::uint32_t kSpirvMagic = 0x07230203U;
+[[maybe_unused]] constexpr std::uint32_t kSpirvMagic = 0x07230203U;
 
 // Op codes used by the reflector.
-constexpr std::uint16_t kOpEntryPoint = 15;
-constexpr std::uint16_t kOpConstant = 43;
-constexpr std::uint16_t kOpDecorate = 71;
-constexpr std::uint16_t kOpTypeStruct = 30;
-constexpr std::uint16_t kOpTypeArray = 28;
-constexpr std::uint16_t kOpTypeRuntimeArray = 29;
-constexpr std::uint16_t kOpTypePointer = 32;
-constexpr std::uint16_t kOpTypeSampler = 26;
-constexpr std::uint16_t kOpTypeSampledImage = 27;
-constexpr std::uint16_t kOpTypeImage = 25;
-constexpr std::uint16_t kOpVariable = 59;
+[[maybe_unused]] constexpr std::uint16_t kOpEntryPoint = 15;
+[[maybe_unused]] constexpr std::uint16_t kOpConstant = 43;
+[[maybe_unused]] constexpr std::uint16_t kOpDecorate = 71;
+[[maybe_unused]] constexpr std::uint16_t kOpTypeStruct = 30;
+[[maybe_unused]] constexpr std::uint16_t kOpTypeArray = 28;
+[[maybe_unused]] constexpr std::uint16_t kOpTypeRuntimeArray = 29;
+[[maybe_unused]] constexpr std::uint16_t kOpTypePointer = 32;
+[[maybe_unused]] constexpr std::uint16_t kOpTypeSampler = 26;
+[[maybe_unused]] constexpr std::uint16_t kOpTypeSampledImage = 27;
+[[maybe_unused]] constexpr std::uint16_t kOpTypeImage = 25;
+[[maybe_unused]] constexpr std::uint16_t kOpVariable = 59;
 
 // Execution models (OpEntryPoint).
 constexpr std::uint32_t kExecutionModelVertex = 0;
@@ -51,13 +51,13 @@ constexpr std::uint32_t kExecutionModelTessellationEvaluation = 2;
 constexpr std::uint32_t kExecutionModelCompute = 5;
 
 // Decorations.
-constexpr std::uint32_t kDecorationDescriptorSet = 34;
-constexpr std::uint32_t kDecorationBinding = 33;
+[[maybe_unused]] constexpr std::uint32_t kDecorationDescriptorSet = 34;
+[[maybe_unused]] constexpr std::uint32_t kDecorationBinding = 33;
 
 // Storage classes (SPIR-V 1.x subset relevant to descriptors).
-constexpr std::uint32_t kStorageUniformConstant = 0;
-constexpr std::uint32_t kStorageUniform = 2;
-constexpr std::uint32_t kStorageStorageBuffer = 12;
+[[maybe_unused]] constexpr std::uint32_t kStorageUniformConstant = 0;
+[[maybe_unused]] constexpr std::uint32_t kStorageUniform = 2;
+[[maybe_unused]] constexpr std::uint32_t kStorageStorageBuffer = 12;
 
 struct IdInfo {
   std::uint32_t kind{0};            // Classification enum below.

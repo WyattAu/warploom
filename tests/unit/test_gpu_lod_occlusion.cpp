@@ -41,20 +41,20 @@ constexpr std::uint32_t kTilesY = kSize / kTile;  // 8
 constexpr std::uint32_t kInstances = 8U;
 
 // Word layout of binding 0 (mirrors cull_lod_occlude.comp).
-constexpr std::uint32_t kWordInstanceCount = 0U;
-constexpr std::uint32_t kWordCursor = 1U;
-constexpr std::uint32_t kWordTilesX = 2U;
-constexpr std::uint32_t kWordTilesY = 3U;
-constexpr std::uint32_t kWordStatsAccepted = 4U;
-constexpr std::uint32_t kWordStatsFrustum = 5U;
-constexpr std::uint32_t kWordStatsOccluded = 6U;
+[[maybe_unused]] constexpr std::uint32_t kWordInstanceCount = 0U;
+[[maybe_unused]] constexpr std::uint32_t kWordCursor = 1U;
+[[maybe_unused]] constexpr std::uint32_t kWordTilesX = 2U;
+[[maybe_unused]] constexpr std::uint32_t kWordTilesY = 3U;
+[[maybe_unused]] constexpr std::uint32_t kWordStatsAccepted = 4U;
+[[maybe_unused]] constexpr std::uint32_t kWordStatsFrustum = 5U;
+[[maybe_unused]] constexpr std::uint32_t kWordStatsOccluded = 6U;
 constexpr std::uint32_t kWordPyramid = 10U;
 constexpr std::uint32_t kSphereOff = kWordPyramid + kTilesX * kTilesY;  // 74
 constexpr std::uint32_t kLodOff = kSphereOff + 4U * kInstances;
 constexpr std::uint32_t kComp0Off = kLodOff + kInstances;
 constexpr std::uint32_t kComp1Off = kComp0Off + kInstances;
 constexpr std::uint32_t kComp2Off = kComp1Off + kInstances;
-constexpr std::uint32_t kCullWords = kComp2Off + kInstances;
+[[maybe_unused]] constexpr std::uint32_t kCullWords = kComp2Off + kInstances;
 
 struct DrawCmd {
   std::uint32_t vertex_count;

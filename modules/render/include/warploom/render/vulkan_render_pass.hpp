@@ -62,7 +62,7 @@ private:
   VkDevice device_{VK_NULL_HANDLE};  //!< Captured at create(); see owning_device().
   std::vector<VkFramebuffer> framebuffers_;
   VkImage depth_image_{VK_NULL_HANDLE};
-  VkDeviceMemory depth_memory_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkDeviceMemory depth_memory_{VK_NULL_HANDLE};
   VkImageView depth_view_{VK_NULL_HANDLE};
   VkFormat depth_format_{VK_FORMAT_UNDEFINED};
   bool depth_sampleable_{false};

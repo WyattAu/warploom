@@ -401,15 +401,15 @@ class VulkanPathTracer final {
   [[nodiscard]] ::warploom::core::Result<std::vector<float>> read_image_sum(
       VkImage image) const;
 
-  VkPhysicalDevice physical_device_{VK_NULL_HANDLE};
-  VkDevice device_{VK_NULL_HANDLE};
-  VkQueue graphics_queue_{VK_NULL_HANDLE};
-  std::uint32_t graphics_family_{0};
-  VulkanMemoryAllocator* allocator_{nullptr};
+  [[maybe_unused]] VkPhysicalDevice physical_device_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkDevice device_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkQueue graphics_queue_{VK_NULL_HANDLE};
+  [[maybe_unused]] std::uint32_t graphics_family_{0};
+  [[maybe_unused]] VulkanMemoryAllocator* allocator_{nullptr};
   std::string shader_dir_{};
   std::uint32_t width_{0};
   std::uint32_t height_{0};
-  std::uint32_t max_bounces_{4};
+  [[maybe_unused]] std::uint32_t max_bounces_{4};
   std::uint32_t samples_{0};
   //! Live-PT stepping state: set by set_camera() on a real pose/fov
   //! change, consumed (restart + clear) by the next record_round().
@@ -446,8 +446,8 @@ class VulkanPathTracer final {
   //! Denoise compute pipeline + descriptor set (bindings 0-3 mirror the
   //! spike shader's, 4 = the count image for per-texel divisors).
   VulkanPipeline denoise_pipeline_{};
-  VkDescriptorSetLayout denoise_layout_{VK_NULL_HANDLE};
-  VkDescriptorSet denoise_set_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkDescriptorSetLayout denoise_layout_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkDescriptorSet denoise_set_{VK_NULL_HANDLE};
   //! First record_denoise() lays the output out of UNDEFINED; later ones
   //! find it GENERAL. Pure function of the call sequence, so replay is
   //! unaffected. Reset by create()/destroy (new image, new layout).
@@ -460,8 +460,8 @@ class VulkanPathTracer final {
   //! sums are, cleared alongside them. Uniform rounds leave every texel at
   //! sample_count(); masked rounds leave held texels behind, which is what
   //! makes read_adaptive_mean() exact per texel.
-  VkImage count_image_{VK_NULL_HANDLE};
-  VkImageView count_view_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkImage count_image_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkImageView count_view_{VK_NULL_HANDLE};
   Allocation count_allocation_{};
   //! Adaptive mask (storage buffer, one uint per texel, host-visible).
   //! Zero-initialized at create() (mask-all-hold would freeze the image,
@@ -472,18 +472,18 @@ class VulkanPathTracer final {
   // Host-visible, host-coherent; mirrored into these by set_camera().
   Allocation params_allocation_{};
   Allocation instance_allocation_{};
-  std::uint32_t instance_capacity_{0};
+  [[maybe_unused]] std::uint32_t instance_capacity_{0};
 
-  VulkanAccelerationStructureBuilder as_builder_{};
+  [[maybe_unused]] VulkanAccelerationStructureBuilder as_builder_{};
   std::vector<BottomLevelAS> blas_list_{};
   TopLevelAS tlas_{};
   VulkanScratchPool scratch_{};
-  std::uint64_t scratch_address_{0};
+  [[maybe_unused]] std::uint64_t scratch_address_{0};
 
   std::unique_ptr<VulkanDescriptorManager> descriptor_manager_{};
-  VkDescriptorSetLayout layout_{VK_NULL_HANDLE};
-  VkPipelineLayout pipeline_layout_{VK_NULL_HANDLE};
-  VkDescriptorSet descriptor_set_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkDescriptorSetLayout layout_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkPipelineLayout pipeline_layout_{VK_NULL_HANDLE};
+  [[maybe_unused]] VkDescriptorSet descriptor_set_{VK_NULL_HANDLE};
   VulkanRtPipeline rt_pipeline_{};
   Allocation sbt_allocation_{};
 

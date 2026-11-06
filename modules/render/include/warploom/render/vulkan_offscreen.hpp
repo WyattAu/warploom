@@ -113,9 +113,9 @@ private:
   VkImage image_{VK_NULL_HANDLE};
   VkDeviceMemory memory_{VK_NULL_HANDLE};
   // Owns the image binding when created through a VulkanMemoryAllocator.
-  VulkanMemoryAllocator* allocator_{nullptr};
+  [[maybe_unused]] VulkanMemoryAllocator* allocator_{nullptr};
   Allocation allocator_allocation_{};
-  bool uses_allocator_{false};
+  [[maybe_unused]] bool uses_allocator_{false};
   VkImageView image_view_{VK_NULL_HANDLE};
   VkImage depth_image_{VK_NULL_HANDLE};
   VkImageView depth_view_{VK_NULL_HANDLE};
@@ -126,7 +126,7 @@ private:
   //! cleanup() destroys render pass + framebuffer but not the image/view.
   bool adopted_{false};
   bool adopted_depth_{false};
-  bool depth_uses_allocator_{false};
+  [[maybe_unused]] bool depth_uses_allocator_{false};
   Allocation depth_allocation_{};
   VkRenderPass render_pass_{VK_NULL_HANDLE};
   VkFramebuffer framebuffer_{VK_NULL_HANDLE};

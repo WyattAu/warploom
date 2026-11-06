@@ -38,7 +38,7 @@ struct DrawCmd {
   std::uint32_t first_instance;
 };
 
-constexpr std::uint32_t kSphereOffset = 26U;  // word index of spheres in binding 0
+[[maybe_unused]] constexpr std::uint32_t kSphereOffset = 26U;  // word index of spheres in binding 0
 
 //! Perspective projection, Vulkan clip space (y down, z into [0,1]).
 [[maybe_unused]] void make_perspective(float fov_y, float aspect, float znear, float zfar,

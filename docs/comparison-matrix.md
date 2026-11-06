@@ -174,10 +174,12 @@ counts with 0 races; 80 shader sources compile; live protocol proofs 192/192
 (viewport + headless host); the viewport matrix
 (hdr, bloom, rt+bloom, no-hdr, node editor, pt) re-run after the fullscreen
 fix, all six clean with 0 validation diagnostics; `default`, `asan-ubsan` and
-`tsan` warning-free on GCC and clang. The `headless-debug-clang` CI leg is NOT
-warning-free and is not claimed to be: 104 clang-only warnings, every one a
-Vulkan-only private field or constant that is unreferenced when the tree
-builds `WARPLOOM_USE_VULKAN=OFF`. Named as debt, measured 2026-11-06.
+`tsan` warning-free on GCC and clang, and the `headless-debug-clang` CI leg
+now reports 0 warnings too: its 104 clang-only warnings (Vulkan-only
+private fields and constants unreferenced under `WARPLOOM_USE_VULKAN=OFF`,
+a class GCC has no equivalent for) were paid with `[[maybe_unused]]` over
+21 files, 2026-11-06. The `default` tree on the same source stays 747/747,
+so no annotation masks a genuinely dead member.
 
 **Measured about the path tracer specifically:** the *linear* accumulation mean
 is flat — 0.7336 → 0.7357 across 300–1800 samples read from inside the running

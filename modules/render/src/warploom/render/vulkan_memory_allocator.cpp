@@ -11,7 +11,8 @@
 namespace warploom::render {
 
 namespace {
-constexpr VkDeviceSize round_up(VkDeviceSize value, VkDeviceSize alignment) noexcept {
+[[maybe_unused]] constexpr VkDeviceSize round_up(VkDeviceSize value,
+                                                VkDeviceSize alignment) noexcept {
   return (alignment <= 1) ? value : ((value + alignment - 1) / alignment) * alignment;
 }
 } // namespace

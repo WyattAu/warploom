@@ -96,7 +96,7 @@ private:
   };
 
   VkDevice device_{VK_NULL_HANDLE};
-  std::uint32_t queue_family_index_{0};
+  [[maybe_unused]] std::uint32_t queue_family_index_{0};
   std::vector<Band> bands_;
   std::vector<BandJob> band_jobs_;
   std::uint32_t band_count_{0};

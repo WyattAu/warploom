@@ -149,7 +149,7 @@ private:
 
   bool initialized_{false};
   bool validation_enabled_{false};
-  bool headless_surface_enabled_{false};
+  [[maybe_unused]] bool headless_surface_enabled_{false};
   bool synchronization2_enabled_{false};
   bool timeline_semaphores_enabled_{false};
   bool descriptor_indexing_enabled_{false};
@@ -186,7 +186,7 @@ private:
   VkQueue graphics_queue_{nullptr};
   VkQueue present_queue_{nullptr};
   VkQueue compute_queue_{nullptr};
-  VkDebugUtilsMessengerEXT debug_messenger_{nullptr};
+  [[maybe_unused]] VkDebugUtilsMessengerEXT debug_messenger_{nullptr};
   QueueFamilyIndices queue_families_{};
   DeviceProperties device_properties_{};
   std::atomic<std::uint32_t> validation_warning_count_{0};
