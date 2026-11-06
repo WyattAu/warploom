@@ -1427,6 +1427,15 @@ bool EditorSession::handle_edit(
           out += "],\"count\":" + std::to_string(track.samples.size()) +
                  "}";
         }  // tracks
+        // CLOSE the tracks object here. The T5d block below used to append
+        // ",\"armed\":[" straight after the loop, so `armed` was a member of
+        // `tracks` -- and on a clip with NO tracks the object had just been
+        // opened, producing "tracks":{,"armed":[]}: invalid JSON. Every
+        // client parsing clips_info failed on the first untracked clip (found
+        // by tools/live_proof.py g3, which died in json.loads at the comma),
+        // while a clip WITH tracks parsed but reported `armed` in the wrong
+        // place.
+        out += "}";
         // T5d: armed record tracks on this clip, sorted by (object id,
         // property) for a deterministic report (arms sample in insertion
         // order; the report is sorted for output). Additive: existing
@@ -1443,7 +1452,7 @@ bool EditorSession::handle_edit(
           if (i > 0U) out += ",";
           out += quote(armed[i]);
         }
-        out += "]}}";
+        out += "]}";  // armed array, clip entry
       }  // clips
       out += "]";
       reply.ok = true;

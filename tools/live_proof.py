@@ -26,8 +26,8 @@ Usage:
   tools/live_proof.py w1 --sock /tmp/omnicpp_hw.sock
   tools/live_proof.py g1 --sock /tmp/omnicpp_hw.sock
   tools/live_proof.py w2 --sock-a /tmp/omnicpp_w2a.sock --sock-b /tmp/omnicpp_w2b.sock
-  tools/live_proof.py g3 --sock /tmp/omnicpp_hw.sock  # FRESH host: the
-                        # g3 frame contract needs a step-untouched counter
+  tools/live_proof.py g3 --sock /tmp/omnicpp_hw.sock  # any host state:
+                        # g3 pauses first and places every clip relatively
 """
 
 import argparse
@@ -213,11 +213,19 @@ def proof_w2(a, b):
 
 def proof_g3(c):
     print("G3: timeline clips over the wire")
-    # Frame contract: the host frame advances ONLY on `step` ticks, so this
-    # proof must run on a connection whose frame counter is known. In `all`
-    # mode main() runs it on sock-b AFTER w2 (w2's instance B never gets a
-    # wire `step` — its load_replay re-simulates ticks internally — so its
-    # frame is 0); standalone, run it against a fresh host.
+    # Frame contract: a live viewport ticks its session on EVERY rendered
+    # frame while unpaused, so the frame counter races ahead of wire `step`
+    # ticks and a clip spanning [0, 6) expires within a tenth of a second of
+    # arming — the record auto-disarms and the clip keeps no tracks (seen
+    # standalone on a fresh host: "record was not armed" + "no tracks").
+    # `pause` freezes the counter; wire `step` then releases frames one at a
+    # time and the recorded frames are exactly the stepped ones. The proof
+    # pauses first and resumes at the end, so it runs on ANY host state —
+    # the old comment's claim that B's frame "is 0" after w2 was wrong
+    # (B free-runs the whole time w2 runs) and standalone needed a fresh
+    # host only by luck of timing.
+    r = c.cmd(cmd="pause", id=48)
+    check("pause freezes the frame", r.get("ok") is True, str(r))
     base = c.detail(cmd="list_objects", id=49)
     base_names = [o["name"] for o in base["objects"]]
     r = c.cmd(cmd="spawn_cube", id=50, x=1, y=1, z=1, size=1.0)
@@ -228,14 +236,25 @@ def proof_g3(c):
     oid = new[0]["id"]
     name = new[0]["name"]
 
-    # Clip spanning [0, 6); frame is 0, so the record below captures
-    # frames 0..3.
-    r = c.cmd(cmd="clip_add", id=51, name="proof", frame=0, length=6)
+    # Frame contract, second attempt. A viewport ticks its session on every
+    # rendered frame, so by the time this proof runs the counter is thousands
+    # past zero and a clip at [0, 6) would be born expired (seen standalone:
+    # "record was not armed" + "no tracks"). `pause` freezes the counter so
+    # each wire `step` releases exactly the requested frames — but the
+    # ABSOLUTE frame is still unknown, and clips_info cannot reveal it (its
+    # samples array carries head/tail VALUES, not offsets; a first attempt at
+    # a probe clip misread the value 1.0 as frame 1). So the clip spans
+    # [0, 1e9) — wherever the frozen frame sits, the record below lands
+    # inside — and every assertion is frame-relative: counts and values,
+    # never absolute positions. (t5c already uses this shape for the same
+    # reason.) The deterministic absolute-offset semantics stay pinned by
+    # the headless TimelineSession unit tests; this proof pins the wire path.
+    r = c.cmd(cmd="clip_add", id=51, name="proof", frame=0, length=1000000000)
     check("clip_add", r.get("ok") is True, str(r))
     clip_id = int(r["detail"].rsplit(" ", 1)[1])  # "added clip <N>"
 
     # Arm a record track on position.x (vec3 axis form) and tick 2 step
-    # frames (0..1); the mid-recording edit must land in later samples.
+    # frames; the mid-recording edit must land in later samples.
     r = c.cmd(cmd="clip_record", id=52, clip=clip_id, oid=oid,
               key="position.x")
     check("clip_record armed", r.get("ok") is True and
@@ -247,27 +266,70 @@ def proof_g3(c):
     check("set mid-recording", r.get("ok") is True, str(r))
     r = c.cmd(cmd="step", id=55, ticks=2)
     check("step 2 (post-edit)", r.get("ok") is True, str(r))
+    # A wire `step` only QUEUES released frames — the reply lands when the
+    # command is received, not when the frames tick (on a loaded GPU a
+    # frame can take seconds). Poll the sample count until the 4 queued
+    # ticks land; time out rather than assert a half-ticked state. No extra
+    # steps are queued here, so count == 4 is exact, not an overshoot.
+    # Match by track key, not just clip name: a host re-used across runs
+    # holds several clips named "proof" (one per run, distinct cubes), and
+    # have[0] would be a frozen clip from an earlier run whose count never
+    # moves — exactly the false "count=0" timeout seen when this matched
+    # on name alone.
+    pkey = str(oid) + ":position.x"
+    n = 0
+    for _ in range(60):
+        info = c.detail(cmd="clips_info", id=80)
+        have = [k for k in info
+                if k["name"] == "proof" and pkey in k["tracks"]]
+        n = have[0]["tracks"][pkey].get("count", 0) if have else 0
+        if n >= 4:
+            break
+        time.sleep(2)
+    check("4 ticks landed", n >= 4, "count=%d" % n)
     r = c.cmd(cmd="clip_record_stop", id=56)
     check("record stop", r.get("ok") is True and
           r.get("detail") == "record disarmed", str(r))
 
-    # Playback armed from frame 6 while the host frame is 4 is silence:
-    # ticks 4..5 are below play_started_, so nothing applies.
-    r = c.cmd(cmd="clip_play", id=57, clip=clip_id, frame=6)
-    check("clip_play@6", r.get("ok") is True, str(r))
+    # Replay from the clip start at a frame far past the recorded samples:
+    # evaluate clamps to the tail, so stepped ticks must restore 0.75 over
+    # a sentinel the ticks could not have produced (999) — which also
+    # proves the ticks actually ran before the readback, closing the
+    # queue-vs-tick race above in the other direction.
+    r = c.cmd(cmd="set_property", id=84, object=name, key="position",
+              x=999, y=1, z=1)
+    check("sentinel 999", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_play", id=57, clip=clip_id)
+    check("clip_play from start", r.get("ok") is True, str(r))
     r = c.cmd(cmd="step", id=58, ticks=2)
-    check("step 2 (play silent)", r.get("ok") is True, str(r))
+    check("step 2 (tail hold)", r.get("ok") is True, str(r))
+    for _ in range(60):
+        after = c.detail(cmd="get_object", oid=oid)
+        px = after["properties"]["position"][0]
+        if abs(px - 0.75) < 1e-9:
+            break
+        time.sleep(2)
+    check("replay holds tail 0.75", abs(px - 0.75) < 1e-9, str(px))
+    r = c.cmd(cmd="clip_stop", id=59)
+    check("clip_stop", r.get("ok") is True, str(r))
 
-    # Re-arming record past the clip end auto-disarms on the first tick
-    # (frame 6 >= 0 + 6): no samples are added and stop reports unarmed.
-    r = c.cmd(cmd="clip_record", id=59, clip=clip_id, oid=oid,
+    # A zero-length clip ends the moment it begins: arming then stepping
+    # auto-disarms on the first tick at ANY host frame (frame_time >= 0 + 0
+    # is always true), no samples are added, and stop reports unarmed.
+    # This is the end-of-clip disarm contract without an absolute frame.
+    r = c.cmd(cmd="clip_add", id=60, name="ends", frame=0, length=0)
+    check("zero-length clip_add", r.get("ok") is True, str(r))
+    ends_id = int(r["detail"].rsplit(" ", 1)[1])
+    r = c.cmd(cmd="clip_record", id=61, clip=ends_id, oid=oid,
               key="position.x")
-    check("record re-arm past end", r.get("ok") is True, str(r))
-    r = c.cmd(cmd="step", id=60, ticks=2)
-    check("step 2 (past end)", r.get("ok") is True, str(r))
-    r = c.cmd(cmd="clip_record_stop", id=61)
+    check("ends record armed", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="step", id=74, ticks=1)
+    check("step 1 (past end)", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_record_stop", id=75)
     check("record auto-disarmed at clip end",
           r.get("detail") == "record was not armed", str(r))
+    r = c.cmd(cmd="clip_remove", id=76, clip=ends_id)
+    check("ends clip removed", r.get("ok") is True, str(r))
 
     info = c.detail(cmd="clips_info", id=62)  # already parsed JSON
     matching = [k for k in info
@@ -281,25 +343,62 @@ def proof_g3(c):
           track["samples"][0] == 1.0 and
           track["samples"][-1] == 0.75, str(track["samples"]))
 
-    # Move the clip to [8, 14) and replay from its (new) start. Ticks run
-    # 8..10: offsets 0,1,2 step-hold 1.0, 1.0, then the edit value 0.75.
-    r = c.cmd(cmd="clip_move", id=63, clip=clip_id, frame=8)
-    check("clip_move@8", r.get("ok") is True, str(r))
+    # Move the clip far into the future and replay from its (new) start:
+    # every stepped tick is below play_started_, so nothing applies and the
+    # cube sits untouched at 0.75. This is the original play-silence check,
+    # freed from the absolute frame by placing the start beyond any host
+    # counter (2^40; exact in JSON doubles, no u64 overflow with length).
+    far = 1099511627776
+    r = c.cmd(cmd="clip_move", id=63, clip=clip_id, frame=far)
+    check("clip_move@far", r.get("ok") is True, str(r))
+    # Sentinel again: the ticks must run (else this is vacuous) and apply
+    # nothing, so 999 survives. Restored to 0.75 afterwards.
+    r = c.cmd(cmd="set_property", id=85, object=name, key="position",
+              x=999, y=1, z=1)
+    check("sentinel 999 (far)", r.get("ok") is True, str(r))
+    # A silent playback leaves no trace, so "nothing happened" is vacuous
+    # unless the ticks are observed independently: a watch clip records the
+    # untouched y channel over the same two steps. Its count reaching 2
+    # proves the ticks ran; x still 999 proves playback applied nothing.
+    r = c.cmd(cmd="clip_add", id=87, name="watch", frame=0, length=1000000000)
+    check("watch clip_add", r.get("ok") is True, str(r))
+    watch_id = int(r["detail"].rsplit(" ", 1)[1])
+    r = c.cmd(cmd="clip_record", id=88, clip=watch_id, oid=oid,
+              key="position.y")
+    check("watch record armed", r.get("ok") is True, str(r))
     r = c.cmd(cmd="clip_play", id=64, clip=clip_id)
-    check("clip_play from start", r.get("ok") is True, str(r))
-    r = c.cmd(cmd="step", id=65, ticks=3)
-    check("step 3 (replay)", r.get("ok") is True, str(r))
-
+    check("clip_play from far start", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="step", id=65, ticks=2)
+    check("step 2 (play silent)", r.get("ok") is True, str(r))
+    n = 0
+    for _ in range(60):
+        info = c.detail(cmd="clips_info", id=89)
+        have = [k for k in info if k["name"] == "watch"]
+        n = have[0]["tracks"].get(str(oid) + ":position.y", {}).get(
+            "count", 0) if have else 0
+        if n >= 2:
+            break
+        time.sleep(2)
+    check("silence ticks landed", n >= 2, "count=%d" % n)
     after = c.detail(cmd="get_object", oid=oid)
     px = after["properties"]["position"][0]
-    check("step-held 0.75", abs(px - 0.75) < 1e-9, str(px))
+    check("future play applies nothing", abs(px - 999) < 1e-9, str(px))
+    r = c.cmd(cmd="clip_record_stop", id=90)
+    check("watch record stop", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_remove", id=91, clip=watch_id)
+    check("watch clip removed", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="set_property", id=86, object=name, key="position",
+              x=0.75, y=1, z=1)
+    check("restore 0.75", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_stop", id=66)
+    check("clip_stop far", r.get("ok") is True, str(r))
 
-    info = c.detail(cmd="clips_info", id=66)
+    info = c.detail(cmd="clips_info", id=77)
     moved = [k for k in info
              if k["name"] == "proof" and
              str(oid) + ":position.x" in k["tracks"]]
     check("moved start", len(moved) == 1 and
-          moved[0]["start_frame"] == 8, str(moved))
+          moved[0]["start_frame"] == far, str(moved))
 
     # Scrub warps disarm anything armed: re-arm both, warp, verify.
     r = c.cmd(cmd="clip_record", id=67, clip=clip_id, oid=oid,
@@ -317,6 +416,11 @@ def proof_g3(c):
     r = c.cmd(cmd="clip_stop", id=72)
     check("playback disarmed by warp",
           r.get("detail") == "playback was not armed", str(r))
+    # Leave the host as found: resume the free run. Every check above ran
+    # under pause, so the recorded/played frames are exactly the stepped
+    # ones regardless of what the host was doing before.
+    r = c.cmd(cmd="resume", id=73)
+    check("resume restores free run", r.get("ok") is True, str(r))
 
 
 def proof_e1(c):
@@ -485,6 +589,44 @@ def proof_e1(c):
         check("denoised mean differs from raw",
               m_raw != m_den and '"mean":' in m_raw,
               f"{m_raw} vs {m_den}")
+        # A resize rebuilds the tracer (create() is re-entrant) and create()
+        # RESETS the tracer-side toggles. The app has to re-apply its own
+        # state or the wire contradicts the screen: measured live, a resize
+        # with the filter on left get_denoise answering "off" over a filtered
+        # frame, and a resize of a HELD stack silently restarted an unbounded
+        # accumulation. Both re-applies are pinned here because no headless
+        # test can see the app's half of them.
+        r = c.cmd(cmd="set_denoise", id=700, enabled=1)
+        check("denoise on before resize", r.get("ok") is True, str(r))
+        r = c.cmd(cmd="set_adaptive", id=701, enabled=1, fraction=0.25)
+        check("adaptive on before resize", r.get("ok") is True, str(r))
+        r = c.cmd(cmd="set_viewport_size", id=702, width=960, height=540)
+        check("resize with denoise on ok", r.get("ok") is True, str(r))
+        time.sleep(1.5)
+        g = c.detail(cmd="get_denoise", id=703)
+        check("denoise survives a resize", g.get("enabled") is True, str(g))
+        g = c.detail(cmd="get_adaptive", id=704)
+        check("resize drops the stale adaptive mask",
+              g.get("enabled") is False and g.get("selected", -1) == 0, str(g))
+        r = c.cmd(cmd="set_viewport_size", id=705, width=1280, height=720)
+        check("resize back with denoise on ok", r.get("ok") is True, str(r))
+        time.sleep(1.5)
+        g = c.detail(cmd="get_denoise", id=706)
+        check("denoise survives the resize back",
+              g.get("enabled") is True, str(g))
+        # The stepped target is app state too: the stack re-converged from 0
+        # after the rebuild and must HOLD at 16 again rather than run on.
+        held = None
+        for _ in range(40):
+            held = c.detail(cmd="get_pt_samples", id=707).get("samples", -1)
+            if held == 16:
+                break
+            time.sleep(0.25)
+        check("stepped target survives a resize", held == 16, str(held))
+        time.sleep(1.0)
+        still = c.detail(cmd="get_pt_samples", id=708).get("samples", -1)
+        check("stepped target still holds after a resize", still == 16,
+              str(still))
         r = c.cmd(cmd="set_denoise", id=685, enabled=0)
         check("set_denoise off ok", r.get("ok") is True, str(r))
         g = c.detail(cmd="get_denoise", id=686)
@@ -791,9 +933,9 @@ def main():
     if args.proof in ("w2", "all"):
         proof_w2(Client(args.sock_a), Client(args.sock_b))
     if args.proof in ("g3", "all"):
-        # In `all` mode g3 runs on sock-b after w2: w2's instance B never
-        # receives a wire `step` (its replay re-simulates internally), so
-        # its host frame counter is still 0 — see proof_g3's contract note.
+        # proof_g3 pauses first and places every clip frame-relatively, so
+        # it runs on any host state — including sock-b after w2, whose
+        # frame counter has free-run the whole time w2 ran.
         proof_g3(Client(args.sock_b if args.proof == "all" else args.sock))
 
     print()

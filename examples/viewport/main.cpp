@@ -1993,7 +1993,33 @@ bool setup_wm_delete_protocol(ViewportApp& app) {
       // chains must be re-pointed at the new handles -- and a fresh
       // denoised image needs one forced dispatch before the tonemap may
       // sample it.
+      //
+      // create() also RESETS the tracer-side toggles (destroy_resources sets
+      // denoise_enabled_ and adaptive_enabled_ false), so the app-side denoise
+      // flag has to be re-applied here -- the same miss setup_path_tracing
+      // documents. Without it the tonemap keeps sampling the filtered image
+      // (app.pt_denoise is still true) while get_denoise reports "off", which
+      // is a wire answer that contradicts the screen. Found live: toggle on,
+      // set_viewport_size, then get_denoise said false with the frame still
+      // visibly filtered.
+      // The stepped SAMPLE TARGET is app state that create() also resets, so a
+      // held session would silently become unbounded after a resize: the
+      // accumulator restarts at 0 and grows forever, which is the one
+      // property the stepped run exists to guarantee. Re-applying it lets the
+      // stack re-converge to the caller's target and hold there again (the
+      // documented behaviour: samples never carry across a resize).
+      app.pt_tracer->set_sample_target(app.pt_sample_target);
+      app.pt_tracer->set_denoise_enabled(app.pt_denoise);
       app.pt_denoise_pending = true;
+      // The adaptive MASK does NOT survive: it was rank-selected over texels
+      // that no longer exist at this extent, and count_image_ was recreated, so
+      // the mask is gone tracer-side. Clearing the reported snapshot keeps
+      // get_adaptive from reporting a selection the renderer is not using (the
+      // same rule as leaving/re-entering PT: a rebuilt stack is uniform).
+      app.pt_tracer->set_adaptive_enabled(false);
+      app.pt_adaptive_fraction = 0.0;
+      app.pt_adaptive_selected = 0U;
+      app.pt_adaptive_threshold = 0.0F;
       point_tonemap_at_pt_source(app);
     } else {
       app.renderer.set_external_tonemap_source(VK_NULL_HANDLE, VK_NULL_HANDLE);

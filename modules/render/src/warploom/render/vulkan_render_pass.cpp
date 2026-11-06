@@ -151,6 +151,28 @@ VulkanRenderPass::~VulkanRenderPass() { cleanup(device_); }
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
 
+  // A recreate must not leak the previous attachment. The caller is
+  // responsible for device idle (the viewport drains before a resize), and the
+  // render pass still owns the old image until this point, so the release is
+  // here: image, view and DEDICATED memory were allocated with raw Vulkan
+  // calls, outside the in-tree allocator, which means nothing else can free
+  // them and no allocator accounting can notice them. Measured: a synthetic
+  // resize sequence leaked one depth image per resize, and the leak surfaced
+  // far from its cause as vkAllocateMemory returning VK_ERROR_OUT_OF_DEVICE_
+  // MEMORY (-2) for a 3.9 MB attachment.
+  if (depth_view_ != VK_NULL_HANDLE) {
+    vkDestroyImageView(device, depth_view_, nullptr);
+    depth_view_ = VK_NULL_HANDLE;
+  }
+  if (depth_image_ != VK_NULL_HANDLE) {
+    vkDestroyImage(device, depth_image_, nullptr);
+    depth_image_ = VK_NULL_HANDLE;
+  }
+  if (depth_memory_ != VK_NULL_HANDLE) {
+    vkFreeMemory(device, depth_memory_, nullptr);
+    depth_memory_ = VK_NULL_HANDLE;
+  }
+  depth_sampleable_ = false;
   depth_format_ = format;
 
   // Create depth image

@@ -6459,6 +6459,14 @@ TEST(path_tracing_real, denoise_render_path_uniform_parity) {
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
   EXPECT_TRUE(tracer.ready());
+  // create() RESETS both tracer-side toggles, and the caller re-applies them.
+  // Pinned because a caller that assumes otherwise renders one thing and
+  // reports another: the viewport resize path forgot the denoise re-apply, so
+  // get_denoise answered "off" over a visibly filtered frame.
+  EXPECT_FALSE(tracer.denoise_enabled())
+      << "create() must leave the denoise toggle off (caller re-applies)";
+  EXPECT_FALSE(tracer.adaptive_enabled())
+      << "create() must leave the adaptive mask off (caller re-uploads)";
   tracer.set_camera(cam);
   tracer.set_denoise_enabled(true);
   record_rounds(kNoisyFrames);

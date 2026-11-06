@@ -158,10 +158,14 @@ Two honest caveats on the ray tracing:
   with a per-iteration E2 re-smoothing that still beats stale 1.24x-3.8x
   same-k (loop34) -- no render-path loop, single-iteration stands.
   Measured on the RTX 2060 at
-  1000x600: fraction=0.25 selected exactly 150000/600000 texels. Gate
-  CLEARED 2026-11-06: e1 runs 69/69 on the viewport including the resize
+  1000x600: fraction=0.25 selected exactly 150000/600000 texels.  Gate
+  CLEARED 2026-11-06: e1 runs 92/92 on the viewport including the resize
   round trip (down/back, sim steps after) at ~5.1/6.1 GiB VRAM, 18/18 on
-  headless. The 2026-11-05 failure was a STALE viewport binary (Nov 5
+  headless. Resize now also re-applies the stepped sample target and the
+  denoise toggle after the tracer rebuild and clears the stale adaptive
+  snapshot (a resize dropped all three on the floor); and
+  `create_depth_resources` no longer leaks one attachment per resize
+  (pinned by `DepthResourceRecreateReleasesTheOldAttachment`). The 2026-11-05 failure was a STALE viewport binary (Nov 5
   13:45) against the rebuilt render .so (new tracer layout) -- a
   shared-lib ODR segfault at PT entry, misread as VRAM pressure.
   Rebuilt everything, re-ran, green. A binary that predates the headers
@@ -183,8 +187,8 @@ The one subsystem that needs no caveat.
 | Fixed-step scheduler, state hash, replay | yes | yes | 8 scrubber tests + 23-assertion socket proof |
 | Document save/load, atomic write, undo boundaries | yes | yes | protocol-path test + 16-assertion proof |
 | Protocol record/replay (`warploom-replay-v1`) | yes | yes | `test_command_recorder`, 19-assertion two-instance proof |
-| Timeline clips as document entities | yes | yes | 20 tests in `modules/core/tests/test_timeline.cpp` (5 re-run green when these rows were corrected) + the `g3` assertions inside `tools/live_proof.py all`; the widget has had an app caller since G3-B (`ClipTimelineView` above the W1 scrub strip) |
-| Live socket proof harness  + `e1` (render mode/exposure/bloom/RT-toggle/PT-stepped wire contract)| — | — | `tools/live_proof.py all` → **103/103 assertions** headless (measured 2026-11-05, three fresh hosts: w1, g1, e1 and t5c on one, then w2 across two); the visual-host half (payload validation + bloom read-back + RT-sub-toggle round-trip + stepped-PT determinism round-trip: enter pt, target 16, poll to 16, mean M1, leave + re-enter, repeat to 16, M2 == M1 bitwise) passed on the RTX 2060 viewport, 58/58 e1, plus `t5c` 24/24 there, 0 diagnostics in the viewport log |
+| Timeline clips as document entities | yes | yes | 20 tests in `modules/core/tests/test_timeline.cpp` (5 re-run green when these rows were corrected) + the `g3` assertions inside `tools/live_proof.py all`; the widget has had an app caller since G3-B (`ClipTimelineView` above the W1 scrub strip). `clips_info` closed its `tracks` object before `armed` (2026-11-06): a trackless clip used to emit `"tracks":{,"armed":[]}`, unparseable by every client; pinned by `ProtocolValidationAndInfo` |
+| Live socket proof harness  + `e1` (render mode/exposure/bloom/RT-toggle/PT-stepped wire contract)| — | — | `tools/live_proof.py all` → **192/192 assertions** (measured 2026-11-06, viewport A + headless B: w1, g1, e1 92/92 incl. 9 resize checks, t5c, w2, g3 43/43), 0 diagnostics in the viewport log. Supersedes the 103/103 (2026-11-05) and 58/58 figures. g3 is now frame-relative (pause + [0, 1e9) clips + sentinel/watch-clip proofs + count polls) because a viewport's timeline counter free-runs past any absolute clip window — see `docs/research/loop35-live-pt-consumer.md` |
 
 **The determinism story stops at physics.** The viewport steps physics in
 the wall-clock frame loop rather than the fixed tick, the headless host

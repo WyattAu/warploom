@@ -1935,3 +1935,21 @@ v1 filter and no further denoiser spikes are queued -- the next denoiser
 work waits on a live-PT consumer need, not another filter variant. Full
 suite 746/746, ctest 6/6, 0 warnings, 0 validation diagnostics.
 Research: docs/research/loop34-variance-update.md.
+
+Live-PT consumer (loop35) MEASURED 2026-11-06, defects fixed and verified:
+single-iteration denoiser on a live app scene at K=16, 3.6x smoother
+(Laplacian 0.029089 -> 0.008093) at unchanged exposure (LDR mean
+0.886119 -> 0.887030); the wire-DC gap (raw 0.9478 vs denoised 0.7327)
+is firefly clipping (max texel 203.57 -> 39.68), not darkening.
+Adaptive-at-hold is a no-op (byte-identical); PT re-entry keeps the
+accumulation; resize now re-applies the stepped target + denoise toggle
+and clears the stale adaptive snapshot; `create_depth_resources` no
+longer leaks one attachment per resize (pinned). Follow-on: `clips_info`
+emitted invalid JSON on trackless clips (`"tracks":{,"armed":[]}` —
+`armed` appended with the object still open; fixed + pinned); g3
+rewritten frame-relative (pause, [0, 1e9) clips, sentinel/watch-clip
+proofs, count polls) because a viewport's counter free-runs past any
+absolute window — a wire client can never observe the absolute frame.
+`live_proof.py all` 192/192 (viewport A + headless B), 0 diagnostics;
+suites unit 747/747, core 22/22, editor 48/48, ui 19/19, runtime 10/10,
+ctest 6/6. Research: docs/research/loop35-live-pt-consumer.md.

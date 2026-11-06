@@ -1226,6 +1226,17 @@ TEST(TimelineSession, ProtocolValidationAndInfo) {
   const auto detail = s.on_control(info).detail;
   EXPECT_NE(detail.find("\"name\":\"empty\""), std::string::npos);
   EXPECT_NE(detail.find("\"start_frame\":0"), std::string::npos);
+  // The tracks object must be CLOSED before the armed array, on a clip with no
+  // tracks at all: the writer used to emit "tracks":{,"armed":[]}, which no
+  // JSON reader accepts (tools/live_proof.py g3 died in json.loads there), and
+  // on a clip WITH tracks it nested `armed` inside `tracks` instead of
+  // reporting it beside them. Both shapes are checked here because the empty
+  // case is the one that broke parsing.
+  EXPECT_NE(detail.find("[{\"id\":1,\"name\":\"empty\",\"start_frame\":0,"
+                        "\"length_frames\":0,\"tracks\":{},\"armed\":[]}]"),
+            std::string::npos)
+      << detail;
+  EXPECT_EQ(detail.find("\"tracks\":{,"), std::string::npos) << detail;
   // Warp path: scrub_start + scrub_to disarm anything armed (nothing is).
   omnicpp::core::ControlCommand scrub;
   scrub.kind = CK::ScrubStart;

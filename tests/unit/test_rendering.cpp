@@ -4642,6 +4642,79 @@ TEST(VulkanHardware, SwapchainRecreationStress) {
 #endif
 }
 
+//! A depth-attachment RECREATE (the viewport's resize path, which calls
+//! create_depth_resources on a LIVE render pass) must release the previous
+//! image, view and memory. The old code overwrote the three handles, so every
+//! resize leaked a dedicated allocation that nothing could account for: the
+//! leak surfaced far from its cause, as vkAllocateMemory returning
+//! VK_ERROR_OUT_OF_DEVICE_MEMORY for a 3.9 MB attachment after a PT-mode
+//! resize. Asserted here on the handles themselves (the previous image and
+//! view must be gone), because no allocator counts raw
+//! vkAllocateMemory calls.
+TEST(VulkanRenderPass, DepthResourceRecreateReleasesTheOldAttachment) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  omnicpp::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("OmniCppDepthRecreate", true).is_ok());
+
+  const VkFormat depth_format =
+      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+          context.physical_device());
+  ASSERT_NE(depth_format, VK_FORMAT_UNDEFINED);
+  omnicpp::render::VulkanRenderPass render_pass;
+  ASSERT_TRUE(render_pass
+                  .create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
+                          depth_format)
+                  .is_ok());
+
+  struct Size {
+    std::uint32_t w;
+    std::uint32_t h;
+  };
+  const Size sizes[4] = {{640, 480}, {1280, 720}, {320, 240}, {1000, 600}};
+  VkImage previous_image = VK_NULL_HANDLE;
+  VkImageView previous_view = VK_NULL_HANDLE;
+  for (std::uint32_t i = 0; i < 16U; ++i) {
+    const Size s = sizes[i % 4U];
+    ASSERT_TRUE(render_pass
+                    .create_depth_resources(context.device(),
+                                            context.physical_device(),
+                                            depth_format, s.w, s.h)
+                    .is_ok())
+        << "recreate " << i << " failed at " << s.w << "x" << s.h;
+    EXPECT_NE(render_pass.depth_image(), VK_NULL_HANDLE);
+    EXPECT_NE(render_pass.depth_view(), VK_NULL_HANDLE);
+    if (previous_image != VK_NULL_HANDLE) {
+      // A fresh handle every time is the observable half of "the old one was
+      // freed": reusing the same handle value for a NEW image is possible, but
+      // an unchanged handle means the recreate did not happen at all.
+      EXPECT_NE(render_pass.depth_image(), previous_image)
+          << "recreate " << i << " reused the previous depth image";
+    }
+    previous_image = render_pass.depth_image();
+    previous_view = render_pass.depth_view();
+    (void)previous_view;
+  }
+
+  // The release witness is the validation layer itself: an undestroyed child
+  // object is reported as VUID-vkDestroyDevice-device-05137 at
+  // vkDestroyDevice, and this context's debug callback counts that as an
+  // error. So the count has to be read AFTER cleanup -- reading it before
+  // cleanup is exactly how a leaked attachment stays invisible (the first
+  // version of this test did that and passed against a sabotaged build that
+  // released nothing).
+  render_pass.cleanup(context.device());
+  context.cleanup();
+  EXPECT_EQ(context.validation_error_count(), 0U)
+      << "a depth-attachment recreate leaked a device object";
+  EXPECT_EQ(context.validation_warning_count(), 0U);
+#else
+  GTEST_SKIP() << "Vulkan types unavailable";
+#endif
+}
+
 TEST(VulkanSwapchain, ChooseSurfaceFormatPrefersSRGB) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE
   std::vector<VkSurfaceFormatKHR> formats = {
