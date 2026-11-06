@@ -1042,6 +1042,35 @@ class PhysicsWorld final {
     c2z = p2z + d2z * t;
   }
 
+  //! Swept entry root for a relative segment against radius R: the first
+  //! s in [0, 1] with |c0 + d*s| = R, where d = (dx, dy, dz) is the given
+  //! relative travel. Pure algebra (quadratic formula), deterministic
+  //! float32 throughout, one shared implementation so the sphere and
+  //! capsule branches cannot drift (the BLAS-size duplication lesson).
+  //! Start-inside (c0 <= R) is NOT an entry: returns false, leaving the
+  //! pair to the discrete path (continuing overlap) or the historical miss
+  //! (separating from overlap — solving the exit root would glue a
+  //! legitimately separating pair back). s_out is written only on success.
+  static bool swept_entry_root(float c0x, float c0y, float c0z, float dx,
+                               float dy, float dz, float r_sq,
+                               float& s_out) noexcept {
+    const float c0sq = c0x * c0x + c0y * c0y + c0z * c0z;
+    if (c0sq <= r_sq) return false;
+    const float ddx = dx - c0x;
+    const float ddy = dy - c0y;
+    const float ddz = dz - c0z;
+    const float a2 = ddx * ddx + ddy * ddy + ddz * ddz;
+    if (a2 <= 0.0f) return false;
+    const float bq = c0x * ddx + c0y * ddy + c0z * ddz;
+    if (bq >= 0.0f) return false;
+    const float disc = bq * bq - a2 * (c0sq - r_sq);
+    if (disc < 0.0f) return false;
+    const float s = (-bq - std::sqrt(disc)) / a2;
+    if (s < 0.0f || s > 1.0f) return false;
+    s_out = s;
+    return true;
+  }
+
   //! Shape-aware narrowphase on the frozen snapshot. Sphere-sphere is the
   //! historical computation exactly (same degenerate branch, same order);
   //! any pair involving a capsule reduces to sphere-vs-sphere at the closest
@@ -1109,17 +1138,13 @@ class PhysicsWorld final {
       const bool crossed = dist_sq < r_sq && c0sq > r_sq;
       if (speculative_contacts_ && (crossed || dist_sq >= r_sq) &&
           c0sq > r_sq) {
-        const float ddx = dx - c0x;
-        const float ddy = dy - c0y;
-        const float ddz = dz - c0z;
-        const float a2 = ddx * ddx + ddy * ddy + ddz * ddz;
-        const float bq = c0x * ddx + c0y * ddy + c0z * ddz;
         float s = -1.0f;
-        if (a2 > 0.0f && bq < 0.0f) {
-          const float disc = bq * bq - a2 * (c0sq - r_sq);
-          if (disc >= 0.0f) s = (-bq - std::sqrt(disc)) / a2;
-        }
-        if (s >= 0.0f && s <= 1.0f) {
+        const bool entered =
+            swept_entry_root(c0x, c0y, c0z, dx, dy, dz, r_sq, s);
+        if (entered) {
+          const float ddx = dx - c0x;
+          const float ddy = dy - c0y;
+          const float ddz = dz - c0z;
           // TOI configuration: centers exactly min_dist apart along n.
           const float cx = c0x + ddx * s;
           const float cy = c0y + ddy * s;
@@ -1189,29 +1214,218 @@ class PhysicsWorld final {
     const float dz = cbz - caz;
     const float dist_sq = dx * dx + dy * dy + dz * dz;
     const float min_dist = a.radius + b.radius;
-    if (dist_sq >= min_dist * min_dist) return false;
-    solve.a = static_cast<std::uint32_t>(i);
-    solve.b = static_cast<std::uint32_t>(j);
-    const float dist = std::sqrt(dist_sq);
-    solve.nx = dist > 1e-8f ? dx / dist : 0.0f;
-    solve.ny = dist > 1e-8f ? dy / dist : 1.0f;
-    solve.nz = dist > 1e-8f ? dz / dist : 0.0f;
-    solve.penetration = min_dist - dist;
-    solve.inv_sum = inv_sum;
-    solve.restitution = 0.5f * (a.restitution + b.restitution);
-    solve.vel_n = (b.vx - a.vx) * solve.nx + (b.vy - a.vy) * solve.ny +
-                  (b.vz - a.vz) * solve.nz;
-    // Contact point on a's surface; lever arms from body centers.
-    const float cpx = cax + solve.nx * a.radius;
-    const float cpy = cay + solve.ny * a.radius;
-    const float cpz = caz + solve.nz * a.radius;
-    solve.rax = cpx - a.px;
-    solve.ray = cpy - a.py;
-    solve.raz = cpz - a.pz;
-    solve.rbx = cpx - b.px;
-    solve.rby = cpy - b.py;
-    solve.rbz = cpz - b.pz;
-    return true;
+    if (min_dist <= 0.0f) return false;
+    const float cap_r_sq = min_dist * min_dist;
+    if (dist_sq < cap_r_sq) {
+      // End overlap: the discrete segment contact, verbatim — unless the
+      // pair crossed this step (start outside the bound spheres), in
+      // which case the discrete end-normal exits the far side and the TOI
+      // path below owns it (same ejection mechanism as spheres).
+      const float sc0x = (b.px - b.vx * h) - (a.px - a.vx * h);
+      const float sc0y = (b.py - b.vy * h) - (a.py - a.vy * h);
+      const float sc0z = (b.pz - b.vz * h) - (a.pz - a.vz * h);
+      const float sc0sq = sc0x * sc0x + sc0y * sc0y + sc0z * sc0z;
+      const float bound_sum = a.bound + b.bound;
+      if (!speculative_contacts_ || sc0sq <= bound_sum * bound_sum) {
+        solve.a = static_cast<std::uint32_t>(i);
+        solve.b = static_cast<std::uint32_t>(j);
+        const float dist = std::sqrt(dist_sq);
+        solve.nx = dist > 1e-8f ? dx / dist : 0.0f;
+        solve.ny = dist > 1e-8f ? dy / dist : 1.0f;
+        solve.nz = dist > 1e-8f ? dz / dist : 0.0f;
+        solve.penetration = min_dist - dist;
+        solve.inv_sum = inv_sum;
+        solve.restitution = 0.5f * (a.restitution + b.restitution);
+        solve.vel_n = (b.vx - a.vx) * solve.nx + (b.vy - a.vy) * solve.ny +
+                      (b.vz - a.vz) * solve.nz;
+        const float cpx = cax + solve.nx * a.radius;
+        const float cpy = cay + solve.ny * a.radius;
+        const float cpz = caz + solve.nz * a.radius;
+        solve.rax = cpx - a.px;
+        solve.ray = cpy - a.py;
+        solve.raz = cpz - a.pz;
+        solve.rbx = cpx - b.px;
+        solve.rby = cpy - b.py;
+        solve.rbz = cpz - b.pz;
+        return true;
+      }
+      // Crossed: fall through to the TOI path (bound trigger below finds
+      // the entry; the start-outside check is already established here).
+    } else if (!speculative_contacts_) {
+      return false;
+    }
+    // Capsule swept TOI (flag on). Bound-sphere entry on centers first
+    // (conservative trigger: bound spheres contain the capsules, and the
+    // grid already guarantees the pair was gathered), then Newton
+    // refinement on the true segment gap at fixed END orientations —
+    // rotation within a substep is ignored (exact for non-spinning pairs;
+    // documented approximation otherwise). Fixed 3 iterations:
+    // deterministic best-effort; a non-converged graze misses this step
+    // and is re-tested next step (delays rather than tunnels).
+    const float tc0x = (b.px - b.vx * h) - (a.px - a.vx * h);
+    const float tc0y = (b.py - b.vy * h) - (a.py - a.vy * h);
+    const float tc0z = (b.pz - b.vz * h) - (a.pz - a.vz * h);
+    const float tc1x = b.px - a.px;
+    const float tc1y = b.py - a.py;
+    const float tc1z = b.pz - a.pz;
+    // Segment axes at END orientations (fixed through the trigger and the
+    // refinement below).
+    float tax = 0.0F, tay = 1.0F, taz = 0.0F;
+    float tbx = 0.0F, tby = 1.0F, tbz = 0.0F;
+    if (cap_a) snapshot_axis(a, tax, tay, taz);
+    if (cap_b) snapshot_axis(b, tbx, tby, tbz);
+    // Start-inside-bound is transit, not rest: the bound was entered on
+    // an earlier step without surface contact (phase 7 of the gate does
+    // exactly this). Only start-inside-SURFACE keeps the historical miss
+    // (resting/separating — and the same corner the sphere rule takes).
+    // The surface gap at step start costs one extra closest-points solve,
+    // but only for bound-overlapping pairs.
+    const float bound_sum = a.bound + b.bound;
+    const float bound_r_sq = bound_sum * bound_sum;
+    const float tc0sq = tc0x * tc0x + tc0y * tc0y + tc0z * tc0z;
+    float sb = -1.0f;
+    if (tc0sq > bound_r_sq) {
+      if (!swept_entry_root(tc0x, tc0y, tc0z, tc1x, tc1y, tc1z, bound_r_sq,
+                            sb)) {
+        return false;
+      }
+    } else {
+      const float sax = a.px - a.vx * h;
+      const float say = a.py - a.vy * h;
+      const float saz = a.pz - a.vz * h;
+      const float sbx = b.px - b.vx * h;
+      const float sby = b.py - b.vy * h;
+      const float sbz = b.pz - b.vz * h;
+      float scax = sax, scay = say, scaz = saz;
+      float scbx = sbx, scby = sby, scbz = sbz;
+      segment_segment_closest(
+          sax - tax * a.half_height, say - tay * a.half_height,
+          saz - taz * a.half_height, sax + tax * a.half_height,
+          say + tay * a.half_height, saz + taz * a.half_height,
+          sbx - tbx * b.half_height, sby - tby * b.half_height,
+          sbz - tbz * b.half_height, sbx + tbx * b.half_height,
+          sby + tby * b.half_height, sbz + tbz * b.half_height, scax, scay,
+          scaz, scbx, scby, scbz);
+      const float sgx = scbx - scax;
+      const float sgy = scby - scay;
+      const float sgz = scbz - scaz;
+      if (sgx * sgx + sgy * sgy + sgz * sgz <= min_dist * min_dist) {
+        return false;  // resting/separating at step start: historical miss
+      }
+      sb = 0.0f;  // surface-separated inside the bound: Newton climbs
+    }
+    float s = sb;
+    for (int newton = 0; newton < 3; ++newton) {
+      const float k = 1.0f - s;
+      const float pax = a.px - a.vx * h * k;
+      const float pay = a.py - a.vy * h * k;
+      const float paz = a.pz - a.vz * h * k;
+      const float pbx = b.px - b.vx * h * k;
+      const float pby = b.py - b.vy * h * k;
+      const float pbz = b.pz - b.vz * h * k;
+      float qax = pax, qay = pay, qaz = paz;
+      float qbx = pbx, qby = pby, qbz = pbz;
+      segment_segment_closest(pax - tax * a.half_height,
+                              pay - tay * a.half_height,
+                              paz - taz * a.half_height,
+                              pax + tax * a.half_height,
+                              pay + tay * a.half_height,
+                              paz + taz * a.half_height,
+                              pbx - tbx * b.half_height,
+                              pby - tby * b.half_height,
+                              pbz - tbz * b.half_height,
+                              pbx + tbx * b.half_height,
+                              pby + tby * b.half_height,
+                              pbz + tbz * b.half_height,
+                              qax, qay, qaz, qbx, qby, qbz);
+      const float gx = qbx - qax;
+      const float gy = qby - qay;
+      const float gz = qbz - qaz;
+      const float gdist_sq = gx * gx + gy * gy + gz * gz;
+      const float gdist = std::sqrt(gdist_sq);
+      if (gdist <= min_dist) break;  // at/past the surface: solve here
+      // Advance along the approach: gap over center-closing-rate. The
+      // rate uses centers (first-order; closest-point migration within
+      // one Newton step is second-order). Sign: the gap SHRINKS as s
+      // grows while closing, so the closing rate is minus the relative
+      // velocity along the outward closest-point normal.
+      float nnx = gx, nny = gy, nnz = gz;
+      if (gdist > 1e-8f) {
+        nnx /= gdist;
+        nny /= gdist;
+        nnz /= gdist;
+      }
+      const float rate = -((b.vx - a.vx) * nnx + (b.vy - a.vy) * nny +
+                           (b.vz - a.vz) * nnz) *
+                         h;
+      if (rate <= 1e-9f) break;  // not closing: take the current s
+      s += (gdist - min_dist) / rate;
+      if (s < 0.0f) {
+        s = 0.0f;
+      } else if (s > 1.0f) {
+        s = 1.0f;
+      }
+    }
+    // Capsule geometry at the refined TOI centers + end orientations.
+    {
+      const float k = 1.0f - s;
+      const float pax = a.px - a.vx * h * k;
+      const float pay = a.py - a.vy * h * k;
+      const float paz = a.pz - a.vz * h * k;
+      const float pbx = b.px - b.vx * h * k;
+      const float pby = b.py - b.vy * h * k;
+      const float pbz = b.pz - b.vz * h * k;
+      float qax = pax, qay = pay, qaz = paz;
+      float qbx = pbx, qby = pby, qbz = pbz;
+      segment_segment_closest(pax - tax * a.half_height,
+                              pay - tay * a.half_height,
+                              paz - taz * a.half_height,
+                              pax + tax * a.half_height,
+                              pay + tay * a.half_height,
+                              paz + taz * a.half_height,
+                              pbx - tbx * b.half_height,
+                              pby - tby * b.half_height,
+                              pbz - tbz * b.half_height,
+                              pbx + tbx * b.half_height,
+                              pby + tby * b.half_height,
+                              pbz + tbz * b.half_height,
+                              qax, qay, qaz, qbx, qby, qbz);
+      const float fx = qbx - qax;
+      const float fy = qby - qay;
+      const float fz = qbz - qaz;
+      const float fdist_sq = fx * fx + fy * fy + fz * fz;
+      const float fdist = std::sqrt(fdist_sq);
+      // Non-converged graze (still clearly separated): miss this step.
+      if (fdist > min_dist + 1e-3f) return false;
+      solve.a = static_cast<std::uint32_t>(i);
+      solve.b = static_cast<std::uint32_t>(j);
+      solve.nx = fdist > 1e-8f ? fx / fdist : 0.0f;
+      solve.ny = fdist > 1e-8f ? fy / fdist : 1.0f;
+      solve.nz = fdist > 1e-8f ? fz / fdist : 0.0f;
+      solve.penetration = 0.0f;  // touching at TOI; never an island edge
+      solve.inv_sum = inv_sum;
+      solve.restitution = 0.5f * (a.restitution + b.restitution);
+      solve.vel_n = (b.vx - a.vx) * solve.nx + (b.vy - a.vy) * solve.ny +
+                    (b.vz - a.vz) * solve.nz;
+      if (solve.vel_n >= 0.0f) return false;
+      // Lever arms from the TOI contact point (torque side effect only).
+      const float cpx = qax + solve.nx * a.radius;
+      const float cpy = qay + solve.ny * a.radius;
+      const float cpz = qaz + solve.nz * a.radius;
+      solve.rax = cpx - pax;
+      solve.ray = cpy - pay;
+      solve.raz = cpz - paz;
+      solve.rbx = cpx - pbx;
+      solve.rby = cpy - pby;
+      solve.rbz = cpz - pbz;
+      // Center rewind from TOI to end, split by inverse mass (same
+      // COM-preserving rewind as spheres; orientations untouched).
+      solve.speculative = true;
+      solve.wx = (tc1x - tc0x) * k;
+      solve.wy = (tc1y - tc0y) * k;
+      solve.wz = (tc1z - tc0z) * k;
+      return true;
+    }
   }
 
   //! Fill candidate_pairs_ with (i, j), i < j, in exactly the order the nested

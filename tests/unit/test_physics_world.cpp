@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdint>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "warploom/physics/physics_world.hpp"
@@ -914,48 +915,98 @@ TEST(PhysicsWorld, FastCapsuleTunnelsOnSomePhases) {
   constexpr int kPhases = 12;
   constexpr int kSteps = 10;
 
-  auto run_sweep = []() {
-    std::vector<std::pair<float, float>> final_xv;
-    final_xv.reserve(kPhases);
-    for (int p = 0; p < kPhases; ++p) {
-      PhysicsWorld w(/*gravity=*/0.0f);
-      PhysicsBody wall;
-      wall.position[0] = 0.0f;
-      wall.position[1] = 5.0f;
-      wall.radius = kR;
-      wall.inverse_mass = 0.0f;
-      (void)w.add_body(wall);
-      PhysicsBody shot;
-      shot.shape = omnicpp::physics::BodyShape::Capsule;
-      shot.radius = kShotR;
-      shot.half_height = kHalf;
-      const float phase = static_cast<float>(p) * kStepTravel /
-                          static_cast<float>(kPhases);
-      shot.position[0] = -10.0f + phase;
-      shot.position[1] = 5.0f;
-      shot.restitution = 0.0f;
-      shot.velocity[0] = kSpeed;
-      (void)w.add_body(shot);
-      for (int i = 0; i < kSteps; ++i) w.step(kGateDt);
-      final_xv.emplace_back(w.body(1).position[0], w.body(1).velocity[0]);
+  struct PhaseOut {
+    float x{0.0f};
+    float vx{0.0f};
+    bool contacted{false};
+  };
+  auto run_phase = [](int p, bool speculative) {
+    PhysicsWorld w(/*gravity=*/0.0f);
+    if (speculative) w.set_speculative_contacts(true);
+    PhysicsBody wall;
+    wall.position[0] = 0.0f;
+    wall.position[1] = 5.0f;
+    wall.radius = kR;
+    wall.inverse_mass = 0.0f;
+    (void)w.add_body(wall);
+    PhysicsBody shot;
+    shot.shape = omnicpp::physics::BodyShape::Capsule;
+    shot.radius = kShotR;
+    shot.half_height = kHalf;
+    const float phase = static_cast<float>(p) * kStepTravel /
+                        static_cast<float>(kPhases);
+    shot.position[0] = -10.0f + phase;
+    shot.position[1] = 5.0f;
+    shot.restitution = 0.0f;
+    shot.velocity[0] = kSpeed;
+    (void)w.add_body(shot);
+    PhaseOut out{};
+    for (int i = 0; i < kSteps; ++i) {
+      w.step(kGateDt);
+      if (!w.contacts().empty()) out.contacted = true;
     }
-    return final_xv;
+    out.x = w.body(1).position[0];
+    out.vx = w.body(1).velocity[0];
+    return out;
   };
 
-  const std::vector<std::pair<float, float>> first = run_sweep();
-  int tunneled = 0;
-  for (const auto& [x, vx] : first) {
-    if (x > kR) {
-      ++tunneled;
-      EXPECT_GT(vx, 0.0f) << "tunneled but stopped: third mechanism?";
-    } else {
-      EXPECT_LT(x, 0.0f) << "final x = " << x;
-      EXPECT_LE(vx, 0.0f) << "collided but still advancing: " << vx;
-    }
+  // The flag is what fixes it: discrete still tunnels (the loop55 trigger,
+  // kept alive as the off-mode pin).
+  int tunneled_off = 0;
+  for (int p = 0; p < kPhases; ++p) {
+    if (run_phase(p, false).x > kR) ++tunneled_off;
   }
-  EXPECT_GE(tunneled, 1) << "no phase tunneled: capsule gate has no trigger";
-  EXPECT_LT(tunneled, kPhases) << "every phase tunneled: detector is broken";
-  EXPECT_EQ(run_sweep(), first);  // pure function of constants
+  EXPECT_GE(tunneled_off, 1) << "off-mode trigger gone: gate pins nothing";
+  // Sphere twin: identical setup with a sphere shot (r=0.1), flag on. The
+  // capsule flies perpendicular to its segment, so the contact geometry
+  // coincides with the sphere's — the twin must agree to 1e-3. This is the
+  // hover guard with teeth: a bound-only rewind lands 0.4 short and the
+  // rebound trajectories diverge by the same 0.4.
+  auto run_sphere_twin = [](int p) {
+    PhysicsWorld w(/*gravity=*/0.0f);
+    w.set_speculative_contacts(true);
+    PhysicsBody wall;
+    wall.position[0] = 0.0f;
+    wall.position[1] = 5.0f;
+    wall.radius = kR;
+    wall.inverse_mass = 0.0f;
+    (void)w.add_body(wall);
+    PhysicsBody shot;
+    shot.radius = kShotR;
+    const float phase = static_cast<float>(p) * kStepTravel /
+                        static_cast<float>(kPhases);
+    shot.position[0] = -10.0f + phase;
+    shot.position[1] = 5.0f;
+    shot.restitution = 0.0f;
+    shot.velocity[0] = kSpeed;
+    (void)w.add_body(shot);
+    for (int i = 0; i < kSteps; ++i) w.step(kGateDt);
+    return std::make_pair(w.body(1).position[0], w.body(1).velocity[0]);
+  };
+  // Fix mode: no phase crosses, every phase interacted, approach dead,
+  // and every phase matches its sphere twin (no hover, no early stop).
+  for (int p = 0; p < kPhases; ++p) {
+    const PhaseOut on = run_phase(p, true);
+    EXPECT_TRUE(on.contacted) << "phase " << p << " passed silently";
+    EXPECT_LT(on.x, 0.0f) << "phase " << p << " crossed: x = " << on.x;
+    EXPECT_LE(on.vx, 1e-3f) << "phase " << p << " advancing: vx = " << on.vx;
+    const auto twin = run_sphere_twin(p);
+    EXPECT_NEAR(on.x, twin.first, 1e-3f)
+        << "phase " << p << " diverges from sphere twin";
+    EXPECT_NEAR(on.vx, twin.second, 1e-3f)
+        << "phase " << p << " diverges from sphere twin";
+  }
+  // Colliding phases (self-calibrating set: off-mode ends in the window)
+  // reproduce the discrete outcome to 1e-3, with the bounce floor pinning
+  // the rebound is preserved, not merely non-crossing.
+  for (int p = 0; p < kPhases; ++p) {
+    const PhaseOut off = run_phase(p, false);
+    if (off.x > kR) continue;  // tunneled off-mode: no discrete outcome
+    const PhaseOut on = run_phase(p, true);
+    EXPECT_NEAR(on.x, off.x, 1e-3f) << "phase " << p;
+    EXPECT_NEAR(on.vx, off.vx, 1e-3f) << "phase " << p;
+    EXPECT_LT(on.vx, -1.0f) << "phase " << p << " lost its bounce";
+  }
 }
 
 TEST(PhysicsWorld, SpeculativeContactsStopFastBodyCrossing) {

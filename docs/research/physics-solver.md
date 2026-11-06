@@ -108,11 +108,27 @@ all-pairs at 200/600/1200 with TOI traffic. Gate sabotage-validated
 code: spheres only, stiff rewind under compliance, penetration 0 so no
 island edges (conservative).
 
-**Capsule follow-up (loop55 gate).** `FastCapsuleTunnelsOnSomePhases`
+**Capsule follow-up (loop55 gate, loop57 fix).** `FastCapsuleTunnelsOnSomePhases`
 ports the R3 protocol with the shot as an upright capsule (r=0.1,
 half-height 0.4, identical 198 m/s travel — shape is the only variable).
-Trigger met 8/12, same count as spheres: the discrete capsule
-narrowphase misses the identical way. The sweep fix is open.
+Trigger met 8/12, same count as spheres. Fixed the same way, one level
+up: the bound-sphere entry (shared `swept_entry_root` helper — the two
+branches must not drift) triggers, then fixed-3 Newton iterations on the
+true segment gap at end orientations refine to the surface TOI; the
+capsule solve runs at the refined centers, with the center rewind +
+impulse shared with spheres. Two subtleties the gate caught: (1) the
+Newton rate sign (gap shrinks as s grows — closing rate is minus the
+relative velocity along the outward normal; inverted, every phase
+passes silently); (2) start-inside-bound is transit, not rest — the
+bound is entered on an earlier step, so shell transit climbs Newton
+from s=0 while only start-inside-SURFACE keeps the historical miss.
+Measured: 0/12 cross, per-phase contact telemetry, every phase matches
+its sphere twin to 1e-3 (the hover guard with teeth — a bound-only
+rewind lands 0.4 short and the rebound trajectories diverge). Gate
+sabotage-validated (capsule TOI suppressed fails 60 assertions; sphere
+gate still passes — the sabotage is surgical). Limits: end-orientation
+approximation for spinning pairs; non-converged grazes miss one step
+and retry (delays rather than tunnels).
 
 ## R4. Islands and sleeping (Jolt's answer to our "no sleep" gap)
 
