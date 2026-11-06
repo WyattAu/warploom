@@ -213,7 +213,7 @@ old_function();  // Replace with new_function()
 
 2. Enable warnings as errors for strict builds:
 ```bash
-cmake -DOMNICPP_WARNINGS_AS_ERRORS=ON ..
+cmake -DWARPLOOM_WARNINGS_AS_ERRORS=ON ..
 ```
 
 ## Vulkan Issues
