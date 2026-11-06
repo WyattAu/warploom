@@ -115,20 +115,26 @@ TEST(QuadricDecimationTrial, QemIsDeterministic) {
 
 TEST(QuadricDecimationTrial, TimingQemVsNaive) {
   const DecimationMesh src = make_roof();
+  // Interleaved, not sequential windows: back-to-back loops let a load
+  // spike during one window land on one side only (observed once at load
+  // 37 — a design flaw visible by reading, not just a flake). Same
+  // statistic (mean per iteration), same bound; spikes now spread evenly.
   constexpr int kIters = 10;
   volatile std::size_t sink = 0;
-  auto t0 = std::chrono::steady_clock::now();
+  double naive_us = 0.0;
+  double qem_us = 0.0;
   for (int i = 0; i < kIters; ++i) {
+    const auto t0 = std::chrono::steady_clock::now();
     sink += live_tris(decimate_blind(src, 64, 0xC0FFEEULL));
+    const auto t1 = std::chrono::steady_clock::now();
+    sink += live_tris(decimate_quadric(src, 64));
+    const auto t2 = std::chrono::steady_clock::now();
+    naive_us += std::chrono::duration<double, std::micro>(t1 - t0).count();
+    qem_us += std::chrono::duration<double, std::micro>(t2 - t1).count();
   }
-  auto t1 = std::chrono::steady_clock::now();
-  for (int i = 0; i < kIters; ++i) sink += live_tris(decimate_quadric(src, 64));
-  auto t2 = std::chrono::steady_clock::now();
   (void)sink;
-  const double naive_us =
-      std::chrono::duration<double, std::micro>(t1 - t0).count() / kIters;
-  const double qem_us =
-      std::chrono::duration<double, std::micro>(t2 - t1).count() / kIters;
+  naive_us /= static_cast<double>(kIters);
+  qem_us /= static_cast<double>(kIters);
   std::printf("[qem] timing naive=%.1fus qem=%.1fus ratio=%.2fx\n", naive_us,
               qem_us, qem_us / naive_us);
   // Same loop -- QEM must stay within 3x the naive baseline.
