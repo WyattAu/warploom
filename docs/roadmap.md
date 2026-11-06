@@ -562,8 +562,11 @@ declares a slot 3.
       the header: spin omits surface-velocity feedback (friction stays the
       historical 0.98 damp), no rolling-resistance/angular-damping model.
       Still open (research-deferred, not regressions): speculative contacts
-      (needs a tunneling proof as trigger), MGPBD (no deformables —
-      explicitly not adopted), warm-start (breaks snapshot replay).
+      (trigger met 2026-11-06: `FastBodyTunnelsOnSomePhasesR3Gate` measures
+      8/12 tunnels — 4 clean misses plus 4 far-side ejections, where the
+      solver itself throws the body through; see the test comment and R3),
+      MGPBD (no deformables — explicitly not adopted), warm-start (breaks
+      snapshot replay).
 - [x] **D2a interpolated, eased track evaluation** — `TimelineClip::evaluate_at`
       takes a fractional frame and an `Easing`, and interpolates Number and
       Vec3 between the bracketing samples. Bool and String hold the earlier

@@ -81,9 +81,17 @@ radius grows by v·dt). Deterministic; the predicted set is a pure function
 of the same frozen snapshot. Cost: broader candidate pairs (the grid query
 radius is velocity-aware), and the solver needs the speculative margin as a
 limit on the allowed approach velocity. This is the correct fix for the
-"fast bodies tunnel" class; our current engine does not have a tunneling
-*proof* because the gd scene's velocities are low; this stays a roadmap item
-with a tunneling stress test as its acceptance gate.
+"fast bodies tunnel" class. Gate test landed 2026-11-06
+(`PhysicsWorld.FastBodyTunnelsOnSomePhasesR3Gate`): 12 launch phases at
+S = 3W through a static sphere, 8/12 tunnel — 4 clean misses (no sample in
+the window) plus 4 far-side ejections (sample lands past center, projection
+exits forward, the separating contact draws no impulse so full speed is
+kept; colliders project to the near face and rebound via the bias). The
+trigger is met and the failure is sharper than "misses fast bodies": on
+far-half samples the solver throws the body through. Speculative contacts
+must drive the count to 0/12 without changing the colliding phases'
+near-face outcome; per-step contact telemetry (not final poses) is how the
+fix is verified, since ejections and misses are indistinguishable post-hoc.
 
 ## R4. Islands and sleeping (Jolt's answer to our "no sleep" gap)
 
