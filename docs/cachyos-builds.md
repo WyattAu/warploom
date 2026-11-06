@@ -222,8 +222,7 @@ cmake -G Ninja \
   -DCMAKE_CXX_FLAGS="-march=native -O3 -flto -DNDEBUG" \
   -DCMAKE_EXE_LINKER_FLAGS="-Wl,--as-needed -Wl,--no-undefined -flto" \
   -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--as-needed -Wl,--no-undefined -flto" \
-  -DOMNICPP_BUILD_ENGINE=ON \
-  -DOMNICPP_BUILD_GAME=ON \
+  -DWARPLOOM_BUILD_ENGINE=ON \
   ../..
 
 # Build
@@ -232,6 +231,10 @@ ninja
 # Install (optional)
 ninja install
 ```
+
+> Legacy `OMNICPP_BUILD_GAME` (dropped above) gated a game target archived
+> in Phase 0 — it built nothing even before the rename. The runnable app
+> (viewport) is `-DWARPLOOM_BUILD_EXAMPLES=ON`.
 
 ### Debug Build
 
@@ -250,9 +253,8 @@ cmake -G Ninja \
   -DCMAKE_CXX_FLAGS="-march=native -g -O0 -DDEBUG -fstack-protector-strong -D_FORTIFY_SOURCE=2" \
   -DCMAKE_EXE_LINKER_FLAGS="-Wl,--as-needed -Wl,--no-undefined -Wl,-z,relro -Wl,-z,now" \
   -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--as-needed -Wl,--no-undefined -Wl,-z,relro -Wl,-z,now" \
-  -DOMNICPP_BUILD_ENGINE=ON \
-  -DOMNICPP_BUILD_GAME=ON \
-  -DOMNICPP_BUILD_TESTS=ON \
+  -DWARPLOOM_BUILD_ENGINE=ON \
+  -DWARPLOOM_BUILD_TESTS=ON \
   ../..
 
 # Build
@@ -312,8 +314,7 @@ cmake -G Ninja \
   -DCMAKE_CXX_FLAGS="-march=native -O3 -flto -DNDEBUG" \
   -DCMAKE_EXE_LINKER_FLAGS="-Wl,--as-needed -Wl,--no-undefined -flto" \
   -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--as-needed -Wl,--no-undefined -flto" \
-  -DOMNICPP_BUILD_ENGINE=ON \
-  -DOMNICPP_BUILD_GAME=ON \
+  -DWARPLOOM_BUILD_ENGINE=ON \
   ../..
 
 # Build
@@ -337,9 +338,8 @@ cmake -G Ninja \
   -DCMAKE_CXX_FLAGS="-march=native -g -O0 -DDEBUG -fstack-protector-strong -D_FORTIFY_SOURCE=2" \
   -DCMAKE_EXE_LINKER_FLAGS="-Wl,--as-needed -Wl,--no-undefined -Wl,-z,relro -Wl,-z,now" \
   -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--as-needed -Wl,--no-undefined -Wl,-z,relro -Wl,-z,now" \
-  -DOMNICPP_BUILD_ENGINE=ON \
-  -DOMNICPP_BUILD_GAME=ON \
-  -DOMNICPP_BUILD_TESTS=ON \
+  -DWARPLOOM_BUILD_ENGINE=ON \
+  -DWARPLOOM_BUILD_TESTS=ON \
   ../..
 
 # Build
@@ -446,10 +446,9 @@ ctest --preset gcc-debug
     "CMAKE_C_FLAGS": "-march=native -O3 -flto -DNDEBUG -Wall -Wextra -Wpedantic",
     "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
     "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-    "OMNICPP_BUILD_ENGINE": "ON",
-    "OMNICPP_BUILD_GAME": "ON",
-    "OMNICPP_BUILD_TESTS": "OFF",
-    "OMNICPP_BUILD_EXAMPLES": "OFF"
+    "WARPLOOM_BUILD_ENGINE": "ON",
+    "WARPLOOM_BUILD_TESTS": "OFF",
+    "WARPLOOM_BUILD_EXAMPLES": "OFF"
   }
 }
 ```
@@ -472,10 +471,9 @@ ctest --preset gcc-debug
     "CMAKE_C_FLAGS": "-march=native -O3 -flto -DNDEBUG -Wall -Wextra -Wpedantic",
     "CMAKE_EXE_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
     "CMAKE_SHARED_LINKER_FLAGS": "-Wl,--as-needed -Wl,--no-undefined -flto",
-    "OMNICPP_BUILD_ENGINE": "ON",
-    "OMNICPP_BUILD_GAME": "ON",
-    "OMNICPP_BUILD_TESTS": "OFF",
-    "OMNICPP_BUILD_EXAMPLES": "OFF"
+    "WARPLOOM_BUILD_ENGINE": "ON",
+    "WARPLOOM_BUILD_TESTS": "OFF",
+    "WARPLOOM_BUILD_EXAMPLES": "OFF"
   }
 }
 ```
