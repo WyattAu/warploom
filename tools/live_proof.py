@@ -450,6 +450,17 @@ def proof_e1(c):
               g.get("selected", 0) > 0
               and g.get("selected", 0) * 4 == g.get("texels", -1),
               str(g))
+        # T2 iterative re-mask (no protocol change): re-issuing set_adaptive
+        # re-snapshots from the REFINED accumulation, so the second ranking
+        # follows the current noise. The budget stays exact by construction.
+        r = c.cmd(cmd="set_adaptive", id=677, enabled=1, fraction=0.25)
+        check("adaptive re-mask on demand ok", r.get("ok") is True, str(r))
+        g = c.detail(cmd="get_adaptive", id=678)
+        check("adaptive re-mask stays enabled with exact budget",
+              g.get("enabled") is True
+              and g.get("selected", 0) > 0
+              and g.get("selected", 0) * 4 == g.get("texels", -1),
+              str(g))
         r = c.cmd(cmd="set_adaptive", id=671, enabled=1, fraction=2)
         check("adaptive fraction >1 rejected",
               r.get("ok") is False and "fraction" in r.get("error", ""),

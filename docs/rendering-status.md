@@ -130,7 +130,13 @@ Two honest caveats on the ray tracing:
   from the live accumulation (top fraction by luma variance, rank-selected
   so the budget is exact) and the tracer refines only masked-in texels,
   with held texels keeping their uniform mean bit-exactly (pinned headlessly
-  by `adaptive_masked_rounds_hold_unmasked_bit_exact`); leaving PT disables
+  by `adaptive_masked_rounds_hold_unmasked_bit_exact`); re-issuing
+  `set_adaptive` while enabled re-snapshots from the refined accumulation
+  (no protocol change -- upload + enable are re-callable), and two
+  generations are pinned headlessly by
+  `adaptive_iterative_remask_refines_new_texels` (disjoint 256/256 sets,
+  history-class counts, bit-exact holds, bit-identical repeat,
+  sabotage-checked); leaving PT disables
   it so a re-entered stack is uniform again. The tracer also emits a
   first-hit G-buffer (rgb = world normal, a = hit t, miss = (0,0,0,-1),
   overwritten per round; pinned by `gbuffer_first_hit_normal_depth`), and
@@ -140,12 +146,13 @@ Two honest caveats on the ray tracing:
   pinned by `denoise_edge_gbuffer_spike`) -- still no render-path
   consumer. Measured on the RTX 2060 at
   1000x600: fraction=0.25 selected exactly 150000/600000 texels. Gate
-  (2026-11-05): the viewport half of e1 currently cannot run to completion
-  on EITHER this tree or HEAD -- both die at the first real resize
-  (`resized to 1000x600`, then `frame presentation failed`) with ~5.3/6.1
-  GiB VRAM held by other processes. The 7 visual adaptive checks pass 7/7
-  before that pre-existing failure; the 2 parser-level checks pass on the
-  headless `all` run (105/105). App-scene coverage is no
+  CLEARED 2026-11-06: e1 runs 69/69 on the viewport including the resize
+  round trip (down/back, sim steps after) at ~5.1/6.1 GiB VRAM, 18/18 on
+  headless. The 2026-11-05 failure was a STALE viewport binary (Nov 5
+  13:45) against the rebuilt render .so (new tracer layout) -- a
+  shared-lib ODR segfault at PT entry, misread as VRAM pressure.
+  Rebuilt everything, re-ran, green. A binary that predates the headers
+  is evidence of nothing (second instance of the AGENTS.md lesson). App-scene coverage is no
   longer a gap: `setup_path_tracing` walks `scene.objects` and uploads one
   mesh per category (cube, ground, each mannequin import, each city part,
   merged sponza, all nameable by `mesh_index`), falling back to the cube

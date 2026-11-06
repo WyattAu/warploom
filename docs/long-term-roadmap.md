@@ -407,13 +407,19 @@ Against the §5 definition, criterion by criterion:
    variance-only a-trous = 1.67x at 4spp (corrected 2026-11-04),
    temporal-history constraint holds by construction; multi-iteration
    CLOSED 2026-11-05 (K=2 0.94x, K=3 0.48x -- diverges, do not build).
-   Remaining, in order: adaptive build (engine + one-shot mask live;
-   iterative re-masking open), then the RENDER-PATH consumer of the two
-   measured spikes (variance-only 1.67x + edge-stopped 1.73x, loop29/30)
-   or a per-iteration variance update -- never more variance-only
-   iterations. Open spikes: normal-term on a curved scene, multi-iteration
-   WITH geometry guidance (only variance-only iteration is closed).
-   Exit: live PT on app scenes at the published budgets.
+   Remaining, in order: adaptive build CLOSED 2026-11-06 -- engine masked
+   re-trace + per-pixel counts (one-shot, earlier), iterative re-masking
+   (two generations select disjoint 256/256 sets on the box scene, pinned
+   headlessly by `adaptive_iterative_remask_refines_new_texels`, live
+   re-snapshot checks in e1 69/69 with the resize round trip -- the old
+   e1 resize gate was a STALE viewport binary vs the new render .so, an
+   ODR segfault misread as VRAM pressure; rebuilt, green). Next: the
+   RENDER-PATH consumer of the two measured spikes (variance-only 1.67x
+   + edge-stopped 1.73x, loop29/30) or a per-iteration variance update --
+   never more variance-only iterations. Open spikes: normal-term on a
+   curved scene, multi-iteration WITH geometry guidance (only
+   variance-only iteration is closed). Exit: live PT on app scenes at
+   the published budgets.
 6. **Camera/light/render tracks + concurrent arms (T5).** Spec first
    (WyattAu repo survey per §6), then chrome.
 7. **E3 hardware runner, then E6 packaging (T8).** RT is the best-tested

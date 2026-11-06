@@ -4105,6 +4105,254 @@ TEST(path_tracing_real, adaptive_masked_rounds_hold_unmasked_bit_exact) {
   ctx.cleanup();
 }
 
+//! T2 adaptive build, second generation: iterative re-masking.
+//!
+//! One-shot masking (previous test) freezes the FIRST ranking: texels that
+//! are quiet at 4spp but noisy at 8spp never get selected. Re-masking from
+//! the refined state re-ranks: the second mask follows the CURRENT noise.
+//! This needs no engine change (upload + enable are re-callable; the mask
+//! buffer is host-coherent) -- it is a host-side loop over existing
+//! primitives, proven here headlessly.
+//!
+//! Two generations on the 32x32 box scene: 4 uniform + mask1(25%) + 4
+//! masked + re-mask from the refined state + mask2(25%) + 4 masked.
+//! Per-texel history classes pin the counts (HH=4, HR/RH=8, RR=12);
+//! double-held texels keep the prefix mean bit-exactly and
+//! refined-then-held texels keep the gen-1 mean bit-exactly (same hold
+//! contract as the one-shot test, extended across a re-rank). A same-tracer
+//! reset + full repeat must reproduce means AND counts bit-exactly (replay
+//! is a pure function of the call sequence). Sabotage-checked: an
+//! all-zeros re-upload freezes every count and an all-ones re-upload
+//! advances every count, so the device mask tracks the LATEST upload in
+//! both directions rather than sticking on the first.
+TEST(path_tracing_real, adaptive_iterative_remask_refines_new_texels) {
+  omnicpp::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("OmniCppPtReMask", true).is_ok());
+  if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+  const std::uint32_t side = 32U;
+  const std::size_t texels = static_cast<std::size_t>(side) * side;
+
+  omnicpp::render::VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+
+  const std::vector<float> box = {
+      -0.5F, -0.5F, -0.5F,  -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,  -0.5F, -0.5F, -0.5F,
+      -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, -0.5F, 0.5F,  -0.5F, -0.5F, -0.5F};
+  auto geo = alloc.create_buffer(box.size() * sizeof(float),
+                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  std::memcpy(geo.value().mapped, box.data(), box.size() * sizeof(float));
+  VkBufferDeviceAddressInfo ai{};
+  ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  ai.buffer = geo.value().buffer;
+
+  omnicpp::render::PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.width = side;
+  cfg.height = side;
+  cfg.max_bounces = 4U;
+  omnicpp::render::PathTracerMesh cube{};
+  cube.vertex_buffer_address = static_cast<std::uint64_t>(
+      vkGetBufferDeviceAddress(ctx.device(), &ai));
+  cube.triangle_count = 12U;
+  cube.max_vertex = 35U;
+  cfg.meshes = {cube};
+  cfg.instances = {
+      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+
+  omnicpp::render::VulkanPathTracer tracer;
+  ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
+                            ctx.graphics_queue(), qf, alloc, cfg)
+                  .is_ok());
+  omnicpp::render::PathTracerCamera cam{};
+  cam.position = {0.0F, 0.6F, 2.6F};
+  cam.forward = {0.0F, -0.2F, -1.0F};
+  cam.right = {1.0F, 0.0F, 0.0F};
+  cam.up = {0.0F, 1.0F, 0.0F};
+  tracer.set_camera(cam);
+
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+      ctx.device(), qf);
+  ASSERT_TRUE(pool.is_ok());
+  const auto run_round = [&](std::uint32_t frame, bool clear) {
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    EXPECT_TRUE(cbr.is_ok());
+    if (!cbr.is_ok()) return;
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    tracer.record_round(cb, frame, clear);
+    EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    VkFence fence{};
+    VkFenceCreateInfo fi{};
+    fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    vkCreateFence(ctx.device(), &fi, nullptr, &fence);
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1U;
+    si.pCommandBuffers = &cb;
+    EXPECT_EQ(vkQueueSubmit(ctx.graphics_queue(), 1, &si, fence), VK_SUCCESS);
+    EXPECT_EQ(vkWaitForFences(ctx.device(), 1, &fence, VK_TRUE, UINT64_MAX),
+              VK_SUCCESS);
+    vkDestroyFence(ctx.device(), fence, nullptr);
+  };
+  const auto current_mask = [&](double frac) {
+    auto m = tracer.read_mean();
+    auto e = tracer.read_second_moment();
+    EXPECT_TRUE(m.is_ok());
+    EXPECT_TRUE(e.is_ok());
+    return omnicpp::render::adaptive_mask_from_variance(m.value(), e.value(),
+                                                        frac);
+  };
+
+  // Generation 0: uniform prefix.
+  tracer.reset_accumulation();
+  for (std::uint32_t r = 0; r < 4U; ++r) run_round(r, r == 0U);
+  auto m4 = tracer.read_mean();
+  ASSERT_TRUE(m4.is_ok());
+
+  // Generation 1: mask from the prefix, 4 masked rounds.
+  const auto mask1 =
+      omnicpp::render::adaptive_mask_from_variance(m4.value(),
+                                                   tracer.read_second_moment().value(),
+                                                   0.25);
+  ASSERT_EQ(mask1.mask.size(), texels);
+  EXPECT_EQ(mask1.selected, 256U)
+      << "rank budget must be exact: ceil(0.25 * 1024)";
+  ASSERT_TRUE(tracer.upload_adaptive_mask(mask1.mask));
+  tracer.set_adaptive_enabled(true);
+  for (std::uint32_t r = 4U; r < 8U; ++r) run_round(r, false);
+  auto a8 = tracer.read_adaptive_mean();
+  ASSERT_TRUE(a8.is_ok());
+
+  // Generation 2: re-mask from the REFINED state, 4 more masked rounds.
+  const auto mask2 = current_mask(0.25);
+  ASSERT_EQ(mask2.mask.size(), texels);
+  EXPECT_EQ(mask2.selected, 256U) << "re-ranked budget must stay exact";
+  std::size_t overlap = 0U;
+  for (std::size_t t = 0; t < texels; ++t)
+    if (mask1.mask[t] != 0U && mask2.mask[t] != 0U) ++overlap;
+  std::printf("LoopT2 remask: gen1=%zu gen2=%zu overlap=%zu new=%zu\n",
+              mask1.selected, mask2.selected, overlap,
+              mask2.selected - overlap);
+  // Iteration must re-rank onto NEW texels: measured overlap 0 (gen-2
+  // picks the complementary noisy half). A stale re-upload of mask1 would
+  // read overlap 256 here... but overlap is computed from the masks, so
+  // this pin guards the RANKING; the history-class counts below guard the
+  // upload (stale mask1 fails the RH count 12 != 8 -- sabotage-checked).
+  EXPECT_LT(overlap, mask2.selected)
+      << "re-masking re-selected the same set: iteration adds nothing";
+  // Non-vacuity: HR and RH must both occur, or their bit-exact loops
+  // check nothing. (RR is empty on this scene -- overlap 0 -- so the RR
+  // branch documents the 4+4+4 contract without executing; the +1
+  // instruction it relies on is proven by the all-ones round below and
+  // HR/RH prove two selections accumulate.)
+  ASSERT_TRUE(tracer.upload_adaptive_mask(mask2.mask));
+  for (std::uint32_t r = 8U; r < 12U; ++r) run_round(r, false);
+  auto counts12 = tracer.read_per_pixel_counts();
+  auto a12 = tracer.read_adaptive_mean();
+  ASSERT_TRUE(counts12.is_ok());
+  ASSERT_TRUE(a12.is_ok());
+
+  // History classes: HH=4, HR/RH=8, RR=12. Double-held keeps the prefix
+  // mean; refined-then-held keeps the gen-1 mean -- both bit-exact.
+  std::size_t n_hh = 0U, n_hr = 0U, n_rh = 0U, n_rr = 0U;
+  for (std::size_t t = 0; t < texels; ++t) {
+    const bool in1 = mask1.mask[t] != 0U;
+    const bool in2 = mask2.mask[t] != 0U;
+    if (!in1 && !in2) {
+      EXPECT_EQ(counts12.value()[t], 4U) << "HH texel " << t;
+      for (std::size_t c = 0; c < 3U; ++c)
+        EXPECT_FLOAT_EQ(a12.value()[t * 4U + c], m4.value()[t * 4U + c])
+            << "HH texel " << t << " channel " << c;
+      ++n_hh;
+    } else if (!in1 && in2) {
+      EXPECT_EQ(counts12.value()[t], 8U) << "HR texel " << t;
+      ++n_hr;
+    } else if (in1 && !in2) {
+      EXPECT_EQ(counts12.value()[t], 8U) << "RH texel " << t;
+      for (std::size_t c = 0; c < 3U; ++c)
+        EXPECT_FLOAT_EQ(a12.value()[t * 4U + c], a8.value()[t * 4U + c])
+            << "RH texel " << t << " channel " << c;
+      ++n_rh;
+    } else {
+      EXPECT_EQ(counts12.value()[t], 12U) << "RR texel " << t;
+      ++n_rr;
+    }
+  }
+  EXPECT_EQ(n_hh + n_hr + n_rh + n_rr, texels);
+  EXPECT_GT(n_hr, 0U) << "HR class empty: held-then-refined unproven";
+  EXPECT_GT(n_rh, 0U) << "RH class empty: refined-then-held unproven";
+  std::printf("LoopT2 remask: HH=%zu HR=%zu RH=%zu RR=%zu\n", n_hh, n_hr,
+              n_rh, n_rr);
+
+  // Sabotage, both directions of the upload wire: all-zeros freezes every
+  // count, all-ones advances every count -- the device mask tracks the
+  // LATEST upload, not the first.
+  ASSERT_TRUE(tracer.upload_adaptive_mask(std::vector<std::uint32_t>(texels, 0U)));
+  run_round(12U, false);
+  auto counts_frozen = tracer.read_per_pixel_counts();
+  ASSERT_TRUE(counts_frozen.is_ok());
+  EXPECT_EQ(std::memcmp(counts_frozen.value().data(),
+                        counts12.value().data(),
+                        texels * sizeof(std::uint32_t)),
+            0)
+      << "all-zeros upload must freeze every count";
+  ASSERT_TRUE(tracer.upload_adaptive_mask(std::vector<std::uint32_t>(texels, 1U)));
+  run_round(13U, false);
+  auto counts_all = tracer.read_per_pixel_counts();
+  ASSERT_TRUE(counts_all.is_ok());
+  for (std::size_t t = 0; t < texels; ++t)
+    EXPECT_EQ(counts_all.value()[t], counts_frozen.value()[t] + 1U)
+        << "texel " << t;
+
+  // Determinism: same tracer, reset, full two-generation repeat -- means
+  // AND counts bit-identical (replay is a pure function of the calls).
+  tracer.set_adaptive_enabled(false);
+  tracer.reset_accumulation();
+  for (std::uint32_t r = 0; r < 4U; ++r) run_round(r, r == 0U);
+  const auto rep1 = current_mask(0.25);
+  EXPECT_EQ(rep1.mask, mask1.mask) << "gen-1 mask must re-rank identically";
+  ASSERT_TRUE(tracer.upload_adaptive_mask(rep1.mask));
+  tracer.set_adaptive_enabled(true);
+  for (std::uint32_t r = 4U; r < 8U; ++r) run_round(r, false);
+  const auto rep2 = current_mask(0.25);
+  EXPECT_EQ(rep2.mask, mask2.mask) << "gen-2 mask must re-rank identically";
+  ASSERT_TRUE(tracer.upload_adaptive_mask(rep2.mask));
+  for (std::uint32_t r = 8U; r < 12U; ++r) run_round(r, false);
+  auto rep_counts = tracer.read_per_pixel_counts();
+  auto rep_mean = tracer.read_adaptive_mean();
+  ASSERT_TRUE(rep_counts.is_ok());
+  ASSERT_TRUE(rep_mean.is_ok());
+  EXPECT_EQ(std::memcmp(rep_counts.value().data(), counts12.value().data(),
+                        texels * sizeof(std::uint32_t)),
+            0)
+      << "iterative counts are not a pure function of the call sequence";
+  EXPECT_EQ(std::memcmp(rep_mean.value().data(), a12.value().data(),
+                        a12.value().size() * sizeof(float)),
+            0)
+      << "iterative means are not a pure function of the call sequence";
+
+  EXPECT_EQ(ctx.validation_error_count(), 0U);
+  EXPECT_EQ(ctx.validation_warning_count(), 0U);
+  tracer.destroy();
+  vkDestroyCommandPool(ctx.device(), pool.value(), nullptr);
+  auto keep_geo = geo.value();
+  alloc.destroy_allocation(keep_geo);
+  alloc.cleanup();
+  ctx.cleanup();
+}
+
 //! T2 G-buffer emission: first-hit normal + depth overwritten per round.
 //!
 //! One isolated triangle in the void: hit texels must carry a unit

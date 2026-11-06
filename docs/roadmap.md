@@ -1828,11 +1828,25 @@ never resumes a stale mask. `get_adaptive` reports the live flag plus the mask t
 (enabled/fraction/selected/texels/threshold). Measured on the RTX 2060:
 fraction=0.25 over the 1000x600 stack selected exactly 150000/600000 texels
 (the rank budget is exact even when most variances tie at zero), and the wire
-round-trips 9/9 where runnable -- 7 visual checks green on the viewport, 2
-parser checks green on headless (`all` 105/105, up from 103). Gate, recorded
-not papered over: the viewport half of e1 currently cannot complete on
-EITHER this tree or HEAD -- both die at the first real resize with
-`frame presentation failed` while ~5.3 of 6.1 GiB VRAM is held by other
-processes -- so the e1 total is 64 PASS / 0 FAIL *before* that pre-existing
-failure, not a completed run. The unit suite is unaffected: 738/738 and
-ctest 6/6 on the same tree.
+round-trips 11/11 where runnable -- 9 visual checks green on the viewport
+(including two re-mask checks: re-issuing `set_adaptive` while enabled
+re-snapshots from the refined accumulation with the budget still exact),
+2 parser checks green on headless. Iterative re-masking needs no protocol
+change (upload + enable are re-callable) and is pinned headlessly by
+`adaptive_iterative_remask_refines_new_texels`: two generations on the
+32x32 box scene select DISJOINT sets (gen1=256, gen2=256, overlap 0 --
+the second ranking follows the current noise, not the first), history
+classes pin counts (HH=4, HR/RH=8, RR=0 here) with double-held and
+refined-then-held means bit-exact, same-tracer full repeat bit-identical,
+and sabotage-checked (all-zeros freezes / all-ones advances every count;
+stale mask1 re-upload fails the RH counts 12 != 8 -- reverted).
+Gate CLEARED 2026-11-06, and the cause is worth recording: the viewport
+binary was STALE (Nov 5 13:45) against the rebuilt render .so (Nov 5
+23:23, new VulkanPathTracer layout) -- a shared-lib ODR violation that
+segfaulted at PT entry (garbage descriptor-manager pointer, core
+attributed), misread as VRAM pressure. Rebuilding everything and
+re-running: e1 69/69 on the viewport INCLUDING the resize round trip
+(resized down/back, sim steps after) with ~5.1/6.1 GiB VRAM in use, and
+18/18 on headless. A binary that predates the headers is evidence of
+nothing -- the same lesson as the stale-binary phantom in AGENTS.md,
+second instance. The unit suite on the same tree: 741/741 and ctest 6/6.
