@@ -418,11 +418,16 @@ Against the §5 definition, criterion by criterion:
    uniform + same 4% geometry gain on the masked stack, e1 79/79 with
    the resize rebuild. Found on the way: `VulkanPipeline::cleanup`
    never nulled `compute_shader_`, so the resize re-create refused --
-   the suite never re-creates a tracer, so a new pin does. Open
-   spikes: normal-term on a curved scene, multi-iteration WITH
-   geometry guidance (only variance-only iteration is closed), or a
-   per-iteration variance update instead. Exit: live PT on app scenes at
-   the published budgets.
+   the suite never re-creates a tracer, so a new pin does.   Open spikes, in order: multi-iteration WITH geometry guidance (only
+   variance-only iteration is closed -- loop29 s4) or a per-iteration
+   variance update instead. The normal-term spike CLOSED 2026-11-06
+   (loop32): tessellated sphere r=0.5, best edge 0.970x var (1.03x) /
+   0.496x raw, gain composition INVERTED vs planar (ns sweep moves 2%,
+   ds flat -- normal weight live, depth inert; pinned by an ns-slope
+   guard + the 0.99x pin, sabotage round-tripped). A larger sphere
+   (r=1.0) is a worse spike (variance-dominated, 1.02x) -- recorded so
+   it is not retried. Exit: live PT on app scenes at the published
+   budgets.
 6. **Camera/light/render tracks + concurrent arms (T5).** Spec first
    (WyattAu repo survey per §6), then chrome.
 7. **E3 hardware runner, then E6 packaging (T8).** RT is the best-tested

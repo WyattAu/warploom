@@ -1869,3 +1869,19 @@ re-create pin does; sabotage round-tripped (revert -> pin fails with the
 production message -> re-apply). Full suite 743/743, ctest 6/6, 0
 warnings, 0 validation diagnostics. Research: docs/research/loop31-
 render-path-denoiser.md.
+
+Curved-scene normal-term spike (loop32) CLOSED 2026-11-06: tessellated
+sphere (r=0.5, 24x48, 2208 tris) at the origin under the loop30
+camera/bounces/sky/measure. Best edge k=2.0/ns=0.2/ds=0.1 is
+1.435363e-03 = 0.970x var (1.03x) / 0.496x raw (2.02x). Gain composition
+INVERTED vs planar: ds sweep flat (~0.05%), ns sweep moves 2%
+(ns=0.05 over-stops) -- the normal weight is live here, the depth stop
+is inert here. Pinned by `denoise_edge_curved_spike` (same wire guards
+both directions + re-dispatch purity, 0.99x pin with 2-point margin, and
+an ns-slope guard index 9 > best*1.01 that a dead normal weight fails by
+construction); sabotage round-tripped (all-miss store -> edge == var
+exactly, both pins fail; revert restores bit-exactly). Scene-selection
+finding: r=1.0 tried the same day is a WORSE spike (raw 3.28e-02,
+variance-dominated multi-bounce, 1.02x over var) -- recorded so it is not
+retried. Full suite 744/744, ctest 6/6, 0 warnings, 0 validation
+diagnostics. Research: docs/research/loop32-curved-scene-normal-term.md.

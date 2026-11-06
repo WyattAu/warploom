@@ -145,11 +145,15 @@ Two honest caveats on the ray tracing:
   the gain is the depth stop at silhouettes, normals inert on planar
   scenes): `record_denoise()` on the tracer (count-sourced divisors, so
   adaptive-held texels stay exact; bit-identical to the spike on uniform
-  input), toggled by `set_denoise`/`get_denoise` (v1.18) with the tonemap
-  divisor switching to 1, `get_denoised_mean` for the A/B. Pinned by
+  input), toggled by `set_denoise`/`get_denoise` (v1.18) with the  tonemap divisor switching to 1, `get_denoised_mean` for the A/B. Pinned by
   `denoise_render_path_uniform_parity` +
   `denoise_render_path_adaptive`; e1 carries 10 denoise checks (on/off,
-  reads-back, differs-from-raw, refused-outside-PT, resize rebuilt). Measured on the RTX 2060 at
+  reads-back, differs-from-raw, refused-outside-PT, resize rebuilt).
+  Normal term closed on a curved scene (loop32): sphere r=0.5, best edge
+  0.970x var / 0.496x raw, ns sweep moves 2% while ds is flat (inverted
+  vs planar); pinned by `denoise_edge_curved_spike` incl. an ns-slope
+  guard, sabotage round-tripped. r=1.0 tried and rejected
+  (variance-dominated, 1.02x). Measured on the RTX 2060 at
   1000x600: fraction=0.25 selected exactly 150000/600000 texels. Gate
   CLEARED 2026-11-06: e1 runs 69/69 on the viewport including the resize
   round trip (down/back, sim steps after) at ~5.1/6.1 GiB VRAM, 18/18 on
