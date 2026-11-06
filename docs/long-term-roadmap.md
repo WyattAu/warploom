@@ -271,11 +271,14 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
 - **Sub-frame fraction in the protocol: DONE 2026-11-03** (T4b: `frac`
   key on Step, validated at the boundary, forwarded by both hosts on the
   span's last tick, recorded in `n`, replayed deterministically through
-  the closing-hash check). Next: concurrent record-and-play.
+  the closing-hash check). Concurrent record-and-play DONE live 2026-11-06
+  (`proof_cnc`, 32 checks in `tools/live_proof.py all` on the viewport:
+  chained tail, double-arm rejection, disarm independence).
 
 ### T5. Movies / timeline
 
-- Camera/light/render-property tracks; concurrent record + play arms.
+- Camera/light/render-property tracks; concurrent record + play arms
+  (both landed: T5c render tracks + `proof_cnc` live leg, 2026-11-06).
 - Clip-strip chrome as needed (context menu, zoom/pan UI — window is
   host-set today); block-move already live-proven.
 - Capture pipeline follows PT usability (already 0.9994 correlation).
@@ -362,8 +365,10 @@ Against the §5 definition, criterion by criterion:
    2026-11-03: the sub-frame fraction travels the protocol end to end
    (parse + validate, host forward, record, deterministic replay).
 3. **Timeline tracks + concurrent arms + clip strip: MEDIUM.** Strip
-   chrome + block-move live-proven; camera/light/render tracks and
-   concurrent record + play are specless.
+   chrome + block-move live-proven; camera/light tracks ride the generic
+   property-track machinery, render tracks are T5c end to end, and
+   concurrent record + play is live-proven (`proof_cnc`, 2026-11-06) —
+   the session contract was already T5a, the wire leg was what was missing.
 4. **Physics spheres + capsules + rotation + joints + sleeping: MEDIUM-FAR.**
    Grid broadphase pinned with speedups; rotation and joints are each a
    design arc (loops 2/3 researched, not built); capsule/sleeping partial.

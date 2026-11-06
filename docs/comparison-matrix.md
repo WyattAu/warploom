@@ -170,8 +170,9 @@ Stated precisely, because "measured" and "designed" are different things here.
 under `VK_LAYER_KHRONOS_validation=1` with 0 diagnostics and 0 leaked objects;
 ctest 6/6; ASan/UBSan 673 (626 ran, 47 skipped because the sanitizer preset
 builds `WARPLOOM_USE_VULKAN=OFF`) with 0 diagnostics and 0 leaks, TSan the same
-counts with 0 races; 80 shader sources compile; live protocol proofs 192/192
-(viewport + headless host); the viewport matrix
+counts with 0 races; 80 shader sources compile; live protocol proofs 224/224
+(viewport + headless host, incl. the 32-check concurrent record+play leg);
+the viewport matrix
 (hdr, bloom, rt+bloom, no-hdr, node editor, pt) re-run after the fullscreen
 fix, all six clean with 0 validation diagnostics; `default`, `asan-ubsan` and
 `tsan` warning-free on GCC and clang, and the `headless-debug-clang` CI leg

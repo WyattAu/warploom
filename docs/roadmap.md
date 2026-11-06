@@ -610,9 +610,18 @@ declares a slot 3.
       travels the protocol end to end — T4b: `frac` key on Step, validated
       at the boundary, forwarded by both hosts on the span's last tick,
       recorded in the file's `n` array, replayed deterministically through
-      the closing-hash check): concurrent record-and-play;
-      camera/light/render tracks; and `ClipTimelineView`, which still has no
-      caller in the app.
+      the closing-hash check): the LIVE half of concurrent record-and-play
+      only. Camera/light tracks ride the generic property-track machinery
+      (`RecordAllCapturesCameraPoseAtomically` pins all 10 environment
+      tracks plus driven playback); render tracks are T5c end to end
+      (`proof_t5c` over the wire); `ClipTimelineView` has had an app caller
+      since G3-B (viewport clip strip, block-drag live-proven). The
+      session-level concurrent-arms contract is T5a (`tick_timeline_at`:
+      playback applies, then recording samples; per-arm disarm; same-track
+      self-chain). What no proof touches is arming play AND record over
+      the socket on a live host — the queue-vs-tick races only exist
+      there — so that leg is specced and proven next, not assumed from
+      the session test.
 
 - [x] **O1 structured diagnostics** — `warploom/core/diagnostics.hpp`. One
       filterable channel for app, engine and viewport: severity, subsystem tag,
@@ -1953,3 +1962,21 @@ absolute window — a wire client can never observe the absolute frame.
 `live_proof.py all` 192/192 (viewport A + headless B), 0 diagnostics;
 suites unit 747/747, core 22/22, editor 48/48, ui 19/19, runtime 10/10,
 ctest 6/6. Research: docs/research/loop35-live-pt-consumer.md.
+
+Live concurrent record+play (loop38) CLOSED the last open D2 leg 2026-11-06:
+`proof_cnc` in tools/live_proof.py (32 checks, wired into `all` on the
+viewport host where the queue-vs-tick races live): pause-first and
+frame-relative like g3; source clip records 5/6/7, sentinel 999 is read
+back (a missed sentinel would make the ordering proof vacuous), then play
++ record arm together — the destination captures the PLAYED tail [7,7],
+never the stale 999 (a sample-before-playback build records 999 first);
+the same-track double arm is rejected over the wire (T5d); stopping
+playback does not stop the recording (count 2 -> 3, tail holds 7.0); both
+clips removed, host resumed. Wire honesty recorded in the proof: the
+wire `samples` array is always the 2-element [head, tail] display pair
+with `count` the true length (the full list is document-internal), so the
+leg pins exactly what the wire can observe and the full-sequence property
+stays a session-level (T5a) property. Standalone 32/32 on both hosts;
+`all` 224/224 with 0 validation diagnostics. One mid-run viewport death
+(`end_frame` failure under trainer VRAM pressure at 5.2/6.1 GiB) did NOT
+reproduce on relaunch — environmental, recorded, not hidden.

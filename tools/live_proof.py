@@ -21,6 +21,13 @@ Proofs (run against hardware per docs/roadmap.md verification discipline):
          values the host actually applied, so the track -> renderer
          mapping is observed rather than inferred. Any host: an armed
          track pins the reserved object against destruction.
+  cnc -- concurrent record+play (T5a over the wire): arm playback on a
+         source clip AND a record arm on a destination clip for the same
+         track, step, and verify the destination captures the PLAYED
+         tail (never the stale sentinel), the duplicate arm is rejected
+         (T5d), and stopping playback does not stop the recording.
+         Frame-relative like g3; the head is unreplayable live, so only
+         the tail half of the T5a contract is wire-observable here.
 
 Usage:
   tools/live_proof.py w1 --sock /tmp/omnicpp_hw.sock
@@ -420,6 +427,155 @@ def proof_g3(c):
     # under pause, so the recorded/played frames are exactly the stepped
     # ones regardless of what the host was doing before.
     r = c.cmd(cmd="resume", id=73)
+    check("resume restores free run", r.get("ok") is True, str(r))
+
+
+def poll_count(c, pid, name, pkey, want, tries=60):
+    """Poll clips_info until the track count reaches `want` (or tries run
+    out). A wire `step` only QUEUES released frames — the reply lands when
+    the command is received, not when the frames tick (on a loaded GPU a
+    frame can take seconds) — so asserting a half-ticked state is a race;
+    poll, time out, never overshoot (no extra steps are queued)."""
+    import time
+    n = 0
+    for _ in range(tries):
+        info = c.detail(cmd="clips_info", id=pid)
+        have = [k for k in info
+                if k["name"] == name and pkey in k["tracks"]]
+        n = have[0]["tracks"][pkey].get("count", 0) if have else 0
+        if n >= want:
+            break
+        time.sleep(2)
+    return n
+
+
+def proof_cnc(c):
+    print("CNC: concurrent record+play over the wire")
+    # The session contract is T5a (playback applies, THEN recording samples
+    # the current value; per-arm disarm; T5d duplicate-arm rejection). What
+    # no proof touches is arming play AND record over the SOCKET on a live
+    # host — the queue-vs-tick races only exist there: a `step` reply lands
+    # when the command is received, not when the frames tick, so every
+    # count below is polled, never asserted once.
+    #
+    # Frame contract (same as g3): pause first, clips at [0, 1e9), every
+    # assertion frame-relative. One honest limit, stated: the head of a
+    # source clip is unreplayable live — playback maps frame_time minus
+    # clip start onto stored offsets, and the live counter never revisits
+    # the frames the source was recorded at (only a scrub warps back, and
+    # a warp disarms everything). So the chain reproduces the TAIL, which
+    # is exactly the wire-observable half of the T5a ordering contract:
+    # at the tail, "record ran after playback" means the played value and
+    # "record ran first" means the stale sentinel.
+    r = c.cmd(cmd="pause", id=100)
+    check("pause freezes the frame", r.get("ok") is True, str(r))
+    base = c.detail(cmd="list_objects", id=101)
+    base_names = [o["name"] for o in base["objects"]]
+    r = c.cmd(cmd="spawn_cube", id=102, x=1, y=1, z=1, size=1.0)
+    check("spawn cube", r.get("ok") is True, str(r))
+    after = c.detail(cmd="list_objects", id=103)
+    new = [o for o in after["objects"] if o["name"] not in base_names]
+    check("one new object", len(new) == 1, str(new))
+    oid = new[0]["id"]
+    name = new[0]["name"]
+    pkey = str(oid) + ":position.x"
+
+    # Source clip: three stepped values 5/6/7 on position.x.
+    r = c.cmd(cmd="clip_add", id=104, name="csrc", frame=0,
+              length=1000000000)
+    check("csrc clip_add", r.get("ok") is True, str(r))
+    src_id = int(r["detail"].rsplit(" ", 1)[1])
+    r = c.cmd(cmd="clip_record", id=105, clip=src_id, oid=oid,
+              key="position.x")
+    check("csrc record armed", r.get("ok") is True, str(r))
+    for i, v in enumerate((5.0, 6.0, 7.0)):
+        r = c.cmd(cmd="set_property", id=106 + i, object=name,
+                  key="position", x=v, y=1, z=1)
+        check("set %.1f" % v, r.get("ok") is True, str(r))
+        r = c.cmd(cmd="step", id=110 + i, ticks=1)
+        check("step %d" % (i + 1), r.get("ok") is True, str(r))
+    n = poll_count(c, 120, "csrc", pkey, 3)
+    check("3 source ticks landed", n == 3, "count=%d" % n)
+    r = c.cmd(cmd="clip_record_stop", id=121)
+    check("csrc record stop", r.get("ok") is True and
+          r.get("detail") == "record disarmed", str(r))
+    info = c.detail(cmd="clips_info", id=122)
+    have = [k for k in info if k["name"] == "csrc" and pkey in k["tracks"]]
+    check("csrc has 3 samples", len(have) == 1 and
+          have[0]["tracks"][pkey].get("count", 0) == 3, str(have))
+    tail = have[0]["tracks"][pkey]["samples"][-1] if have else None
+    check("csrc tail is 7.0", tail == 7.0, str(tail))
+
+    # Sentinel: the destination must capture the PLAYED tail, never this.
+    # Read it back: if the 999 never landed, the ordering proof below is
+    # vacuous (everything would be 7.0 regardless of tick order).
+    r = c.cmd(cmd="set_property", id=123, object=name, key="position",
+              x=999, y=1, z=1)
+    check("sentinel 999", r.get("ok") is True, str(r))
+    after = c.detail(cmd="get_object", oid=oid)
+    check("sentinel read back", after["properties"]["position"][0] == 999,
+          str(after["properties"]["position"][0]))
+    r = c.cmd(cmd="clip_add", id=124, name="cdst", frame=0,
+              length=1000000000)
+    check("cdst clip_add", r.get("ok") is True, str(r))
+    dst_id = int(r["detail"].rsplit(" ", 1)[1])
+    r = c.cmd(cmd="clip_play", id=125, clip=src_id)
+    check("play csrc", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_record", id=126, clip=dst_id, oid=oid,
+              key="position.x")
+    check("cdst record armed", r.get("ok") is True, str(r))
+    # T5d over the wire: the same clip+track twice is rejected, so two
+    # writers can never share a track even when play is armed alongside.
+    r = c.cmd(cmd="clip_record", id=127, clip=dst_id, oid=oid,
+              key="position.x")
+    check("double arm rejected",
+          r.get("ok") is False and "already armed" in r.get("error", ""),
+          str(r))
+    r = c.cmd(cmd="step", id=128, ticks=2)
+    check("step 2 (chained)", r.get("ok") is True, str(r))
+    n = poll_count(c, 129, "cdst", pkey, 2)
+    check("2 chained ticks landed", n == 2, "count=%d" % n)
+    info = c.detail(cmd="clips_info", id=130)
+    have = [k for k in info if k["name"] == "cdst" and pkey in k["tracks"]]
+    vals = have[0]["tracks"][pkey]["samples"] if have else []
+    # Wire semantics (see clips_info in editor_session.cpp): `samples` is
+    # ALWAYS the 2-element [head, tail] display pair and `count` is the
+    # true length — the full list lives in the document, not on the wire.
+    # With count == 2 that pair IS the whole track, exactly. A
+    # sample-before-playback build would record the stale 999 first, so
+    # head == 7.0 is the ordering proof and tail == 7.0 the hold proof.
+    check("chained track is exactly [7,7]",
+          len(vals) == 2 and vals[0] == 7.0 and vals[1] == 7.0, str(vals))
+
+    # Per-arm disarm is independent: stopping playback must not stop the
+    # recording, which keeps sampling the held tail.
+    r = c.cmd(cmd="clip_stop", id=131)
+    check("clip_stop ends playback",
+          r.get("ok") is True and
+          r.get("detail") == "playback stopped", str(r))
+    r = c.cmd(cmd="step", id=132, ticks=1)
+    check("step 1 (record alone)", r.get("ok") is True, str(r))
+    n = poll_count(c, 133, "cdst", pkey, 3)
+    check("record outlives playback", n == 3, "count=%d" % n)
+    info = c.detail(cmd="clips_info", id=134)
+    have = [k for k in info if k["name"] == "cdst" and pkey in k["tracks"]]
+    vals = have[0]["tracks"][pkey]["samples"] if have else []
+    # count == 3 (above) is the length proof; the wire pair pins both
+    # visible ends at the held tail. The interior of a 3-sample track is
+    # wire-invisible by design — but nothing can put a 999 there: the
+    # sentinel predates the chain and no writer runs on the solo tick —
+    # so head/tail/count pin everything observable. Full-sequence
+    # visibility stays a session-level property (T5a unit test).
+    check("held tail keeps sampling",
+          len(vals) == 2 and vals[0] == 7.0 and vals[1] == 7.0, str(vals))
+    r = c.cmd(cmd="clip_record_stop", id=135)
+    check("cdst record stop", r.get("ok") is True and
+          r.get("detail") == "record disarmed", str(r))
+    r = c.cmd(cmd="clip_remove", id=136, clip=dst_id)
+    check("cdst removed", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="clip_remove", id=137, clip=src_id)
+    check("csrc removed", r.get("ok") is True, str(r))
+    r = c.cmd(cmd="resume", id=138)
     check("resume restores free run", r.get("ok") is True, str(r))
 
 
@@ -912,13 +1068,14 @@ def proof_t5c(c):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "proof", choices=["w1", "g1", "w2", "g3", "e1", "t5c", "all"])
+        "proof", choices=["w1", "g1", "w2", "g3", "e1", "t5c", "cnc",
+                            "all"])
     parser.add_argument("--sock", default="/tmp/omnicpp_hw.sock")
     parser.add_argument("--sock-a", default="/tmp/omnicpp_w2a.sock")
     parser.add_argument("--sock-b", default="/tmp/omnicpp_w2b.sock")
     args = parser.parse_args()
 
-    if args.proof in ("w1", "g1", "e1", "t5c", "all"):
+    if args.proof in ("w1", "g1", "e1", "t5c", "cnc", "all"):
         c = Client(args.sock)
         if args.proof in ("w1", "all"):
             proof_w1(c)
@@ -930,6 +1087,11 @@ def main():
             # Frame-counter independent: the clip spans [0, 1e6), so this
             # runs correctly on a fresh host and after the e1 churn alike.
             proof_t5c(c)
+        if args.proof in ("cnc", "all"):
+            # Same pause-first, frame-relative shape as g3, on the main
+            # (viewport) host: the queue-vs-tick races this pins only
+            # exist where a free-running frame loop meets wire steps.
+            proof_cnc(c)
     if args.proof in ("w2", "all"):
         proof_w2(Client(args.sock_a), Client(args.sock_b))
     if args.proof in ("g3", "all"):
