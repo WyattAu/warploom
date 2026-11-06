@@ -218,9 +218,24 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
   section 4): K=2 best 0.94x, K=3 best 0.48x -- variance-only iteration
   diverges, residual is edge-dominated, do NOT build a variance-only filter
   loop. Next, in order: adaptive build (masked re-trace + per-pixel
-  counts), then the G-buffer (normals/albedo/depth outputs) or a
+  counts), then the G-buffer  (normals/albedo/depth outputs) or a
   per-iteration variance update -- not more iterations of the variance-only
   filter. OIDN stays excluded by the dependency budget.
+- [x] **Edge-stopped single-iteration a-trous (second half)** SPIKED
+  2026-11-06 (RTX 2060, loop30): variance x normal x depth weights over
+  the same scene+measure -- best k=2.0/ds=1.0 at 1.334328e-03 = 1.04x
+  over variance-only (1.67x -> 1.73x over raw). The 4% comes from the
+  DEPTH stop at silhouettes; the ns sweep is flat (planar faces, normal
+  stop inert -- a curved scene is needed to exercise it). Provenance:
+  Dammertz et al. HPG 2010 (edge-avoiding a-trous) + Schied et al. HPG
+  2017 / DOI 10.1145/3105762.3105770 (variance width); combination is
+  textbook, measurement is the contribution. Pinned by
+  `denoise_edge_gbuffer_spike` (geometry-blind == variance-only to
+  4.65e-15, true != uniform, bit-identical re-dispatch; sabotage-checked
+  -- store deleted collapses to 1.00x and fails exactly the geometry
+  pins, revert restores bit-exactly). Still headless-dispatch only; the
+  render-path consumer is the step that turns the spikes into the v1
+  denoiser.
 - [x] **G-buffer emission (first half)** DONE 2026-11-05 (RTX 2060): the
   rgen writes a first-hit normal+depth image (binding 7, rgb = faceforward
   world normal, a = hit t, miss = (0,0,0,-1); overwritten per unmasked
@@ -393,10 +408,12 @@ Against the §5 definition, criterion by criterion:
    temporal-history constraint holds by construction; multi-iteration
    CLOSED 2026-11-05 (K=2 0.94x, K=3 0.48x -- diverges, do not build).
    Remaining, in order: adaptive build (engine + one-shot mask live;
-   iterative re-masking open), then the edge-stopped filter consuming the
-   G-buffer (emitted 2026-11-05) or a per-iteration variance update on the
-   edge-dominated residual -- never more variance-only iterations. Exit:
-   live PT on app scenes at the published budgets.
+   iterative re-masking open), then the RENDER-PATH consumer of the two
+   measured spikes (variance-only 1.67x + edge-stopped 1.73x, loop29/30)
+   or a per-iteration variance update -- never more variance-only
+   iterations. Open spikes: normal-term on a curved scene, multi-iteration
+   WITH geometry guidance (only variance-only iteration is closed).
+   Exit: live PT on app scenes at the published budgets.
 6. **Camera/light/render tracks + concurrent arms (T5).** Spec first
    (WyattAu repo survey per §6), then chrome.
 7. **E3 hardware runner, then E6 packaging (T8).** RT is the best-tested

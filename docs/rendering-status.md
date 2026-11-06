@@ -133,8 +133,12 @@ Two honest caveats on the ray tracing:
   by `adaptive_masked_rounds_hold_unmasked_bit_exact`); leaving PT disables
   it so a re-entered stack is uniform again. The tracer also emits a
   first-hit G-buffer (rgb = world normal, a = hit t, miss = (0,0,0,-1),
-  overwritten per round; pinned by `gbuffer_first_hit_normal_depth`) --
-  emission only, no filter consumes it yet. Measured on the RTX 2060 at
+  overwritten per round; pinned by `gbuffer_first_hit_normal_depth`), and
+  an edge-stopped single-iteration a-trous over (mean, moment, G-buffer)
+  is spiked headlessly at 1.73x over raw (1.04x over variance-only; the
+  gain is the depth stop at silhouettes, normals inert on planar scenes;
+  pinned by `denoise_edge_gbuffer_spike`) -- still no render-path
+  consumer. Measured on the RTX 2060 at
   1000x600: fraction=0.25 selected exactly 150000/600000 texels. Gate
   (2026-11-05): the viewport half of e1 currently cannot run to completion
   on EITHER this tree or HEAD -- both die at the first real resize

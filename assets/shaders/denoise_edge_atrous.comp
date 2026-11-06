@@ -1,0 +1,117 @@
+#version 450
+
+// denoise_edge_atrous.comp — T2 denoiser SPIKE, second half: edge-stopped
+// single-iteration a-trous guided by variance AND the first-hit G-buffer.
+//
+// Provenance (AGENTS.md research discipline):
+//   - Dammertz, Sewtz, Hanika, Lensch. "Edge-Avoiding A-Trous Wavelet
+//     Transform for fast Global Illumination Filtering." Proc. High
+//     Performance Graphics (HPG) 2010, pp. 67-75. 3rd best paper.
+//     Claim borrowed: an a-trous wavelet tap weight multiplies a spatial
+//     Gaussian by edge-stopping terms from geometry buffers, so smoothing
+//     stops at geometric discontinuities. Checked: HPG best-paper list
+//     + Ulm preprint (HPG 2010).
+//   - Schied, Kaplanyan, Wyman, Patney, Chaitanya, Burgess, Liu,
+//     Dachsbacher, Lefohn, Salvi. "Spatiotemporal Variance-Guided
+//     Filtering: Real-Time Reconstruction for Path-Traced Global
+//     Illumination." Proc. HPG 2017, 12 pp. DOI 10.1145/3105762.3105770.
+//     Best paper. Claim borrowed: per-pixel luminance variance drives the
+//     filter width (edge = k*sqrt(v_center)), hierarchical filtering
+//     separates noise from detail. Our temporal term is absent (single
+//     frame, no history yet) -- this is the spatial half of SVGF only.
+// Novelty assessment: none. Standard single-iteration edge-avoiding
+// a-trous (Dammertz) with an SVGF-style variance width (Schied). The
+// combination is the textbook pairing, not an invention. What is new is
+// only the measurement on THIS codebase/scene (below).
+// Fit/cost: pure function of (mean, moment, gbuffer) -- no RNG, no
+// atomics, no cross-invocation communication, so the temporal-history
+// constraint holds by construction (bit-identical re-dispatch pinned).
+// One extra storage-image binding over the variance-only spike; same
+// 5x5 stride-1 footprint, same determinism contract.
+//
+// G-buffer contract (pt_real.rgen binding 7): rgb = first-hit world normal
+// (faceforward, normalized), a = hit t, miss = (0,0,0,-1). Overwritten per
+// unmasked round, not accumulated -- so the edge image always describes
+// the CURRENT geometry, never a blend of rounds.
+//
+// Weight: w = spatial * luma * normal * depth.
+//   normal: both miss -> 1 (sky filters with sky); one miss -> 0 (never
+//     bleed sky across a silhouette); else exp(-(1-dot)^2 / (2*ns^2)).
+//   depth: both miss -> 1; one miss -> 0; else
+//     exp(-((tc-tn)/max(tc,eps))^2 / (2*ds^2)) -- relative depth so the
+//     same sigma works near and far.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0, rgba32f) readonly uniform image2D mean_img;
+layout(set = 0, binding = 1, rgba32f) readonly uniform image2D moment_img;
+layout(set = 0, binding = 2, rgba32f) readonly uniform image2D gbuffer_img;
+layout(set = 0, binding = 3, rgba32f) uniform image2D out_img;
+
+layout(push_constant) uniform Push {
+  uint width;
+  uint height;
+  float luma_sigma_scale;  // edge width = k * sqrt(v_center)
+  float spatial_sigma;     // spatial Gaussian sigma, pixels
+  float normal_sigma;      // angle stop: 1-dot scale (~0.1 = ~25 deg)
+  float depth_sigma;       // relative-depth stop (~0.3 = 30% depth change)
+  uint mean_samples;       // divisor for binding 0 (live SUMS depth)
+  uint moment_samples;     // divisor for binding 1 (always the sums depth)
+  uint stride;             // a-trous stride (1 for the single-iteration pin)
+} push;
+
+float luma(vec3 c) { return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; }
+
+void main() {
+  const ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+  if (px.x >= int(push.width) || px.y >= int(push.height)) return;
+
+  const float nm = max(float(push.mean_samples), 1.0);
+  const float ne = max(float(push.moment_samples), 1.0);
+  const vec4 mc = imageLoad(mean_img, px) / nm;
+  const vec4 e2 = imageLoad(moment_img, px) / ne;
+  const vec4 gc = imageLoad(gbuffer_img, px);
+  const float ml = luma(mc.rgb);
+  const float vc = max(0.0, luma(e2.rgb) - ml * ml);
+  const float edge2 =
+      push.luma_sigma_scale * push.luma_sigma_scale * vc + 1e-8;
+  const float s2 = 2.0 * push.spatial_sigma * push.spatial_sigma;
+  const float ns2 = 2.0 * push.normal_sigma * push.normal_sigma;
+  const float ds2 = 2.0 * push.depth_sigma * push.depth_sigma;
+  const vec3 nc = gc.rgb;
+  const float tc = gc.a;
+  const bool c_miss = tc < 0.0;
+
+  vec3 acc = vec3(0.0);
+  float wsum = 0.0;
+  const int st = int(push.stride);
+  for (int dy = -2; dy <= 2; ++dy) {
+    for (int dx = -2; dx <= 2; ++dx) {
+      const ivec2 q = clamp(px + ivec2(dx * st, dy * st), ivec2(0),
+                            ivec2(push.width, push.height) - 1);
+      const vec4 mn = imageLoad(mean_img, q) / nm;
+      const vec4 gn = imageLoad(gbuffer_img, q);
+      const float dm = luma(mn.rgb) - ml;
+      float w = exp(-float(dx * dx + dy * dy) / s2) *
+                exp(-dm * dm / (2.0 * edge2));
+      // Geometry stop: the wire this spike exists to measure.
+      const vec3 nn = gn.rgb;
+      const float tn = gn.a;
+      const bool n_miss = tn < 0.0;
+      float w_geo = 1.0;
+      if (c_miss || n_miss) {
+        w_geo = (c_miss && n_miss) ? 1.0 : 0.0;
+      } else {
+        const float dot_nn = clamp(dot(nc, nn), -1.0, 1.0);
+        const float one_minus = 1.0 - dot_nn;
+        const float rel = (tc - tn) / max(tc, 1e-3);
+        w_geo = exp(-one_minus * one_minus / ns2) *
+                exp(-rel * rel / ds2);
+      }
+      w *= w_geo;
+      acc += w * mn.rgb;
+      wsum += w;
+    }
+  }
+  imageStore(out_img, px, vec4(acc / max(wsum, 1e-9), mc.a));
+}
