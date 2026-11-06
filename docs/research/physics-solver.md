@@ -108,6 +108,12 @@ all-pairs at 200/600/1200 with TOI traffic. Gate sabotage-validated
 code: spheres only, stiff rewind under compliance, penetration 0 so no
 island edges (conservative).
 
+**Capsule follow-up (loop55 gate).** `FastCapsuleTunnelsOnSomePhases`
+ports the R3 protocol with the shot as an upright capsule (r=0.1,
+half-height 0.4, identical 198 m/s travel — shape is the only variable).
+Trigger met 8/12, same count as spheres: the discrete capsule
+narrowphase misses the identical way. The sweep fix is open.
+
 ## R4. Islands and sleeping (Jolt's answer to our "no sleep" gap)
 
 **Source.** Jolt Physics architecture docs (jrouwe.github.io/JoltPhysics):

@@ -892,6 +892,72 @@ TEST(PhysicsWorld, Trial638ComplianceIndependentOfSubstepCount) {
 // poses: ejections and misses are indistinguishable post-hoc, so every
 // phase must show a contact event (the 4 historical clean misses going
 // from zero events to a speculative one is the fix made visible).
+// Capsule tunneling gate (D1; spheres fixed loop52, capsules open and
+// documented as the remaining sweep). Same 12-phase protocol as the R3
+// sphere gate, only the shot is a capsule (radius 0.1, half-height 0.4,
+// upright so its segment is perpendicular to the flight direction): the
+// ONLY variable vs the sphere gate is shape. Travel S = 3W is identical
+// (198 m/s at 1/60), so any trigger difference is the narrowphase, not
+// the setup. The speculative flag stays off: this pins the discrete
+// capsule path the sweep must later fix, the way the R3 gate pinned the
+// discrete sphere path before loop52.
+TEST(PhysicsWorld, FastCapsuleTunnelsOnSomePhases) {
+  constexpr float kR = 1.0f;        // static obstacle radius
+  constexpr float kShotR = 0.1f;    // capsule radius
+  constexpr float kHalf = 0.4f;     // capsule half-height (bound 0.5)
+  constexpr float kWindow = kR + kShotR;  // contact window in flight dir
+  constexpr float kGateDt = 1.0f / 60.0f;
+  // Identical travel to the R3 sphere gate (3.3 m/step, 198 m/s): the
+  // bound sum (1.5) only sizes the broadphase, not the shot.
+  constexpr float kStepTravel = 3.0f * kWindow;
+  constexpr float kSpeed = kStepTravel / kGateDt;
+  constexpr int kPhases = 12;
+  constexpr int kSteps = 10;
+
+  auto run_sweep = []() {
+    std::vector<std::pair<float, float>> final_xv;
+    final_xv.reserve(kPhases);
+    for (int p = 0; p < kPhases; ++p) {
+      PhysicsWorld w(/*gravity=*/0.0f);
+      PhysicsBody wall;
+      wall.position[0] = 0.0f;
+      wall.position[1] = 5.0f;
+      wall.radius = kR;
+      wall.inverse_mass = 0.0f;
+      (void)w.add_body(wall);
+      PhysicsBody shot;
+      shot.shape = omnicpp::physics::BodyShape::Capsule;
+      shot.radius = kShotR;
+      shot.half_height = kHalf;
+      const float phase = static_cast<float>(p) * kStepTravel /
+                          static_cast<float>(kPhases);
+      shot.position[0] = -10.0f + phase;
+      shot.position[1] = 5.0f;
+      shot.restitution = 0.0f;
+      shot.velocity[0] = kSpeed;
+      (void)w.add_body(shot);
+      for (int i = 0; i < kSteps; ++i) w.step(kGateDt);
+      final_xv.emplace_back(w.body(1).position[0], w.body(1).velocity[0]);
+    }
+    return final_xv;
+  };
+
+  const std::vector<std::pair<float, float>> first = run_sweep();
+  int tunneled = 0;
+  for (const auto& [x, vx] : first) {
+    if (x > kR) {
+      ++tunneled;
+      EXPECT_GT(vx, 0.0f) << "tunneled but stopped: third mechanism?";
+    } else {
+      EXPECT_LT(x, 0.0f) << "final x = " << x;
+      EXPECT_LE(vx, 0.0f) << "collided but still advancing: " << vx;
+    }
+  }
+  EXPECT_GE(tunneled, 1) << "no phase tunneled: capsule gate has no trigger";
+  EXPECT_LT(tunneled, kPhases) << "every phase tunneled: detector is broken";
+  EXPECT_EQ(run_sweep(), first);  // pure function of constants
+}
+
 TEST(PhysicsWorld, SpeculativeContactsStopFastBodyCrossing) {
   constexpr float kR = 1.0f;       // static obstacle radius
   constexpr float kR2 = 0.1f;      // projectile radius
