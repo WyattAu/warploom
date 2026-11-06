@@ -38,11 +38,20 @@ Notes worth keeping:
 
 ## Budgets (gates)
 
-Machine-readable form: `docs/perf-budgets.json` (same numbers). Gate:
+Machine-readable form: `docs/perf-budgets.json` (same numbers). Gate — the
+`key:` prefix is required (the script splits `key:path`; the bare path
+form fails the gate on every run, including a perfect one):
 
 ```bash
-python3 scripts/analyze_telemetry.py <telemetry_dir> --check-budgets docs/perf-budgets.json
+python3 scripts/analyze_telemetry.py <telemetry_dir> --check-budgets <key>:docs/perf-budgets.json
 ```
+
+The full ten-config table (rt, node, pt, phys4k, phys8k with measured
+p50/p95 and flags) lives in `docs/scale-benchmark.md` and is not
+duplicated here — duplication is how this file's five-row subset went
+stale. The five rows below are the subset this file originally measured
+(2026-10-30); the other five were measured 2026-10-31 and recorded in
+scale-benchmark.md.
 
 | Config key | GPU p95 budget | Record p95 budget | Min gpu coverage |
 |---|---|---|---|
@@ -51,6 +60,14 @@ python3 scripts/analyze_telemetry.py <telemetry_dir> --check-budgets docs/perf-b
 | nohdr | 1200 us | 200 us | 90% |
 | gd | 500 us | 100 us | 90% |
 | scale10k | 500 us | 100 us | 90% |
+
+PT note (2026-11-06): the `pt` budget (12000/500) was measured 2026-10-31
+*without* the render-path denoiser (v1.18) and iterative adaptive
+re-masking (v1.17), which both landed later and change the PT frame's
+GPU cost. The budget still gates (7697 us p95 measured vs 12000 us),
+but the app-scene PT + denoise + adaptive re-measure at low load is
+open — blocked while the trainer holds the GPU (5.2/6.1 GiB, 85%),
+recorded here so it is not mistaken for done.
 
 ## Reproduce
 
