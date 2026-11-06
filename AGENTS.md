@@ -163,14 +163,27 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   input. All 12 now go through `checked_double_to_uint64`.
 
   All four presets now build warning-free on GCC, and memory safety is
-  verified rather than assumed:
+  verified rather than assumed. Re-measured 2026-11-06 on the current tree
+  (the counts below are that run, not the campaign's 540):
 
-  - `asan-ubsan`: 540 tests, 0 AddressSanitizer and 0 UndefinedBehaviorSanitizer
-    diagnostics, 0 leaks; plus 39 editor, 10 core, 19 ui and 10 runtime tests,
+  - `asan-ubsan`: `warploom_unit_tests` 673 (626 pass, 47 skip for the
+    Vulkan-only cases), 0 AddressSanitizer and 0 UndefinedBehaviorSanitizer
+    diagnostics, 0 leaks; plus 48 editor, 22 core, 19 ui and 10 runtime tests,
     all clean. 6/6 ctest under sanitizers.
-  - `tsan`: 540 tests, 0 ThreadSanitizer data races. The first real
-    verification of the job system's concurrency claims.
+  - `tsan`: the same 673/22/48/19/10, 0 ThreadSanitizer data races.
   - `headless-debug`: builds clean, and is what CI's live-proof job uses.
+
+  That re-run paid for itself: the Vulkan-off tree, which nothing builds on
+  a normal development cycle, **did not compile**. Three `VulkanRenderer`
+  members were declared inside `#ifdef OMNICPP_HAS_VULKAN` while their
+  definitions were unguarded, and two public-header default arguments named
+  `VK_ACCESS_SHADER_WRITE_BIT` / `VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR`,
+  which only exist with Vulkan present -- the rule at the top of this file,
+  broken in the one tree that cannot notice. Both fixed, and the 16 GCC
+  warnings only that tree reaches were paid (`-Wmissing-declarations` x8,
+  `-Wunused-parameter` x4, `-Wpedantic` on `__int128` x3,
+  `-Wunused-function`, `-Wconversion`). A "four presets are clean" claim is
+  only as good as the last time someone built the fourth one.
 
   Along the way both compilers also paid `-Wunused-result` (86, hid a
   deadlock), `-Wsign-conversion` (104), `-Wshorten-64-to-32` (24),

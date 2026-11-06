@@ -231,11 +231,15 @@ TEST(FrameAllocator, NoOverlappingShareAcrossManyConfigurations) {
 
 // Loop 13 (research loop 2 of 10): lifetimes derived from the node sequence
 // instead of hand-declared -- the prerequisite R6b was gated behind.
+// Helpers are file-local: a named namespace in a .cpp still has external
+// linkage, which GCC reports as -Wmissing-declarations in the Vulkan-off
+// tree (clang does not enable that warning, which is why only the sanitizer
+// presets saw it).
 namespace loop13 {
 
-VkImage img(std::uintptr_t id) { return reinterpret_cast<VkImage>(id); }
+static VkImage img(std::uintptr_t id) { return reinterpret_cast<VkImage>(id); }
 
-std::uint64_t size_of(VkImage image) noexcept {
+static std::uint64_t size_of(VkImage image) noexcept {
   switch (reinterpret_cast<std::uintptr_t>(image)) {
     case 1U:
     case 6U:
@@ -247,14 +251,14 @@ std::uint64_t size_of(VkImage image) noexcept {
       return 4096U;  // scratch + history metadata images
   }
 }
-bool is_history(VkImage image) noexcept {
+static bool is_history(VkImage image) noexcept {
   // Caller knowledge the graph cannot supply (RPS external/persistent): the
   // swapchain image belongs to the next frame's present, the pyramid and the
   // PT accumulation are read by a later frame.
   const auto id = reinterpret_cast<std::uintptr_t>(image);
   return id == 6U || id == 7U || id == 8U;
 }
-std::uint64_t tag_of(VkImage) noexcept { return 7U; }
+static std::uint64_t tag_of(VkImage) noexcept { return 7U; }
 
 // Five passes shaped like the compose frame: scene -> bloom x2 -> present,
 // plus a compute H-Z pass. First-touch order fixes the generated names.
@@ -263,7 +267,7 @@ struct Scene {
   std::vector<warploom::render::GraphComputePass> computes;
   std::vector<warploom::render::GraphNode> nodes;
 };
-Scene make_scene() {
+static Scene make_scene() {
   using namespace warploom::render;
   Scene s;
   s.passes.resize(4);
@@ -307,7 +311,7 @@ Scene make_scene() {
   return s;
 }
 
-const FrameResource* find(const std::vector<FrameResource>& rs,
+static const FrameResource* find(const std::vector<FrameResource>& rs,
                           const std::string& name) {
   for (const FrameResource& r : rs) {
     if (r.name == name) return &r;

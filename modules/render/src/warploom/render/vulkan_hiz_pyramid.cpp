@@ -153,7 +153,7 @@ VulkanHiZPyramid::~VulkanHiZPyramid() { cleanup(device_); }
   return ::warploom::core::Result<void>::ok();
 #else
   (void)device; (void)physical_device; (void)width; (void)height;
-  (void)levels; (void)allocator;
+  (void)levels; (void)allocator; (void)sharing;
   return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }

@@ -16,14 +16,38 @@ and compose stages through the module's own entry points; the
 "untested in production" gap this page used to warn about is closed.
 
 Proof runs under the Khronos validation layer. The full suite
-(738 tests, `warploom_unit_tests`) passes on an RTX 2060 (default
-preset, measured 2026-11-01); the Vulkan tests enable the layer and
+(747 tests, `warploom_unit_tests`) passes on an RTX 2060 (default
+preset, measured 2026-11-06); the Vulkan tests enable the layer and
 assert their own validation error/warning counts, so the green run is
 also the 0-diagnostics evidence. On CI's Mesa lavapipe software Vulkan,
-every ray-tracing test skips because the extensions are absent. The
-sanitizer presets (asan-ubsan/tsan, Vulkan-off Debug tree) have NOT
-been re-run on the current tree — their last green numbers predate the
-D1-physics and R1/R2/R3 landings, so they are pending, not passing.
+every ray-tracing test skips because the extensions are absent.
+
+The sanitizer legs are re-run as of 2026-11-06, and doing so was worth
+more than the numbers: the Vulkan-off tree **did not compile at all**.
+Three members of `VulkanRenderer` were declared inside the Vulkan guard
+while their definitions were unguarded, and two public-header default
+arguments named `VK_ACCESS_SHADER_WRITE_BIT` /
+`VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR`, which only exist when
+Vulkan does. That is the AGENTS.md rule about public headers compiling
+without Vulkan, broken in the one tree nothing built on a normal
+development cycle. Fixed (declarations moved out of the guard; the two
+constants added to the headless stand-in block), then paid the 16
+GCC warnings the Vulkan-off tree owns and nothing else reached
+(`-Wmissing-declarations` x8, `-Wunused-parameter` x4, `-Wpedantic` on
+`__int128` x3, one `-Wunused-function`, one `-Wconversion`). Measured
+on the current tree, both sanitizer presets build warning-free and run:
+`warploom_unit_tests` 673 (626 pass, 47 skip — the Vulkan-only cases),
+core 22, editor 48, ui 19, runtime 10, ctest 6/6, with **0** ASan/UBSan
+diagnostics, **0** leaks and **0** TSan warnings. The `default` preset on the
+same tree is 747/747 with ctest 6/6.
+
+Still not warning-free, and not claimed to be: the `headless-debug-clang` CI
+leg reports 104 clang-only warnings, all of the same shape — a Vulkan-only
+private field or file-scope constant that is unreferenced once
+`WARPLOOM_USE_VULKAN=OFF`. GCC has no `-Wunused-private-field`, so the GCC
+pass to zero could never see them; that is the "one compiler measures one
+compiler" trap again, and paying it is the next campaign rather than a
+silent exception.
 
 Two verification milestones worth knowing when reading the Proof column:
 

@@ -310,6 +310,12 @@ void AsyncComputeQueue::record(void (*record_fn)(VkCommandBuffer, void*), void* 
   timeline_value_ = signal_value;
   return ::warploom::core::Result<std::uint64_t>::ok(signal_value);
 #else
+  // No compute queue without Vulkan. Both wait parameters exist in the
+  // signature in every tree (the caller passes them unconditionally), so the
+  // stub has to name them or the Vulkan-off build -- what every sanitizer
+  // preset compiles -- warns -Wunused-parameter.
+  (void)wait_semaphore;
+  (void)wait_stage;
   return ::warploom::core::Result<std::uint64_t>::error(::warploom::core::RuntimeError::vulkan_not_available);
 #endif
 }

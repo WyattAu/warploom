@@ -38,13 +38,15 @@ constexpr std::uint32_t kTile = 32U;
 constexpr std::uint32_t kPyramidWidth = kSize / kTile;  // 8
 constexpr float kClearDepth = 0.5f;
 
-std::uint32_t bits(float value) {
+#ifdef WARPLOOM_HAS_VULKAN
+
+// Bit-pattern comparison of two float images: only a Vulkan build reads an
+// image back, so this helper lives inside the guard that can use it.
+static std::uint32_t bits(float value) {
   std::uint32_t out = 0U;
   std::memcpy(&out, &value, sizeof(out));
   return out;
 }
-
-#ifdef WARPLOOM_HAS_VULKAN
 
 void transition_image(VkCommandBuffer cb, VkImage image,
                       VkImageLayout old_layout, VkImageLayout new_layout,

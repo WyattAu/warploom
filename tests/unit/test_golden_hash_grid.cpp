@@ -38,7 +38,8 @@ std::uint64_t next_u64() {
   return rng_state * 0x2545F4914F6CDD1DULL;
 }
 float next_unit() {  // [0, 1)
-  return static_cast<float>((next_u64() >> 11) * (1.0 / 9007199254740992.0));
+  return static_cast<float>(static_cast<double>(next_u64() >> 11) *
+                            (1.0 / 9007199254740992.0));
 }
 
 // --- Scenes (deterministic) -----------------------------------------------

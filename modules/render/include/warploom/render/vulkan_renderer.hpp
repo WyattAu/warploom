@@ -796,12 +796,16 @@ private:
                                    VkFormat snapshot_format,
                                    bool depth_from_attachment) noexcept;
 #endif
-#ifdef OMNICPP_HAS_VULKAN
-  [[nodiscard]] bool record_hiz_reduction(VkCommandBuffer command_buffer,
-                                           const HiZFrameRecord& record);
   //! Loop28 step 4, record half: the snapshot copy without the inline
   //! reduce + pack (the compute leg produces the pyramid a frame behind).
   //! Best-effort like the copy it wraps: never fails the frame.
+  //!
+  //! Declared OUTSIDE the Vulkan guard, like the two below it, because the
+  //! definitions are unguarded (they compile a `(void)` stub without a
+  //! device). Leaving the declarations inside made the Vulkan-off tree --
+  //! which every sanitizer preset builds -- fail with "no declaration
+  //! matches": the header hid a member the .cpp still defined. A member
+  //! that exists in both trees has to be declared in both.
   void record_hiz_snapshot_only(VkCommandBuffer command_buffer,
                                  const HiZFrameRecord& record) noexcept;
   //! Loop28 step 4, pre-scene half: pack the compute-produced pyramid for
@@ -817,6 +821,10 @@ private:
   //! handoff carries the ordering). Records the signalled value so the
   //! next reuse of the slot waits exactly this kick.
   void kick_hiz_compute_reduce(std::uint32_t slot) noexcept;
+
+#ifdef OMNICPP_HAS_VULKAN
+  [[nodiscard]] bool record_hiz_reduction(VkCommandBuffer command_buffer,
+                                           const HiZFrameRecord& record);
   //! Snapshot format owning `record.depth_image` (compose HDR depth vs
   //! swapchain depth), or UNDEFINED when the owner is unknown. Shared by
   //! the inline reduce path and the pipelined snapshot-only path.

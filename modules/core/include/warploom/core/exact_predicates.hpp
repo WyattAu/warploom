@@ -29,8 +29,12 @@ namespace warploom::core {
 //! determinant itself lives in __int128).
 inline int orient2d_exact(std::int64_t ax, std::int64_t ay, std::int64_t bx,
                           std::int64_t by, std::int64_t cx, std::int64_t cy) {
-  const __int128 det = static_cast<__int128>(bx - ax) * (cy - ay) -
-                       static_cast<__int128>(by - ay) * (cx - ax);
+  // `__extension__` because __int128 is not ISO C++: without it GCC's
+  // -Wpedantic (on in the sanitizer presets) reports three warnings for one
+  // deliberate, load-bearing choice. Clang accepts the prefix too.
+  __extension__ const __int128 det =
+      static_cast<__int128>(bx - ax) * (cy - ay) -
+      static_cast<__int128>(by - ay) * (cx - ax);
   if (det > 0) return 1;
   if (det < 0) return -1;
   return 0;

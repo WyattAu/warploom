@@ -166,14 +166,18 @@ decision*, and it should not be described as "blocked".
 
 Stated precisely, because "measured" and "designed" are different things here.
 
-**Measured on this machine (RTX 2060, `default` preset):** 629 unit tests green
+**Measured on this machine (RTX 2060, `default` preset):** 747 unit tests green
 under `VK_LAYER_KHRONOS_validation=1` with 0 diagnostics and 0 leaked objects;
-ctest 6/6; ASan/UBSan 555 (594 ran, 39 skipped because the sanitizer preset
-builds `WARPLOOM_USE_VULKAN=OFF`); 80 shader sources compile; live protocol
-proofs 76/76 headless and 28/28 on a visual host; the viewport matrix
+ctest 6/6; ASan/UBSan 673 (626 ran, 47 skipped because the sanitizer preset
+builds `WARPLOOM_USE_VULKAN=OFF`) with 0 diagnostics and 0 leaks, TSan the same
+counts with 0 races; 80 shader sources compile; live protocol proofs 192/192
+(viewport + headless host); the viewport matrix
 (hdr, bloom, rt+bloom, no-hdr, node editor, pt) re-run after the fullscreen
-fix, all six clean with 0 validation diagnostics; clang and GCC both
-warning-free.
+fix, all six clean with 0 validation diagnostics; `default`, `asan-ubsan` and
+`tsan` warning-free on GCC and clang. The `headless-debug-clang` CI leg is NOT
+warning-free and is not claimed to be: 104 clang-only warnings, every one a
+Vulkan-only private field or constant that is unreferenced when the tree
+builds `WARPLOOM_USE_VULKAN=OFF`. Named as debt, measured 2026-11-06.
 
 **Measured about the path tracer specifically:** the *linear* accumulation mean
 is flat — 0.7336 → 0.7357 across 300–1800 samples read from inside the running

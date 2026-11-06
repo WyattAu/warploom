@@ -391,7 +391,10 @@ TEST(NodeEditorPins, PinHitTestFindsInputAndOutputSides) {
 }
 
 //! Row text lookup for the G4 value rows ("value_row_<id>_<pin>").
-std::string value_row_text(WidgetTree& tree, std::uint64_t id,
+//! File-local: a free function in a .cpp has external linkage otherwise, and
+//! GCC's -Wmissing-declarations (enabled in the Vulkan-off sanitizer trees)
+//! reports that as a defect.
+static std::string value_row_text(WidgetTree& tree, std::uint64_t id,
                            const std::string& pin) {
   const auto handle =
       tree.find_by_name("value_row_" + std::to_string(id) + "_" + pin);

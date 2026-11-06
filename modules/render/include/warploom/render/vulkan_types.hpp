@@ -187,6 +187,15 @@ constexpr VkImageLayout VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL = 6;
 constexpr VkImageLayout VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL = 7;
 constexpr VkImageLayout VK_IMAGE_LAYOUT_PRESENT_SRC_KHR = 1000001002;
 constexpr std::uint32_t VK_COLOR_SPACE_SRGB_NONLINEAR_KHR = 0;
+//! Access/stage stand-ins for the external-tonemap-source default arguments
+//! (vulkan_compose_chain.hpp, vulkan_renderer.hpp). Those arguments are part
+//! of a public header, so they must name their constants in BOTH trees --
+//! without them the Vulkan-off build (every sanitizer preset) failed to
+//! compile the header at all. Real values, so a caller's explicit scope and
+//! the default are indistinguishable in either tree.
+constexpr VkAccessFlags VK_ACCESS_SHADER_WRITE_BIT = 0x00000040;
+constexpr VkPipelineStageFlags VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR =
+    0x00000400;
 
 #endif
 
