@@ -496,6 +496,10 @@ declares a slot 3.
       when cell >= r1+r2, compliance 0 is definitionally the stiff
       projection. Still open: velocity-from-position update, island
       sleeping, capsule — sleeping is the scheduled Loop 2 of 10 item.
+      (2026-11-06 note: all three have since landed — Loop 2 sleeping +
+      restitution threshold, Loop 3 velocity-from-position + capsule +
+      rotation + joints — in the paragraphs immediately below. This list
+      is kept as the pre-loop record.)
 
       Loop 2 (2026-10-31): island sleeping + restitution threshold DONE.
       `set_sleep_threshold(v)` (default 0 = never, bit-identical history)
@@ -622,6 +626,13 @@ declares a slot 3.
       the socket on a live host — the queue-vs-tick races only exist
       there — so that leg is specced and proven next, not assumed from
       the session test.
+
+      2026-11-06 update: that leg is PROVEN, not next — loop38's `proof_cnc`
+      (32 checks, wired into `live_proof.py all` on the viewport host where
+      the queue-vs-tick races live; 224/224 with 0 diagnostics). The D2
+      track is closed: T5a session-level, T5c render tracks, T5d rejection,
+      and now the live wire leg. This paragraph is kept as the record of
+      what the leg had to prove.
 
 - [x] **O1 structured diagnostics** — `warploom/core/diagnostics.hpp`. One
       filterable channel for app, engine and viewport: severity, subsystem tag,
