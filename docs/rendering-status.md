@@ -39,7 +39,11 @@ on the current tree, both sanitizer presets build warning-free and run:
 `warploom_unit_tests` 673 (626 pass, 47 skip — the Vulkan-only cases),
 core 22, editor 48, ui 19, runtime 10, ctest 6/6, with **0** ASan/UBSan
 diagnostics, **0** leaks and **0** TSan warnings. The `default` preset on the
-same tree is 747/747 with ctest 6/6.
+same tree is 747/747 with ctest 6/6. Loop49 (wire physics) and loop52
+(speculative contacts, swept grid) re-verified under the asan-ubsan preset
+on the current tree: physics/session/control subset 38/38, core 22/22,
+editor 48/48, 0 diagnostics — the new index arithmetic rides the same
+verified preset rather than a fresh claim.
 
 The one-count-per-compiler trap almost survived this re-run: the
 `headless-debug-clang` CI leg reported 104 clang-only warnings, all of the
