@@ -153,7 +153,10 @@ Two honest caveats on the ray tracing:
   0.970x var / 0.496x raw, ns sweep moves 2% while ds is flat (inverted
   vs planar); pinned by `denoise_edge_curved_spike` incl. an ns-slope
   guard, sabotage round-tripped. r=1.0 tried and rejected
-  (variance-dominated, 1.02x). Measured on the RTX 2060 at
+  (variance-dominated, 1.02x). Iteration closed in both forms (loop33):
+  edge-stopped K=2/K=3 diverge like variance-only (K=2 best 1.01x raw,
+  K=3 0.51x raw) -- no render-path loop, single-iteration stands.
+  Measured on the RTX 2060 at
   1000x600: fraction=0.25 selected exactly 150000/600000 texels. Gate
   CLEARED 2026-11-06: e1 runs 69/69 on the viewport including the resize
   round trip (down/back, sim steps after) at ~5.1/6.1 GiB VRAM, 18/18 on

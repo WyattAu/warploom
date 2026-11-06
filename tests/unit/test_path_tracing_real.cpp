@@ -4541,6 +4541,672 @@ TEST(path_tracing_real, denoise_edge_curved_spike) {
   ctx.cleanup();
 }
 
+TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
+  omnicpp::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("OmniCppPtEdgeIterSpike", true).is_ok());
+  if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
+  const std::uint32_t qf =
+      static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
+  const std::uint32_t side = 64U;
+  constexpr std::uint32_t kNoisyFrames = 4U;
+  constexpr std::uint32_t kRefFrames = 128U;
+
+  omnicpp::render::VulkanMemoryAllocator alloc;
+  ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
+
+  const std::vector<float> box = {
+      -0.5F, -0.5F, -0.5F,  -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,  -0.5F, -0.5F, -0.5F,
+      -0.5F, -0.5F, 0.5F,  -0.5F, 0.5F, 0.5F,   -0.5F, 0.5F, -0.5F,
+      -0.5F, 0.5F, 0.5F,   -0.5F, -0.5F, 0.5F,  -0.5F, -0.5F, -0.5F};
+  auto geo = alloc.create_buffer(box.size() * sizeof(float),
+                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ASSERT_TRUE(geo.is_ok());
+  std::memcpy(geo.value().mapped, box.data(), box.size() * sizeof(float));
+  VkBufferDeviceAddressInfo ai{};
+  ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  ai.buffer = geo.value().buffer;
+
+  omnicpp::render::PathTracerConfig cfg{};
+  cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  cfg.width = side;
+  cfg.height = side;
+  cfg.max_bounces = 4U;
+  cfg.sky.mode = 1U;
+  omnicpp::render::PathTracerMesh cube{};
+  cube.vertex_buffer_address = static_cast<std::uint64_t>(
+      vkGetBufferDeviceAddress(ctx.device(), &ai));
+  cube.triangle_count = 12U;
+  cube.max_vertex = 35U;
+  cfg.meshes = {cube};
+  cfg.instances = {
+      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+
+  omnicpp::render::VulkanPathTracer tracer;
+  ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
+                            ctx.graphics_queue(), qf, alloc, cfg)
+                  .is_ok());
+  omnicpp::render::PathTracerCamera cam{};
+  cam.position = {0.0F, 0.6F, 2.6F};
+  cam.forward = {0.0F, -0.2F, -1.0F};
+  cam.right = {1.0F, 0.0F, 0.0F};
+  cam.up = {0.0F, 1.0F, 0.0F};
+  tracer.set_camera(cam);
+
+  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+      ctx.device(), qf);
+  ASSERT_TRUE(pool.is_ok());
+  const auto submit_wait = [&](VkCommandBuffer cb) {
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1U;
+    si.pCommandBuffers = &cb;
+    EXPECT_EQ(vkQueueSubmit(ctx.graphics_queue(), 1, &si, VK_NULL_HANDLE),
+              VK_SUCCESS);
+    EXPECT_EQ(vkQueueWaitIdle(ctx.graphics_queue()), VK_SUCCESS);
+  };
+  const auto record_rounds = [&](std::uint32_t frames) {
+    for (std::uint32_t r = 0; r < frames; ++r) {
+      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+          ctx.device(), pool.value());
+      EXPECT_TRUE(cbr.is_ok());
+      if (!cbr.is_ok()) return;
+      VkCommandBuffer cb = cbr.value();
+      VkCommandBufferBeginInfo bi{};
+      bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+      tracer.record_round(cb, r, r == 0U);
+      EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+      submit_wait(cb);
+      vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+    }
+  };
+
+  record_rounds(kNoisyFrames);
+  EXPECT_EQ(tracer.sample_count(), kNoisyFrames);
+  auto noisy = tracer.read_mean();
+  ASSERT_TRUE(noisy.is_ok());
+
+  // Output image helper: rgba32f storage + transfer readback through a
+  // host-visible buffer.
+  struct OutBuf {
+    VkImage img{VK_NULL_HANDLE};
+    VkImageView view{VK_NULL_HANDLE};
+    omnicpp::render::Allocation mem{};
+    omnicpp::render::Allocation buf{};
+  };
+  auto make_out = [&]() {
+    OutBuf o{};
+    VkImageCreateInfo ii{};
+    ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    ii.extent = {side, side, 1};
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+               VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    EXPECT_EQ(vkCreateImage(ctx.device(), &ii, nullptr, &o.img), VK_SUCCESS);
+    auto mem = alloc.bind_image(o.img, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    EXPECT_TRUE(mem.is_ok());
+    o.mem = mem.value();
+    VkImageViewCreateInfo vi{};
+    vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vi.image = o.img;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    EXPECT_EQ(vkCreateImageView(ctx.device(), &vi, nullptr, &o.view), VK_SUCCESS);
+    auto buf = alloc.create_buffer(
+        static_cast<VkDeviceSize>(side) * side * 16U,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    EXPECT_TRUE(buf.is_ok());
+    o.buf = buf.value();
+    return o;
+  };
+  OutBuf var_out = make_out();
+  // Uniform-geometry control image: same shape, cleared to (0,0,1,+1).
+  OutBuf uni_geo = make_out();
+  {
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    ASSERT_TRUE(cbr.is_ok());
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    ASSERT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    VkImageMemoryBarrier pre{};
+    pre.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    pre.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    pre.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    pre.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    pre.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    pre.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    pre.image = uni_geo.img;
+    pre.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &pre);
+    VkClearColorValue v{};
+    v.float32[0] = 0.0F;
+    v.float32[1] = 0.0F;
+    v.float32[2] = 1.0F;
+    v.float32[3] = 1.0F;
+    VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(cb, uni_geo.img, VK_IMAGE_LAYOUT_GENERAL, &v, 1,
+                         &range);
+    ASSERT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+  }
+
+  OutBuf ping = make_out();
+  OutBuf pong = make_out();
+  // First-touch: both ping-pong images enter GENERAL once and never leave
+  // it outside finish_out's internal round-trip (which returns to GENERAL),
+  // so every iteration dispatch sees GENERAL on both sides. All dispatches
+  // are idle-separated submits, so no inter-dispatch barriers are needed
+  // beyond the layout contract.
+  {
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    ASSERT_TRUE(cbr.is_ok());
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    ASSERT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    VkImageMemoryBarrier first[2]{};
+    VkImage outs[2] = {ping.img, pong.img};
+    for (int f = 0; f < 2; ++f) {
+      first[f].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      first[f].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+      first[f].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      first[f].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      first[f].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      first[f].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      first[f].image = outs[f];
+      first[f].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    }
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 2, first);
+    ASSERT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+  }
+
+  omnicpp::render::VulkanDescriptorManager var_mgr, edge_mgr;
+  ASSERT_TRUE(var_mgr.initialize(ctx.device()).is_ok());
+  ASSERT_TRUE(edge_mgr.initialize(ctx.device()).is_ok());
+  std::vector<omnicpp::render::ReflectedBinding> var_b(3);
+  for (std::uint32_t b = 0; b < 3U; ++b) {
+    var_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                VK_SHADER_STAGE_COMPUTE_BIT};
+  }
+  auto var_layout = var_mgr.create_layout(var_b, 1);
+  ASSERT_TRUE(var_layout.is_ok());
+  auto var_set = var_mgr.allocate_set(var_layout.value());
+  ASSERT_TRUE(var_set.is_ok());
+  ASSERT_TRUE(var_mgr.write_image(var_set.value(), 0,
+                                  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_NULL_HANDLE,
+                                  tracer.accum_view(), VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+  ASSERT_TRUE(var_mgr.write_image(var_set.value(), 1,
+                                  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_NULL_HANDLE,
+                                  tracer.moment_view(), VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+  ASSERT_TRUE(var_mgr.write_image(var_set.value(), 2,
+                                  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_NULL_HANDLE,
+                                  var_out.view, VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+  std::vector<omnicpp::render::ReflectedBinding> edge_b(4);
+  for (std::uint32_t b = 0; b < 4U; ++b) {
+    edge_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                 VK_SHADER_STAGE_COMPUTE_BIT};
+  }
+  auto edge_layout = edge_mgr.create_layout(edge_b, 1);
+  ASSERT_TRUE(edge_layout.is_ok());
+  auto edge_set = edge_mgr.allocate_set(edge_layout.value());
+  ASSERT_TRUE(edge_set.is_ok());
+  ASSERT_TRUE(edge_mgr.write_image(edge_set.value(), 0,
+                                   VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                   VK_NULL_HANDLE, tracer.accum_view(),
+                                   VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+  ASSERT_TRUE(edge_mgr.write_image(edge_set.value(), 1,
+                                   VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                   VK_NULL_HANDLE, tracer.moment_view(),
+                                   VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+  // Bindings 0/2/3 (mean input, G-buffer, output) are rebound per
+  // iteration: mean alternates sums/ping/pong, G-buffer true vs uniform.
+  // Binding 3 (output) placeholder -- rebound by every iteration.
+  ASSERT_TRUE(edge_mgr.write_image(edge_set.value(), 3,
+                                   VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                   VK_NULL_HANDLE, ping.view,
+                                   VK_IMAGE_LAYOUT_GENERAL)
+                  .is_ok());
+
+  const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
+  omnicpp::render::VulkanPipeline var_pipe, edge_pipe;
+  {
+    const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 28U};
+    ASSERT_TRUE(var_pipe.load_shader_stage_file(
+        ctx.device(), shader_dir + "/denoise_variance_atrous.comp.spv",
+        "compute").is_ok());
+    ASSERT_TRUE(var_pipe.create_pipeline_layout(ctx.device(),
+                                                &var_layout.value(), 1, &push)
+                    .is_ok());
+    ASSERT_TRUE(var_pipe.create_compute_pipeline(ctx.device(),
+                                                 var_pipe.pipeline_layout())
+                    .is_ok());
+  }
+  {
+    const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 36U};
+    ASSERT_TRUE(edge_pipe.load_shader_stage_file(
+        ctx.device(), shader_dir + "/denoise_edge_atrous.comp.spv",
+        "compute").is_ok());
+    ASSERT_TRUE(edge_pipe.create_pipeline_layout(ctx.device(),
+                                                &edge_layout.value(), 1, &push)
+                    .is_ok());
+    ASSERT_TRUE(edge_pipe.create_compute_pipeline(ctx.device(),
+                                                  edge_pipe.pipeline_layout())
+                    .is_ok());
+  }
+
+  // PT inputs barrier shared by every dispatch: accum + moment + gbuffer
+  // GENERAL->GENERAL (they hold the accumulation, not UNDEFINED).
+  const auto barrier_inputs = [&](VkCommandBuffer cb) {
+    VkImageMemoryBarrier pre{};
+    pre.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    pre.srcAccessMask =
+        VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+    pre.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    pre.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    pre.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    pre.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    pre.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    pre.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkImageMemoryBarrier pres[3] = {pre, pre, pre};
+    pres[0].image = tracer.accum_image();
+    pres[1].image = tracer.moment_image();
+    pres[2].image = tracer.gbuffer_image();
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 3, pres);
+  };
+  const auto prep_out = [&](VkCommandBuffer cb, VkImage img) {
+    VkImageMemoryBarrier b{};
+    b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    b.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.image = img;
+    b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &b);
+  };
+  const auto finish_out = [&](VkCommandBuffer cb, VkImage img, VkBuffer buf) {
+    VkImageMemoryBarrier post{};
+    post.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    post.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    post.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    post.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    post.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    post.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    post.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    post.image = img;
+    post.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &post);
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {side, side, 1};
+    vkCmdCopyImageToBuffer(cb, img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           buf, 1, &region);
+    // Return to GENERAL: ping-pong images live in GENERAL permanently,
+    // so the next iteration (or chain) needs no layout tracking.
+    VkImageMemoryBarrier ret{};
+    ret.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    ret.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    ret.dstAccessMask =
+        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    ret.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    ret.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    ret.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ret.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ret.image = img;
+    ret.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &ret);
+  };
+  const auto dispatch_var = [&](float k, OutBuf& out) {
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    EXPECT_TRUE(cbr.is_ok());
+    if (!cbr.is_ok()) return;
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    barrier_inputs(cb);
+    prep_out(cb, out.img);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, var_pipe.pipeline());
+    VkDescriptorSet ds = var_set.value();
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            var_pipe.pipeline_layout(), 0, 1, &ds, 0, nullptr);
+    struct Push {
+      std::uint32_t w, h;
+      float kk, sigma;
+      std::uint32_t mean_n, moment_n, stride;
+    };
+    Push p{side, side, k, 1.5F, kNoisyFrames, kNoisyFrames, 1U};
+    vkCmdPushConstants(cb, var_pipe.pipeline_layout(),
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(Push), &p);
+    vkCmdDispatch(cb, (side + 7U) / 8U, (side + 7U) / 8U, 1);
+    finish_out(cb, out.img, out.buf.buffer);
+    EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+  };
+  // One edge-stopped iteration. Iteration 0 binds the live SUMS (mean_n
+  // = 4); later iterations bind a normalized ping-pong image (mean_n =
+  // 1). The moment image always binds sums (moment_n = 4) -- iterations
+  // >0 guide on E2_orig - filtered_mean^2, the documented loop29-s4
+  // approximation this measurement owns. Binding 0 (mean input) and
+  // binding 3 (output) are rebound every call; binding 2 (geometry) is
+  // rebound too, so the uniform control runs the identical path.
+  const auto dispatch_edge_iter = [&](VkImage in_img, VkImageView in_view,
+                                      std::uint32_t mean_n, float k,
+                                      float nsigma, float dsigma,
+                                      std::uint32_t stride, VkImageView gview,
+                                      OutBuf& out, bool first, bool last) {
+    EXPECT_TRUE(edge_mgr.write_image(edge_set.value(), 0,
+                                     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                     VK_NULL_HANDLE, in_view,
+                                     VK_IMAGE_LAYOUT_GENERAL)
+                    .is_ok());
+    EXPECT_TRUE(edge_mgr.write_image(edge_set.value(), 2,
+                                     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                     VK_NULL_HANDLE, gview,
+                                     VK_IMAGE_LAYOUT_GENERAL)
+                    .is_ok());
+    EXPECT_TRUE(edge_mgr.write_image(edge_set.value(), 3,
+                                     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                     VK_NULL_HANDLE, out.view,
+                                     VK_IMAGE_LAYOUT_GENERAL)
+                    .is_ok());
+    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+        ctx.device(), pool.value());
+    EXPECT_TRUE(cbr.is_ok());
+    if (!cbr.is_ok()) return;
+    VkCommandBuffer cb = cbr.value();
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    EXPECT_EQ(vkBeginCommandBuffer(cb, &bi), VK_SUCCESS);
+    if (first) {
+      barrier_inputs(cb);
+    } else {
+      // Ping-pong input: GENERAL already (first-touch + finish_out's
+      // return trip); declare the compute read. The uniform control
+      // image takes this path too (TRANSFER-written, GENERAL layout).
+      VkImageMemoryBarrier g{};
+      g.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      g.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+      g.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      g.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+      g.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      g.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      g.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      g.image = in_img;
+      g.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                                   VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                           0, nullptr, 1, &g);
+    }
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      edge_pipe.pipeline());
+    VkDescriptorSet eds = edge_set.value();
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            edge_pipe.pipeline_layout(), 0, 1, &eds, 0,
+                            nullptr);
+    struct Push {
+      std::uint32_t w, h;
+      float kk, sigma, nsigma, dsigma;
+      std::uint32_t mean_n, moment_n, stride;
+    };
+    Push p{side, side, k, 1.5F, nsigma, dsigma, mean_n, kNoisyFrames, stride};
+    vkCmdPushConstants(cb, edge_pipe.pipeline_layout(),
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(Push), &p);
+    vkCmdDispatch(cb, (side + 7U) / 8U, (side + 7U) / 8U, 1);
+    if (last) finish_out(cb, out.img, out.buf.buffer);
+    EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
+    submit_wait(cb);
+    vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
+  };
+  const auto read_out = [&](OutBuf& out) {
+    std::vector<float> v(static_cast<std::size_t>(side) * side * 4U);
+    std::memcpy(v.data(), out.buf.mapped, v.size() * sizeof(float));
+    return v;
+  };
+
+  dispatch_var(2.0F, var_out);
+  const std::vector<float> var_img = read_out(var_out);
+  // K-iteration ping-pong with stride doubling (loop29 s4 shape, edge
+  // weights on). Iteration 0 binds the live SUMS (divisor 4); later
+  // iterations bind the normalized ping-pong (divisor 1). The moment image
+  // always binds sums (divisor 4) -- iterations >0 guide on E2_orig minus
+  // filtered_mean^2, the documented s4 approximation this measurement
+  // owns. The G-buffer is CONSTANT across iterations (first-hit geometry
+  // does not move), so unlike the variance width the edge stops never go
+  // stale: the question this spike answers is whether that saves iteration
+  // from the s4 divergence (K=2 0.94x, K=3 0.48x -- do NOT build on the
+  // variance signal alone). ns/ds fixed at the loop30 planar best
+  // (0.1/1.0); k swept per K, s4-style. Stash outputs; the reference is
+  // traced after the sweep so the 4spp inputs cannot have moved.
+  struct IterCase {
+    std::uint32_t rounds;
+    float k;
+    std::vector<float> img;
+  };
+  std::vector<IterCase> cases;
+  const auto run_chain = [&](std::uint32_t rounds, float k, float ns,
+                             float ds, VkImageView gview) {
+    for (std::uint32_t it = 0U; it < rounds; ++it) {
+      const bool first = it == 0U;
+      VkImage in_img = tracer.accum_image();
+      VkImageView in_view = tracer.accum_view();
+      std::uint32_t mean_n = kNoisyFrames;
+      if (!first) {
+        const bool odd = it % 2U == 1U;
+        in_img = odd ? ping.img : pong.img;
+        in_view = odd ? ping.view : pong.view;
+        mean_n = 1U;
+      }
+      OutBuf& out = (it % 2U == 0U) ? ping : pong;
+      const bool last = it + 1U == rounds;
+      const std::uint32_t stride = 1U << it;
+      dispatch_edge_iter(in_img, in_view, mean_n, k, ns, ds, stride, gview,
+                         out, first, last);
+    }
+    OutBuf& fin = (rounds % 2U == 1U) ? ping : pong;
+    return read_out(fin);
+  };
+  for (std::uint32_t rounds : {1U, 2U, 3U}) {
+    for (float k : {0.5F, 1.0F, 2.0F}) {
+      cases.push_back(
+          {rounds, k, run_chain(rounds, k, 0.1F, 1.0F,
+                                tracer.gbuffer_view())});
+    }
+  }
+  // Temporal-history pin for the chain form: K=2/k=2.0 re-dispatched
+  // after the sweep (inputs unchanged since the trace) must be
+  // bit-identical -- the chain is a pure function of its inputs.
+  const std::vector<float> chain_rep =
+      run_chain(2U, 2.0F, 0.1F, 1.0F, tracer.gbuffer_view());
+  EXPECT_EQ(std::memcmp(cases[5].img.data(), chain_rep.data(),
+                        chain_rep.size() * sizeof(float)),
+            0)
+      << "iterated edge-stopped filter is not a pure function of its inputs";
+  // K-wire guard: K=2 and K=3 (k=2.0) must DIFFER -- an iteration that
+  // changes nothing is a no-op chain, and the verdict below would be
+  // evidence of nothing. (Cases order: rounds outer, k inner:
+  // index 5 = K=2/k=2.0, index 8 = K=3/k=2.0.)
+  EXPECT_NE(std::memcmp(cases[5].img.data(), cases[8].img.data(),
+                        cases[8].img.size() * sizeof(float)),
+            0)
+      << "K=2 and K=3 agree bit-exactly: iteration 2 is a no-op";
+  // Stride-wire guard (s4 shape): K=2 with strides (1,2) must differ from
+  // K=2 with strides (1,1) -- stride doubling must be live in the chain.
+  {
+    dispatch_edge_iter(tracer.accum_image(), tracer.accum_view(),
+                       kNoisyFrames, 2.0F, 0.1F, 1.0F, 1U,
+                       tracer.gbuffer_view(), ping, true, false);
+    dispatch_edge_iter(ping.img, ping.view, 1U, 2.0F, 0.1F, 1.0F, 1U,
+                       tracer.gbuffer_view(), pong, false, true);
+    const std::vector<float> stride11 = read_out(pong);
+    EXPECT_NE(std::memcmp(cases[5].img.data(), stride11.data(),
+                          stride11.size() * sizeof(float)),
+              0)
+        << "stride doubling is dead: (1,2) matches (1,1)";
+  }
+  // Geometry-wire guards for the chain, both legs K-matched (a K=2
+  // uniform chain is a different algorithm than K=1 variance-only, so the
+  // loop30 single-dispatch guard does not transfer -- first version of
+  // this test compared them and failed on its own guard, correctly).
+  // (a) K=1 with uniform geometry reproduces variance-only bit-nearly
+  // (no edges to stop on == no new signal in EITHER iteration slot).
+  const std::vector<float> uni_k1 =
+      run_chain(1U, 2.0F, 0.1F, 1.0F, uni_geo.view);
+  double geo_blind_sse = 0.0;
+  for (std::size_t i = 0; i < var_img.size(); ++i) {
+    const double d =
+        static_cast<double>(var_img[i]) - static_cast<double>(uni_k1[i]);
+    geo_blind_sse += d * d;
+  }
+  const double geo_blind_mse =
+      geo_blind_sse / static_cast<double>(var_img.size());
+  std::printf("LoopT2 edge-iter spike: geometry-blind MSE vs variance-only = %.6e\n",
+              geo_blind_mse);
+  EXPECT_LT(geo_blind_mse, 1e-12)
+      << "uniform geometry must reduce to variance-only; binding 2 is dead";
+  // (b) K=2 with uniform geometry through both iterations must DIFFER
+  // from K=2 with true geometry -- binding 2 rebound every iteration, so
+  // a rebind that drops it in later rounds returns the K=1 answer here
+  // instead of the chain answer.
+  const std::vector<float> uni_img =
+      run_chain(2U, 2.0F, 0.1F, 1.0F, uni_geo.view);
+  EXPECT_NE(std::memcmp(cases[5].img.data(), uni_img.data(),
+                        uni_img.size() * sizeof(float)),
+            0)
+      << "uniform K=2 chain matches true K=2 chain: binding 2 dropped "
+         "after iteration 0";
+
+  tracer.reset_accumulation();
+  record_rounds(kRefFrames);
+  EXPECT_EQ(tracer.sample_count(), kRefFrames);
+  auto ref = tracer.read_mean();
+  ASSERT_TRUE(ref.is_ok());
+  const auto luma_mse = [&](const std::vector<float>& img) {
+    constexpr double w[3] = {0.2126, 0.7152, 0.0722};
+    const std::size_t texels = ref.value().size() / 4U;
+    double sse = 0.0;
+    for (std::size_t t = 0; t < texels; ++t) {
+      double a = 0.0;
+      double b = 0.0;
+      for (std::size_t c = 0; c < 3U; ++c) {
+        a += w[c] * static_cast<double>(img[t * 4U + c]);
+        b += w[c] * static_cast<double>(ref.value()[t * 4U + c]);
+      }
+      const double d = a - b;
+      sse += d * d;
+    }
+    return sse / static_cast<double>(texels);
+  };
+  const double raw_mse = luma_mse(noisy.value());
+  const double var_mse = luma_mse(var_img);
+  // Per-K best (k swept per K, s4-style) + the verdict print. Whether
+  // geometry guidance saves iteration from the s4 divergence is a
+  // MEASUREMENT this run reports, not a pin this run asserts -- the
+  // structural pins above (chain purity, K-wire, stride-wire,
+  // geometry-wire) are what stop a dead chain from passing silently.
+  // The one efficacy pin: K=1 IS the loop30 single-iteration filter, so
+  // it reproduces the loop30 bars in-harness (0.963x var, 0.577x raw).
+  for (std::uint32_t rounds : {1U, 2U, 3U}) {
+    double best = 1e30;
+    float best_k = 0.0F;
+    for (const IterCase& c : cases) {
+      if (c.rounds != rounds) continue;
+      const double m = luma_mse(c.img);
+      std::printf("LoopT2 edge-iter spike: K=%u k=%.1f MSE=%.6e (var %.2fx)\n",
+                  rounds, static_cast<double>(c.k), m, var_mse / m);
+      if (m < best) {
+        best = m;
+        best_k = c.k;
+      }
+    }
+    const double k1 = luma_mse(cases[2].img);  // K=1/k=2.0 reference leg
+    std::printf("LoopT2 edge-iter spike: K=%u best k=%.1f MSE=%.6e "
+                "(K=1/k=2 %.2fx, raw %.2fx)\n",
+                rounds, static_cast<double>(best_k), best, k1 / best,
+                raw_mse / best);
+  }
+  // Second wire direction: true geometry must CHANGE the answer (a shader
+  // ignoring binding 2 returns the uniform image here instead). K=2/k=2.0
+  // is the chain representative (index 5).
+  EXPECT_NE(std::memcmp(cases[5].img.data(), uni_img.data(),
+                        uni_img.size() * sizeof(float)),
+            0)
+      << "true geometry identical to uniform: binding 2 is decorative";
+  // K=1/k=2.0 reproduces the loop30 single-iteration bars in-harness.
+  const double k1_mse = luma_mse(cases[2].img);
+  EXPECT_LT(k1_mse, raw_mse * 0.70)
+      << "K=1 stopped reproducing the single-iteration bar: " << k1_mse
+      << " vs raw " << raw_mse;
+  EXPECT_LT(k1_mse, var_mse * 0.99)
+      << "K=1 stopped reproducing the single-iteration bar: K=1 " << k1_mse
+      << " vs variance-only " << var_mse;
+
+  EXPECT_EQ(ctx.validation_error_count(), 0U);
+  EXPECT_EQ(ctx.validation_warning_count(), 0U);
+  var_pipe.cleanup(ctx.device());
+  edge_pipe.cleanup(ctx.device());
+  var_mgr.cleanup();
+  edge_mgr.cleanup();
+  for (OutBuf* o : {&var_out, &ping, &pong, &uni_geo}) {
+    vkDestroyImageView(ctx.device(), o->view, nullptr);
+    vkDestroyImage(ctx.device(), o->img, nullptr);
+    alloc.destroy_allocation(o->mem);
+    auto b = o->buf;
+    alloc.destroy_allocation(b);
+  }
+  tracer.destroy();
+  vkDestroyCommandPool(ctx.device(), pool.value(), nullptr);
+  auto keep_geo = geo.value();
+  alloc.destroy_allocation(keep_geo);
+  alloc.cleanup();
+  ctx.cleanup();
+}
+
 //! T2 render-path consumer: the tracer's record_denoise() (count-sourced
 //! edge-stopped a-trous) must reproduce the spike shader bit-exactly on a
 //! uniform accumulation -- the new shader differs from

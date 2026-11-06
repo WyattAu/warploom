@@ -1885,3 +1885,21 @@ finding: r=1.0 tried the same day is a WORSE spike (raw 3.28e-02,
 variance-dominated multi-bounce, 1.02x over var) -- recorded so it is not
 retried. Full suite 744/744, ctest 6/6, 0 warnings, 0 validation
 diagnostics. Research: docs/research/loop32-curved-scene-normal-term.md.
+
+Multi-iteration WITH geometry guidance (loop33) CLOSED 2026-11-06 as a
+negative: K-iteration ping-pong (strides 1,2,4, loop29 s4 shape, edge
+weights at the planar best) DIVERGES -- K=2 best k=0.5 is 2.286227e-03
+(0.58x of K=1, 1.01x raw), K=3 best 4.545933e-03 (0.51x raw), larger k
+hurts more. K=2/k=2.0 edge (1.133e-02) == s4 variance-only (1.154e-02)
+to 2%: at large k the stale variance width dominates so completely
+that perfect edge stops change nothing -- no spatial stop can fix a
+width that is wrong. Pinned by `denoise_edge_multi_iteration_spike`:
+K=1 reproduces the loop30 best EXACTLY (1.334328e-03, validates the
+chain harness), chain re-dispatch bit-identical, K=2 != K=3, stride
+(1,2) != (1,1), geometry-wire both legs K-matched; stride sabotage
+fails exactly its guard. Guard-design trap recorded: the first version
+compared K=2-uniform against K=1-variance and failed on its own guard
+-- wire legs must be K-matched. No render-path loop; single-iteration
+stays the v1 filter. Full suite 745/745, ctest 6/6, 0 warnings, 0
+validation diagnostics. Research: docs/research/loop33-
+edge-iteration-diverges.md.
