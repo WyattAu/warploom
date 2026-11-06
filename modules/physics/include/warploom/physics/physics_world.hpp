@@ -196,15 +196,19 @@ class PhysicsWorld final {
     return restitution_threshold_;
   }
 
-  //! Speculative (swept) contacts (D1, R3 gate). When on, sphere-sphere
-  //! detection also tests the swept segment start->end from the frozen
-  //! snapshot: a pair whose centers pass within r1+r2 mid-substep emits a
-  //! TOI contact that rewinds the overshoot and kills the approach, so a
-  //! fast body stops at the wall instead of tunneling. Default OFF, like
-  //! every other solver staging flag: the discrete path is then textually
-  //! untouched and existing replays reproduce bit-identically.
-  //! Limits (documented, not silent): spheres only — capsule pairs stay
-  //! discrete; the rewind is stiff even under contact compliance; under
+  //! Speculative (swept) contacts (D1, R3 gate). When on, detection also
+  //! tests the swept segment start->end from the frozen snapshot: a pair
+  //! whose path passes within contact distance mid-substep emits a TOI
+  //! contact that rewinds the overshoot and kills the approach, so a
+  //! fast body stops at the wall instead of tunneling. Default ON:
+  //! tunneling is a correctness defect, and the suite verifies the flip
+  //! changes nothing except fast crossings (all other scenes are slow
+  //! enough that the swept test never fires). set(false) restores the
+  //! discrete path textually untouched, for replay archaeology and for
+  //! gates that pin the discrete behavior.
+  //! Limits (documented, not silent): capsule TOI refines at fixed end
+  //! orientations (exact for non-spinning pairs); the rewind is stiff
+  //! even under contact compliance; under
   //! velocity-from-position the derived velocities include the TOI landing
   //! by construction. Speculative contacts carry penetration 0, so they
   //! never form island edges (a touched island stays awake — conservative).
@@ -1915,7 +1919,7 @@ class PhysicsWorld final {
   std::uint64_t determinism_violations_{0};  //!< Mismatches seen while on.
   float restitution_threshold_{0.0f};   //!< Bounce cutoff speed, 0 = always.
   float sleep_threshold_{0.0f};         //!< Island sleep speed, 0 = never.
-  bool speculative_contacts_{false};    //!< Swept TOI contacts, 0 = discrete.
+  bool speculative_contacts_{true};     //!< Swept TOI contacts, 1 = on.
   //! Minimum penetration for a contact to join islands. Dust is ~1e-8,
   //! genuine rest ~1e-4; see the build_islands comment.
   static constexpr float kSleepEdgeMinPenetration = 1e-5F;

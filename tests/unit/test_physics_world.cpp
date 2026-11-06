@@ -922,7 +922,8 @@ TEST(PhysicsWorld, FastCapsuleTunnelsOnSomePhases) {
   };
   auto run_phase = [](int p, bool speculative) {
     PhysicsWorld w(/*gravity=*/0.0f);
-    if (speculative) w.set_speculative_contacts(true);
+    // Explicit both ways: the suite must not depend on the default.
+    w.set_speculative_contacts(speculative);
     PhysicsBody wall;
     wall.position[0] = 0.0f;
     wall.position[1] = 5.0f;
@@ -1029,7 +1030,8 @@ TEST(PhysicsWorld, SpeculativeContactsStopFastBodyCrossing) {
   };
   auto run_phase = [](int p, bool speculative) {
     PhysicsWorld w(/*gravity=*/0.0f);
-    if (speculative) w.set_speculative_contacts(true);
+    // Explicit both ways: the suite must not depend on the default.
+    w.set_speculative_contacts(speculative);
     PhysicsBody wall;
     wall.position[0] = 0.0f;
     wall.position[1] = 5.0f;  // well clear of the y = 0 plane

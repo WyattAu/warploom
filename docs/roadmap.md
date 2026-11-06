@@ -407,9 +407,11 @@ declares a slot 3.
       single pass). Speculative contacts landed loop52 as an opt-in
       (`set_speculative_contacts`, spheres only): R3 gate now 0/12 cross
       with per-phase contact telemetry and swept-grid/all-pairs agreement
-      at 200/600/1200.Remains: default-on, compliant speculative rewind. Capsule sweep landed
-loop57 (bound trigger + 3-Newton surface refinement; gate 0/12 with
-sphere-twin agreement, sabotage-validated).
+      at 200/600/1200.Remains: compliant speculative rewind. Capsule sweep landed loop57
+(bound trigger + 3-Newton surface refinement; gate 0/12 with
+sphere-twin agreement, sabotage-validated); default-on graduated
+loop58 (tunneling is a correctness defect; suite proved only fast
+crossings change, so no fingerprint moved).
 
       **Measured blocker for the broadphase.** A conservative uniform grid was
       written, verified result-preserving at N=1000 (fingerprint identical,

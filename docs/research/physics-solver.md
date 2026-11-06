@@ -130,6 +130,19 @@ gate still passes — the sabotage is surgical). Limits: end-orientation
 approximation for spinning pairs; non-converged grazes miss one step
 and retry (delays rather than tunnels).
 
+**Default-on graduation (loop58).** The flag now defaults on: tunneling
+is a correctness defect, and the flip was measured before it was made.
+Trial flip first: the entire physics suite passed unchanged except the
+two gates' off-mode pins — and those failed only because the test
+helpers relied on the default (`if (speculative) set(true)`), not
+because any simulated outcome moved. Every other scene in the suite is
+slow enough that the swept test never fires, so no fingerprint moved.
+The helpers now set the flag explicitly both ways (the suite must not
+depend on the default), and `set(false)` restores the discrete path
+for replay archaeology. blast radius beyond the suite: none measured
+— full CPU suite 545/545, asan-ubsan physics+session 29/29, headless
+live `all` 186/186 (including the bit-identical session replay).
+
 ## R4. Islands and sleeping (Jolt's answer to our "no sleep" gap)
 
 **Source.** Jolt Physics architecture docs (jrouwe.github.io/JoltPhysics):
