@@ -221,7 +221,13 @@ Two honest caveats on the ray tracing:
   13:45) against the rebuilt render .so (new tracer layout) -- a
   shared-lib ODR segfault at PT entry, misread as VRAM pressure.
   Rebuilt everything, re-ran, green. A binary that predates the headers
-  is evidence of nothing (second instance of the AGENTS.md lesson). App-scene coverage is no
+  is evidence of nothing (second instance of the AGENTS.md lesson). Third
+  instance, loop65: loop63's live `all` 186/186 ran on headless hosts
+  linked before the loop62 header change (only the unit-test target had
+  been rebuilt). The count stands — the phys scenes never touch the new
+  branches — but the new code never executed over the wire, so loop65
+  is a full default rebuild plus a fresh-host re-proof, green.
+  App-scene coverage is no
   longer a gap: `setup_path_tracing` walks `scene.objects` and uploads one
   mesh per category (cube, ground, each mannequin import, each city part,
   merged sponza, all nameable by `mesh_index`), falling back to the cube
