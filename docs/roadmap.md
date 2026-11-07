@@ -1082,7 +1082,16 @@ declares a slot 3.
       presents — the NVIDIA driver does Wayland WSI here) and surface
       capabilities with 0 validation diagnostics; skips with a stated
       reason where there is no compositor. The viewport's Wayland backend
-      (swapchain presentation + input) remains the second half.
+      landed in loop69 as a creation+present slice (no seat input):
+      `WARPLOOM_WAYLAND=1` builds the xdg_toplevel window (vendored
+      stable xdg-shell XML, build-time scanner generation, viewport-only),
+      routes configure to the existing `apply_resize`, and presents
+      through the unchanged swapchain/renderer. Proven live against
+      kwin_wayland: 8/8 frame captures byte-identical with the XCB
+      backend at the same extent, validation-diagnostic parity (10
+      pre-existing timestamp warnings on both, zero new), WAYLAND_DEBUG
+      shows the full configure handshake with zero protocol errors.
+      Seat input (keyboard/pointer parity) is the loop70 slice.
 - [x] **E7 estate-shared C++ gates** — DONE (warploom side; the kit
       itself lives in the estate repo). The estate runs one reusable workflow
       per language (rust-kit, go-kit, haskell-kit, node-ci, python-kit); C++

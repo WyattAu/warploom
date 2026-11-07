@@ -26,6 +26,57 @@ pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb)
 target_link_libraries(omnicpp_viewport PRIVATE PkgConfig::XCB)
 target_compile_definitions(omnicpp_viewport PRIVATE VK_USE_PLATFORM_XCB_KHR=1)
 
+# Wayland backend (loop69, E6): xdg-shell client bindings are generated at
+# build time from the vendored stable XML (see wayland-protocol/README.md)
+# with wayland-scanner, viewport-only. Absent scanner/client lib degrades
+# gracefully: the viewport stays XCB-only on that machine.
+find_program(WAYLAND_SCANNER wayland-scanner)
+if(WAYLAND_SCANNER)
+    pkg_check_modules(WAYLAND_CLIENT QUIET IMPORTED_TARGET wayland-client)
+endif()
+if(WAYLAND_SCANNER AND WAYLAND_CLIENT_FOUND)
+    set(WAYLAND_PROTOCOL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/wayland-protocol)
+    set(WAYLAND_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/wayland-gen)
+    file(MAKE_DIRECTORY ${WAYLAND_GEN_DIR})
+    add_custom_command(
+        OUTPUT ${WAYLAND_GEN_DIR}/xdg-shell-client-protocol.h
+        COMMAND ${WAYLAND_SCANNER} client-header
+            ${WAYLAND_PROTOCOL_DIR}/xdg-shell.xml
+            ${WAYLAND_GEN_DIR}/xdg-shell-client-protocol.h
+        DEPENDS ${WAYLAND_PROTOCOL_DIR}/xdg-shell.xml
+        COMMENT "Generating xdg-shell client header")
+    add_custom_command(
+        OUTPUT ${WAYLAND_GEN_DIR}/xdg-shell-protocol.cpp
+        COMMAND ${WAYLAND_SCANNER} private-code
+            ${WAYLAND_PROTOCOL_DIR}/xdg-shell.xml
+            ${WAYLAND_GEN_DIR}/xdg-shell-protocol.cpp
+        DEPENDS ${WAYLAND_PROTOCOL_DIR}/xdg-shell.xml
+        COMMENT "Generating xdg-shell protocol code")
+    # The header has no TU depending on it explicitly (it is only
+    # #included), so anchor both outputs to a target the viewport waits
+    # on — otherwise main.cpp can compile before the header exists.
+    add_custom_target(wayland_xdg_shell_gen DEPENDS
+        ${WAYLAND_GEN_DIR}/xdg-shell-client-protocol.h
+        ${WAYLAND_GEN_DIR}/xdg-shell-protocol.cpp)
+    add_dependencies(omnicpp_viewport wayland_xdg_shell_gen)
+    # Scanner output is C: in C++ its namespace-scope consts get internal
+    # linkage, go unreferenced, and are never emitted — leaving main.cpp's
+    # extern references dangling at link time (measured). The project is
+    # CXX-only, so enable C for this generated file alone.
+    enable_language(C)
+    set_source_files_properties(${WAYLAND_GEN_DIR}/xdg-shell-protocol.cpp
+        PROPERTIES LANGUAGE C)
+    target_sources(omnicpp_viewport PRIVATE
+        ${WAYLAND_GEN_DIR}/xdg-shell-protocol.cpp)
+    # SYSTEM: scanner output is third-party code (old-style casts
+    # throughout); same treatment as the gtest headers.
+    target_include_directories(omnicpp_viewport SYSTEM PRIVATE ${WAYLAND_GEN_DIR})
+    target_link_libraries(omnicpp_viewport PRIVATE PkgConfig::WAYLAND_CLIENT)
+    target_compile_definitions(omnicpp_viewport PRIVATE VK_USE_PLATFORM_WAYLAND_KHR=1)
+else()
+    message(STATUS "warploom-viewport: Wayland backend disabled (need wayland-scanner + wayland-client)")
+endif()
+
 # Shaders: the app depends on the same root-scope target the tests use, and
 # receives its output directory as a compile definition. This is what
 # removed the "build it, set WARPLOOM_SHADER_DIR by hand, hope it works"

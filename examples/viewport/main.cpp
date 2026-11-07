@@ -47,6 +47,10 @@
 
 #include <xcb/xcb.h>
 #include <vulkan/vulkan.h>
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+#include <wayland-client.h>
+#include "xdg-shell-client-protocol.h"
+#endif
 
 #include "warploom/asset/gltf_animation.hpp"
 #include "warploom/asset/gltf_importer.hpp"
@@ -946,6 +950,21 @@ struct ViewportApp {
   // XCB window.
   xcb_connection_t* connection{nullptr};
   xcb_window_t window{0};
+  // Wayland window (loop69, E6 second half starts here). Only the
+  // creation/present half: no wl_seat, no input — interactive use stays
+  // on XCB until the seat slice. Selected at runtime by WARPLOOM_WAYLAND.
+  bool use_wayland{false};
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+  wl_display* wayland_display{nullptr};
+  wl_registry* wayland_registry{nullptr};
+  wl_compositor* wayland_compositor{nullptr};
+  xdg_wm_base* wayland_shell{nullptr};
+  wl_surface* wayland_surface{nullptr};
+  xdg_surface* wayland_xdg_surface{nullptr};
+  xdg_toplevel* wayland_toplevel{nullptr};
+  bool wayland_configured{false};
+  bool wayland_should_close{false};
+#endif
   xcb_atom_t wm_protocols{0};
   xcb_atom_t wm_delete_window{0};
   //! _NET_WM_PID atom, interned so the window can be attributed to this
@@ -1812,6 +1831,144 @@ bool setup_wm_delete_protocol(ViewportApp& app) {
   return app.wm_protocols != 0 && app.wm_delete_window != 0;
 }
 
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+// Wayland window (loop69). Mirrors the XCB setup above: connect, bind the
+// globals, build the xdg toplevel, wait for the first configure. No seat:
+// keyboard/pointer stay XCB-only until the seat slice (loop70).
+namespace {
+struct WaylandWindowGlobals {
+  wl_compositor* compositor{nullptr};
+  xdg_wm_base* shell{nullptr};
+};
+void wayland_window_registry_global(void* data, wl_registry* registry,
+                                    std::uint32_t name, const char* interface,
+                                    std::uint32_t version) {
+  auto* globals = static_cast<WaylandWindowGlobals*>(data);
+  if (std::strcmp(interface, wl_compositor_interface.name) == 0) {
+    globals->compositor = static_cast<wl_compositor*>(
+        wl_registry_bind(registry, name, &wl_compositor_interface, 1));
+  } else if (std::strcmp(interface, xdg_wm_base_interface.name) == 0) {
+    globals->shell = static_cast<xdg_wm_base*>(
+        wl_registry_bind(registry, name, &xdg_wm_base_interface, 1));
+  }
+  (void)version;
+}
+void wayland_window_registry_remove(void* data, wl_registry* registry,
+                                    std::uint32_t name) {
+  (void)data;
+  (void)registry;
+  (void)name;
+}
+const wl_registry_listener kWaylandWindowRegistryListener = {
+    wayland_window_registry_global, wayland_window_registry_remove};
+void wayland_shell_ping(void* data, xdg_wm_base* shell, std::uint32_t serial) {
+  (void)data;
+  // Mandatory: a client that does not pong is disconnected by the compositor.
+  xdg_wm_base_pong(shell, serial);
+}
+const xdg_wm_base_listener kWaylandShellListener = {wayland_shell_ping};
+void wayland_xdg_surface_configure(void* data, xdg_surface* xdg_surface,
+                                   std::uint32_t serial) {
+  auto* app = static_cast<ViewportApp*>(data);
+  xdg_surface_ack_configure(xdg_surface, serial);
+  app->wayland_configured = true;
+}
+const xdg_surface_listener kWaylandXdgSurfaceListener = {
+    wayland_xdg_surface_configure};
+void wayland_toplevel_configure(void* data, xdg_toplevel* toplevel,
+                                std::int32_t width, std::int32_t height,
+                                wl_array* states) {
+  auto* app = static_cast<ViewportApp*>(data);
+  (void)toplevel;
+  (void)states;
+  // Zero means the compositor leaves the choice to us: keep the extent
+  // the swapchain was built with (kWidth/kHeight) instead of resizing
+  // to nothing.
+  if (width > 0 && height > 0 &&
+      (static_cast<std::uint32_t>(width) != app->width ||
+       static_cast<std::uint32_t>(height) != app->height)) {
+    app->resize_pending = true;
+    app->pending_width = static_cast<std::uint32_t>(width);
+    app->pending_height = static_cast<std::uint32_t>(height);
+  }
+}
+void wayland_toplevel_close(void* data, xdg_toplevel* toplevel) {
+  auto* app = static_cast<ViewportApp*>(data);
+  (void)toplevel;
+  app->wayland_should_close = true;
+}
+const xdg_toplevel_listener kWaylandToplevelListener = {
+    wayland_toplevel_configure, wayland_toplevel_close, nullptr, nullptr};
+}  // namespace
+
+bool setup_wayland_window(ViewportApp& app) {
+  const char* display_name = std::getenv("WAYLAND_DISPLAY");
+  app.wayland_display = wl_display_connect(display_name);
+  if (!app.wayland_display) {
+    std::fprintf(stderr, "viewport: cannot connect to the Wayland display\n");
+    return false;
+  }
+  WaylandWindowGlobals globals;
+  app.wayland_registry = wl_display_get_registry(app.wayland_display);
+  wl_registry_add_listener(app.wayland_registry,
+                           &kWaylandWindowRegistryListener, &globals);
+  wl_display_roundtrip(app.wayland_display);
+  if (!globals.compositor || !globals.shell) {
+    std::fprintf(stderr,
+                 "viewport: compositor lacks wl_compositor or xdg_wm_base\n");
+    return false;
+  }
+  app.wayland_compositor = globals.compositor;
+  app.wayland_shell = globals.shell;
+  xdg_wm_base_add_listener(app.wayland_shell, &kWaylandShellListener, &app);
+  app.wayland_surface =
+      wl_compositor_create_surface(app.wayland_compositor);
+  if (!app.wayland_surface) {
+    std::fprintf(stderr, "viewport: wl_surface creation failed\n");
+    return false;
+  }
+  app.wayland_xdg_surface = xdg_wm_base_get_xdg_surface(
+      app.wayland_shell, app.wayland_surface);
+  if (!app.wayland_xdg_surface) {
+    std::fprintf(stderr, "viewport: xdg_surface creation failed\n");
+    return false;
+  }
+  xdg_surface_add_listener(app.wayland_xdg_surface,
+                           &kWaylandXdgSurfaceListener, &app);
+  app.wayland_toplevel =
+      xdg_surface_get_toplevel(app.wayland_xdg_surface);
+  if (!app.wayland_toplevel) {
+    std::fprintf(stderr, "viewport: xdg_toplevel creation failed\n");
+    return false;
+  }
+  xdg_toplevel_add_listener(app.wayland_toplevel, &kWaylandToplevelListener,
+                            &app);
+  // Attribution, the Wayland counterpart of _NET_WM_PID: without an app_id
+  // the compositor cannot group or name this window.
+  xdg_toplevel_set_app_id(app.wayland_toplevel, "warploom_viewport");
+  xdg_toplevel_set_title(app.wayland_toplevel, "Warploom Viewport");
+  wl_surface_commit(app.wayland_surface);
+  // The compositor answers the initial commit with a configure; without it
+  // there is no agreed size and no mapped window. Round-trips deliver it.
+  for (int i = 0; i < 100 && !app.wayland_configured; ++i) {
+    wl_display_roundtrip(app.wayland_display);
+  }
+  if (!app.wayland_configured) {
+    std::fprintf(stderr, "viewport: no initial xdg configure received\n");
+    return false;
+  }
+  wl_surface_commit(app.wayland_surface);
+  return true;
+}
+#else
+bool setup_wayland_window(ViewportApp& app) {
+  (void)app;
+  std::fprintf(stderr,
+               "viewport: Wayland requested but not enabled in this build\n");
+  return false;
+}
+#endif
+
 //! Poll the event queue; returns false when the window should close.
 //! Recreate every extent-sized resource for a new framebuffer size.
 //!
@@ -2038,6 +2195,17 @@ bool setup_wm_delete_protocol(ViewportApp& app) {
 }
 
 bool poll_events(ViewportApp& app) {
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+  if (app.use_wayland) {
+    // No seat input on the Wayland path yet (loop70): dispatch compositor
+    // events (configure/close) and report the close flag. The deterministic
+    // control socket + scripted input drive the run, same as headless.
+    if (!app.wayland_display) return false;
+    if (wl_display_dispatch_pending(app.wayland_display) < 0) return false;
+    wl_display_flush(app.wayland_display);
+    return !app.wayland_should_close;
+  }
+#endif
   while (xcb_generic_event_t* event =
              xcb_poll_for_event(app.connection)) {
     const std::uint8_t type = event->response_type & 0x7f;
@@ -6894,8 +7062,13 @@ bool ViewportApp::initialize() {
       sun_direction = {x / len, y / len, z / len};
     }
   }
-  if (!setup_window(*this)) return false;
-  setup_wm_delete_protocol(*this);
+  use_wayland = warploom_env("WARPLOOM_WAYLAND", "OMNICPP_WAYLAND") != nullptr;
+  if (use_wayland) {
+    if (!setup_wayland_window(*this)) return false;
+  } else {
+    if (!setup_window(*this)) return false;
+    setup_wm_delete_protocol(*this);
+  }
 
   if (!context.initialize("OmniCppViewport", false).is_ok()) {
     std::fprintf(stderr, "viewport: Vulkan context initialization failed\n");
@@ -6903,8 +7076,14 @@ bool ViewportApp::initialize() {
   }
 
   omnicpp::render::SurfaceCreateInfo surface_info;
-  surface_info.display = connection;
-  surface_info.window = reinterpret_cast<void*>(static_cast<std::uintptr_t>(window));
+  if (use_wayland) {
+    surface_info.platform = omnicpp::render::SurfacePlatform::Wayland;
+    surface_info.display = wayland_display;
+    surface_info.window = wayland_surface;
+  } else {
+    surface_info.display = connection;
+    surface_info.window = reinterpret_cast<void*>(static_cast<std::uintptr_t>(window));
+  }
   surface_info.width = kWidth;
   surface_info.height = kHeight;
   if (!omnicpp::render::create_platform_surface(context.instance(),
@@ -7978,6 +8157,15 @@ void ViewportApp::shutdown() {
     xcb_destroy_window(connection, window);
     xcb_disconnect(connection);
   }
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+  if (wayland_toplevel) xdg_toplevel_destroy(wayland_toplevel);
+  if (wayland_xdg_surface) xdg_surface_destroy(wayland_xdg_surface);
+  if (wayland_surface) wl_surface_destroy(wayland_surface);
+  if (wayland_shell) xdg_wm_base_destroy(wayland_shell);
+  if (wayland_registry) wl_registry_destroy(wayland_registry);
+  // wl_compositor is a registry global owned by the display connection.
+  if (wayland_display) wl_display_disconnect(wayland_display);
+#endif
 }
 
 int main() {
