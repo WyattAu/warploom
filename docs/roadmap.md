@@ -786,8 +786,22 @@ declares a slot 3.
       command through the same undoable path OMNICPP_DOC uses. The click
       handler itself is XCB-gated like all viewport input (stated limit);
       everything else on the path is session- and engine-tested.
-      Remaining in D3: scene management (no spec or exit criteria yet —
-      not started, not claimed). G2/G4/G5 are landed. Editor UI: one
+      Remaining in D3: scene management — SPEC (loop74, not started, not
+      claimed). Grounded in what the session already does: SaveDocument /
+      LoadDocument exist with history-clearing load boundaries and a loud
+      load-during-capture rejection, but the session tracks neither a
+      current path nor dirtiness, and there is no new-scene command. So:
+      (1) the session tracks `current_path` (empty = untitled), set by
+      successful load AND successful save; (2) a dirty flag, set by any
+      mutating command, cleared by load/save/new, queryable from the
+      session; (3) a `new_document` command — empty default document,
+      same boundary semantics as load (history clears, rejected during
+      active capture); (4) `save_document` with an empty path saves to
+      the current path and fails loudly when untitled. Exit criteria (all
+      CPU-testable, no viewport): dirty set/cleared transitions,
+      current-path tracking across load/save, new-document boundary +
+      capture rejection, save-to-current round-trip byte-identical.
+      G2/G4/G5 are landed. Editor UI: one
       value row per output pin ("name = value") after the param rows, so a
       multi-output node no longer overdraws into one line — verified by
       NodeEditorValues.ReadoutsAppearAfterEvaluate /
@@ -805,7 +819,8 @@ declares a slot 3.
       counts 1..9, 7 rejection shapes), a missing .so or bad counts skips
       that entry logged-not-fatal, duplicates are skipped, and doc-load
       registers the same type so persisted script nodes parse. Remaining in
-      D3: G2 editor UI wiring, G5 asset browser, scene management.
+      D3: scene management only (G2 UI wiring and G5 both landed above) —
+      spec with exit criteria now recorded at the head of this paragraph.
 
 ## Phase E — release
 
