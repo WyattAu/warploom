@@ -806,6 +806,12 @@ declares a slot 3.
       same byte-deterministic serialization the scrubber verifies — undo
       back to saved bytes reads clean with no per-command bookkeeping to
       drift; 11 SceneManagement tests, sabotage-checked both directions).
+      Loop76 closed the cross-preset half (same standing rule as loop73):
+      asan-ubsan 0 warnings / 657 passed / ctest 6/6 / 0 diagnostics, tsan
+      0 warnings / 657 passed / 0 races, headless-debug-clang 0 warnings /
+      62-test subset (SceneManagement + NodeDisk + input + physics +
+      determinism + session) passed, and the viewport recompiled clean
+      with the reset_from(path) call-site change.
       The one red test it turned up was a stale contract, not a
       regression: NodeDisk asserted a pathless save always fails, which
       the spec deliberately replaces — the test now pins the rejection
