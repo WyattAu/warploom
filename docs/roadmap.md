@@ -605,8 +605,8 @@ declares a slot 3.
       is future shapes, which is new work by definition, not debt.
 - [x] **D2 timeline + tracks** — DONE (loop80 closure audit; D2 never had
 a parent box, only D2a/D2b children, while the text inside D2b carried the
-open legs — so closure was claimed in prose at line ~2211 and never
-tickable). Re-verified against this tree: `evaluate_at` +
+open legs — so closure was claimed in prose (the loop38 paragraph,
+now at the end of Phase D) and never tickable). Re-verified against this tree: `evaluate_at` +
 `tick_timeline_at` in document/session, `frac` key at the protocol
 boundary and in both hosts, T5a session-level + T5c render tracks +
 T5d rejection, `proof_cnc` defined AND wired into `all` (live_proof.py),
@@ -1132,7 +1132,16 @@ leg (224/224) stays VRAM-gated like all wire proofs, stated not hidden.
       pipeline (+0.06) fails a CORRECT build here: assert the signal the
       pipeline can actually carry, the R1b noise-floor lesson again.
 - [ ] **E3 hardware CI runner** — every RT test skips on lavapipe, so the
-      best subsystem has the least regression protection.
+      best subsystem has the least regression protection. Loop81 measured
+      the complementary failure: with the trainer holding ~5.5/6.1 GiB,
+      the default unit binary goes 774/779 with 5 GPU-allocation failures
+      ("transient store allocation failed"), and the failing SET varies
+      run to run (HiZ pair once, DynamicRendering once, five together
+      once; a retry of the single failure passed) — the signature of
+      resource contention, not a deterministic fault, and zero code
+      changed under any of them since the green loop77 run. A shared
+      card makes even the CPU-suite host flaky; the runner E3 wants is
+      exactly the fix.
 - [x] **E4 warning debt, then `-Werror`** — DONE. All four presets build
       warning-free on BOTH clang and GCC (the GCC gap held the only
       memory-safety findings: dangling-pointer and null-dereference classes),
