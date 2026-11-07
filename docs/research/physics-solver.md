@@ -108,8 +108,9 @@ since loop61 — every other fast body is a capsule, so the bound-keyed
 gathering and the segment TOI path are covered at scale, not just the
 gate's two-body case). Gate sabotage-validated
 (TOI suppressed fails the gate; revert re-greens). Limits, documented in
-code: spheres only, stiff rewind under compliance, penetration 0 so no
-island edges (conservative).
+code: spheres only (capsules land two paragraphs down), penetration 0
+so no island edges (conservative). The stiff-rewind limit is gone as
+of loop63 above.
 
 **Capsule follow-up (loop55 gate, loop57 fix).** `FastCapsuleTunnelsOnSomePhases`
 ports the R3 protocol with the shot as an upright capsule (r=0.1,
@@ -132,6 +133,25 @@ sabotage-validated (capsule TOI suppressed fails 60 assertions; sphere
 gate still passes — the sabotage is surgical). Limits: end-orientation
 approximation for spinning pairs; non-converged grazes miss one step
 and retry (delays rather than tunnels).
+
+**Compliant rewind (loop63).** The pass-0 rewind was stiff even under
+contact compliance — a fast body hard-stopped at the TOI surface while
+slow contacts in the same scene sank to the compliant equilibrium.
+It now carries the first-iteration XPBD factor
+`inv_eff/(inv_eff + atilde)` (Trial 638's exact-XPBD scaling, one shared
+site for spheres and capsules): a soft wall lets the body sink partway
+past TOI, and the residual overlap is an ordinary discrete contact from
+the next step on. The default path is untouched by construction (the
+branch keeps atilde = 0 on the old code), and the suite confirms it:
+the R3/capsule gates run at compliance 0 and never move. Pinned by
+`CompliantRewindSinksPastToi`: a single-step zero-g shot lands at TOI
+stiff vs at the predicted sunk depth compliant (1e-4 tolerance, effect
+0.059 — two orders of separation), plus a 120-step no-cross leg.
+Sabotage (rw forced to 1) fails the new test and moves nothing else.
+Verified: CPU-filtered suite 536/536, physics/session/command/replay
+106/106, asan-ubsan physics 30/30, headless live `all` 186/186,
+ctest 6/6. This closes the last structural D1 solver item: compliant
+contacts, speculation, sleep, and now compliant speculation.
 
 **Default-on graduation (loop58).** The flag now defaults on: tunneling
 is a correctness defect, and the flip was measured before it was made.

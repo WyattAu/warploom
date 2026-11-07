@@ -407,7 +407,13 @@ declares a slot 3.
       single pass). Speculative contacts landed loop52 as an opt-in
       (`set_speculative_contacts`, spheres only): R3 gate now 0/12 cross
       with per-phase contact telemetry and swept-grid/all-pairs agreement
-      at 200/600/1200. Remains: compliant speculative rewind. Capsule sweep
+      at 200/600/1200. Compliant speculative rewind landed loop63
+      (pass-0 overshoot carries the first-iteration XPBD factor
+      inv_eff/(inv_eff + atilde): a soft wall lets a fast body sink
+      partway past TOI instead of hard-stopping; stiff path untouched by
+      construction). Remains on the solver side: nothing — joints,
+      compliance, speculation, sleep all landed; the box stays open for
+      extraction and any future shapes. Capsule sweep
       landed loop57 (bound trigger + 3-Newton surface refinement; gate 0/12
       with sphere-twin agreement, sabotage-validated); default-on graduated
       loop58 (tunneling is a correctness defect; suite proved only fast

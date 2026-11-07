@@ -1218,3 +1218,84 @@ TEST(PhysicsWorld, FastImpactWakesSleepingStack) {
   // cannot latch: island_hit_ is reassigned from scratch every step, so a
   // wake lasts exactly as long as a violent contact does.
 }
+
+TEST(PhysicsWorld, CompliantRewindSinksPastToi) {
+  // Loop63: the pass-0 speculative rewind was stiff even under contact
+  // compliance — a fast body hard-stopped at the TOI surface while every
+  // slow contact in the same scene sank to the compliant equilibrium.
+  // The rewind now carries the first-iteration XPBD factor
+  // inv_eff/(inv_eff + atilde), so a soft wall lets the body sink
+  // partway past TOI; the residual overlap is an ordinary discrete
+  // contact from the next step on.
+  //
+  // Single-step pin, zero gravity (exactly 1D, no gravity drop): the
+  // ball starts outside, ends inside after one integration, so exactly
+  // one speculative contact fires and nothing else moves positions —
+  // the post-step distance IS the rewind landing, up to TOI-root error.
+  constexpr float kR = 1.0f;    // static obstacle radius
+  constexpr float kR2 = 0.1f;   // projectile radius
+  constexpr float kSurf = kR + kR2;
+  constexpr float kD0 = 3.0f;       // start distance from wall center
+  constexpr float kTravel = 2.0f;   // one-step travel: crosses TOI by 0.1
+  constexpr float kSpeed = kTravel / kDt;  // 240 m/s at dt = 1/120
+  constexpr float kAlpha = 1.0e-4f;  // the suite's moderate compliance
+  auto run_once = [](float alpha) {
+    PhysicsWorld w(/*gravity=*/0.0f);
+    w.set_speculative_contacts(true);
+    w.set_contact_compliance(alpha);
+    PhysicsBody wall;
+    wall.position[1] = 5.0f;  // clear of the y = 0 plane
+    wall.radius = kR;
+    wall.inverse_mass = 0.0f;
+    wall.restitution = 0.0f;  // approach killed: positions pin the rewind
+    (void)w.add_body(wall);
+    PhysicsBody shot;
+    shot.position[0] = -kD0;
+    shot.position[1] = 5.0f;
+    shot.radius = kR2;
+    shot.restitution = 0.0f;
+    shot.velocity[0] = kSpeed;
+    (void)w.add_body(shot);
+    w.step(kDt);
+    return w.body(1).position[0];
+  };
+  // Stiff (alpha = 0): lands at the TOI surface. Tolerance 1e-4 is three
+  // orders above TOI-root error and two below the compliant effect.
+  const float stiff_x = run_once(0.0f);
+  EXPECT_NEAR(stiff_x, -kSurf, 1e-4f) << "stiff rewind missed TOI";
+  // Compliant: the landing sinks (1 - scale) of the overshoot past TOI.
+  // The test mirrors the engine's float ops (integrate then scale) so the
+  // prediction is exact up to the TOI root, not up to a re-derivation.
+  const float h_sq = kDt * kDt;
+  const float atilde = kAlpha / h_sq;
+  const float scale = 1.0f / (1.0f + atilde);
+  const float d1 = kD0 - kTravel;  // end distance before rewind (== 1.0)
+  const float expect_x = -(d1 + scale * (kSurf - d1));
+  const float soft_x = run_once(kAlpha);
+  EXPECT_NEAR(soft_x, expect_x, 1e-4f)
+      << "compliant rewind sank " << (soft_x - expect_x) << " off predict";
+  // Margin pin (sabotage direction): the compliant landing sits 0.059
+  // inside the stiff one (both measured from -x) — forcing rw = 1 lands
+  // at the surface and fails this by two orders over tolerance.
+  EXPECT_GT(soft_x, stiff_x + 0.03f) << "rewind stayed stiff under compliance";
+  // The sink is not a tunnel: over 120 further steps the ball never
+  // crosses (zero gravity, approach killed, discrete path owns it next).
+  PhysicsWorld w(/*gravity=*/0.0f);
+  w.set_speculative_contacts(true);
+  w.set_contact_compliance(kAlpha);
+  PhysicsBody wall;
+  wall.position[1] = 5.0f;
+  wall.radius = kR;
+  wall.inverse_mass = 0.0f;
+  wall.restitution = 0.0f;
+  (void)w.add_body(wall);
+  PhysicsBody shot;
+  shot.position[0] = -kD0;
+  shot.position[1] = 5.0f;
+  shot.radius = kR2;
+  shot.restitution = 0.0f;
+  shot.velocity[0] = kSpeed;
+  (void)w.add_body(shot);
+  for (int i = 0; i < 120; ++i) w.step(kDt);
+  EXPECT_LT(w.body(1).position[0], -0.5f) << "compliant sink tunneled";
+}

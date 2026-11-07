@@ -207,8 +207,8 @@ class PhysicsWorld final {
   //! discrete path textually untouched, for replay archaeology and for
   //! gates that pin the discrete behavior.
   //! Limits (documented, not silent): capsule TOI refines at fixed end
-  //! orientations (exact for non-spinning pairs); the rewind is stiff
-  //! even under contact compliance; under
+  //! orientations (exact for non-spinning pairs); the rewind is
+  //! XPBD-scaled under contact compliance (stiff only at alpha = 0); under
   //! velocity-from-position the derived velocities include the TOI landing
   //! by construction. Speculative contacts carry penetration 0, so they
   //! never form island edges; waking a sleeper they hit is the sleep
@@ -600,15 +600,26 @@ class PhysicsWorld final {
             if (inv_eff <= 0.0f) continue;  // both pinned
             // W points from TOI to end (overshoot direction); the rewind
             // moves the pair back along it, so a takes +W and b takes -W
-            // (relative change -W, center-of-mass preserving).
+            // (relative change -W, center-of-mass preserving). Under
+            // contact compliance the rewind is XPBD-scaled, not stiff:
+            // first-iteration factor inv_eff/(inv_eff + atilde), the same
+            // single-iteration XPBD the generic correction applies below
+            // (Trial 638). A soft wall lets a fast body sink partway past
+            // TOI instead of hard-stopping it; the residual overlap is an
+            // ordinary discrete contact from the next step on. The branch
+            // keeps the default path textually the old code (atilde = 0
+            // never enters the scale), so stiff replays are untouched.
             const float fa = inv_a / inv_eff;
             const float fb = inv_b / inv_eff;
-            a.position[0] += solve.wx * fa;
-            a.position[1] += solve.wy * fa;
-            a.position[2] += solve.wz * fa;
-            b.position[0] -= solve.wx * fb;
-            b.position[1] -= solve.wy * fb;
-            b.position[2] -= solve.wz * fb;
+            const float rw = contact_atilde > 0.0f
+                                 ? inv_eff / (inv_eff + contact_atilde)
+                                 : 1.0f;
+            a.position[0] += solve.wx * rw * fa;
+            a.position[1] += solve.wy * rw * fa;
+            a.position[2] += solve.wz * rw * fa;
+            b.position[0] -= solve.wx * rw * fb;
+            b.position[1] -= solve.wy * rw * fb;
+            b.position[2] -= solve.wz * rw * fb;
           }
         }
         for (std::size_t ji = 0; ji < joints_.size(); ++ji) {
@@ -961,7 +972,8 @@ class PhysicsWorld final {
   //! build_islands contact veto. (wx, wy, wz) is the relative overshoot
   //! vector from
   //! the TOI configuration to the snapshot end configuration. Pass 0
-  //! rewinds it split by inverse mass (center-of-mass preserving; exact
+  //! rewinds it split by inverse mass (center-of-mass preserving, XPBD-
+  //! scaled under compliance; exact
   //! for a static obstacle or head-on equal masses); the impulse then
   //! kills the approach velocity exactly like a discrete contact.
   struct ContactSolve {
