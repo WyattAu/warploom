@@ -488,7 +488,12 @@ void EditorSession::tick_timeline_at(double frame_time, Easing easing) {
   }
 }
 
-EditorSession::EditorSession() {
+namespace {
+
+//! D3: the fresh-document recipe — what a new session starts with. Shared
+//! by the ctor and `new_document` so a new document is identical to a fresh
+//! session's document by construction, not by parallel maintenance.
+void seed_fresh_document(SceneDocument& doc) {
   // Seed the singleton environment object so camera/sun edits work on a
   // fresh session (matches the bridge's expectations).
   const auto* env_type = default_registry().find_by_name(kTypeEnvironment);
@@ -500,16 +505,25 @@ EditorSession::EditorSession() {
   for (const auto& desc : env_type->properties) {
     env.properties.emplace(desc.name, desc.default_value);
   }
-  doc_.objects.push_back(std::move(env));
-  doc_.next_object_id = kEnvironmentObjectId + 1;
+  doc.objects.push_back(std::move(env));
+  doc.next_object_id = kEnvironmentObjectId + 1;
   // The session owns the node-type registry: the same registered set the
   // node editor toolbar and document parser validate against. The unbound
   // "script" type rides along (G4 viewport wiring): a saved document may
   // name it, and the toolbar lists it, whether or not a module with the
   // requested name is loaded — an unknown module degrades to zero outputs
   // deterministically, never to a load failure.
-  register_builtin_node_types(doc_.node_graph);
-  register_script_node_type(doc_.node_graph);
+  register_builtin_node_types(doc.node_graph);
+  register_script_node_type(doc.node_graph);
+}
+
+}  // namespace
+
+EditorSession::EditorSession() {
+  seed_fresh_document(doc_);
+  // A fresh session is clean by definition: nothing differs from a file
+  // because no file is involved yet.
+  clean_hash_ = state_hash(doc_);
 }
 
 ::warploom::core::ControlReply EditorSession::on_control(
@@ -1018,19 +1032,28 @@ bool EditorSession::handle_edit(
       return true;
     }
     case CK::SaveDocument: {
-      if (command.text.empty()) {
+      // D3: an empty path saves to the current file (set by the last
+      // load or save). Untitled with no path is a loud failure, not a
+      // silent write to nowhere.
+      const std::string& target =
+          command.text.empty() ? current_path_ : command.text;
+      if (target.empty()) {
         reply.ok = false;
-        reply.error = "save_document needs \"path\"";
+        reply.error = "save_document needs \"path\" (no current file)";
         return true;
       }
       std::string error;
-      if (!doc_.save_to_file(command.text, error)) {
+      if (!doc_.save_to_file(target, error)) {
         reply.ok = false;
         reply.error = "save_document failed: " + error;
         return true;
       }
+      // A successful save IS the clean state (and establishes it when
+      // the path came on the command line).
+      current_path_ = target;
+      clean_hash_ = state_hash(doc_);
       reply.ok = true;
-      reply.detail = "saved " + command.text;
+      reply.detail = "saved " + target;
       return true;
     }
     case CK::LoadDocument: {
@@ -1077,8 +1100,41 @@ bool EditorSession::handle_edit(
       // document load has no checkpoint, so it clears.)
       physics_.clear_bodies();
       physics_bodies_.clear();
+      // D3: a successful load IS the clean state, and its path is what
+      // a bare `save_document` writes back to.
+      current_path_ = command.text;
+      clean_hash_ = state_hash(doc_);
       reply.ok = true;
       reply.detail = "loaded " + command.text;
+      return true;
+    }
+    case CK::NewDocument: {
+      // A wholesale document replace mid-capture is unrepresentable for
+      // the same reason a load is (see LoadDocument above): the loader
+      // replays from the opening checkpoint plus the command log, and a
+      // replace that neither checkpointed nor logged would silently fork
+      // the timeline. Reject loudly; stop capture first.
+      if (recorder_.active()) {
+        reply.ok = false;
+        reply.error =
+            "new_document during active capture forks the timeline; "
+            "stop capture first";
+        return true;
+      }
+      // Fresh by construction: the same recipe the ctor runs, so a new
+      // document is identical to a fresh session's document.
+      SceneDocument fresh;
+      seed_fresh_document(fresh);
+      reset_from(std::move(fresh));
+      // Same class of intent as a load (v1.19 comment above): bodies
+      // reference pre-replace object ids and must not simulate ghosts.
+      physics_.clear_bodies();
+      physics_bodies_.clear();
+      // reset_from already cleared the path (untitled) and the clean
+      // hash, so a bare `save_document` now fails loudly instead of
+      // writing to the previous file.
+      reply.ok = true;
+      reply.detail = "new document";
       return true;
     }
     case CK::ScrubStart: {

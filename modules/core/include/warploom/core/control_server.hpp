@@ -84,6 +84,10 @@ struct ControlCommand final {
     // v1.4: document persistence (M8) — path rides in `text`.
     SaveDocument,
     LoadDocument,
+    // v1.20: scene management (D3) — new empty document. No payload;
+    // same load-boundary semantics as LoadDocument (history clears,
+    // rejected during active capture).
+    NewDocument,
     // v1.5: graph -> scene bindings (M10).
     //   BindNodeProperty:   numbers[0] = node id, numbers[1] = object id,
     //                       text = out pin, text2 = property (axis

@@ -367,6 +367,17 @@ bool protocol_spawn(omnicpp::editor::EditorSession& session, double x,
 //! selection resets.
 TEST(NodeDisk, ProtocolSaveLoadRoundTripRestoresStateAndResetsSession) {
   ed::EditorSession session;
+  // D3 (v1.20): untitled sessions reject a pathless save loudly — the
+  // save-to-current rule only applies once a current file exists.
+  {
+    omnicpp::core::ControlCommand untitled;
+    untitled.kind = omnicpp::core::ControlCommand::Kind::SaveDocument;
+    const auto untitled_reply = session.on_control(untitled);
+    EXPECT_FALSE(untitled_reply.ok);
+    EXPECT_NE(untitled_reply.error.find("needs \"path\""),
+              std::string::npos)
+        << untitled_reply.error;
+  }
   ASSERT_TRUE(protocol_spawn(session, 1.0, 2.0, 3.0, 0.75));
   const std::uint64_t spawned_id = 2U;  // constructor seeds object 1
 
@@ -411,13 +422,17 @@ TEST(NodeDisk, ProtocolSaveLoadRoundTripRestoresStateAndResetsSession) {
   ASSERT_EQ(session.document().to_json(), session.document().to_json());
   ASSERT_EQ(session.document().objects.size(), 3U);
 
-  // Empty path is rejected before touching the filesystem.
+  // D3 (v1.20): with a current file set, an empty path saves back to it
+  // (the untitled rejection above is the only loud-failure shape left).
+  // This overwrites the file with the diverged document, so the load
+  // below restores the DIVERGED bytes — still a byte-exact restore of
+  // whatever the file holds, which is what the round-trip proves.
+  const std::string diverged_bytes = session.document().to_json();
   omnicpp::core::ControlCommand no_path;
   no_path.kind = omnicpp::core::ControlCommand::Kind::SaveDocument;
   reply = session.on_control(no_path);
-  EXPECT_FALSE(reply.ok);
-  EXPECT_NE(reply.error.find("needs \"path\""), std::string::npos)
-      << reply.error;
+  ASSERT_TRUE(reply.ok) << reply.error;
+  EXPECT_EQ(reply.detail, "saved " + path);
 
   // The real load: state returns to the save point...
   omnicpp::core::ControlCommand load;
@@ -425,8 +440,8 @@ TEST(NodeDisk, ProtocolSaveLoadRoundTripRestoresStateAndResetsSession) {
   load.text = path;
   reply = session.on_control(load);
   ASSERT_TRUE(reply.ok) << reply.error;
-  EXPECT_EQ(session.document().to_json(), saved_bytes);
-  EXPECT_EQ(session.document().objects.size(), 2U);
+  EXPECT_EQ(session.document().to_json(), diverged_bytes);
+  EXPECT_EQ(session.document().objects.size(), 3U);
   EXPECT_NE(session.document().find(spawned_id), nullptr);
   // ...selection reset (the load boundary)...
   EXPECT_EQ(session.selected_id(), 0U);

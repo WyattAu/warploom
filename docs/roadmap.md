@@ -801,7 +801,16 @@ declares a slot 3.
       CPU-testable, no viewport): dirty set/cleared transitions,
       current-path tracking across load/save, new-document boundary +
       capture rejection, save-to-current round-trip byte-identical.
-      G2/G4/G5 are landed. Editor UI: one
+      G2/G4/G5 are landed. Loop75 implemented the spec (v1.20
+      `new_document`, save-to-current, hash-derived `is_dirty` over the
+      same byte-deterministic serialization the scrubber verifies — undo
+      back to saved bytes reads clean with no per-command bookkeeping to
+      drift; 11 SceneManagement tests, sabotage-checked both directions).
+      The one red test it turned up was a stale contract, not a
+      regression: NodeDisk asserted a pathless save always fails, which
+      the spec deliberately replaces — the test now pins the rejection
+      while untitled and the save-to-current success after. Full battery
+      779 passed, ctest 6/6. Editor UI: one
       value row per output pin ("name = value") after the param rows, so a
       multi-output node no longer overdraws into one line — verified by
       NodeEditorValues.ReadoutsAppearAfterEvaluate /

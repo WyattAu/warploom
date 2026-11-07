@@ -72,17 +72,36 @@ class EditorSession final : public ::warploom::core::ControlHost {
   [[nodiscard]] const std::vector<PropertyBinding>& bindings() const noexcept {
     return bindings_;
   }
+  //! Scene management (D3): the path of the file this document was loaded
+  //! from or last saved to (empty = untitled: never loaded nor saved).
+  //! `save_document` with an empty path saves here.
+  [[nodiscard]] const std::string& current_path() const noexcept {
+    return current_path_;
+  }
+  //! True when the document differs from the last load/save/new state.
+  //! Hash-compared, not flag-maintained: `state_hash` runs over the same
+  //! byte-deterministic `to_json` the scrubber verifies, so undoing back
+  //! to the saved bytes reads clean and no per-command bookkeeping can
+  //! drift. Session-only state (bindings, physics bodies, clip arms) is
+  //! not serialized into the file, so it does not affect dirtiness.
+  [[nodiscard]] bool is_dirty() const noexcept {
+    return state_hash(doc_) != clean_hash_;
+  }
   //! Replaces the document wholesale (file load): the loaded document becomes
   //! authoritative and history is cleared (undo across a load boundary is
   //! meaningless). Bindings and selection reset; borrowed graph pointers
-  //! stay valid (the document object's address does not change).
-  void reset_from(SceneDocument&& loaded) {
+  //! stay valid (the document object's address does not change). The
+  //! document is clean afterwards by construction, and `path` (empty =
+  //! untitled) becomes the current path a bare `save_document` writes to.
+  void reset_from(SceneDocument&& loaded, const std::string& path = {}) {
     doc_ = std::move(loaded);
     stack_.clear();
     bindings_.clear();
     selected_id_ = 0;
     record_arms_.clear();  // G3: armed clip intent does not survive a replace
     playing_ = false;
+    current_path_ = path;
+    clean_hash_ = state_hash(doc_);
   }
   //! Runs the graph evaluation, then writes every binding's current pin
   //! value into its bound object property. Returns the number of bindings
@@ -311,6 +330,11 @@ class EditorSession final : public ::warploom::core::ControlHost {
       ::warploom::core::ControlReply& reply);
 
   SceneDocument doc_{};
+  //! D3 scene management: file this document came from / was saved to
+  //! (empty = untitled) and the hash of the last clean state. Dirtiness
+  //! is derived (see is_dirty), never stored, so it cannot drift.
+  std::string current_path_{};
+  std::uint64_t clean_hash_{0};
   //! C1/C2: the document's runtime projection, refreshed once per tick so
   //! every system downstream reads one store rather than the document.
   DocumentProjection projection_{};

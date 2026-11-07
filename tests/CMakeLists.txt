@@ -44,6 +44,7 @@ add_executable(warploom_unit_tests
     unit/test_ui_paint_golden.cpp
     unit/test_ui_gpu.cpp
     unit/test_editor_session.cpp
+    unit/test_scene_management.cpp
     unit/test_replay_scrubber.cpp
     unit/test_command_recorder.cpp
     unit/test_node_graph.cpp

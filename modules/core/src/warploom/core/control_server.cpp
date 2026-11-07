@@ -47,6 +47,8 @@ const std::vector<ControlCommand::KindName>& ControlCommand::kind_names() {
       {Kind::GetGraph, "get_graph"},
       {Kind::SaveDocument, "save_document"},
       {Kind::LoadDocument, "load_document"},
+      // v1.20 scene management (D3).
+      {Kind::NewDocument, "new_document"},
       // v1.5 graph->scene bindings (M10).
       {Kind::BindNodeProperty, "bind_node_property"},
       {Kind::UnbindNodeProperty, "unbind_node_property"},

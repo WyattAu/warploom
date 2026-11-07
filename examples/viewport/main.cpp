@@ -7572,7 +7572,9 @@ bool ViewportApp::initialize() {
       std::string err;
       if (omnicpp::editor::SceneDocument::load_from_file(doc_path, loaded,
                                                          err)) {
-        editor.reset_from(std::move(loaded));
+        // D3: the load path is the current file — a bare save_document
+        // writes back here instead of failing as untitled.
+        editor.reset_from(std::move(loaded), doc_path);
         // Re-borrow the graph (same document address, but stay explicit).
         node_graph = &session_document().node_graph;
         std::printf("viewport: loaded document %s (%zu nodes)\n",
