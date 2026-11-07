@@ -415,7 +415,10 @@ declares a slot 3.
       compliance, speculation, sleep all landed; the box stays open for
       extraction and any future shapes. Capsule sweep
       landed loop57 (bound trigger + 3-Newton surface refinement; gate 0/12
-      with sphere-twin agreement, sabotage-validated); default-on graduated
+      with sphere-twin agreement, sabotage-validated; loop67 retired the
+      end-orientation approximation — nlerp axes + 8-iteration spin
+      budget after a probe found silent tunneling at 30 rad/s tumble);
+      default-on graduated
       loop58 (tunneling is a correctness defect; suite proved only fast
       crossings change, so no fingerprint moved). Sleeping gained its missing
       half in loop62: a slow body with a fast contact now stays awake

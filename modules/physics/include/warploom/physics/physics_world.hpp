@@ -207,7 +207,8 @@ class PhysicsWorld final {
   //! discrete path textually untouched, for replay archaeology and for
   //! gates that pin the discrete behavior.
   //! Limits (documented, not silent): capsule TOI refines at fixed end
-  //! orientations (exact for non-spinning pairs); the rewind is
+  //! orientations (nlerp-interpolated for spinning pairs, exact
+  //! end-orientations otherwise); the rewind is
   //! XPBD-scaled under contact compliance (stiff only at alpha = 0); under
   //! velocity-from-position the derived velocities include the TOI landing
   //! by construction. Speculative contacts carry penetration 0, so they
@@ -1089,6 +1090,33 @@ class PhysicsWorld final {
     return true;
   }
 
+  //! Nlerp between capsule segment axes across a substep (loop67):
+  //! axis(s) for s in [0, 1] from the step-start axis a0 to the end axis
+  //! a1. Trig-free (no new libm calls on the tick path — the determinism
+  //! contract forbids platform sin/cos; sqrt is IEEE-exact and already
+  //! used throughout). Falls back to the end axis when start/end are
+  //! near-opposite (half-turn-per-step pathology — normalizing the
+  //! near-zero lerp would explode, and the caller's fdist check keeps
+  //! the miss honest). Pure algebra, deterministic float32 throughout.
+  static void interp_axis(float s, float a0x, float a0y, float a0z,
+                          float a1x, float a1y, float a1z, float& ox,
+                          float& oy, float& oz) noexcept {
+    const float dx = a0x + (a1x - a0x) * s;
+    const float dy = a0y + (a1y - a0y) * s;
+    const float dz = a0z + (a1z - a0z) * s;
+    const float d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 < 1e-12f) {
+      ox = a1x;
+      oy = a1y;
+      oz = a1z;
+      return;
+    }
+    const float inv = 1.0f / std::sqrt(d2);
+    ox = dx * inv;
+    oy = dy * inv;
+    oz = dz * inv;
+  }
+
   //! Shape-aware narrowphase on the frozen snapshot. Sphere-sphere is the
   //! historical computation exactly (same degenerate branch, same order);
   //! any pair involving a capsule reduces to sphere-vs-sphere at the closest
@@ -1275,23 +1303,47 @@ class PhysicsWorld final {
     // Capsule swept TOI (flag on). Bound-sphere entry on centers first
     // (conservative trigger: bound spheres contain the capsules, and the
     // grid already guarantees the pair was gathered), then Newton
-    // refinement on the true segment gap at fixed END orientations —
-    // rotation within a substep is ignored (exact for non-spinning pairs;
-    // documented approximation otherwise). Fixed 3 iterations:
-    // deterministic best-effort; a non-converged graze misses this step
-    // and is re-tested next step (delays rather than tunnels).
+    // refinement on the true segment gap with axes interpolated across
+    // the substep (loop67: nlerp from step-start to end orientations).
+    // Fixed end orientations were exact only for non-spinning pairs — a
+    // tumbling capsule refined against a fictional configuration, and
+    // Newton could miss a head-on pair entirely (measured: silent 3.3 m
+    // tunnel at 30 rad/s). Both-zero spin keeps the old path untouched:
+    // the working axes ARE the end axes, so non-spinning scenes are
+    // bit-identical. Fixed 3 iterations: deterministic best-effort; a
+    // non-converged graze misses this step and is re-tested next step
+    // (delays rather than tunnels).
     const float tc0x = (b.px - b.vx * h) - (a.px - a.vx * h);
     const float tc0y = (b.py - b.vy * h) - (a.py - a.vy * h);
     const float tc0z = (b.pz - b.vz * h) - (a.pz - a.vz * h);
     const float tc1x = b.px - a.px;
     const float tc1y = b.py - a.py;
     const float tc1z = b.pz - a.pz;
-    // Segment axes at END orientations (fixed through the trigger and the
-    // refinement below).
+    // Segment axes at END orientations, plus START orientations when
+    // either body spins. The spin test is a relational float comparison
+    // (sum of magnitudes above zero), never ==, so -Wfloat-equal stays
+    // quiet; a zero-spin pair takes the historical variables verbatim.
     float tax = 0.0F, tay = 1.0F, taz = 0.0F;
     float tbx = 0.0F, tby = 1.0F, tbz = 0.0F;
     if (cap_a) snapshot_axis(a, tax, tay, taz);
     if (cap_b) snapshot_axis(b, tbx, tby, tbz);
+    const PreStep& psa = pre_step_[i];
+    const PreStep& psb = pre_step_[j];
+    const bool spinning =
+        (std::fabs(psa.wx) + std::fabs(psa.wy) + std::fabs(psa.wz) +
+         std::fabs(psb.wx) + std::fabs(psb.wy) + std::fabs(psb.wz)) > 0.0f;
+    float t0ax = tax, t0ay = tay, t0az = taz;
+    float t0bx = tbx, t0by = tby, t0bz = tbz;
+    if (spinning) {
+      if (cap_a) {
+        float qa[4] = {psa.qx, psa.qy, psa.qz, psa.qw};
+        quat_rotate_vector(qa, 0.0F, 1.0F, 0.0F, t0ax, t0ay, t0az);
+      }
+      if (cap_b) {
+        float qb[4] = {psb.qx, psb.qy, psb.qz, psb.qw};
+        quat_rotate_vector(qb, 0.0F, 1.0F, 0.0F, t0bx, t0by, t0bz);
+      }
+    }
     // Start-inside-bound is transit, not rest: the bound was entered on
     // an earlier step without surface contact (phase 7 of the gate does
     // exactly this). Only start-inside-SURFACE keeps the historical miss
@@ -1316,13 +1368,21 @@ class PhysicsWorld final {
       const float sbz = b.pz - b.vz * h;
       float scax = sax, scay = say, scaz = saz;
       float scbx = sbx, scby = sby, scbz = sbz;
+      // Axes at step start: end orientations when still, nlerp(0) when
+      // spinning (copies keep the still path on the historical variables).
+      float aax = tax, aay = tay, aaz = taz;
+      float abx = tbx, aby = tby, abz = tbz;
+      if (spinning) {
+        interp_axis(0.0f, t0ax, t0ay, t0az, tax, tay, taz, aax, aay, aaz);
+        interp_axis(0.0f, t0bx, t0by, t0bz, tbx, tby, tbz, abx, aby, abz);
+      }
       segment_segment_closest(
-          sax - tax * a.half_height, say - tay * a.half_height,
-          saz - taz * a.half_height, sax + tax * a.half_height,
-          say + tay * a.half_height, saz + taz * a.half_height,
-          sbx - tbx * b.half_height, sby - tby * b.half_height,
-          sbz - tbz * b.half_height, sbx + tbx * b.half_height,
-          sby + tby * b.half_height, sbz + tbz * b.half_height, scax, scay,
+          sax - aax * a.half_height, say - aay * a.half_height,
+          saz - aaz * a.half_height, sax + aax * a.half_height,
+          say + aay * a.half_height, saz + aaz * a.half_height,
+          sbx - abx * b.half_height, sby - aby * b.half_height,
+          sbz - abz * b.half_height, sbx + abx * b.half_height,
+          sby + aby * b.half_height, sbz + abz * b.half_height, scax, scay,
           scaz, scbx, scby, scbz);
       const float sgx = scbx - scax;
       const float sgy = scby - scay;
@@ -1333,7 +1393,11 @@ class PhysicsWorld final {
       sb = 0.0f;  // surface-separated inside the bound: Newton climbs
     }
     float s = sb;
-    for (int newton = 0; newton < 3; ++newton) {
+    // Spinning pairs get more iterations: the nlerp gap is less smooth
+    // (closest-point branch jumps as the segments swing), so 3 steps can
+    // run out before landing. Still fixed-count, still deterministic.
+    const int newton_budget = spinning ? 8 : 3;
+    for (int newton = 0; newton < newton_budget; ++newton) {
       const float k = 1.0f - s;
       const float pax = a.px - a.vx * h * k;
       const float pay = a.py - a.vy * h * k;
@@ -1341,20 +1405,28 @@ class PhysicsWorld final {
       const float pbx = b.px - b.vx * h * k;
       const float pby = b.py - b.vy * h * k;
       const float pbz = b.pz - b.vz * h * k;
+      // Axes at the current iterate: end orientations when still,
+      // nlerp(s) when spinning (copies keep the still path historical).
+      float nax = tax, nay = tay, naz = taz;
+      float nbx = tbx, nby = tby, nbz = tbz;
+      if (spinning) {
+        interp_axis(s, t0ax, t0ay, t0az, tax, tay, taz, nax, nay, naz);
+        interp_axis(s, t0bx, t0by, t0bz, tbx, tby, tbz, nbx, nby, nbz);
+      }
       float qax = pax, qay = pay, qaz = paz;
       float qbx = pbx, qby = pby, qbz = pbz;
-      segment_segment_closest(pax - tax * a.half_height,
-                              pay - tay * a.half_height,
-                              paz - taz * a.half_height,
-                              pax + tax * a.half_height,
-                              pay + tay * a.half_height,
-                              paz + taz * a.half_height,
-                              pbx - tbx * b.half_height,
-                              pby - tby * b.half_height,
-                              pbz - tbz * b.half_height,
-                              pbx + tbx * b.half_height,
-                              pby + tby * b.half_height,
-                              pbz + tbz * b.half_height,
+      segment_segment_closest(pax - nax * a.half_height,
+                              pay - nay * a.half_height,
+                              paz - naz * a.half_height,
+                              pax + nax * a.half_height,
+                              pay + nay * a.half_height,
+                              paz + naz * a.half_height,
+                              pbx - nbx * b.half_height,
+                              pby - nby * b.half_height,
+                              pbz - nbz * b.half_height,
+                              pbx + nbx * b.half_height,
+                              pby + nby * b.half_height,
+                              pbz + nbz * b.half_height,
                               qax, qay, qaz, qbx, qby, qbz);
       const float gx = qbx - qax;
       const float gy = qby - qay;
@@ -1384,7 +1456,8 @@ class PhysicsWorld final {
         s = 1.0f;
       }
     }
-    // Capsule geometry at the refined TOI centers + end orientations.
+    // Capsule geometry at the refined TOI centers + interpolated
+    // orientations (end orientations when still — historical).
     {
       const float k = 1.0f - s;
       const float pax = a.px - a.vx * h * k;
@@ -1393,20 +1466,26 @@ class PhysicsWorld final {
       const float pbx = b.px - b.vx * h * k;
       const float pby = b.py - b.vy * h * k;
       const float pbz = b.pz - b.vz * h * k;
+      float fax = tax, fay = tay, faz = taz;
+      float fbx = tbx, fby = tby, fbz = tbz;
+      if (spinning) {
+        interp_axis(s, t0ax, t0ay, t0az, tax, tay, taz, fax, fay, faz);
+        interp_axis(s, t0bx, t0by, t0bz, tbx, tby, tbz, fbx, fby, fbz);
+      }
       float qax = pax, qay = pay, qaz = paz;
       float qbx = pbx, qby = pby, qbz = pbz;
-      segment_segment_closest(pax - tax * a.half_height,
-                              pay - tay * a.half_height,
-                              paz - taz * a.half_height,
-                              pax + tax * a.half_height,
-                              pay + tay * a.half_height,
-                              paz + taz * a.half_height,
-                              pbx - tbx * b.half_height,
-                              pby - tby * b.half_height,
-                              pbz - tbz * b.half_height,
-                              pbx + tbx * b.half_height,
-                              pby + tby * b.half_height,
-                              pbz + tbz * b.half_height,
+      segment_segment_closest(pax - fax * a.half_height,
+                              pay - fay * a.half_height,
+                              paz - faz * a.half_height,
+                              pax + fax * a.half_height,
+                              pay + fay * a.half_height,
+                              paz + faz * a.half_height,
+                              pbx - fbx * b.half_height,
+                              pby - fby * b.half_height,
+                              pbz - fbz * b.half_height,
+                              pbx + fbx * b.half_height,
+                              pby + fby * b.half_height,
+                              pbz + fbz * b.half_height,
                               qax, qay, qaz, qbx, qby, qbz);
       const float fx = qbx - qax;
       const float fy = qby - qay;

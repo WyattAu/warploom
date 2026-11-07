@@ -118,7 +118,8 @@ half-height 0.4, identical 198 m/s travel — shape is the only variable).
 Trigger met 8/12, same count as spheres. Fixed the same way, one level
 up: the bound-sphere entry (shared `swept_entry_root` helper — the two
 branches must not drift) triggers, then fixed-3 Newton iterations on the
-true segment gap at end orientations refine to the surface TOI; the
+true segment gap at (now interpolated — loop67) orientations refine to
+the surface TOI; the
 capsule solve runs at the refined centers, with the center rewind +
 impulse shared with spheres. Two subtleties the gate caught: (1) the
 Newton rate sign (gap shrinks as s grows — closing rate is minus the
@@ -130,9 +131,22 @@ Measured: 0/12 cross, per-phase contact telemetry, every phase matches
 its sphere twin to 1e-3 (the hover guard with teeth — a bound-only
 rewind lands 0.4 short and the rebound trajectories diverge). Gate
 sabotage-validated (capsule TOI suppressed fails 60 assertions; sphere
-gate still passes — the sabotage is surgical). Limits: end-orientation
-approximation for spinning pairs; non-converged grazes miss one step
-and retry (delays rather than tunnels).
+gate still passes — the sabotage is surgical). Limits (loop67
+retires the first): the refinement ran at fixed end orientations, and
+a tumbling-pair probe (`SpinningCapsuleStillStopsAtWall`: 12 phases x
+5 spin rates to 300 rad/s) found it was not an approximation but a
+hole — a silent 3.3 m tunnel at 30 rad/s, and tip-first embeds at 300.
+The refinement now interpolates axes across the substep (nlerp from
+step-start to end orientations — trig-free, no new libm on the tick
+path) with the Newton budget raised to 8 for spinning pairs only
+(the nlerp gap is less smooth; still fixed-count, still
+relative-velocity rate). Both-zero spin keeps the old path verbatim,
+so every non-spinning scene is bit-identical. Sabotage both
+directions, each surgical: no interpolation fails spin-30-phase-7
+silently; no budget fails spin-150-phase-3 silently; gates,
+compliance, sleep and rewind tests never move. Remaining limit:
+non-converged grazes miss one step and retry (delays rather than
+tunnels) — now measured to hold through 300 rad/s tumbles.
 
 **Compliant rewind (loop63).** The pass-0 rewind was stiff even under
 contact compliance — a fast body hard-stopped at the TOI surface while

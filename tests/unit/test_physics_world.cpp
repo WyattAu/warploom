@@ -1299,3 +1299,77 @@ TEST(PhysicsWorld, CompliantRewindSinksPastToi) {
   for (int i = 0; i < 120; ++i) w.step(kDt);
   EXPECT_LT(w.body(1).position[0], -0.5f) << "compliant sink tunneled";
 }
+
+TEST(PhysicsWorld, SpinningCapsuleStillStopsAtWall) {
+  // Loop67 probe of the documented end-orientation approximation: the
+  // capsule TOI refines at fixed END orientations, so a tumbling pair
+  // lands approximately. Approximation of WHERE is acceptable; missing
+  // the pair is not. End-over-end tumble (spin about z, in the flight
+  // plane) maximizes the axis error: at 300 rad/s and dt = 1/60 the
+  // segment turns 5 rad per step — nearly a full turn of wrongness.
+  // Both restitutions are 0 (approach killed), so the only questions
+  // are contact and non-crossing; vx is deliberately unpinned (the
+  // impulse omits surface velocity feedback by documented design, so a
+  // spinning body may legitimately keep sliding after the stop).
+  constexpr float kR = 1.0f;
+  constexpr float kShotR = 0.1f;
+  constexpr float kHalf = 0.4f;
+  constexpr float kWindow = kR + kShotR;
+  constexpr float kGateDt = 1.0f / 60.0f;
+  constexpr float kStepTravel = 3.0f * kWindow;
+  constexpr float kSpeed = kStepTravel / kGateDt;
+  constexpr int kPhases = 12;
+  constexpr int kSteps = 10;
+  for (const float spin : {0.0f, 30.0f, 60.0f, 150.0f, 300.0f}) {
+    for (int p = 0; p < kPhases; ++p) {
+      PhysicsWorld w(/*gravity=*/0.0f);
+      w.set_speculative_contacts(true);
+      PhysicsBody wall;
+      wall.position[0] = 0.0f;
+      wall.position[1] = 5.0f;
+      wall.radius = kR;
+      wall.inverse_mass = 0.0f;
+      wall.restitution = 0.0f;
+      (void)w.add_body(wall);
+      PhysicsBody shot;
+      shot.shape = omnicpp::physics::BodyShape::Capsule;
+      shot.radius = kShotR;
+      shot.half_height = kHalf;
+      const float phase = static_cast<float>(p) * kStepTravel /
+                          static_cast<float>(kPhases);
+      shot.position[0] = -10.0f + phase;
+      shot.position[1] = 5.0f;
+      shot.restitution = 0.0f;
+      shot.velocity[0] = kSpeed;
+      shot.angular_velocity[2] = spin;
+      (void)w.add_body(shot);
+      bool contacted = false;
+      for (int i = 0; i < kSteps; ++i) {
+        w.step(kGateDt);
+        if (!w.contacts().empty()) contacted = true;
+      }
+      // The airtight pin: with no contacts there are no forces, so the
+      // flight is a straight line at y = 5 straight through the window —
+      // silence IS tunneling, no position check needed. (x is unpinned:
+      // a clip that deflects the ball around the wall is legitimate.)
+      EXPECT_TRUE(contacted) << "spin " << spin << " phase " << p
+                             << " passed silently: tunneled";
+      // No deep embed: a ball that ground to a halt must be resting AT
+      // the wall, not inside it. Center distance below kR (margin 0.1
+      // under the 1.1 surface) with speed dead means the rewind landed
+      // past the true surface and discrete never pushed back out.
+      const auto& bp = w.body(1).position;
+      const auto& bv = w.body(1).velocity;
+      const float dcx = bp[0] - 0.0f;
+      const float dcy = bp[1] - 5.0f;
+      const float center_dist = std::sqrt(dcx * dcx + dcy * dcy);
+      const float speed =
+          std::sqrt(bv[0] * bv[0] + bv[1] * bv[1] + bv[2] * bv[2]);
+      if (speed < 1.0f) {
+        EXPECT_GT(center_dist, kR)
+            << "spin " << spin << " phase " << p
+            << " ground to a halt inside the wall: dist = " << center_dist;
+      }
+    }
+  }
+}
