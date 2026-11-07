@@ -730,7 +730,7 @@ declares a slot 3.
       not statistically conclusive on this loaded machine; the fix is certain
       structurally — the old ordering was undefined by the standard, the new
       one has no window.
-- [ ] **D3 game depth** — ECS as the app's data model, scene management
+- [x] **D3 game depth** — DONE (loop78 closure audit; ECS as the app's data model, scene management
       (G2 subgraph copy/paste, G4 script node, G5 asset browser landed).
 
       G2 SUBGRAPH COPY/PASTE DONE (engine half): `copy_subgraph(ids)`
@@ -848,6 +848,21 @@ declares a slot 3.
       registers the same type so persisted script nodes parse. Remaining in
       D3: scene management only (G2 UI wiring and G5 both landed above) —
       spec with exit criteria now recorded at the head of this paragraph.
+      Loop78 CLOSED the box by audit, not by new code: every sub-claim
+      re-verified against this tree — G2 copy/paste + `selected_node_nids`
+      in node_graph/document/session/tests/viewport, G4
+      `register_script_node_type` + `parse_module_spec` in script
+      sources/tests, G5 `list_scene_files` + `scene_status_text` in the
+      editor, scene-management v1.20 (`new_document`, `current_path`,
+      hash `is_dirty`) in session/tests, `DocumentProjection` owned by
+      the viewport (main.cpp:606) with the projection tests, and
+      `NewDocument` dispatched in both the session server and the
+      viewport. D3-covering suites on the current tree: 82/82 unit
+      (subgraph, copy/paste, script, scene-mgmt, ECS, projection,
+      control-server, node-disk/persist/graph) + 49/49 editor. The only
+      D3-adjacent work left is the standing stated limits (XCB-gated
+      input incl. click delivery, VRAM-gated visual proof), which apply
+      tree-wide rather than to D3.
 
 ## Phase E — release
 
