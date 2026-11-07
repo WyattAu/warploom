@@ -1169,6 +1169,24 @@ declares a slot 3.
       (scroll events need focus + the dispatch loop) and the replay
       comparison still wait on a free GPU (5705/6144 used, trainer
       still at 4.4 GiB; today's launches re-confirm init failure).
+      Loop72 closed the verification the hardening commit shorted (it had
+      run only the input subset): full unit binary on the commit — 657
+      passed, 33 skipped, 78 failed, suite runs to completion. All 78 are
+      GPU-allocation failures, proven by assertion-shape census (every
+      failing assertion is an is_ok()/empty()/ready() init check; zero
+      pixel, fingerprint, or logic failures) — the same environmental set
+      the roadmap already records. The run also caught a REAL pre-existing
+      defect the saturation exposed: `ComposeChainHonoursConfiguredExposure`
+      skipped on allocation failure AFTER `ctx.cleanup()` destroyed the
+      device, so `present`'s destructor called vkDestroyRenderPass on a
+      dead device — Invalid-device VUID + SIGABRT instead of a skip, in
+      isolation as well as in-suite. Proven pre-existing (`git diff
+      322472d..HEAD` empty on modules/ and all render tests; the aborting
+      path shares no code with the commit). Fixed by mirroring the
+      happy-path tail on the skip path (hdr/present/alloc die on the live
+      device first) — the file's own convention; this was the only
+      inverted skip site. A/B: pre-fix isolated SIGABRT (exit 134), post-fix
+      clean skip (exit 0, 0 VUIDs), full suite completes.
 - [x] **E7 estate-shared C++ gates** — DONE (warploom side; the kit
       itself lives in the estate repo). The estate runs one reusable workflow
       per language (rust-kit, go-kit, haskell-kit, node-ci, python-kit); C++

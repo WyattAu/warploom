@@ -909,6 +909,17 @@ TEST(VulkanHardware, ComposeChainHonoursConfiguredExposure) {
                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
            .is_ok() ||
       !hdr.create_framebuffer(ctx.device()).is_ok()) {
+    // Teardown order mirrors the happy-path tail below: every live child
+    // dies on the live device BEFORE ctx.cleanup() destroys it. Destroying
+    // the device first leaves `present`'s render pass (created above) to
+    // the scope-exit destructor, which calls vkDestroyRenderPass on a dead
+    // device -- Invalid-device VUID + abort instead of a skip. Found when
+    // the full suite ran under saturated VRAM (loop72): the skip fired and
+    // the process dumped core. All sibling skip sites in this file already
+    // destroy children first; this was the only inverted one.
+    hdr.cleanup(ctx.device());
+    present.cleanup(ctx.device());
+    alloc.cleanup();
     ctx.cleanup();
     GTEST_SKIP() << "offscreen target unavailable";
   }
