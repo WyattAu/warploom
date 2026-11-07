@@ -603,6 +603,18 @@ declares a slot 3.
       tree: 56/56 (PhysicsWorld 31, bridge, scrub, replay, determinism)
       with 0 skips, plus 23/23 feature-name matches. The only remainder
       is future shapes, which is new work by definition, not debt.
+- [x] **D2 timeline + tracks** — DONE (loop80 closure audit; D2 never had
+a parent box, only D2a/D2b children, while the text inside D2b carried the
+open legs — so closure was claimed in prose at line ~2211 and never
+tickable). Re-verified against this tree: `evaluate_at` +
+`tick_timeline_at` in document/session, `frac` key at the protocol
+boundary and in both hosts, T5a session-level + T5c render tracks +
+T5d rejection, `proof_cnc` defined AND wired into `all` (live_proof.py),
+`ClipTimelineView` owned with editor tests and a viewport caller.
+D2-covering suites on the current tree: 20/20 core
+(timeline/session/record) + 44/44 unit (timeline/clip/record/replay/
+control-server) + 5/5 editor clip views, 0 failures. The live `all`
+leg (224/224) stays VRAM-gated like all wire proofs, stated not hidden.
 - [x] **D2a interpolated, eased track evaluation** — `TimelineClip::evaluate_at`
       takes a fractional frame and an `Easing`, and interpolates Number and
       Vec3 between the bracketing samples. Bool and String hold the earlier
