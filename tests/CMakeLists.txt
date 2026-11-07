@@ -52,6 +52,7 @@ add_executable(warploom_unit_tests
     unit/test_script_module.cpp
     unit/test_input_state.cpp
     unit/test_input_translators.cpp
+    unit/test_wayland_keymap.cpp
     unit/test_engine.cpp
     unit/test_concurrency.cpp
     unit/test_platform_primitives.cpp
@@ -125,6 +126,9 @@ target_link_libraries(warploom_unit_tests PRIVATE Warploom::engine Threads::Thre
 get_target_property(WARPLOOM_GTEST_INCLUDES gtest INTERFACE_INCLUDE_DIRECTORIES)
 if(WARPLOOM_GTEST_INCLUDES)
     target_include_directories(warploom_unit_tests SYSTEM PRIVATE ${WARPLOOM_GTEST_INCLUDES})
+    # Loop70: wayland_keymap.hpp lives with the viewport (examples/); the
+    # unit suite includes it to pin the shipped mapping, not a copy.
+    target_include_directories(warploom_unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/examples/viewport)
 endif()
 # Asset directory for file-based tests (mannequin model); shader-dir define
 # only applies when the test shader targets exist (GPU presets).

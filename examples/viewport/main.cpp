@@ -50,6 +50,9 @@
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
 #include <wayland-client.h>
 #include "xdg-shell-client-protocol.h"
+#include "wayland_keymap.hpp"
+#include <xkbcommon/xkbcommon.h>
+#include <sys/mman.h>
 #endif
 
 #include "warploom/asset/gltf_animation.hpp"
@@ -950,13 +953,18 @@ struct ViewportApp {
   // XCB window.
   xcb_connection_t* connection{nullptr};
   xcb_window_t window{0};
-  // Wayland window (loop69, E6 second half starts here). Only the
-  // creation/present half: no wl_seat, no input — interactive use stays
-  // on XCB until the seat slice. Selected at runtime by WARPLOOM_WAYLAND.
+  // Wayland window (loop69 creation/present + loop70 keyboard seat).
+  // Pointer stays XCB-only until the pointer slice (loop71).
+  // Selected at runtime by WARPLOOM_WAYLAND.
   bool use_wayland{false};
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
   wl_display* wayland_display{nullptr};
   wl_registry* wayland_registry{nullptr};
+  wl_seat* wayland_seat{nullptr};
+  wl_keyboard* wayland_keyboard{nullptr};
+  xkb_context* wayland_xkb_ctx{nullptr};
+  xkb_keymap* wayland_xkb_keymap{nullptr};
+  xkb_state* wayland_xkb_state{nullptr};
   wl_compositor* wayland_compositor{nullptr};
   xdg_wm_base* wayland_shell{nullptr};
   wl_surface* wayland_surface{nullptr};
@@ -1831,14 +1839,21 @@ bool setup_wm_delete_protocol(ViewportApp& app) {
   return app.wm_protocols != 0 && app.wm_delete_window != 0;
 }
 
+// Shared key dispatch (defined just above poll_events): the seat listener
+// below runs earlier in the file, hence the forward declarations.
+bool viewport_key_press(ViewportApp& app, std::uint8_t code, bool ctrl_held,
+                        char printable);
+void viewport_key_release(ViewportApp& app, std::uint8_t code);
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
-// Wayland window (loop69). Mirrors the XCB setup above: connect, bind the
-// globals, build the xdg toplevel, wait for the first configure. No seat:
-// keyboard/pointer stay XCB-only until the seat slice (loop70).
+// Wayland window (loop69 creation/present + loop70 keyboard seat).
+// Mirrors the XCB setup above: connect, bind the globals, build the xdg
+// toplevel, wait for the first configure. Pointer stays XCB-only until
+// the loop71 slice.
 namespace {
 struct WaylandWindowGlobals {
   wl_compositor* compositor{nullptr};
   xdg_wm_base* shell{nullptr};
+  wl_seat* seat{nullptr};
 };
 void wayland_window_registry_global(void* data, wl_registry* registry,
                                     std::uint32_t name, const char* interface,
@@ -1847,6 +1862,12 @@ void wayland_window_registry_global(void* data, wl_registry* registry,
   if (std::strcmp(interface, wl_compositor_interface.name) == 0) {
     globals->compositor = static_cast<wl_compositor*>(
         wl_registry_bind(registry, name, &wl_compositor_interface, 1));
+  } else if (std::strcmp(interface, wl_seat_interface.name) == 0) {
+    // Seat v1 carries capabilities + get_keyboard; the loop70 slice
+    // needs nothing newer (no repeat_info client-side repeat).
+    const std::uint32_t seat_version = version < 1U ? version : 1U;
+    globals->seat = static_cast<wl_seat*>(
+        wl_registry_bind(registry, name, &wl_seat_interface, seat_version));
   } else if (std::strcmp(interface, xdg_wm_base_interface.name) == 0) {
     globals->shell = static_cast<xdg_wm_base*>(
         wl_registry_bind(registry, name, &xdg_wm_base_interface, 1));
@@ -1866,6 +1887,125 @@ void wayland_shell_ping(void* data, xdg_wm_base* shell, std::uint32_t serial) {
   // Mandatory: a client that does not pong is disconnected by the compositor.
   xdg_wm_base_pong(shell, serial);
 }
+// --- Seat: keyboard only (loop70). No wl_pointer until loop71. -----------
+void wayland_keyboard_keymap(void* data, wl_keyboard* keyboard,
+                             std::uint32_t format, std::int32_t fd,
+                             std::uint32_t size) {
+  auto* app = static_cast<ViewportApp*>(data);
+  (void)keyboard;
+  // The compositor owns the keymap: XKB_V1 (1) over an mmap'd fd.
+  if (format != 1) {
+    std::fprintf(stderr, "viewport: unsupported keymap format %u\n", format);
+    close(fd);
+    return;
+  }
+  void* map = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
+  if (map == MAP_FAILED) {
+    std::fprintf(stderr, "viewport: keymap mmap failed\n");
+    close(fd);
+    return;
+  }
+  app->wayland_xkb_ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+  if (app->wayland_xkb_ctx != nullptr) {
+    app->wayland_xkb_keymap = xkb_keymap_new_from_string(
+        app->wayland_xkb_ctx, static_cast<const char*>(map),
+        XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    if (app->wayland_xkb_keymap != nullptr) {
+      app->wayland_xkb_state =
+          xkb_state_new(app->wayland_xkb_keymap);
+    }
+  }
+  munmap(map, size);
+  close(fd);
+  if (app->wayland_xkb_state == nullptr) {
+    // Degraded, not fatal: physical codes still feed the translator and
+    // the chords; only keysym chars and the Ctrl gate are lost.
+    std::fprintf(stderr,
+                 "viewport: xkb state creation failed; typing degraded\n");
+  }
+}
+void wayland_keyboard_enter(void* data, wl_keyboard* keyboard,
+                            std::uint32_t serial, wl_surface* surface,
+                            wl_array* keys) {
+  (void)data;
+  (void)keyboard;
+  (void)serial;
+  (void)surface;
+  (void)keys;
+}
+void wayland_keyboard_leave(void* data, wl_keyboard* keyboard,
+                            std::uint32_t serial, wl_surface* surface) {
+  (void)data;
+  (void)keyboard;
+  (void)serial;
+  (void)surface;
+}
+void wayland_keyboard_key(void* data, wl_keyboard* keyboard,
+                          std::uint32_t serial, std::uint32_t time,
+                          std::uint32_t key, std::uint32_t state) {
+  auto* app = static_cast<ViewportApp*>(data);
+  (void)keyboard;
+  (void)serial;
+  (void)time;
+  // Wayland delivers raw evdev codes; the shared dispatch speaks X11
+  // (evdev + 8), so the physical paths match the XCB numbers exactly.
+  const std::uint8_t code = wayland_keymap::evdev_to_x11(key);
+  if (code == 0) return;
+  const bool pressed = state == 1;  // WL_KEYBOARD_KEY_STATE_PRESSED
+  if (!pressed) {
+    viewport_key_release(*app, code);
+    return;
+  }
+  char printable = 0;
+  bool ctrl = false;
+  if (app->wayland_xkb_state != nullptr) {
+    printable = wayland_keymap::keysym_to_printable(
+        xkb_state_key_get_one_sym(app->wayland_xkb_state, key));
+    ctrl = xkb_state_mod_name_is_active(app->wayland_xkb_state,
+                                        XKB_MOD_NAME_CTRL,
+                                        XKB_STATE_MODS_EFFECTIVE) > 0;
+  }
+  // Parity with XCB: no Ctrl exemption while editing (XCB types the
+  // letter); the chord logic below the editor section gates on ctrl.
+  if (!viewport_key_press(*app, code, ctrl, printable)) {
+    app->wayland_should_close = true;  // ESC outside the editor quits
+  }
+}
+void wayland_keyboard_modifiers(void* data, wl_keyboard* keyboard,
+                                std::uint32_t serial, std::uint32_t mods_depressed,
+                                std::uint32_t mods_latched,
+                                std::uint32_t mods_locked,
+                                std::uint32_t group) {
+  auto* app = static_cast<ViewportApp*>(data);
+  (void)keyboard;
+  (void)serial;
+  if (app->wayland_xkb_state == nullptr) return;
+  xkb_state_update_mask(app->wayland_xkb_state, mods_depressed, mods_latched,
+                        mods_locked, 0, 0, group);
+}
+const wl_keyboard_listener kWaylandKeyboardListener = {
+    wayland_keyboard_keymap, wayland_keyboard_enter, wayland_keyboard_leave,
+    wayland_keyboard_key, wayland_keyboard_modifiers, nullptr};
+void wayland_seat_capabilities(void* data, wl_seat* seat,
+                               std::uint32_t capabilities) {
+  auto* app = static_cast<ViewportApp*>(data);
+  // Keyboard only in loop70; the pointer is the loop71 slice.
+  if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) != 0U &&
+      app->wayland_keyboard == nullptr) {
+    app->wayland_keyboard = wl_seat_get_keyboard(seat);
+    if (app->wayland_keyboard != nullptr) {
+      wl_keyboard_add_listener(app->wayland_keyboard,
+                               &kWaylandKeyboardListener, app);
+    }
+  }
+}
+void wayland_seat_name(void* data, wl_seat* seat, const char* name) {
+  (void)data;
+  (void)seat;
+  (void)name;
+}
+const wl_seat_listener kWaylandSeatListener = {wayland_seat_capabilities,
+                                               wayland_seat_name};
 const xdg_wm_base_listener kWaylandShellListener = {wayland_shell_ping};
 void wayland_xdg_surface_configure(void* data, xdg_surface* xdg_surface,
                                    std::uint32_t serial) {
@@ -1945,6 +2085,12 @@ bool setup_wayland_window(ViewportApp& app) {
                             &app);
   // Attribution, the Wayland counterpart of _NET_WM_PID: without an app_id
   // the compositor cannot group or name this window.
+  if (globals.seat != nullptr) {
+    app.wayland_seat = globals.seat;
+    wl_seat_add_listener(app.wayland_seat, &kWaylandSeatListener, &app);
+  } else {
+    std::fprintf(stderr, "viewport: no wl_seat; keyboard input unavailable\n");
+  }
   xdg_toplevel_set_app_id(app.wayland_toplevel, "warploom_viewport");
   xdg_toplevel_set_title(app.wayland_toplevel, "Warploom Viewport");
   wl_surface_commit(app.wayland_surface);
@@ -2194,12 +2340,184 @@ bool setup_wayland_window(ViewportApp& app) {
   return true;
 }
 
+//! Shared key-press dispatch for the XCB event loop and the Wayland
+//! seat listener (loop70): param-editor consumption, chords, then the
+//! action translator feed. code is an X11 keycode on both paths (Wayland
+//! passes evdev + 8); ctrl_held is the XCB Control mask / xkb Ctrl
+//! state; printable is the xkb keysym-derived char (Wayland only, 0 on
+//! XCB). Returns false when the app should quit (ESC outside the editor).
+bool viewport_key_press(ViewportApp& app, std::uint8_t code,
+                       bool ctrl_held, char printable) {
+  // M12: active param editor consumes keys first. Enter (36) commits,
+  // ESC (9) cancels (without closing the window), printable + backspace
+  // edit the buffer. XCB keycodes: digits 10..19 map to 1..9,0;
+  // letters use the evdev+offset layout via the host lookup below.
+  if (app.node_editor && app.node_view != nullptr &&
+      app.node_view->param_edit_active()) {
+    // Wayland seat path: the xkbcommon keysym IS the character
+    // (layout-correct), so it bypasses the XCB tables below.
+    // XCB passes printable=0 and always takes the tables.
+    if (printable != 0) {
+      app.node_view->edit_param_char(printable);
+      return true;
+    }
+    if (code == 36) {  // Return: commit through the session
+      std::uint64_t nid = 0;
+      std::string param;
+      double number = 0.0;
+      std::string text;
+      bool is_number = false;
+      if (app.node_view->end_param_edit(
+              true, nullptr, nid, param, number, text, is_number)) {
+        omnicpp::core::ControlCommand cmd;
+        cmd.kind = omnicpp::core::ControlCommand::Kind::SetNodeParam;
+        cmd.numbers[0] = static_cast<double>(nid);
+        cmd.number_count = 1;
+        cmd.text = param;
+        if (is_number) {
+          cmd.numbers[1] = number;
+          cmd.number_count = 2;
+        } else {
+          cmd.text2 = text;
+        }
+        {
+          std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+          app.edit_queue.push_back({std::move(cmd)});
+        }
+        app.node_dirty = true;
+      }
+      return true;
+    }
+    if (code == 9) {  // ESC: cancel the edit, keep the window
+      std::uint64_t nid = 0;
+      std::string param;
+      double number = 0.0;
+      std::string text;
+      bool is_number = false;
+      (void)app.node_view->end_param_edit(
+          false, nullptr, nid, param, number, text, is_number);
+      return true;
+    }
+    if (code == 22) {  // BackSpace
+      app.node_view->edit_param_char('\b');
+      return true;
+    }
+    static constexpr char kDigitRow[10] = {'1', '2', '3', '4', '5',
+                                           '6', '7', '8', '9', '0'};
+    if (code >= 10 && code <= 19) {
+      app.node_view->edit_param_char(kDigitRow[code - 10]);
+      return true;
+    }
+    if (code == 60) app.node_view->edit_param_char('.');
+    if (code == 61) app.node_view->edit_param_char('-');
+    if ((code >= 10 && code <= 19) || code == 60 ||
+        code == 61) {
+      return true;
+    }
+    // Letters (evdev q..p=24..33, a..l=38..46, z..m=52..58) are accepted
+    // for string params; numbers ignore them at parse time.
+    static const char* kRows = "qqq";  // placeholder to keep structure
+    (void)kRows;
+    // BOUND (loop70, measured): kLower has 29 entries (0..28),
+    // so codes 52..58 (z,x,c,v,b,n,m) read out of bounds. 51 is the
+    // last code with a valid entry (index 27); higher codes are
+    // ignored instead of feeding heap garbage into the param buffer.
+    // The in-bounds-but-mislabelled row (48..51) is noted for the
+    // input-hardening pass. Wayland bypasses this table via the
+    // printable branch above.
+    if (code >= 24 && code <= 51) {
+      static const char kLower[] =
+          "?qwertzuiop?asdfghjkl?yxcvbnm";  // index by keycode-24
+      const char c = kLower[code - 24];
+      if (c != '?') {
+        app.node_view->edit_param_char(c);
+        return true;
+      }
+    }
+    return true;  // swallow all other keys while editing
+  }
+  // ESC (keycode 9 on most servers).
+  if (code == 9) {
+    return false;
+  }
+  // G2: Ctrl+C copies the view selection, Ctrl+V pastes it. Keycodes
+  // 54/55 are the PHYSICAL C/V positions on pc105 (stable across
+  // QWERTY/AZERTY/QWERTZ); the Control modifier gates the chord.
+  if (app.node_editor && ctrl_held && code == 54 &&
+      app.node_view != nullptr) {
+    // G2: the nids payload is the tested editor helper; only the
+    // keycode mapping above is platform-specific.
+    const std::string nids =
+        omnicpp::editor::selected_node_nids(app.node_view->views());
+    if (!nids.empty()) {
+      omnicpp::core::ControlCommand cmd;
+      cmd.kind = omnicpp::core::ControlCommand::Kind::CopySubgraph;
+      cmd.text = nids;
+      {
+        std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+        app.edit_queue.push_back({std::move(cmd), true});
+      }
+    }
+    return true;
+  }
+  if (app.node_editor && ctrl_held && code == 55 &&
+      app.node_view != nullptr) {
+    std::string frag;
+    {
+      std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+      frag = app.clipboard_fragment_;
+    }
+    if (!frag.empty()) {
+      omnicpp::core::ControlCommand cmd;
+      cmd.kind = omnicpp::core::ControlCommand::Kind::PasteSubgraph;
+      cmd.text = std::move(frag);
+      {
+        std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+        app.edit_queue.push_back({std::move(cmd), false});
+      }
+      app.node_dirty = true;
+    }
+    return true;
+  }
+  // Delete (119) / BackSpace (22) with a selected node: remove it
+  // through the session's undoable command.
+  if (app.node_editor && (code == 119 || code == 22) &&
+      app.node_view != nullptr) {
+    std::uint64_t selected = 0;
+    for (const auto& v : app.node_view->views()) {
+      if (v.selected) {
+        selected = v.node_id;
+        break;
+      }
+    }
+    if (selected != 0U) {
+      omnicpp::core::ControlCommand cmd;
+      cmd.kind = omnicpp::core::ControlCommand::Kind::NodeRemove;
+      cmd.numbers[0] = static_cast<double>(selected);
+      cmd.number_count = 1;
+      {
+        std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+        app.edit_queue.push_back({std::move(cmd)});
+      }
+      app.node_dirty = true;
+    }
+  }
+  app.kb_mouse.on_key(code, true);
+  return true;  // the XCB fall-through reached the shared tail: keep going
+}
+
+//! Shared key-release dispatch (XCB event loop + Wayland seat).
+void viewport_key_release(ViewportApp& app, std::uint8_t code) {
+  app.kb_mouse.on_key(code, false);
+}
+
+
 bool poll_events(ViewportApp& app) {
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
   if (app.use_wayland) {
-    // No seat input on the Wayland path yet (loop70): dispatch compositor
-    // events (configure/close) and report the close flag. The deterministic
-    // control socket + scripted input drive the run, same as headless.
+    // Keyboard seat events arrive through the listeners during dispatch
+    // (loop70); pointer stays XCB-only until loop71. The deterministic
+    // control socket + scripted input still drive scripted runs.
     if (!app.wayland_display) return false;
     if (wl_display_dispatch_pending(app.wayland_display) < 0) return false;
     wl_display_flush(app.wayland_display);
@@ -2235,163 +2553,20 @@ bool poll_events(ViewportApp& app) {
     } else if (type == XCB_KEY_PRESS) {
       const auto* key =
           reinterpret_cast<const xcb_key_press_event_t*>(event);
-      // M12: active param editor consumes keys first. Enter (36) commits,
-      // ESC (9) cancels (without closing the window), printable + backspace
-      // edit the buffer. XCB keycodes: digits 10..19 map to 1..9,0;
-      // letters use the evdev+offset layout via the host lookup below.
-      if (app.node_editor && app.node_view != nullptr &&
-          app.node_view->param_edit_active()) {
-        if (key->detail == 36) {  // Return: commit through the session
-          std::uint64_t nid = 0;
-          std::string param;
-          double number = 0.0;
-          std::string text;
-          bool is_number = false;
-          if (app.node_view->end_param_edit(
-                  true, nullptr, nid, param, number, text, is_number)) {
-            omnicpp::core::ControlCommand cmd;
-            cmd.kind = omnicpp::core::ControlCommand::Kind::SetNodeParam;
-            cmd.numbers[0] = static_cast<double>(nid);
-            cmd.number_count = 1;
-            cmd.text = param;
-            if (is_number) {
-              cmd.numbers[1] = number;
-              cmd.number_count = 2;
-            } else {
-              cmd.text2 = text;
-            }
-            {
-              std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
-              app.edit_queue.push_back({std::move(cmd)});
-            }
-            app.node_dirty = true;
-          }
-          free(event);
-          return true;
-        }
-        if (key->detail == 9) {  // ESC: cancel the edit, keep the window
-          std::uint64_t nid = 0;
-          std::string param;
-          double number = 0.0;
-          std::string text;
-          bool is_number = false;
-          (void)app.node_view->end_param_edit(
-              false, nullptr, nid, param, number, text, is_number);
-          free(event);
-          return true;
-        }
-        if (key->detail == 22) {  // BackSpace
-          app.node_view->edit_param_char('\b');
-          free(event);
-          return true;
-        }
-        static constexpr char kDigitRow[10] = {'1', '2', '3', '4', '5',
-                                               '6', '7', '8', '9', '0'};
-        if (key->detail >= 10 && key->detail <= 19) {
-          app.node_view->edit_param_char(kDigitRow[key->detail - 10]);
-          free(event);
-          return true;
-        }
-        if (key->detail == 60) app.node_view->edit_param_char('.');
-        if (key->detail == 61) app.node_view->edit_param_char('-');
-        if ((key->detail >= 10 && key->detail <= 19) || key->detail == 60 ||
-            key->detail == 61) {
-          free(event);
-          return true;
-        }
-        // Letters (evdev q..p=24..33, a..l=38..46, z..m=52..58) are accepted
-        // for string params; numbers ignore them at parse time.
-        static const char* kRows = "qqq";  // placeholder to keep structure
-        (void)kRows;
-        if (key->detail >= 24 && key->detail <= 58) {
-          static const char kLower[] =
-              "?qwertzuiop?asdfghjkl?yxcvbnm";  // index by keycode-24
-          const char c = kLower[key->detail - 24];
-          if (c != '?') {
-            app.node_view->edit_param_char(c);
-            free(event);
-            return true;
-          }
-        }
-        free(event);
-        return true;  // swallow all other keys while editing
-      }
-      // ESC (keycode 9 on most servers).
-      if (key->detail == 9) {
+      // Shared with the Wayland seat path (viewport_key_press above):
+      // XCB passes printable=0 and keeps its keycode tables.
+      const bool keep = viewport_key_press(
+          app, key->detail,
+          (key->state & XCB_MOD_MASK_CONTROL) != 0U, 0);
+      if (!keep) {
         free(event);
         return false;
       }
-      // G2: Ctrl+C copies the view selection, Ctrl+V pastes it. Keycodes
-      // 54/55 are the PHYSICAL C/V positions on pc105 (stable across
-      // QWERTY/AZERTY/QWERTZ); the Control modifier gates the chord.
-      const bool ctrl_held =
-          (key->state & XCB_MOD_MASK_CONTROL) != 0U;
-      if (app.node_editor && ctrl_held && key->detail == 54 &&
-          app.node_view != nullptr) {
-        // G2: the nids payload is the tested editor helper; only the
-        // keycode mapping above is platform-specific.
-        const std::string nids =
-            omnicpp::editor::selected_node_nids(app.node_view->views());
-        if (!nids.empty()) {
-          omnicpp::core::ControlCommand cmd;
-          cmd.kind = omnicpp::core::ControlCommand::Kind::CopySubgraph;
-          cmd.text = nids;
-          {
-            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
-            app.edit_queue.push_back({std::move(cmd), true});
-          }
-        }
-        free(event);
-        return true;
-      }
-      if (app.node_editor && ctrl_held && key->detail == 55 &&
-          app.node_view != nullptr) {
-        std::string frag;
-        {
-          std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
-          frag = app.clipboard_fragment_;
-        }
-        if (!frag.empty()) {
-          omnicpp::core::ControlCommand cmd;
-          cmd.kind = omnicpp::core::ControlCommand::Kind::PasteSubgraph;
-          cmd.text = std::move(frag);
-          {
-            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
-            app.edit_queue.push_back({std::move(cmd), false});
-          }
-          app.node_dirty = true;
-        }
-        free(event);
-        return true;
-      }
-      // Delete (119) / BackSpace (22) with a selected node: remove it
-      // through the session's undoable command.
-      if (app.node_editor && (key->detail == 119 || key->detail == 22) &&
-          app.node_view != nullptr) {
-        std::uint64_t selected = 0;
-        for (const auto& v : app.node_view->views()) {
-          if (v.selected) {
-            selected = v.node_id;
-            break;
-          }
-        }
-        if (selected != 0U) {
-          omnicpp::core::ControlCommand cmd;
-          cmd.kind = omnicpp::core::ControlCommand::Kind::NodeRemove;
-          cmd.numbers[0] = static_cast<double>(selected);
-          cmd.number_count = 1;
-          {
-            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
-            app.edit_queue.push_back({std::move(cmd)});
-          }
-          app.node_dirty = true;
-        }
-      }
-      app.kb_mouse.on_key(key->detail, true);
+
     } else if (type == XCB_KEY_RELEASE) {
       const auto* key =
           reinterpret_cast<const xcb_key_release_event_t*>(event);
-      app.kb_mouse.on_key(key->detail, false);
+      viewport_key_release(app, key->detail);
     } else if (type == XCB_MOTION_NOTIFY) {
       const auto* motion =
           reinterpret_cast<const xcb_motion_notify_event_t*>(event);
@@ -8160,6 +8335,11 @@ void ViewportApp::shutdown() {
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
   if (wayland_toplevel) xdg_toplevel_destroy(wayland_toplevel);
   if (wayland_xdg_surface) xdg_surface_destroy(wayland_xdg_surface);
+  if (wayland_keyboard) wl_keyboard_destroy(wayland_keyboard);
+  if (wayland_seat) wl_seat_destroy(wayland_seat);
+  if (wayland_xkb_state) xkb_state_unref(wayland_xkb_state);
+  if (wayland_xkb_keymap) xkb_keymap_unref(wayland_xkb_keymap);
+  if (wayland_xkb_ctx) xkb_context_unref(wayland_xkb_ctx);
   if (wayland_surface) wl_surface_destroy(wayland_surface);
   if (wayland_shell) xdg_wm_base_destroy(wayland_shell);
   if (wayland_registry) wl_registry_destroy(wayland_registry);

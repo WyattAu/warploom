@@ -64,6 +64,13 @@ occupies the same slot, so no tick ever reads compositor timing.
   `xdg_surface.configure` (size) routes to the existing
   `apply_resize`. No `wl_seat`, no xkbcommon, no pointer/keyboard:
   interactive use stays on XCB until loop70.
-- Loop70: seat input parity (keymap via xkbcommon, pointer motion +
-  buttons), verified by replaying an input script on both backends and
-  comparing captures.
+- Loop70 (as landed): keyboard-only seat parity (wl_seat v1 bind,
+  keymap/modifiers via xkbcommon, XKB_V1 fd keymap, ESC closes).
+  X11 codes are evdev + 8, so the shared dispatch is fed unchanged;
+  printables come from the keysym (layout-correct, unlike the XCB
+  tables). Pointer motion + buttons explicitly deferred to loop71.
+  Live key-delivery e2e deferred (environmental: live-session focus
+  prevention, saturated GPU) — setup handshake proven live, mappings
+  unit-pinned and sabotage-checked, XCB post-extraction captures
+  byte-identical. The input-script replay comparison stays the
+  loop71 proof.

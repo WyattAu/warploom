@@ -72,6 +72,10 @@ if(WAYLAND_SCANNER AND WAYLAND_CLIENT_FOUND)
     # throughout); same treatment as the gtest headers.
     target_include_directories(omnicpp_viewport SYSTEM PRIVATE ${WAYLAND_GEN_DIR})
     target_link_libraries(omnicpp_viewport PRIVATE PkgConfig::WAYLAND_CLIENT)
+    # Seat keyboard (loop70): xkbcommon decodes the compositor keymap into
+    # keysyms (printable chars) and modifiers (Ctrl gate). Viewport-only.
+    pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
+    target_link_libraries(omnicpp_viewport PRIVATE PkgConfig::XKBCOMMON)
     target_compile_definitions(omnicpp_viewport PRIVATE VK_USE_PLATFORM_WAYLAND_KHR=1)
 else()
     message(STATUS "warploom-viewport: Wayland backend disabled (need wayland-scanner + wayland-client)")

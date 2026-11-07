@@ -1091,7 +1091,34 @@ declares a slot 3.
       backend at the same extent, validation-diagnostic parity (10
       pre-existing timestamp warnings on both, zero new), WAYLAND_DEBUG
       shows the full configure handshake with zero protocol errors.
-      Seat input (keyboard/pointer parity) is the loop70 slice.
+      Loop70 landed the keyboard-only seat slice (pointer explicitly
+      deferred to loop71 so every landed line is verifiable): wl_seat
+      bind at v1, keyboard object, xkbcommon keymap/modifiers, ESC
+      closes, teardown destroys in dependency order; xkbcommon is a
+      REQUIRED viewport-only link. The XCB key-press/release blocks were
+      extracted verbatim into shared `viewport_key_press/release`
+      helpers (no-behaviour-change proof: reconstruction diff identical
+      modulo the intended comment/printable/OOB-guard changes; 4/4
+      post-extraction XCB captures byte-identical across runs, exit 0).
+      Pure mappings live in `wayland_keymap.hpp` (evdev+8, keysym range)
+      pinned by 4 unit tests, both directions sabotage-checked (offset
+      +1 fails 2 tests, range widened to 127 fails 1). Measuring found a
+      real defect the slice guards but does not fix: the param-editor
+      `kLower` table has 29 entries indexed 0..34, so X11 codes 52-58
+      read out of bounds (48-51 yield wrong letters); guarded to `<=51`
+      with the table fix deferred to the input-hardening pass. Setup
+      proven live on kwin_wayland (seat bind, get_keyboard,
+      keymap(1, 36KB) received, xkb state built, zero protocol errors).
+      The ESC end-to-end (both backends) is environmentally gated and
+      deferred, not hidden: this is a live user session (focus-stealing
+      prevention denied the new window keyboard focus; no nested
+      compositor installed) and the user's 4.4 GiB trainer run saturates
+      the 6 GiB card so viewport init intermittently fails to allocate
+      (all 40 non-CPU suite failures are GPU-allocation failures; the
+      CPU-only suites pass, exit 0). Process hygiene learned twice over:
+      `&`-launched children of SYNC calls and bare BACKGROUND launches
+      without DISPLAY/XAUTHORITY do not survive; foreground SYNC runs
+      and env-complete BACKGROUND launches do.
 - [x] **E7 estate-shared C++ gates** — DONE (warploom side; the kit
       itself lives in the estate repo). The estate runs one reusable workflow
       per language (rust-kit, go-kit, haskell-kit, node-ci, python-kit); C++
