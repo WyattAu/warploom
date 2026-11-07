@@ -1119,6 +1119,32 @@ declares a slot 3.
       `&`-launched children of SYNC calls and bare BACKGROUND launches
       without DISPLAY/XAUTHORITY do not survive; foreground SYNC runs
       and env-complete BACKGROUND launches do.
+      Loop71 landed the pointer slice
+      (motion + buttons; wheel-axis stays unmapped — it needs a seat
+      v5+ discrete-step policy, deferred to input-hardening):
+      wl_pointer object, Linux BTN_* (0x110/111/112) translated to XCB
+      details (1/2/3) with zero for the rest, wl_fixed (24.8) converted
+      at one site; enter syncs position without feeding the translator
+      (XCB has no enter/leave, so parity means the same stale-last
+      first-motion delta), leave is a no-op, axis handlers are null.
+      The XCB motion/press/release blocks were extracted verbatim into
+      shared `viewport_pointer_motion` / `viewport_button_press`
+      (returns consumed) / `viewport_button_release` helpers —
+      reconstruction proof: 249 lines re-inlined byte-identical to the
+      pre-extraction backup. Pure mappings live in
+      `wayland_pointer.hpp`, pinned by 3 unit tests, both directions
+      sabotage-checked (BTN_LEFT->2 fails 1 test, divisor 255 fails 1;
+      pristine restores verified with `diff -q`). Setup proven live on
+      kwin_wayland (seat v10 bound at v1, caps(3), get_keyboard AND
+      get_pointer both issued, zero protocol errors, clean destroy
+      chain; the keymap(1, 36KB) receipt stands from the loop70 log —
+      this run's Vulkan init died in ~1.2s before the async keymap
+      arrived). Still environmentally gated and recorded, not hidden:
+      key/motion/button DELIVERY needs focus + the dispatch loop past
+      renderer init (VRAM still saturated, trainer still at 4.4 GiB;
+      today's launch re-confirmed init failure), and the scripted-input
+      replay comparison (no focus needed, but needs the renderer for
+      captures) waits on free VRAM.
 - [x] **E7 estate-shared C++ gates** — DONE (warploom side; the kit
       itself lives in the estate repo). The estate runs one reusable workflow
       per language (rust-kit, go-kit, haskell-kit, node-ci, python-kit); C++

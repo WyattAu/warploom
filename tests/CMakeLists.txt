@@ -53,6 +53,7 @@ add_executable(warploom_unit_tests
     unit/test_input_state.cpp
     unit/test_input_translators.cpp
     unit/test_wayland_keymap.cpp
+    unit/test_wayland_pointer.cpp
     unit/test_engine.cpp
     unit/test_concurrency.cpp
     unit/test_platform_primitives.cpp

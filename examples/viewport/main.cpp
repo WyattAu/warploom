@@ -51,6 +51,7 @@
 #include <wayland-client.h>
 #include "xdg-shell-client-protocol.h"
 #include "wayland_keymap.hpp"
+#include "wayland_pointer.hpp"
 #include <xkbcommon/xkbcommon.h>
 #include <sys/mman.h>
 #endif
@@ -953,8 +954,8 @@ struct ViewportApp {
   // XCB window.
   xcb_connection_t* connection{nullptr};
   xcb_window_t window{0};
-  // Wayland window (loop69 creation/present + loop70 keyboard seat).
-  // Pointer stays XCB-only until the pointer slice (loop71).
+  // Wayland window (loop69 creation/present + loop70 keyboard seat +
+  // loop71 pointer motion/buttons; wheel-axis stays unmapped).
   // Selected at runtime by WARPLOOM_WAYLAND.
   bool use_wayland{false};
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
@@ -962,6 +963,7 @@ struct ViewportApp {
   wl_registry* wayland_registry{nullptr};
   wl_seat* wayland_seat{nullptr};
   wl_keyboard* wayland_keyboard{nullptr};
+  wl_pointer* wayland_pointer{nullptr};
   xkb_context* wayland_xkb_ctx{nullptr};
   xkb_keymap* wayland_xkb_keymap{nullptr};
   xkb_state* wayland_xkb_state{nullptr};
@@ -1844,11 +1846,17 @@ bool setup_wm_delete_protocol(ViewportApp& app) {
 bool viewport_key_press(ViewportApp& app, std::uint8_t code, bool ctrl_held,
                         char printable);
 void viewport_key_release(ViewportApp& app, std::uint8_t code);
+// Shared pointer dispatch (defined just above poll_events): the seat
+// listener below runs earlier in the file, hence the forward declarations.
+// The press helper returns consumed (XCB frees the event and returns;
+// the Wayland caller ignores it — there is nothing to free).
+void viewport_pointer_motion(ViewportApp& app, double x, double y);
+bool viewport_button_press(ViewportApp& app, std::uint8_t detail);
+void viewport_button_release(ViewportApp& app, std::uint8_t detail);
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
-// Wayland window (loop69 creation/present + loop70 keyboard seat).
-// Mirrors the XCB setup above: connect, bind the globals, build the xdg
-// toplevel, wait for the first configure. Pointer stays XCB-only until
-// the loop71 slice.
+// Wayland window (loop69 creation/present + loop70 keyboard seat +
+// loop71 pointer motion/buttons). Mirrors the XCB setup above: connect,
+// bind the globals, build the xdg toplevel, wait for the first configure.
 namespace {
 struct WaylandWindowGlobals {
   wl_compositor* compositor{nullptr};
@@ -1986,16 +1994,86 @@ void wayland_keyboard_modifiers(void* data, wl_keyboard* keyboard,
 const wl_keyboard_listener kWaylandKeyboardListener = {
     wayland_keyboard_keymap, wayland_keyboard_enter, wayland_keyboard_leave,
     wayland_keyboard_key, wayland_keyboard_modifiers, nullptr};
+// --- Seat: pointer motion + buttons (loop71). ----------------------------
+// Enter syncs the position state (hit-testing must be right even before
+// the first motion) but does NOT feed the translator: XCB has no
+// enter/leave concept, so its first-motion-after-a-gap delta comes from
+// the stale last position — parity means doing exactly the same. Leave is
+// a deliberate no-op for the same reason. Wheel arrives as axis events
+// (seat v5+ discrete policy), not buttons: unmapped, see the header.
+void wayland_pointer_enter(void* data, wl_pointer* pointer,
+                           std::uint32_t serial, wl_surface* surface,
+                           wl_fixed_t sx, wl_fixed_t sy) {
+  auto* app = static_cast<ViewportApp*>(data);
+  (void)pointer;
+  (void)serial;
+  (void)surface;
+  const double x = wayland_pointer::pointer_fixed_to_double(sx);
+  const double y = wayland_pointer::pointer_fixed_to_double(sy);
+  app->last_mouse_x = app->mouse_x;
+  app->last_mouse_y = app->mouse_y;
+  app->mouse_x = static_cast<float>(x);
+  app->mouse_y = static_cast<float>(y);
+}
+void wayland_pointer_leave(void* data, wl_pointer* pointer,
+                           std::uint32_t serial, wl_surface* surface) {
+  (void)data;
+  (void)pointer;
+  (void)serial;
+  (void)surface;
+}
+void wayland_pointer_motion(void* data, wl_pointer* pointer,
+                            std::uint32_t time, wl_fixed_t sx, wl_fixed_t sy) {
+  auto* app = static_cast<ViewportApp*>(data);
+  (void)pointer;
+  (void)time;
+  viewport_pointer_motion(
+      *app, wayland_pointer::pointer_fixed_to_double(sx),
+      wayland_pointer::pointer_fixed_to_double(sy));
+}
+void wayland_pointer_button(void* data, wl_pointer* pointer,
+                            std::uint32_t serial, std::uint32_t time,
+                            std::uint32_t button, std::uint32_t state) {
+  auto* app = static_cast<ViewportApp*>(data);
+  (void)pointer;
+  (void)serial;
+  (void)time;
+  // Wayland delivers Linux input codes; the shared dispatch speaks XCB
+  // details (1/2/3), so buttons match the XCB numbers exactly. Zero has
+  // no counterpart and is dropped, like an unhandled XCB detail.
+  const std::uint8_t detail = wayland_pointer::linux_button_to_x11(button);
+  if (detail == 0) return;
+  const bool pressed = state == 1;  // WL_POINTER_BUTTON_STATE_PRESSED
+  if (!pressed) {
+    viewport_button_release(*app, detail);
+    return;
+  }
+  (void)viewport_button_press(*app, detail);  // no event to free/consume
+}
+// wayland-client 1.26: enter, leave, motion, button, axis, frame,
+// axis_source, axis_stop, axis_discrete, axis_value120,
+// axis_relative_direction, warp. Axis stays null (wheel deferred).
+const wl_pointer_listener kWaylandPointerListener = {
+    wayland_pointer_enter, wayland_pointer_leave, wayland_pointer_motion,
+    wayland_pointer_button, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr};
 void wayland_seat_capabilities(void* data, wl_seat* seat,
                                std::uint32_t capabilities) {
   auto* app = static_cast<ViewportApp*>(data);
-  // Keyboard only in loop70; the pointer is the loop71 slice.
   if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) != 0U &&
       app->wayland_keyboard == nullptr) {
     app->wayland_keyboard = wl_seat_get_keyboard(seat);
     if (app->wayland_keyboard != nullptr) {
       wl_keyboard_add_listener(app->wayland_keyboard,
                                &kWaylandKeyboardListener, app);
+    }
+  }
+  if ((capabilities & WL_SEAT_CAPABILITY_POINTER) != 0U &&
+      app->wayland_pointer == nullptr) {
+    app->wayland_pointer = wl_seat_get_pointer(seat);
+    if (app->wayland_pointer != nullptr) {
+      wl_pointer_add_listener(app->wayland_pointer,
+                              &kWaylandPointerListener, app);
     }
   }
 }
@@ -2102,6 +2180,12 @@ bool setup_wayland_window(ViewportApp& app) {
   if (!app.wayland_configured) {
     std::fprintf(stderr, "viewport: no initial xdg configure received\n");
     return false;
+  }
+  // Capabilities arrive over the round-trips above; a seat without a
+  // pointer (headless test compositor) warns instead of failing.
+  if (app.wayland_pointer == nullptr) {
+    std::fprintf(stderr,
+                 "viewport: seat offers no pointer; mouse input unavailable\n");
   }
   wl_surface_commit(app.wayland_surface);
   return true;
@@ -2512,12 +2596,262 @@ void viewport_key_release(ViewportApp& app, std::uint8_t code) {
 }
 
 
+//! Shared pointer-motion dispatch (XCB event loop + Wayland seat).
+void viewport_pointer_motion(ViewportApp& app, double x, double y) {
+  app.kb_mouse.on_motion(x, y);
+  app.last_mouse_x = app.mouse_x;
+  app.last_mouse_y = app.mouse_y;
+  app.mouse_x = static_cast<float>(x);
+  app.mouse_y = static_cast<float>(y);
+  // Node drag: translate the grabbed card by the mouse delta.
+  if (app.node_editor && app.drag_node_id != 0U &&
+      app.node_view != nullptr) {
+    (void)app.node_view->translate(
+        app.drag_node_id, app.mouse_x - app.last_mouse_x,
+        app.mouse_y - app.last_mouse_y);
+  }
+  // Link drag: the rubber band follows the pointer; the view resolves
+  // the hovered compatible pin (drop target highlight is the band
+  // color change upstream in the paint path).
+  if (app.node_editor && app.node_view != nullptr &&
+      app.node_view->link_drag_active()) {
+    app.node_view->update_link_drag(app.mouse_x, app.mouse_y);
+  }
+  // G3-B clip drag: the pending start follows the pointer; commit
+  // happens on release. Pointer-following only, so no gating beyond
+  // the press that started it (same posture as the card/link drags).
+  if (app.clip_strip.has_value() && app.clip_strip->drag_active()) {
+    app.clip_strip->update_clip_drag(app.mouse_x);
+  }
+}
+
+//! Shared button-press dispatch (XCB event loop + Wayland seat).
+//! Returns consumed: XCB frees the event and returns; the seat caller
+//! ignores it (nothing to free on the Wayland side).
+bool viewport_button_press(ViewportApp& app, std::uint8_t detail) {
+  app.kb_mouse.on_button(detail, true);
+  // Right press on a wire: unlink (undoable). Order matters — wires sit
+  // under cards, so this must be checked before card grabs.
+  if (app.node_editor && detail == 3 && app.node_view != nullptr) {
+    const auto link_index =
+        app.node_view->link_at(app.mouse_x, app.mouse_y, 8.0F);
+    const auto* link =
+        app.node_view->link_at_index(link_index);
+    if (link != nullptr) {
+      omnicpp::core::ControlCommand cmd;
+      cmd.kind = omnicpp::core::ControlCommand::Kind::UnlinkNodes;
+      cmd.numbers[0] = static_cast<double>(link->to_node);
+      cmd.number_count = 1;
+      cmd.text2 = link->to_pin;
+      {
+        std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+        app.edit_queue.push_back({std::move(cmd)});
+      }
+      app.node_dirty = true;
+    }
+  }
+  // G3-B: the clip strip consumes block presses first (it sits above
+  // the W1 strip; regions are disjoint). Grab → clip-move drag, commit
+  // on release through the session path like every other mutation.
+  if (app.node_editor && detail == 1 &&
+      app.clip_strip.has_value()) {
+    const auto hit =
+        app.clip_strip->clip_at(app.mouse_x, app.mouse_y);
+    if (hit.valid() && app.clip_strip->begin_clip_drag(hit)) {
+      return true;
+    }
+  }
+  // W1: the timeline strip consumes left presses first (it overlays the
+  // bottom edge, under the node canvas's empty-space deselect). Click →
+  // scrub_to the nearest checkpoint (queued through the session path).
+  if (app.node_editor && detail == 1) {
+    std::uint64_t scrub_frame = 0;
+    if (app.timeline.frame_at(app.mouse_x, app.mouse_y,
+                              app.editor.scrubber(), scrub_frame)) {
+      omnicpp::core::ControlCommand cmd;
+      cmd.kind = omnicpp::core::ControlCommand::Kind::ScrubTo;
+      cmd.numbers[0] = static_cast<double>(scrub_frame);
+      cmd.number_count = 1U;
+      {
+        std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+        app.edit_queue.push_back({std::move(cmd)});
+      }
+      app.node_dirty = true;
+      return true;
+    }
+  }
+  // Left press on the node canvas: toolbar > pin (link drag) > card
+  // (move drag) > deselect.
+  if (app.node_editor && detail == 1 && app.node_view != nullptr) {
+    // Toolbar buttons first (they live over the canvas).
+    if (!app.node_toolbar_buttons.empty()) {
+      const auto tb = omnicpp::editor::hit_test_toolbar(
+          app.ui_tree, app.node_toolbar_buttons, *app.node_graph,
+          app.mouse_x, app.mouse_y);
+      using TA = omnicpp::editor::ToolbarAction;
+      if (tb.action == TA::AddType) {
+        omnicpp::core::ControlCommand cmd;
+        cmd.kind = omnicpp::core::ControlCommand::Kind::NodeAdd;
+        cmd.text = app.node_graph->types()[tb.type_index].name;
+        cmd.numbers[0] = static_cast<double>(app.mouse_x);
+        cmd.numbers[1] = static_cast<double>(app.mouse_y);
+        cmd.number_count = 2;
+        {
+          std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+          app.edit_queue.push_back({std::move(cmd)});
+        }
+        app.node_dirty = true;
+      } else if (tb.action == TA::Undo) {
+        app.undo_requested = true;
+      } else if (tb.action == TA::Redo) {
+        app.redo_requested = true;
+      }
+      if (tb.action != TA::None) {
+        return true;  // toolbar consumed the click
+      }
+    }
+    // G5: scene-browser load buttons (absolute right-edge column).
+    if (app.browser_enabled && !app.browser_buttons.empty()) {
+      for (const auto& [handle, file] : app.browser_buttons) {
+        if (handle >= app.ui_tree.size()) {
+          continue;
+        }
+        const auto& w = app.ui_tree.get(handle);
+        if (app.mouse_x >= w.x && app.mouse_x <= w.x + w.w &&
+            app.mouse_y >= w.y && app.mouse_y <= w.y + w.h) {
+          omnicpp::core::ControlCommand cmd;
+          cmd.kind = omnicpp::core::ControlCommand::Kind::LoadDocument;
+          cmd.text = app.browser_dir + "/" + file;
+          {
+            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+            app.edit_queue.push_back({std::move(cmd), false});
+          }
+          app.node_dirty = true;  // cards + inspector re-derive
+          return true;
+        }
+      }
+    }
+    // M12: param rows next — click begins editing (one at a time).
+    {
+      const auto prow = app.node_view->param_row_at(app.mouse_x,
+                                                    app.mouse_y);
+      if (prow.valid()) {
+        (void)app.node_view->begin_param_edit(prow.node_id, prow.param);
+        return true;
+      }
+    }
+    const auto pin = app.node_view->pin_at(app.mouse_x, app.mouse_y);
+    if (pin.valid()) {
+      app.node_view->begin_link_drag(pin);
+    } else {
+      const auto hit = app.node_view->hit_test(app.mouse_x, app.mouse_y);
+      if (hit != 0U) {
+        app.drag_node_id = hit;
+        (void)app.node_view->select(hit);
+        float cx = 0.0F;
+        float cy = 0.0F;
+        float cw = 0.0F;
+        float ch = 0.0F;
+        if (app.node_view->node_rect(hit, cx, cy, cw, ch)) {
+          app.drag_grab_dx = app.mouse_x - cx;
+          app.drag_grab_dy = app.mouse_y - cy;
+          app.drag_start_x = cx;
+          app.drag_start_y = cy;
+        }
+      } else {
+        // Empty canvas space: the inspector gets the click BEFORE
+        // deselecting (its rows select document objects, undoable
+        // through the same session path).
+        const auto ihit = app.inspector.hit_test(app.ui_tree, app.mouse_x,
+                                                 app.mouse_y);
+        if (ihit.kind == omnicpp::editor::InspectorHit::Kind::SelectObject) {
+          omnicpp::core::ControlCommand sel_cmd;
+          sel_cmd.kind = omnicpp::core::ControlCommand::Kind::Select;
+          sel_cmd.numbers[0] = static_cast<double>(ihit.object_id);
+          sel_cmd.number_count = 1;
+          {
+            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+            app.edit_queue.push_back({std::move(sel_cmd)});
+          }
+          app.inspector_rebuild_requested = true;
+        } else if (ihit.kind ==
+                   omnicpp::editor::InspectorHit::Kind::None) {
+          (void)app.node_view->select(0U);
+        }
+      }
+    }
+  }
+  return false;
+}
+
+//! Shared button-release dispatch (XCB event loop + Wayland seat).
+void viewport_button_release(ViewportApp& app, std::uint8_t detail) {
+  app.kb_mouse.on_button(detail, false);
+  if (app.node_editor && detail == 1) {
+    // Finish a link drag first: commit a resolved drop through the
+    // session (undoable); an unresolved drop just cancels.
+    if (app.node_view != nullptr &&
+        app.node_view->link_drag_active()) {
+      app.node_view->update_link_drag(app.mouse_x, app.mouse_y);
+      const auto drop = app.node_view->end_link_drag(true);
+      if (drop.valid()) {
+        // Source pin determines direction: output->input, or reversed.
+        const auto src = app.node_view->drag_source_pin();
+        omnicpp::core::ControlCommand cmd;
+        cmd.kind = omnicpp::core::ControlCommand::Kind::LinkNodes;
+        cmd.numbers[0] = static_cast<double>(src.is_input ? drop.node_id
+                                                          : src.node_id);
+        cmd.numbers[1] = static_cast<double>(src.is_input ? src.node_id
+                                                          : drop.node_id);
+        cmd.number_count = 2;
+        cmd.text = src.is_input ? drop.pin_name : src.pin_name;
+        cmd.text2 = src.is_input ? src.pin_name : drop.pin_name;
+        {
+          std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+          app.edit_queue.push_back({std::move(cmd)});
+        }
+      }
+    } else if (app.drag_node_id != 0U) {
+      // Card move finished: commit the position as ONE undoable step.
+      float cx = 0.0F;
+      float cy = 0.0F;
+      float cw = 0.0F;
+      float ch = 0.0F;
+      if (app.node_view != nullptr &&
+          app.node_view->node_rect(app.drag_node_id, cx, cy, cw, ch)) {
+        omnicpp::core::ControlCommand cmd;
+        cmd.kind = omnicpp::core::ControlCommand::Kind::SetNodePosition;
+        cmd.numbers[0] = static_cast<double>(app.drag_node_id);
+        cmd.numbers[1] = static_cast<double>(cx);
+        cmd.numbers[2] = static_cast<double>(cy);
+        cmd.number_count = 3;
+        {
+          std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+          app.edit_queue.push_back({std::move(cmd)});
+        }
+      }
+    }
+    if (app.clip_strip.has_value() && app.clip_strip->drag_active()) {
+      // Clip drag finished: commit the move as ONE undoable step
+      // through the session (the view already built the exact ClipMove
+      // payload; a no-op drag still ends here and commits nothing).
+      omnicpp::core::ControlCommand cmd;
+      if (app.clip_strip->end_clip_drag(true, cmd)) {
+        std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+        app.edit_queue.push_back({std::move(cmd)});
+      }
+    }
+    app.drag_node_id = 0U;
+  }
+}
+
+
 bool poll_events(ViewportApp& app) {
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
   if (app.use_wayland) {
-    // Keyboard seat events arrive through the listeners during dispatch
-    // (loop70); pointer stays XCB-only until loop71. The deterministic
-    // control socket + scripted input still drive scripted runs.
+    // Seat events (keyboard loop70, pointer loop71) arrive through the
+    // listeners during dispatch. The deterministic control socket +
+    // scripted input still drive scripted runs.
     if (!app.wayland_display) return false;
     if (wl_display_dispatch_pending(app.wayland_display) < 0) return false;
     wl_display_flush(app.wayland_display);
@@ -2570,251 +2904,22 @@ bool poll_events(ViewportApp& app) {
     } else if (type == XCB_MOTION_NOTIFY) {
       const auto* motion =
           reinterpret_cast<const xcb_motion_notify_event_t*>(event);
-      app.kb_mouse.on_motion(motion->event_x, motion->event_y);
-      app.last_mouse_x = app.mouse_x;
-      app.last_mouse_y = app.mouse_y;
-      app.mouse_x = static_cast<float>(motion->event_x);
-      app.mouse_y = static_cast<float>(motion->event_y);
-      // Node drag: translate the grabbed card by the mouse delta.
-      if (app.node_editor && app.drag_node_id != 0U &&
-          app.node_view != nullptr) {
-        (void)app.node_view->translate(
-            app.drag_node_id, app.mouse_x - app.last_mouse_x,
-            app.mouse_y - app.last_mouse_y);
-      }
-      // Link drag: the rubber band follows the pointer; the view resolves
-      // the hovered compatible pin (drop target highlight is the band
-      // color change upstream in the paint path).
-      if (app.node_editor && app.node_view != nullptr &&
-          app.node_view->link_drag_active()) {
-        app.node_view->update_link_drag(app.mouse_x, app.mouse_y);
-      }
-      // G3-B clip drag: the pending start follows the pointer; commit
-      // happens on release. Pointer-following only, so no gating beyond
-      // the press that started it (same posture as the card/link drags).
-      if (app.clip_strip.has_value() && app.clip_strip->drag_active()) {
-        app.clip_strip->update_clip_drag(app.mouse_x);
-      }
+      // Shared with the Wayland seat path (viewport_pointer_motion):
+      // surface-local pixels feed the same dispatch on both backends.
+      viewport_pointer_motion(app, motion->event_x, motion->event_y);
     } else if (type == XCB_BUTTON_PRESS) {
       const auto* button =
           reinterpret_cast<const xcb_button_press_event_t*>(event);
-      app.kb_mouse.on_button(button->detail, true);
-      // Right press on a wire: unlink (undoable). Order matters — wires sit
-      // under cards, so this must be checked before card grabs.
-      if (app.node_editor && button->detail == 3 && app.node_view != nullptr) {
-        const auto link_index =
-            app.node_view->link_at(app.mouse_x, app.mouse_y, 8.0F);
-        const auto* link =
-            app.node_view->link_at_index(link_index);
-        if (link != nullptr) {
-          omnicpp::core::ControlCommand cmd;
-          cmd.kind = omnicpp::core::ControlCommand::Kind::UnlinkNodes;
-          cmd.numbers[0] = static_cast<double>(link->to_node);
-          cmd.number_count = 1;
-          cmd.text2 = link->to_pin;
-          {
-            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
-            app.edit_queue.push_back({std::move(cmd)});
-          }
-          app.node_dirty = true;
-        }
-      }
-      // G3-B: the clip strip consumes block presses first (it sits above
-      // the W1 strip; regions are disjoint). Grab → clip-move drag, commit
-      // on release through the session path like every other mutation.
-      if (app.node_editor && button->detail == 1 &&
-          app.clip_strip.has_value()) {
-        const auto hit =
-            app.clip_strip->clip_at(app.mouse_x, app.mouse_y);
-        if (hit.valid() && app.clip_strip->begin_clip_drag(hit)) {
-          free(event);
-          return true;
-        }
-      }
-      // W1: the timeline strip consumes left presses first (it overlays the
-      // bottom edge, under the node canvas's empty-space deselect). Click →
-      // scrub_to the nearest checkpoint (queued through the session path).
-      if (app.node_editor && button->detail == 1) {
-        std::uint64_t scrub_frame = 0;
-        if (app.timeline.frame_at(app.mouse_x, app.mouse_y,
-                                  app.editor.scrubber(), scrub_frame)) {
-          omnicpp::core::ControlCommand cmd;
-          cmd.kind = omnicpp::core::ControlCommand::Kind::ScrubTo;
-          cmd.numbers[0] = static_cast<double>(scrub_frame);
-          cmd.number_count = 1U;
-          {
-            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
-            app.edit_queue.push_back({std::move(cmd)});
-          }
-          app.node_dirty = true;
-          free(event);
-          return true;
-        }
-      }
-      // Left press on the node canvas: toolbar > pin (link drag) > card
-      // (move drag) > deselect.
-      if (app.node_editor && button->detail == 1 && app.node_view != nullptr) {
-        // Toolbar buttons first (they live over the canvas).
-        if (!app.node_toolbar_buttons.empty()) {
-          const auto tb = omnicpp::editor::hit_test_toolbar(
-              app.ui_tree, app.node_toolbar_buttons, *app.node_graph,
-              app.mouse_x, app.mouse_y);
-          using TA = omnicpp::editor::ToolbarAction;
-          if (tb.action == TA::AddType) {
-            omnicpp::core::ControlCommand cmd;
-            cmd.kind = omnicpp::core::ControlCommand::Kind::NodeAdd;
-            cmd.text = app.node_graph->types()[tb.type_index].name;
-            cmd.numbers[0] = static_cast<double>(app.mouse_x);
-            cmd.numbers[1] = static_cast<double>(app.mouse_y);
-            cmd.number_count = 2;
-            {
-              std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
-              app.edit_queue.push_back({std::move(cmd)});
-            }
-            app.node_dirty = true;
-          } else if (tb.action == TA::Undo) {
-            app.undo_requested = true;
-          } else if (tb.action == TA::Redo) {
-            app.redo_requested = true;
-          }
-          if (tb.action != TA::None) {
-            free(event);
-            return true;  // toolbar consumed the click
-          }
-        }
-        // G5: scene-browser load buttons (absolute right-edge column).
-        if (app.browser_enabled && !app.browser_buttons.empty()) {
-          for (const auto& [handle, file] : app.browser_buttons) {
-            if (handle >= app.ui_tree.size()) {
-              continue;
-            }
-            const auto& w = app.ui_tree.get(handle);
-            if (app.mouse_x >= w.x && app.mouse_x <= w.x + w.w &&
-                app.mouse_y >= w.y && app.mouse_y <= w.y + w.h) {
-              omnicpp::core::ControlCommand cmd;
-              cmd.kind = omnicpp::core::ControlCommand::Kind::LoadDocument;
-              cmd.text = app.browser_dir + "/" + file;
-              {
-                std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
-                app.edit_queue.push_back({std::move(cmd), false});
-              }
-              app.node_dirty = true;  // cards + inspector re-derive
-              free(event);
-              return true;
-            }
-          }
-        }
-        // M12: param rows next — click begins editing (one at a time).
-        {
-          const auto prow = app.node_view->param_row_at(app.mouse_x,
-                                                        app.mouse_y);
-          if (prow.valid()) {
-            (void)app.node_view->begin_param_edit(prow.node_id, prow.param);
-            free(event);
-            return true;
-          }
-        }
-        const auto pin = app.node_view->pin_at(app.mouse_x, app.mouse_y);
-        if (pin.valid()) {
-          app.node_view->begin_link_drag(pin);
-        } else {
-          const auto hit = app.node_view->hit_test(app.mouse_x, app.mouse_y);
-          if (hit != 0U) {
-            app.drag_node_id = hit;
-            (void)app.node_view->select(hit);
-            float cx = 0.0F;
-            float cy = 0.0F;
-            float cw = 0.0F;
-            float ch = 0.0F;
-            if (app.node_view->node_rect(hit, cx, cy, cw, ch)) {
-              app.drag_grab_dx = app.mouse_x - cx;
-              app.drag_grab_dy = app.mouse_y - cy;
-              app.drag_start_x = cx;
-              app.drag_start_y = cy;
-            }
-          } else {
-            // Empty canvas space: the inspector gets the click BEFORE
-            // deselecting (its rows select document objects, undoable
-            // through the same session path).
-            const auto ihit = app.inspector.hit_test(app.ui_tree, app.mouse_x,
-                                                     app.mouse_y);
-            if (ihit.kind == omnicpp::editor::InspectorHit::Kind::SelectObject) {
-              omnicpp::core::ControlCommand sel_cmd;
-              sel_cmd.kind = omnicpp::core::ControlCommand::Kind::Select;
-              sel_cmd.numbers[0] = static_cast<double>(ihit.object_id);
-              sel_cmd.number_count = 1;
-              {
-                std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
-                app.edit_queue.push_back({std::move(sel_cmd)});
-              }
-              app.inspector_rebuild_requested = true;
-            } else if (ihit.kind ==
-                       omnicpp::editor::InspectorHit::Kind::None) {
-              (void)app.node_view->select(0U);
-            }
-          }
-        }
+      // Shared with the Wayland seat path (viewport_button_press
+      // above): XCB details feed the helper directly.
+      if (viewport_button_press(app, button->detail)) {
+        free(event);
+        return true;
       }
     } else if (type == XCB_BUTTON_RELEASE) {
       const auto* button =
           reinterpret_cast<const xcb_button_press_event_t*>(event);
-      app.kb_mouse.on_button(button->detail, false);
-      if (app.node_editor && button->detail == 1) {
-        // Finish a link drag first: commit a resolved drop through the
-        // session (undoable); an unresolved drop just cancels.
-        if (app.node_view != nullptr &&
-            app.node_view->link_drag_active()) {
-          app.node_view->update_link_drag(app.mouse_x, app.mouse_y);
-          const auto drop = app.node_view->end_link_drag(true);
-          if (drop.valid()) {
-            // Source pin determines direction: output->input, or reversed.
-            const auto src = app.node_view->drag_source_pin();
-            omnicpp::core::ControlCommand cmd;
-            cmd.kind = omnicpp::core::ControlCommand::Kind::LinkNodes;
-            cmd.numbers[0] = static_cast<double>(src.is_input ? drop.node_id
-                                                              : src.node_id);
-            cmd.numbers[1] = static_cast<double>(src.is_input ? src.node_id
-                                                              : drop.node_id);
-            cmd.number_count = 2;
-            cmd.text = src.is_input ? drop.pin_name : src.pin_name;
-            cmd.text2 = src.is_input ? src.pin_name : drop.pin_name;
-            {
-              std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
-              app.edit_queue.push_back({std::move(cmd)});
-            }
-          }
-        } else if (app.drag_node_id != 0U) {
-          // Card move finished: commit the position as ONE undoable step.
-          float cx = 0.0F;
-          float cy = 0.0F;
-          float cw = 0.0F;
-          float ch = 0.0F;
-          if (app.node_view != nullptr &&
-              app.node_view->node_rect(app.drag_node_id, cx, cy, cw, ch)) {
-            omnicpp::core::ControlCommand cmd;
-            cmd.kind = omnicpp::core::ControlCommand::Kind::SetNodePosition;
-            cmd.numbers[0] = static_cast<double>(app.drag_node_id);
-            cmd.numbers[1] = static_cast<double>(cx);
-            cmd.numbers[2] = static_cast<double>(cy);
-            cmd.number_count = 3;
-            {
-              std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
-              app.edit_queue.push_back({std::move(cmd)});
-            }
-          }
-        }
-        if (app.clip_strip.has_value() && app.clip_strip->drag_active()) {
-          // Clip drag finished: commit the move as ONE undoable step
-          // through the session (the view already built the exact ClipMove
-          // payload; a no-op drag still ends here and commits nothing).
-          omnicpp::core::ControlCommand cmd;
-          if (app.clip_strip->end_clip_drag(true, cmd)) {
-            std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
-            app.edit_queue.push_back({std::move(cmd)});
-          }
-        }
-        app.drag_node_id = 0U;
-      }
+      viewport_button_release(app, button->detail);
     } else if (type == XCB_DESTROY_NOTIFY) {
       free(event);
       return false;
@@ -8336,6 +8441,7 @@ void ViewportApp::shutdown() {
   if (wayland_toplevel) xdg_toplevel_destroy(wayland_toplevel);
   if (wayland_xdg_surface) xdg_surface_destroy(wayland_xdg_surface);
   if (wayland_keyboard) wl_keyboard_destroy(wayland_keyboard);
+  if (wayland_pointer) wl_pointer_destroy(wayland_pointer);
   if (wayland_seat) wl_seat_destroy(wayland_seat);
   if (wayland_xkb_state) xkb_state_unref(wayland_xkb_state);
   if (wayland_xkb_keymap) xkb_keymap_unref(wayland_xkb_keymap);

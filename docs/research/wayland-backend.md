@@ -56,7 +56,7 @@ occupies the same slot, so no tick ever reads compositor timing.
   this machine); loop69 must measure present-path frames + 0
   validation diagnostics + pixel-equality with the XCB backend.
 
-## Slice boundary (loop69 vs loop70)
+## Slice boundary (loop69 vs loop70 vs loop71)
 
 - Loop69: display → registry → compositor + xdg_wm_base → wl_surface
   → xdg toplevel → configure handshake → engine Wayland surface →
@@ -74,3 +74,14 @@ occupies the same slot, so no tick ever reads compositor timing.
   unit-pinned and sabotage-checked, XCB post-extraction captures
   byte-identical. The input-script replay comparison stays the
   loop71 proof.
+- Loop71 (as landed): pointer motion + buttons parity (wl_pointer
+  object, Linux BTN_* to XCB 1/2/3, wl_fixed 24.8 converted at one
+  site). XCB motion/press/release blocks extracted verbatim into
+  shared helpers (249-line reconstruction proof holds); enter syncs
+  position without feeding the translator, leave is a no-op, wheel
+  axis stays null (needs seat v5+ discrete policy — input-hardening).
+  Setup proven live (seat v10 bound at v1, caps keyboard+pointer,
+  get_keyboard AND get_pointer issued, zero protocol errors, clean
+  teardown). Delivery e2e still gated (focus + renderer init under
+  saturated VRAM); the input-script replay comparison stays the
+  deferred proof, runnable when VRAM frees.
