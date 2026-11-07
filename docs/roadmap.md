@@ -400,7 +400,7 @@ declares a slot 3.
 
 ## Phase D — the three thin products
 
-- [ ] **D1 real physics** — extract `warploom-physics`; more shapes, joints,
+- [x] **D1 real physics** — DONE (loop79 closure audit); extract `warploom-physics`; more shapes, joints,
       XPBD substepping, speculative contacts; deterministic by construction.
       Today: ~420 lines in core (deterministic uniform-grid broadphase with
       frozen-snapshot detection, spheres, sequential positional correction,
@@ -589,6 +589,20 @@ declares a slot 3.
       solver itself throws the body through; see the test comment and R3),
       MGPBD (no deformables — explicitly not adopted), warm-start (breaks
       snapshot replay).
+      Loop79 CLOSED the box by audit, not by new code: every sub-claim
+      re-verified against this tree — D1a frozen-snapshot detection +
+      conservative grid (`set_force_all_pairs`, agreement at
+      200/600/1200/1000/4000/8000), iterations + substeps knobs, XPBD
+      compliance opt-in, determinism-check validator
+      (`set_determinism_check`/`determinism_violations`), sleeping +
+      restitution threshold, velocity-from-position, capsule (+sweep) +
+      rotation + distance joints, speculative contacts + compliant rewind
+      — all present in `modules/physics` with tests, and the extraction
+      itself verified (install rules, `WarploomPhysicsTargets` export,
+      core links `Warploom::physics`). D1-covering suites on the current
+      tree: 56/56 (PhysicsWorld 31, bridge, scrub, replay, determinism)
+      with 0 skips, plus 23/23 feature-name matches. The only remainder
+      is future shapes, which is new work by definition, not debt.
 - [x] **D2a interpolated, eased track evaluation** — `TimelineClip::evaluate_at`
       takes a fractional frame and an `Easing`, and interpolates Number and
       Vec3 between the bracketing samples. Bool and String hold the earlier
