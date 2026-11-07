@@ -85,3 +85,12 @@ occupies the same slot, so no tick ever reads compositor timing.
   teardown). Delivery e2e still gated (focus + renderer init under
   saturated VRAM); the input-script replay comparison stays the
   deferred proof, runnable when VRAM frees.
+- Input-hardening (same session): seat bind bumped v1 -> v8 for
+  axis_value120 wheel detents (v2 name already handled; axis_discrete
+  is deprecated since v8 and never sent to v8+ clients, so no
+  double-count hazard). Detents feed the translator as XCB-style 4/5
+  presses; smooth partials truncate toward zero (documented
+  no-zoom, never mis-zoom); sign from the protocol text (value120
+  shares motion coordinates, y-down). Pure mapping unit-pinned,
+  sabotage-checked both directions; v8 bind proven live with zero
+  protocol errors.

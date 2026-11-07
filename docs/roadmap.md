@@ -1143,8 +1143,32 @@ declares a slot 3.
       key/motion/button DELIVERY needs focus + the dispatch loop past
       renderer init (VRAM still saturated, trainer still at 4.4 GiB;
       today's launch re-confirmed init failure), and the scripted-input
-      replay comparison (no focus needed, but needs the renderer for
-      captures) waits on free VRAM.
+      captures) waits on free VRAM. Input-hardening pass (same session):
+      the kLower defect the loop70 guard contained is now FIXED, not
+      just guarded — measuring against the live server (`setxkbmap
+      -query`: pc105/us; `xkbcomp :0 -` keycodes) showed the old table
+      matched no real layout (Q-row +1, A-row +2 with 'a' on Return's
+      code, Z-row at 45..51 instead of 52..58; nearly every letter
+      wrong). New pure `xcb_keymap.hpp` (35 entries, code-24, 24..58,
+      compile-time length assert), frozen to the measured pc105/US
+      layout and pinned by 4 unit tests, both directions
+      sabotage-checked (QWERTZ 'z'-at-30 fails QRow, bound 57 fails
+      ZRow). XCB has no layout engine (Wayland gets layout-correct
+      chars from the keysym), so non-US servers still mistype —
+      documented in the header. Wheel parity also landed: seat bind
+      bumped v1->v8 (v2 name already handled; discrete deprecated at
+      v8 and never sent to v8+ clients, so exactly one wheel source
+      exists), axis_value120 detents feed the translator as 4/5
+      presses, truncating smooth partials instead of mis-zooming (sign
+      from the protocol: value120 shares motion coordinates, y-down).
+      Pure `axis_value120_to_wheel` pinned by 3 unit tests, both
+      directions sabotage-checked (sign flip fails 2, divisor 119
+      fails PartialDetents). Seat v8 bind proven live (bind v8,
+      caps(3), get_keyboard AND get_pointer, zero protocol errors,
+      pointer acquired, clean teardown). The remaining delivery e2e
+      (scroll events need focus + the dispatch loop) and the replay
+      comparison still wait on a free GPU (5705/6144 used, trainer
+      still at 4.4 GiB; today's launches re-confirm init failure).
 - [x] **E7 estate-shared C++ gates** — DONE (warploom side; the kit
       itself lives in the estate repo). The estate runs one reusable workflow
       per language (rust-kit, go-kit, haskell-kit, node-ci, python-kit); C++

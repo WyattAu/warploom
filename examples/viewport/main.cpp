@@ -52,6 +52,7 @@
 #include "xdg-shell-client-protocol.h"
 #include "wayland_keymap.hpp"
 #include "wayland_pointer.hpp"
+#include "xcb_keymap.hpp"
 #include <xkbcommon/xkbcommon.h>
 #include <sys/mman.h>
 #endif
@@ -1871,9 +1872,11 @@ void wayland_window_registry_global(void* data, wl_registry* registry,
     globals->compositor = static_cast<wl_compositor*>(
         wl_registry_bind(registry, name, &wl_compositor_interface, 1));
   } else if (std::strcmp(interface, wl_seat_interface.name) == 0) {
-    // Seat v1 carries capabilities + get_keyboard; the loop70 slice
-    // needs nothing newer (no repeat_info client-side repeat).
-    const std::uint32_t seat_version = version < 1U ? version : 1U;
+    // Seat v8: v1 carries capabilities + get_keyboard/get_pointer and v2
+    // adds the name event (handled below); v8 is needed for pointer
+    // axis_value120 (wheel detents). axis_discrete is deprecated since v8
+    // and never sent to v8+ clients, so exactly one wheel source exists.
+    const std::uint32_t seat_version = version < 8U ? version : 8U;
     globals->seat = static_cast<wl_seat*>(
         wl_registry_bind(registry, name, &wl_seat_interface, seat_version));
   } else if (std::strcmp(interface, xdg_wm_base_interface.name) == 0) {
@@ -2050,13 +2053,29 @@ void wayland_pointer_button(void* data, wl_pointer* pointer,
   }
   (void)viewport_button_press(*app, detail);  // no event to free/consume
 }
+// Wheel (input-hardening): axis_value120 detents feed the translator
+// as XCB-style 4/5 presses, exactly like XCB wheel buttons. axis and
+// axis_discrete stay null (continuous has no detent scale; discrete is
+// deprecated since v8 and never sent to this v8 seat).
+void wayland_pointer_axis_value120(void* data, wl_pointer* pointer,
+                                   std::uint32_t axis,
+                                   std::int32_t value120) {
+  auto* app = static_cast<ViewportApp*>(data);
+  (void)pointer;
+  const wayland_pointer::WheelStep step =
+      wayland_pointer::axis_value120_to_wheel(axis, value120);
+  if (step.button == 0) return;
+  for (std::uint32_t i = 0; i < step.count; ++i) {
+    app->kb_mouse.on_button(step.button, true);
+  }
+}
 // wayland-client 1.26: enter, leave, motion, button, axis, frame,
 // axis_source, axis_stop, axis_discrete, axis_value120,
-// axis_relative_direction, warp. Axis stays null (wheel deferred).
+// axis_relative_direction, warp.
 const wl_pointer_listener kWaylandPointerListener = {
     wayland_pointer_enter, wayland_pointer_leave, wayland_pointer_motion,
     wayland_pointer_button, nullptr, nullptr, nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr};
+    wayland_pointer_axis_value120, nullptr, nullptr};
 void wayland_seat_capabilities(void* data, wl_seat* seat,
                                std::uint32_t capabilities) {
   auto* app = static_cast<ViewportApp*>(data);
@@ -2498,25 +2517,16 @@ bool viewport_key_press(ViewportApp& app, std::uint8_t code,
         code == 61) {
       return true;
     }
-    // Letters (evdev q..p=24..33, a..l=38..46, z..m=52..58) are accepted
-    // for string params; numbers ignore them at parse time.
-    static const char* kRows = "qqq";  // placeholder to keep structure
-    (void)kRows;
-    // BOUND (loop70, measured): kLower has 29 entries (0..28),
-    // so codes 52..58 (z,x,c,v,b,n,m) read out of bounds. 51 is the
-    // last code with a valid entry (index 27); higher codes are
-    // ignored instead of feeding heap garbage into the param buffer.
-    // The in-bounds-but-mislabelled row (48..51) is noted for the
-    // input-hardening pass. Wayland bypasses this table via the
-    // printable branch above.
-    if (code >= 24 && code <= 51) {
-      static const char kLower[] =
-          "?qwertzuiop?asdfghjkl?yxcvbnm";  // index by keycode-24
-      const char c = kLower[code - 24];
-      if (c != '?') {
-        app.node_view->edit_param_char(c);
-        return true;
-      }
+    // Letters (q-row 24..33, A-row 38..46, Z-row 52..58) are accepted
+    // for string params; numbers ignore them at parse time. The table
+    // lives in xcb_keymap.hpp (pure, unit-pinned): it is frozen to
+    // the server's measured pc105/US layout — verified against
+    // `xkbcomp :0 -` — because the XCB path has no layout engine.
+    // Wayland bypasses this table via the printable branch above.
+    const char letter = xcb_keymap::xcb_code_to_lower(code);
+    if (letter != 0) {
+      app.node_view->edit_param_char(letter);
+      return true;
     }
     return true;  // swallow all other keys while editing
   }
