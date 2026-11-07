@@ -50,7 +50,14 @@ re-verified the same way on the current tree: tsan unit subset 60/60
 (PhysicsWorld 30 + SessionTick + SessionPhysicsWire + ControlServer)
 plus core 22/22 and editor 48/48, 0 races, 0 build warnings; the
 Vulkan-off headless-debug-clang leg rebuilds the touched header with
-0 warnings and runs PhysicsWorld 30/30.The Vulkan-off
+0 warnings and runs PhysicsWorld 30/30. Loop66 closes the compiler
+side: the full Vulkan-off clang tree (all targets, including the
+viewport example that includes the header) builds with 0 warnings,
+and GCC 16.2 `-fsyntax-only` with the project's strict set
+(`-Wconversion -Wsign-conversion -Wshadow -Wdouble-promotion
+-Wfloat-equal` et al.) is clean on `test_physics_world.cpp`, which
+pulls in the loop62/63 header changes — the one-compiler trap stays
+shut on the new lines.The Vulkan-off
 headless-debug-clang leg likewise recompiles the touched headers clean
 (0 warnings, re-verified after the loop55-59 solver changes) with the
 same subset green (29/29) — the tree configuration that bit before
