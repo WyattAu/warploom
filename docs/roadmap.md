@@ -1187,6 +1187,16 @@ declares a slot 3.
       device first) — the file's own convention; this was the only
       inverted skip site. A/B: pre-fix isolated SIGABRT (exit 134), post-fix
       clean skip (exit 0, 0 VUIDs), full suite completes.
+      Loop73 closed the cross-preset half the hardening commit had never
+      had (it was verified on the default preset only): asan-ubsan full
+      build 0 warnings, unit 646 passed, ctest 6/6, 0 ASan/UBSan/leak
+      diagnostics; tsan full build 0 warnings, unit 646 passed, 0 races;
+      headless-debug-clang full build 0 warnings, input+physics subset 47
+      passed, core 22 passed. The two touched viewport headers never see
+      the clang tree (examples are OFF there), so they got a direct
+      clang++ 22 strict `-Werror` syntax check under the project's full
+      warning set — clean. GPU-live legs stay gated on VRAM (trainer
+      still saturating the card), stated not hidden.
 - [x] **E7 estate-shared C++ gates** — DONE (warploom side; the kit
       itself lives in the estate repo). The estate runs one reusable workflow
       per language (rust-kit, go-kit, haskell-kit, node-ci, python-kit); C++
