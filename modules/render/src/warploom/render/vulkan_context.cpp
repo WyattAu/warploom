@@ -515,6 +515,11 @@ std::vector<const char*> VulkanContext::get_required_extensions(bool validation)
     extensions.push_back(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
   }
 #endif
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+  if (supported(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME)) {
+    extensions.push_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
+  }
+#endif
   headless_surface_enabled_ = supported(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
   if (headless_surface_enabled_) {
     extensions.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);

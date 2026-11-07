@@ -14,12 +14,19 @@
 
 namespace warploom::render {
 
+//! Which window-system backend the handles belong to. Explicit — never
+//! probed: passing Wayland handles to the XCB constructor (or vice versa)
+//! would wrap garbage into a plausible-looking surface.
+//! Defaults to Xcb so the existing callers behave identically.
+enum class SurfacePlatform : std::uint8_t { Xcb, Wayland };
+
 //! Platform-specific surface creation result.
 struct SurfaceCreateInfo {
   void* display{nullptr};
   void* window{nullptr};
   std::uint32_t width{800};
   std::uint32_t height{600};
+  SurfacePlatform platform{SurfacePlatform::Xcb};
 };
 
 //! Create a Vulkan surface from platform-specific handles.

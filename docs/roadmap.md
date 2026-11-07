@@ -1069,9 +1069,20 @@ declares a slot 3.
       `Warploom::physics`, drives the public API only) configures,
       builds, and runs against the install tree — verified 2026-11-01.
       Remaining, each blocked and stated: WASM (no emscripten toolchain on
-      this machine), native Wayland surface (headers present, but no
-      compositor to verify against), docs rebrand + repo rename (owner
-      decisions, not engineering).
+      this machine), docs rebrand + repo rename (owner decisions, not
+      engineering). Native Wayland surface is half-unblocked: kwin_wayland
+      is live here after all, so the engine-side creation path landed in
+      loop68 — explicit `SurfacePlatform` discriminator (never probed;
+      wrapping Wayland handles as XCB returns a plausible-looking surface,
+      measured during sabotage), `VK_KHR_wayland_surface` instance
+      extension, test-only wayland-client link following the XCB precedent.
+      Pinned by `VulkanWayland.CreateSurfaceOnLiveCompositor`: connects to
+      the live compositor, creates a wl_surface, wraps it through the
+      engine, queries presentation support (at least one queue family
+      presents — the NVIDIA driver does Wayland WSI here) and surface
+      capabilities with 0 validation diagnostics; skips with a stated
+      reason where there is no compositor. The viewport's Wayland backend
+      (swapchain presentation + input) remains the second half.
 - [x] **E7 estate-shared C++ gates** — DONE (warploom side; the kit
       itself lives in the estate repo). The estate runs one reusable workflow
       per language (rust-kit, go-kit, haskell-kit, node-ci, python-kit); C++

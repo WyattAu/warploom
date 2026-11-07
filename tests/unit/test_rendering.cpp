@@ -25,6 +25,12 @@
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(VK_USE_PLATFORM_XCB_KHR)
 #include <xcb/xcb.h>
 #endif
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(VK_USE_PLATFORM_WAYLAND_KHR)
+#include <wayland-client-core.h>
+#include <wayland-client-protocol.h>
+#include <wayland-client.h>
+#include <vulkan/vulkan_wayland.h>
+#endif
 
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE
 namespace {
@@ -2614,6 +2620,106 @@ TEST(VulkanHardware, HeadlessSwapchainAndRenderSubmission) {
   xcb_disconnect(connection);
 #else
   GTEST_SKIP() << "Vulkan XCB support was not enabled for this build";
+#endif
+}
+
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(VK_USE_PLATFORM_WAYLAND_KHR)
+namespace {
+struct WaylandProofGlobals {
+  wl_compositor* compositor{nullptr};
+};
+void wayland_proof_registry_global(void* data, wl_registry* registry,
+                                   std::uint32_t name, const char* interface,
+                                   std::uint32_t version) {
+  auto* globals = static_cast<WaylandProofGlobals*>(data);
+  if (std::strcmp(interface, wl_compositor_interface.name) == 0) {
+    globals->compositor = static_cast<wl_compositor*>(
+        wl_registry_bind(registry, name, &wl_compositor_interface, 1));
+  }
+  (void)version;
+}
+void wayland_proof_registry_remove(void* data, wl_registry* registry,
+                                   std::uint32_t name) {
+  (void)data;
+  (void)registry;
+  (void)name;
+}
+const wl_registry_listener kWaylandProofRegistryListener = {
+    wayland_proof_registry_global, wayland_proof_registry_remove};
+}  // namespace
+#endif
+
+TEST(VulkanWayland, CreateSurfaceOnLiveCompositor) {
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(VK_USE_PLATFORM_WAYLAND_KHR)
+  // Loop68: the E6 Wayland item was blocked on "no compositor to verify
+  // against" — kwin_wayland is live on this machine, so the engine-side
+  // creation path is proven here. The viewport's Wayland backend (swapchain
+  // presentation + input) is the separate remaining half, not this test.
+  if (!omnicpp::render::VulkanContext::is_available()) {
+    GTEST_SKIP() << "Vulkan loader unavailable";
+  }
+  const char* display_name = std::getenv("WAYLAND_DISPLAY");
+  if (!display_name) {
+    GTEST_SKIP() << "WAYLAND_DISPLAY is unavailable (no compositor)";
+  }
+  wl_display* display = wl_display_connect(display_name);
+  if (!display) {
+    GTEST_SKIP() << "Wayland compositor unreachable";
+  }
+  WaylandProofGlobals globals;
+  wl_registry* registry = wl_display_get_registry(display);
+  ASSERT_NE(registry, nullptr);
+  wl_registry_add_listener(registry, &kWaylandProofRegistryListener, &globals);
+  wl_display_roundtrip(display);
+  if (!globals.compositor) {
+    wl_registry_destroy(registry);
+    wl_display_disconnect(display);
+    GTEST_SKIP() << "compositor exposes no wl_compositor";
+  }
+  wl_surface* wl_surface = wl_compositor_create_surface(globals.compositor);
+  ASSERT_NE(wl_surface, nullptr);
+
+  omnicpp::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomWaylandProof", true).is_ok());
+  ASSERT_TRUE(context.has_validation());
+  omnicpp::render::SurfaceCreateInfo surface_info;
+  surface_info.platform = omnicpp::render::SurfacePlatform::Wayland;
+  surface_info.display = display;
+  surface_info.window = wl_surface;
+  VkSurfaceKHR surface = VK_NULL_HANDLE;
+  auto surface_result = omnicpp::render::create_platform_surface(
+      context.instance(), surface_info, surface);
+  ASSERT_TRUE(surface_result.is_ok())
+      << "engine Wayland surface creation failed";
+  ASSERT_NE(surface, VK_NULL_HANDLE);
+  // Presentation support is environment truth (driver + compositor), not
+  // engine behavior: record how many queue families can present. Zero
+  // would leave the future swapchain backend blocked at the driver while
+  // creation itself is proven above.
+  std::uint32_t family_count = 0;
+  vkGetPhysicalDeviceQueueFamilyProperties(context.physical_device(),
+                                            &family_count, nullptr);
+  std::uint32_t presenting_families = 0;
+  for (std::uint32_t family = 0; family < family_count; ++family) {
+    if (vkGetPhysicalDeviceWaylandPresentationSupportKHR(
+            context.physical_device(), family, display) == VK_TRUE) {
+      ++presenting_families;
+    }
+  }
+  EXPECT_GT(presenting_families, 0U) << "no queue family presents to Wayland";
+  VkSurfaceCapabilitiesKHR caps{};
+  EXPECT_EQ(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+                context.physical_device(), surface, &caps),
+            VK_SUCCESS);
+  EXPECT_EQ(context.validation_error_count(), 0U);
+  EXPECT_EQ(context.validation_warning_count(), 0U);
+  context.destroy_surface(surface);
+  context.cleanup();
+  wl_surface_destroy(wl_surface);
+  wl_registry_destroy(registry);
+  wl_display_disconnect(display);
+#else
+  GTEST_SKIP() << "Vulkan Wayland support was not enabled for this build";
 #endif
 }
 

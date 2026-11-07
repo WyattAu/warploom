@@ -124,6 +124,14 @@ if(WARPLOOM_RENDER_USE_VULKAN AND Vulkan_FOUND)
                 target_link_libraries(warploom_render PRIVATE PkgConfig::XCB)
                 target_compile_definitions(warploom_render PRIVATE VK_USE_PLATFORM_XCB_KHR=1)
             endif()
+            # Wayland surface creation needs no link (loader-resolved, types
+            # only — same shape as XCB), but the headers must exist for the
+            # vulkan_wayland.h branch. Absent headers degrade gracefully:
+            # the Wayland platform is then unknown to the engine.
+            pkg_check_modules(WAYLAND_CLIENT QUIET IMPORTED_TARGET wayland-client)
+            if(WAYLAND_CLIENT_FOUND)
+                target_compile_definitions(warploom_render PRIVATE VK_USE_PLATFORM_WAYLAND_KHR=1)
+            endif()
         endif()
     endif()
 else()

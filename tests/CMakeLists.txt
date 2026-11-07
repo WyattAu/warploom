@@ -143,6 +143,19 @@ target_compile_definitions(warploom_unit_tests PRIVATE
 # a window system.
 find_package(X11 REQUIRED)
 target_link_libraries(warploom_unit_tests PRIVATE X11::xcb)
+# Same shape for Wayland (loop68): the proof test drives wl_* directly
+# (connect, registry, compositor, surface), so the test target links
+# wayland-client. Only when the headers exist — otherwise the
+# VK_USE_PLATFORM_WAYLAND_KHR-gated test preprocesses out (stated skip
+# at runtime covers the missing-compositor case, not missing headers).
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(WAYLAND_CLIENT QUIET IMPORTED_TARGET wayland-client)
+    if(WAYLAND_CLIENT_FOUND)
+        target_compile_definitions(warploom_unit_tests PRIVATE VK_USE_PLATFORM_WAYLAND_KHR)
+        target_link_libraries(warploom_unit_tests PRIVATE PkgConfig::WAYLAND_CLIENT)
+    endif()
+endif()
 
 # Native script-module fixtures: real shared objects exercising the dlopen
 # path of the script-module host (ok / missing-symbol / ABI-mismatch).

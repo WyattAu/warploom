@@ -10,6 +10,9 @@
 #ifdef __linux__
 #include <xcb/xcb.h>
 #include <vulkan/vulkan_xcb.h>
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+#include <vulkan/vulkan_wayland.h>
+#endif
 #endif
 
 #ifdef _WIN32
@@ -30,8 +33,32 @@ namespace warploom::render {
   }
 
 #ifdef __linux__
+  // Wayland surface creation (loop68): display is wl_display*, window is
+  // wl_surface*. Types only here — the loader resolves the constructor;
+  // nothing links a window system (same shape as the XCB branch).
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+  if (info.platform == SurfacePlatform::Wayland) {
+    if (!info.display || !info.window) {
+      surface = nullptr;
+      return ::warploom::core::Result<void>::error(
+          ::warploom::core::RuntimeError::vulkan_not_available);
+    }
+    VkWaylandSurfaceCreateInfoKHR create_info{};
+    create_info.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
+    create_info.display = static_cast<wl_display*>(info.display);
+    create_info.surface = static_cast<wl_surface*>(info.window);
+    const auto wayland_result =
+        vkCreateWaylandSurfaceKHR(instance, &create_info, nullptr, &surface);
+    if (wayland_result != VK_SUCCESS) {
+      surface = nullptr;
+      return ::warploom::core::Result<void>::error(
+          ::warploom::core::RuntimeError::vulkan_not_available);
+    }
+    return ::warploom::core::Result<void>::ok();
+  }
+#endif
   // Try X11/XCB surface creation
-  if (info.display && info.window) {
+  if (info.platform == SurfacePlatform::Xcb && info.display && info.window) {
     VkXcbSurfaceCreateInfoKHR create_info{};
     create_info.sType = VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR;
     create_info.connection = static_cast<xcb_connection_t*>(info.display);
