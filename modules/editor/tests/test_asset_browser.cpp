@@ -51,6 +51,16 @@ TEST(AssetBrowser, ListsSortedJsonOnly) {
   fs::remove_all(dir);
 }
 
+TEST(AssetBrowser, SceneStatusText) {
+  // D3 dirty indicator: path + star state is the whole contract.
+  EXPECT_EQ(ed::scene_status_text("", false), "scene: (untitled)");
+  EXPECT_EQ(ed::scene_status_text("", true), "scene: (untitled) *");
+  EXPECT_EQ(ed::scene_status_text("/tmp/demo.json", false),
+            "scene: /tmp/demo.json");
+  EXPECT_EQ(ed::scene_status_text("/tmp/demo.json", true),
+            "scene: /tmp/demo.json *");
+}
+
 TEST(AssetBrowser, MissingDirIsEmptyNotAnException) {
   EXPECT_TRUE(ed::list_scene_files("/no/such/warploom/dir").empty());
   EXPECT_TRUE(ed::is_scene_file("x.json"));  // gating still works

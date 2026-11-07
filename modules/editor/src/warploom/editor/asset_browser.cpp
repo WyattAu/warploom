@@ -44,4 +44,13 @@ std::vector<std::string> list_scene_files(const std::string& dir) {
   return out;
 }
 
+std::string scene_status_text(const std::string& current_path, bool doc_dirty) {
+  std::string out = "scene: ";
+  out += current_path.empty() ? "(untitled)" : current_path;
+  if (doc_dirty) {
+    out += " *";
+  }
+  return out;
+}
+
 }  // namespace warploom::editor

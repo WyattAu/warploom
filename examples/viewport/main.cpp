@@ -647,6 +647,13 @@ struct ViewportApp {
   std::vector<std::string> browser_files{};
   std::vector<std::pair<std::uint32_t, std::string>> browser_buttons{};
   std::uint32_t browser_root{warploom::ui::kInvalidWidget};
+  //! D3 scene header: status label (path + dirty star) + new/save buttons.
+  //! Clicks queue NewDocument / SaveDocument (empty path = save-to-current)
+  //! through the same undoable session path as the socket commands.
+  std::uint32_t scene_status_handle{warploom::ui::kInvalidWidget};
+  std::uint32_t scene_new_handle{warploom::ui::kInvalidWidget};
+  std::uint32_t scene_save_handle{warploom::ui::kInvalidWidget};
+  std::string scene_status_shown{};
   // Mouse tracking (view-space pixels) for node select/drag.
   float mouse_x{0.0f};
   float mouse_y{0.0f};
@@ -1673,13 +1680,16 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
       case CK::GetGraph:
       case CK::SaveDocument:
       case CK::LoadDocument:
+      case CK::NewDocument:
       case CK::BindNodeProperty:
       case CK::UnbindNodeProperty:
       case CK::ListBindings: {
         const bool structural = command.kind == CK::NodeAdd ||
                                 command.kind == CK::NodeRemove ||
                                 command.kind == CK::LinkNodes ||
-                                command.kind == CK::UnlinkNodes;
+                                command.kind == CK::UnlinkNodes ||
+                                command.kind == CK::LoadDocument ||
+                                command.kind == CK::NewDocument;
         reply = app_.editor.on_control(command);
         if (reply.ok && structural) app_.node_dirty = true;
         break;
@@ -2718,6 +2728,41 @@ bool viewport_button_press(ViewportApp& app, std::uint8_t detail) {
       }
       if (tb.action != TA::None) {
         return true;  // toolbar consumed the click
+      }
+    }
+    // D3: scene header — new/save buttons above the file list. Queued
+    // through the edit queue so every mutation crosses the single session
+    // stack with protocol-identical semantics (empty save text =
+    // save-to-current; the session rejects untitled saves + capture-time
+    // news loudly, surfaced as "edit rejected" on the frame thread).
+    if (app.browser_enabled) {
+      const auto header_hit = [&](std::uint32_t handle) {
+        return handle != warploom::ui::kInvalidWidget &&
+               handle < app.ui_tree.size() &&
+               [&] {
+                 const auto& w = app.ui_tree.get(handle);
+                 return app.mouse_x >= w.x && app.mouse_x <= w.x + w.w &&
+                        app.mouse_y >= w.y && app.mouse_y <= w.y + w.h;
+               }();
+      };
+      const auto enqueue_scene = [&](omnicpp::core::ControlCommand::Kind kind) {
+        omnicpp::core::ControlCommand cmd;
+        cmd.kind = kind;
+        cmd.text = {};
+        {
+          std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
+          app.edit_queue.push_back({std::move(cmd), false});
+        }
+        app.node_dirty = true;  // cards + inspector + header re-derive
+        return true;
+      };
+      if (header_hit(app.scene_new_handle)) {
+        return enqueue_scene(
+            omnicpp::core::ControlCommand::Kind::NewDocument);
+      }
+      if (header_hit(app.scene_save_handle)) {
+        return enqueue_scene(
+            omnicpp::core::ControlCommand::Kind::SaveDocument);
       }
     }
     // G5: scene-browser load buttons (absolute right-edge column).
@@ -6892,6 +6937,65 @@ void rebuild_browser_buttons(ViewportApp& app) {
   }
 }
 
+//! D3: scene header above the G5 file list — status label (current path +
+//! dirty star, via the pinned pure helper) plus new/save buttons. Created
+//! once; the label text refreshes only when the status string changes, so
+//! steady-state frames touch nothing. Save enqueues an empty-path
+//! SaveDocument (the session writes the current path, failing loudly when
+//! untitled); new enqueues NewDocument (rejected during active capture).
+void sync_scene_header(ViewportApp& app) {
+  namespace ui = warploom::ui;
+  if (!app.browser_enabled || app.browser_root == ui::kInvalidWidget) {
+    return;
+  }
+  const std::string status = omnicpp::editor::scene_status_text(
+      app.editor.current_path(), app.editor.is_dirty());
+  if (app.scene_status_handle == ui::kInvalidWidget) {
+    ui::Widget label;
+    label.kind = ui::WidgetKind::Label;
+    label.name = "scene_status";
+    label.fixed_w = 212.0F;
+    label.fixed_h = 20.0F;
+    app.scene_status_handle =
+        app.ui_tree.add(label, app.browser_root);
+    app.ui_tree.get(app.scene_status_handle).x = 1052.0F;
+    app.ui_tree.get(app.scene_status_handle).y = 8.0F;
+    app.ui_tree.get(app.scene_status_handle).w = 212.0F;
+    app.ui_tree.get(app.scene_status_handle).h = 20.0F;
+    ui::Widget new_btn;
+    new_btn.kind = ui::WidgetKind::Button;
+    new_btn.name = "scene_new";
+    new_btn.text = "new";
+    new_btn.fixed_w = 102.0F;
+    new_btn.fixed_h = 22.0F;
+    app.scene_new_handle = app.ui_tree.add(new_btn, app.browser_root);
+    app.ui_tree.get(app.scene_new_handle).x = 1052.0F;
+    app.ui_tree.get(app.scene_new_handle).y = 32.0F;
+    app.ui_tree.get(app.scene_new_handle).w = 102.0F;
+    app.ui_tree.get(app.scene_new_handle).h = 22.0F;
+    ui::Widget save_btn;
+    save_btn.kind = ui::WidgetKind::Button;
+    save_btn.name = "scene_save";
+    save_btn.text = "save";
+    save_btn.fixed_w = 102.0F;
+    save_btn.fixed_h = 22.0F;
+    app.scene_save_handle = app.ui_tree.add(save_btn, app.browser_root);
+    app.ui_tree.get(app.scene_save_handle).x = 1158.0F;
+    app.ui_tree.get(app.scene_save_handle).y = 32.0F;
+    app.ui_tree.get(app.scene_save_handle).w = 102.0F;
+    app.ui_tree.get(app.scene_save_handle).h = 22.0F;
+  }
+  if (status != app.scene_status_shown) {
+    std::string shown = status;
+    if (shown.size() > 28U) {
+      shown = shown.substr(0U, 25U) + "...";  // full path loads nowhere;
+    }                                          // the label is display only
+    app.ui_tree.get(app.scene_status_handle).text = shown;
+    app.scene_status_shown = status;
+    app.node_dirty = true;  // label text needs layout + paint
+  }
+}
+
 //! Builds the demo graph (const -> add), the widget tree, and the UI
 //! renderer. False (non-fatal for the scene; overlay just stays off) when
 //! the ui_quad shaders are unavailable.
@@ -7121,6 +7225,10 @@ void tick_node_editor(ViewportApp& app) {
       rebuild_browser_buttons(app);
       app.node_dirty = true;  // new buttons need layout + paint
     }
+    // D3: dirty indicator + path follow the live session (socket saves,
+    // undo-to-clean, loads all flow through here with zero widget churn
+    // at steady state).
+    sync_scene_header(app);
   }
 
   std::string error;

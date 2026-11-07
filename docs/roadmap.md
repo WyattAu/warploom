@@ -806,6 +806,18 @@ declares a slot 3.
       same byte-deterministic serialization the scrubber verifies — undo
       back to saved bytes reads clean with no per-command bookkeeping to
       drift; 11 SceneManagement tests, sabotage-checked both directions).
+      Loop77 closed the viewport half: the socket dispatch now delegates
+      `NewDocument` (it previously answered "unhandled command" — the same
+      parse-table/dispatch drift class as the clip commands), and socket
+      Load/New count as structural so the cards + inspector re-derive
+      (previously only the click path rebuilt; a socket load left a stale
+      view with no detection mechanism — verified there is none). The G5
+      panel gained a scene header: pinned pure `scene_status_text` (path +
+      dirty star, sabotage-checked both directions) plus new/save buttons
+      queuing through the edit queue (empty save = save-to-current; session
+      rejections surface as "edit rejected"). Full battery 779 + editor
+      49, ctest 6/6, 0 warnings. Click delivery + the visual indicator
+      stay VRAM-gated like all viewport input.
       Loop76 closed the cross-preset half (same standing rule as loop73):
       asan-ubsan 0 warnings / 657 passed / ctest 6/6 / 0 diagnostics, tsan
       0 warnings / 657 passed / 0 races, headless-debug-clang 0 warnings /

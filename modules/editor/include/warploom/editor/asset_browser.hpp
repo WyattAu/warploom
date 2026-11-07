@@ -29,4 +29,10 @@ namespace warploom::editor {
 //! just the suffix). Exposed for tests.
 [[nodiscard]] bool is_scene_file(const std::string& name) noexcept;
 
+//! Scene-panel status line (D3): "scene: <path> *" when dirty, plain
+//! when clean; "(untitled)" when there is no current path. Pure, so the
+//! panel text is pinnable headlessly like the scan.
+[[nodiscard]] std::string scene_status_text(const std::string& current_path,
+                                            bool doc_dirty);
+
 }  // namespace warploom::editor
