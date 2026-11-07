@@ -407,11 +407,17 @@ declares a slot 3.
       single pass). Speculative contacts landed loop52 as an opt-in
       (`set_speculative_contacts`, spheres only): R3 gate now 0/12 cross
       with per-phase contact telemetry and swept-grid/all-pairs agreement
-      at 200/600/1200.Remains: compliant speculative rewind. Capsule sweep landed loop57
-(bound trigger + 3-Newton surface refinement; gate 0/12 with
-sphere-twin agreement, sabotage-validated); default-on graduated
-loop58 (tunneling is a correctness defect; suite proved only fast
-crossings change, so no fingerprint moved).
+      at 200/600/1200. Remains: compliant speculative rewind. Capsule sweep
+      landed loop57 (bound trigger + 3-Newton surface refinement; gate 0/12
+      with sphere-twin agreement, sabotage-validated); default-on graduated
+      loop58 (tunneling is a correctness defect; suite proved only fast
+      crossings change, so no fingerprint moved). Sleeping gained its missing
+      half in loop62: a slow body with a fast contact now stays awake
+      (`FastImpactWakesSleepingStack`; measured before the fix — a 300 m/s
+      ball bounced off a sleeping stack whose pose stayed bit-identical).
+      Shared-fate islands were tried and reverted (one rattling body vetoes
+      the restore-damping the rest need; the 400-pile settle cap), so the
+      veto is per-body and progressive freezing survives.
 
       **Measured blocker for the broadphase.** A conservative uniform grid was
       written, verified result-preserving at N=1000 (fingerprint identical,

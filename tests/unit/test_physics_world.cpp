@@ -1097,3 +1097,124 @@ TEST(PhysicsWorld, SpeculativeContactsStopFastBodyCrossing) {
     EXPECT_LT(on.vx, -1.0f) << "phase " << p << " lost its bounce";
   }
 }
+
+TEST(PhysicsWorld, FastImpactWakesSleepingStack) {
+  // Loop62: a speculative contact carries penetration 0, so the sleep
+  // island's penetration gate cannot see it — without the approach-speed
+  // edge, a fast ball bounces off a sleeping pile that stays frozen
+  // (measured: pile fingerprint bit-identical through a 300 m/s impact,
+  // the "rock pile"). The edge fix must wake the island on a fast
+  // approach while slow touches stay edgeless (no dust-class freeze).
+  //
+  // Isolation: the ball's step travel (2.5 m) exceeds the contact window
+  // (2.0 m), and its phase (-8.5 m start) lands no end-sample inside — so
+  // NO discrete contact ever fires and the outcome rides the speculative
+  // edge alone. An off-mode comparison is meaningless here (discrete
+  // tunnels at this speed), so the test pins the fixed behavior directly.
+  auto build = [] {
+    PhysicsWorld w(-9.81F);
+    w.set_restitution_threshold(0.5F);
+    w.set_sleep_threshold(0.05F);
+    w.set_solver_iterations(4U);
+    for (std::uint32_t k = 0; k < 3U; ++k) {
+      PhysicsBody b;
+      b.position[1] = 0.5F + static_cast<float>(k) * 1.0F;
+      b.restitution = 0.0F;
+      (void)w.add_body(b);
+    }
+    return w;
+  };
+  PhysicsWorld w = build();
+  std::size_t settle_steps = 0;
+  while (!(w.is_asleep(0) && w.is_asleep(1) && w.is_asleep(2))) {
+    w.step(kDt);
+    ++settle_steps;
+    ASSERT_LT(settle_steps, 1500U) << "stack never slept";
+  }
+  // Per-body snapshot: the suite fingerprint includes the ball, whose own
+  // rewind would move it even in the broken (rock-pile) case — comparing
+  // fingerprints would pass vacuously. Only the PILE's motion counts.
+  float frozen[3][3];
+  for (std::uint32_t id = 0; id < 3U; ++id) {
+    frozen[id][0] = w.body(id).position[0];
+    frozen[id][1] = w.body(id).position[1];
+    frozen[id][2] = w.body(id).position[2];
+  }
+  // 300 m/s at dt = 1/120: 2.5 m/step, window 2.0 m — every end-sample
+  // straddles, discrete never fires, TOI catches each crossing.
+  PhysicsBody ball;
+  ball.position[0] = -8.5F;
+  ball.position[1] = 1.5F;
+  ball.restitution = 0.0F;
+  ball.velocity[0] = 300.0F;
+  (void)w.add_body(ball);
+  bool contacted = false;
+  for (int i = 0; i < 12; ++i) {
+    w.step(kDt);
+    if (!w.contacts().empty()) contacted = true;
+  }
+  EXPECT_TRUE(contacted) << "ball passed without any contact";
+  // The pile REACTED (not a rock): at least one sleeper moved. Without
+  // the veto the sleepers restore every step — all three bit-identical —
+  // while the ball stops against them. Displacement accumulation with >
+  // (not !=): the suite is -Wfloat-equal clean and the restored case is
+  // exactly 0.0, so any positive motion counts.
+  float pile_motion = 0.0F;
+  for (std::uint32_t id = 0; id < 3U; ++id) {
+    const auto& p = w.body(id).position;
+    pile_motion += std::fabs(p[0] - frozen[id][0]);
+    pile_motion += std::fabs(p[1] - frozen[id][1]);
+    pile_motion += std::fabs(p[2] - frozen[id][2]);
+  }
+  EXPECT_GT(pile_motion, 0.0F) << "rock pile: impact ignored";
+  // And the approach died: e = 0 head-on at equal masses leaves the ball
+  // at roughly half speed (~150); sailing through at ~300 is tunneling.
+  // The bound sits between, far from both.
+  const auto& bv = w.body(3).velocity;
+  const float bspeed =
+      std::sqrt(bv[0] * bv[0] + bv[1] * bv[1] + bv[2] * bv[2]);
+  EXPECT_LT(bspeed, 200.0F) << "ball kept its speed: tunneled";
+  // Part B: a moderate DISCRETE impact also wakes (the veto is not a
+  // speculative-only path — without it the discrete edge still leaves slow
+  // blocks frozen while the ball joins their island awake), and the wake
+  // is transient: the contained debris re-settles and re-sleeps. The 300
+  // m/s case cannot re-settle by construction (debris leaves at ~150 m/s
+  // on an infinite plane), so the contained 5 m/s case pins convergence.
+  PhysicsWorld w2 = build();
+  std::size_t settle2 = 0;
+  while (!(w2.is_asleep(0) && w2.is_asleep(1) && w2.is_asleep(2))) {
+    w2.step(kDt);
+    ++settle2;
+    ASSERT_LT(settle2, 1500U) << "second stack never slept";
+  }
+  float frozen2[3][3];
+  for (std::uint32_t id = 0; id < 3U; ++id) {
+    frozen2[id][0] = w2.body(id).position[0];
+    frozen2[id][1] = w2.body(id).position[1];
+    frozen2[id][2] = w2.body(id).position[2];
+  }
+  PhysicsBody slow_ball;
+  slow_ball.position[0] = -3.0F;
+  slow_ball.position[1] = 1.5F;
+  slow_ball.restitution = 0.0F;
+  slow_ball.velocity[0] = 5.0F;
+  (void)w2.add_body(slow_ball);
+  for (int i = 0; i < 200; ++i) {
+    w2.step(kDt);
+  }
+  float pile_motion2 = 0.0F;
+  for (std::uint32_t id = 0; id < 3U; ++id) {
+    const auto& p = w2.body(id).position;
+    pile_motion2 += std::fabs(p[0] - frozen2[id][0]);
+    pile_motion2 += std::fabs(p[1] - frozen2[id][1]);
+    pile_motion2 += std::fabs(p[2] - frozen2[id][2]);
+  }
+  EXPECT_GT(pile_motion2, 0.0F) << "rock pile in the discrete regime too";
+  // No re-sleep assert here, deliberately: free spheres have no rolling
+  // resistance (documented engine limit), so scattered debris rolls until
+  // it leaves — re-sleeping a scattered pile is beyond this solver with
+  // or without sleep. Undisturbed settling is pinned by
+  // IslandSleepingFreezesSettledPile (green with the veto), and the veto
+  // cannot latch: island_hit_ is reassigned from scratch every step, so a
+  // wake lasts exactly as long as a violent contact does.
+}

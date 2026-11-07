@@ -146,6 +146,43 @@ for replay archaeology. blast radius beyond the suite: none measured
 — full CPU suite 545/545, asan-ubsan physics+session 29/29, headless
 live `all` 186/186 (including the bit-identical session replay).
 
+**Wake-up call (loop62).** Default-on exposed a real defect the gates
+could not see: per-body sleep never woke a sleeper through contact. A
+300 m/s ball bounced off a sleeping 3-stack whose blocks restored
+bit-identical every step — the "rock pile" (measured: pile fingerprint
+unchanged through the impact). The speculative edge cannot fix it: a
+settled pile is already edged through its own micro-penetrations, so
+union without shared fate changes nothing (sabotage-confirmed no-op).
+Shared fate (an island sleeps only when EVERY member is slow) was tried
+and REVERTED: sleep is also the solver's damping (restore discards each
+step's residual jiggle), and all-or-nothing sleep lets one rattling body
+veto the restore-damping the other 399 need — the 400-pile settle loop
+hit its 1500-step cap. What landed is a per-body contact veto: a slow
+body with a contact approaching faster than `veto_thr` stays awake, so
+only the bodies actually being hit wake (progressive freezing
+preserved). The floor is kick-scaled, and the scale is measured, not
+chosen: settled contacts approach at exactly one gravity kick per step
+(0.0818 == |g|·dt, every step of a settled stack — the ground-clamped
+base at v ~= 0 against the kicked snapshot), so a veto at the rest
+criterion fires on every resting contact and nothing ever sleeps
+(measured: asleep=0 throughout). `veto_thr = max(8·|g|·dt, threshold)`
+clears settling transients with margin while a genuine impact clears it
+by orders. Pinned by `FastImpactWakesSleepingStack`: isolated
+speculative impact (2.5 m/step travel, no end-sample in the window, so
+discrete never fires) moves the pile and halves the ball, and a 5 m/s
+discrete impact wakes it too — sabotage (veto disabled) fails both pins
+with the pile bit-identical. No re-sleep assert, deliberately: free
+spheres have no rolling resistance (documented engine limit), so
+scattered debris rolls away with or without sleep; undisturbed settling
+is pinned by the pile test (green with the veto) and the veto cannot
+latch (scratch reassigned every step). Verified: CPU-filtered suite
+535/535, an independent physics/session/editor/control/command/replay
+re-run 105/105 (Replay, PhysicsWorld incl. the new test, ControlServer,
+Session, Command, EditorSession, ReplayScrubber, CommandRecorder),
+asan-ubsan physics 29/29, headless live `all` 186/186. The 52 excluded
+legs (timers, input, GUI-class) re-run green too; the GPU legs were not
+run this loop (no render path touched).
+
 ## R4. Islands and sleeping (Jolt's answer to our "no sleep" gap)
 
 **Source.** Jolt Physics architecture docs (jrouwe.github.io/JoltPhysics):

@@ -211,7 +211,8 @@ class PhysicsWorld final {
   //! even under contact compliance; under
   //! velocity-from-position the derived velocities include the TOI landing
   //! by construction. Speculative contacts carry penetration 0, so they
-  //! never form island edges (a touched island stays awake — conservative).
+  //! never form island edges; waking a sleeper they hit is the sleep
+  //! veto's job (see build_islands).
   void set_speculative_contacts(bool on) noexcept {
     speculative_contacts_ = on;
   }
@@ -557,7 +558,7 @@ class PhysicsWorld final {
       // Islands are derived from the frozen pair list plus the grounded
       // flags BEFORE any correction lands, so both the positional passes
       // and the impulse loop below read this step's sleep set.
-      build_islands();
+      build_islands(dt);
 
       // Positional correction: `solver_iterations_` Gauss-Seidel passes over
       // the frozen contact list (the SET of pairs is frozen; the impulse
@@ -798,7 +799,7 @@ class PhysicsWorld final {
       // Fewer than two bodies: no pairs possible, but a lone body resting
       // on the ground still forms a single-body island that may sleep.
       solve_contacts_.clear();
-      build_islands();
+      build_islands(dt);
       if (velocity_from_position_) {
         solve_velocities_vfp(dt);
       }
@@ -956,8 +957,9 @@ class PhysicsWorld final {
   //! side effect on spin; the linear solve is unchanged by them.
   //! A speculative contact (R3/D1) stopped mid-flight: `speculative` marks
   //! a TOI rewind instead of a separation. `penetration` is 0 (touching at
-  //! TOI, so no island edge — conservative: a speculatively touched island
-  //! stays awake), and (wx, wy, wz) is the relative overshoot vector from
+  //! TOI, so no island edge); waking a sleeper this pair hits is the
+  //! build_islands contact veto. (wx, wy, wz) is the relative overshoot
+  //! vector from
   //! the TOI configuration to the snapshot end configuration. Pass 0
   //! rewinds it split by inverse mass (center-of-mass preserving; exact
   //! for a static obstacle or head-on equal masses); the impulse then
@@ -1690,11 +1692,19 @@ class PhysicsWorld final {
   //! above bouncing on it in a 2-step limit cycle forever). A genuine
   //! resting contact penetrates ~1e-4 per step; the gate sits two orders
   //! of magnitude on either side of the two regimes.
+  //!
+  //! Contacts veto sleep (loop62) rather than only forming edges: a body
+  //! with a contact approaching faster than veto_thr stays awake. Without
+  //! it a sleeping pile is a rock — sleepers restore every step, so a fast
+  //! impact is erased before it can propagate, and no amount of island
+  //! unioning fixes that (measured: a 300 m/s ball bounced off a stack
+  //! whose pose remained bit-identical). The floor is kick-scaled because
+  //! a resting contact's snapshot approach is exactly one gravity kick.
   //! Known limit: a body spawned motionless AND deeply overlapping sleeps
   //! in place instead of resolving first — spawns should be clean (as in
   //! the tests). Fixing that needs a sleep timer, which is stored state;
   //! see the roadmap note.
-  void build_islands() noexcept {
+  void build_islands(float dt) noexcept {
     sleeping_flags_.assign(bodies_.size(), 0U);
     sleeping_count_ = 0;
     if (sleep_threshold_ <= 0.0f) return;
@@ -1726,8 +1736,13 @@ class PhysicsWorld final {
       island_has_edge_[find_root(a)] = 1U;
     };
     for (const ContactSolve& solve : solve_contacts_) {
-      // Penetration gate: dust contacts never form island edges (see above).
-      // The SOLVE still resolves them; only sleep membership is gated.
+      // Penetration gate: dust contacts never form island edges (see
+      // above). The SOLVE still resolves them; only sleep membership is
+      // gated. (A speculative contact carries penetration 0, so it never
+      // edges — waking a touched sleeper is the veto's job below, not the
+      // union's. An earlier revision edged fast-approach speculative pairs
+      // and changed nothing: the pile is already edged through its own
+      // micro-penetrations, and union without shared fate wakes nobody.)
       if (solve.penetration > kSleepEdgeMinPenetration) {
         unite(solve.a, solve.b);
       }
@@ -1743,6 +1758,44 @@ class PhysicsWorld final {
       if (joint.a >= n || joint.b >= n || joint.a == joint.b) continue;
       unite(joint.a, joint.b);
     }
+    // Contact veto (loop62): a slow body with a FAST contact stays awake.
+    // Per-body sleep never woke a sleeper through contact — a 300 m/s
+    // ball bounced off a sleeping pile whose every block restored
+    // bit-identical each step (the "rock pile"). The veto marks bodies
+    // whose snapshot approach speed exceeds veto_thr, discrete or
+    // speculative alike; slow touches stay sleepable (no dust-class
+    // freeze). Shared fate (a fast member waking the whole island) was
+    // tried first and REVERTED: it makes sleep all-or-nothing, so one
+    // rattling body vetoes the restore-damping the other 399 need and the
+    // pile never converges (measured: the 400-pile settle loop hit its
+    // 1500-step cap). The veto wakes only the bodies actually being hit —
+    // progressive freezing is preserved. Boolean OR over pairs, so
+    // order-independent and deterministic.
+    //
+    // Veto floor: settled contacts approach at exactly one gravity kick
+    // per step (measured 0.0818 == |g|·dt at dt = 1/120, every step of a
+    // settled stack: the ground-clamped base sits at v ~= 0 while the
+    // snapshot carries the kick). A veto at the rest criterion therefore
+    // fires on every resting contact and nothing ever sleeps (measured:
+    // asleep=0 across the whole settle). The floor must clear the kick
+    // regime with margin: 8x covers settling transients (cm-scale landings
+    // at a few kicks) while a genuine wake-up impact clears it by orders
+    // (the gate pins 300 m/s). Zero-g falls back to the rest criterion
+    // itself — with no kick, any approach above it is real motion — and
+    // max() keeps tiny-dt kicks from vetoing below the rest criterion.
+    const float kick =
+        (gravity_ < 0.0f ? -gravity_ : gravity_) * dt;
+    const float veto_min =
+        kick > 0.0f ? 8.0f * kick : sleep_threshold_;
+    const float veto_thr =
+        veto_min > sleep_threshold_ ? veto_min : sleep_threshold_;
+    island_hit_.assign(static_cast<std::size_t>(n), 0U);
+    for (const ContactSolve& solve : solve_contacts_) {
+      if (-solve.vel_n > veto_thr) {
+        if (solve.a < n) island_hit_[solve.a] = 1U;
+        if (solve.b < n) island_hit_[solve.b] = 1U;
+      }
+    }
     const float thr_sq = sleep_threshold_ * sleep_threshold_;
     // An island sleeps iff it has an edge and every dynamic member is slow
     // (pre-integration speed — the gravity kick of THIS step must not keep
@@ -1750,6 +1803,7 @@ class PhysicsWorld final {
     for (std::uint32_t i = 0; i < n; ++i) {
       if (bodies_[i].inverse_mass <= 0.0f) continue;  // static: no state
       if (island_has_edge_[find_root(i)] == 0U) continue;  // free flight
+      if (island_hit_[i] != 0U) continue;  // fast contact: veto (see above)
       const PreStep& pre = pre_step_[i];
       const float speed_sq =
           pre.vx * pre.vx + pre.vy * pre.vy + pre.vz * pre.vz;
@@ -1758,7 +1812,6 @@ class PhysicsWorld final {
       // evaluate 0 < thr exactly as before.
       const float spin_sq = pre.wx * pre.wx + pre.wy * pre.wy + pre.wz * pre.wz;
       if (speed_sq < thr_sq && spin_sq < thr_sq) {
-
         sleeping_flags_[i] = 1U;
         ++sleeping_count_;
       }
@@ -1932,6 +1985,7 @@ class PhysicsWorld final {
   std::vector<DistanceJoint> joints_{};     //!< insertion-order constraints
   std::vector<std::uint32_t> island_parent_{};
   std::vector<std::uint8_t> island_has_edge_{};
+  std::vector<std::uint8_t> island_hit_{};
   std::vector<std::uint8_t> sleeping_flags_{};
   std::uint32_t sleeping_count_{0};
 };
