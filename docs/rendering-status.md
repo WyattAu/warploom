@@ -45,7 +45,12 @@ sanitizer presets on the current tree: asan-ubsan physics/session 29/29
 plus core 22/22 and editor 48/48 with 0 diagnostics, and tsan
 physics/session/control 39/39 plus core 22/22 and editor 48/48 with 0
 data races — the new index arithmetic rides the same verified presets
-rather than a fresh claim.The Vulkan-off
+rather than a fresh claim. Loop62/63 (sleep veto, compliant rewind)
+re-verified the same way on the current tree: tsan unit subset 60/60
+(PhysicsWorld 30 + SessionTick + SessionPhysicsWire + ControlServer)
+plus core 22/22 and editor 48/48, 0 races, 0 build warnings; the
+Vulkan-off headless-debug-clang leg rebuilds the touched header with
+0 warnings and runs PhysicsWorld 30/30.The Vulkan-off
 headless-debug-clang leg likewise recompiles the touched headers clean
 (0 warnings, re-verified after the loop55-59 solver changes) with the
 same subset green (29/29) — the tree configuration that bit before
