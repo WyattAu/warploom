@@ -10,36 +10,36 @@ struct Velocity { float dx{0}; float dy{0}; };
 struct Health { int hp{100}; };
 
 TEST(Entity, EqualityAndOrdering) {
-  omnicpp::core::Entity a{1, 0};
-  omnicpp::core::Entity b{1, 0};
-  omnicpp::core::Entity c{2, 0};
+  warploom::core::Entity a{1, 0};
+  warploom::core::Entity b{1, 0};
+  warploom::core::Entity c{2, 0};
   EXPECT_EQ(a, b);
   EXPECT_NE(a, c);
   EXPECT_TRUE(a < c);
 }
 
 TEST(Entity, NullEntityIsDefault) {
-  omnicpp::core::Entity e;
-  EXPECT_EQ(e, omnicpp::core::kNullEntity);
+  warploom::core::Entity e;
+  EXPECT_EQ(e, warploom::core::kNullEntity);
 }
 
 TEST(ComponentTypeId, UniquePerType) {
-  auto pos_id = omnicpp::core::component_type_id<Position>();
-  auto vel_id = omnicpp::core::component_type_id<Velocity>();
-  auto hp_id = omnicpp::core::component_type_id<Health>();
+  auto pos_id = warploom::core::component_type_id<Position>();
+  auto vel_id = warploom::core::component_type_id<Velocity>();
+  auto hp_id = warploom::core::component_type_id<Health>();
   EXPECT_NE(pos_id, vel_id);
   EXPECT_NE(pos_id, hp_id);
   EXPECT_NE(vel_id, hp_id);
 }
 
 TEST(ComponentTypeId, StableAcrossCalls) {
-  auto a = omnicpp::core::component_type_id<Position>();
-  auto b = omnicpp::core::component_type_id<Position>();
+  auto a = warploom::core::component_type_id<Position>();
+  auto b = warploom::core::component_type_id<Position>();
   EXPECT_EQ(a, b);
 }
 
 TEST(World, CreateEntityReturnsUniqueIds) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   auto e2 = world.create_entity();
   auto e3 = world.create_entity();
@@ -49,14 +49,14 @@ TEST(World, CreateEntityReturnsUniqueIds) {
 }
 
 TEST(World, CreateEntityIncrementsId) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   auto e2 = world.create_entity();
   EXPECT_TRUE(e2.id > e1.id);
 }
 
 TEST(World, AddAndGetComponent) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e = world.create_entity();
   world.add_component<Position>(e, {1.0f, 2.0f});
   world.add_component<Velocity>(e, {0.1f, 0.2f});
@@ -75,7 +75,7 @@ TEST(World, AddAndGetComponent) {
 }
 
 TEST(World, AddComponentMultipleEntities) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   auto e2 = world.create_entity();
   world.add_component<Position>(e1, {1.0f, 0.0f});
@@ -90,7 +90,7 @@ TEST(World, AddComponentMultipleEntities) {
 }
 
 TEST(World, RemoveComponent) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e = world.create_entity();
   world.add_component<Position>(e, {1.0f, 2.0f});
   world.add_component<Velocity>(e, {0.1f, 0.2f});
@@ -102,7 +102,7 @@ TEST(World, RemoveComponent) {
 }
 
 TEST(World, ForEachSingleComponent) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   auto e2 = world.create_entity();
   auto e3 = world.create_entity();
@@ -111,7 +111,7 @@ TEST(World, ForEachSingleComponent) {
   world.add_component<Health>(e3, {50});
 
   std::vector<float> xs;
-  world.for_each<Position>([&](omnicpp::core::Entity, Position& p) {
+  world.for_each<Position>([&](warploom::core::Entity, Position& p) {
     xs.push_back(p.x);
   });
   EXPECT_EQ(xs.size(), 2u);
@@ -120,7 +120,7 @@ TEST(World, ForEachSingleComponent) {
 }
 
 TEST(World, ForEachTwoComponents) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   auto e2 = world.create_entity();
   auto e3 = world.create_entity();
@@ -131,7 +131,7 @@ TEST(World, ForEachTwoComponents) {
   world.add_component<Health>(e3, {50});
 
   int count = 0;
-  world.for_each<Position, Velocity>([&](omnicpp::core::Entity, Position& p, Velocity& v) {
+  world.for_each<Position, Velocity>([&](warploom::core::Entity, Position& p, Velocity& v) {
     p.x += v.dx;
     ++count;
   });
@@ -141,7 +141,7 @@ TEST(World, ForEachTwoComponents) {
 }
 
 TEST(World, EntityCountIncludesAllArchetypes) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   auto e2 = world.create_entity();
   auto e3 = world.create_entity();
@@ -152,13 +152,13 @@ TEST(World, EntityCountIncludesAllArchetypes) {
 }
 
 TEST(Archetype, StoresAndRemovesEntities) {
-  omnicpp::core::Archetype arch;
-  omnicpp::core::ComponentMask mask;
-  mask.set(omnicpp::core::component_type_id<Position>());
+  warploom::core::Archetype arch;
+  warploom::core::ComponentMask mask;
+  mask.set(warploom::core::component_type_id<Position>());
   arch.set_mask(mask);
 
-  arch.add_entity(omnicpp::core::Entity{1, 0});
-  arch.add_entity(omnicpp::core::Entity{2, 0});
+  arch.add_entity(warploom::core::Entity{1, 0});
+  arch.add_entity(warploom::core::Entity{2, 0});
   EXPECT_EQ(arch.size(), 2u);
 
   (void)arch.remove_entity(0);
@@ -167,28 +167,28 @@ TEST(Archetype, StoresAndRemovesEntities) {
 }
 
 TEST(Archetype, FindEntity) {
-  omnicpp::core::Archetype arch;
-  arch.add_entity(omnicpp::core::Entity{5, 0});
-  EXPECT_EQ(arch.find_entity(omnicpp::core::Entity{5, 0}), 0u);
-  EXPECT_EQ(arch.find_entity(omnicpp::core::Entity{99, 0}), arch.size());
+  warploom::core::Archetype arch;
+  arch.add_entity(warploom::core::Entity{5, 0});
+  EXPECT_EQ(arch.find_entity(warploom::core::Entity{5, 0}), 0u);
+  EXPECT_EQ(arch.find_entity(warploom::core::Entity{99, 0}), arch.size());
 }
 
 TEST(SystemScheduler, TopologicalOrdering) {
-  omnicpp::core::SystemScheduler scheduler;
+  warploom::core::SystemScheduler scheduler;
   std::vector<std::string> order;
 
-  scheduler.add_system({"input", [&](omnicpp::core::World&, std::uint64_t) noexcept {
+  scheduler.add_system({"input", [&](warploom::core::World&, std::uint64_t) noexcept {
     order.push_back("input");
   }, {}, {}});
-  scheduler.add_system({"physics", [&](omnicpp::core::World&, std::uint64_t) noexcept {
+  scheduler.add_system({"physics", [&](warploom::core::World&, std::uint64_t) noexcept {
     order.push_back("physics");
   }, {"input"}, {}});
-  scheduler.add_system({"render", [&](omnicpp::core::World&, std::uint64_t) noexcept {
+  scheduler.add_system({"render", [&](warploom::core::World&, std::uint64_t) noexcept {
     order.push_back("render");
   }, {"physics"}, {}});
 
   EXPECT_TRUE(scheduler.build_schedule());
-  omnicpp::core::World world;
+  warploom::core::World world;
   scheduler.run(world, 0);
 
   EXPECT_EQ(order.size(), 3u);
@@ -198,28 +198,28 @@ TEST(SystemScheduler, TopologicalOrdering) {
 }
 
 TEST(SystemScheduler, DetectsCycle) {
-  omnicpp::core::SystemScheduler scheduler;
-  scheduler.add_system({"a", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {"b"}, {}});
-  scheduler.add_system({"b", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {"a"}, {}});
+  warploom::core::SystemScheduler scheduler;
+  scheduler.add_system({"a", [](warploom::core::World&, std::uint64_t) noexcept {}, {"b"}, {}});
+  scheduler.add_system({"b", [](warploom::core::World&, std::uint64_t) noexcept {}, {"a"}, {}});
   EXPECT_FALSE(scheduler.build_schedule());
 }
 
 TEST(SystemScheduler, IndependentSystemsRunInRegistrationOrder) {
-  omnicpp::core::SystemScheduler scheduler;
+  warploom::core::SystemScheduler scheduler;
   std::vector<std::string> order;
 
-  scheduler.add_system({"x", [&](omnicpp::core::World&, std::uint64_t) noexcept {
+  scheduler.add_system({"x", [&](warploom::core::World&, std::uint64_t) noexcept {
     order.push_back("x");
   }, {}, {}});
-  scheduler.add_system({"y", [&](omnicpp::core::World&, std::uint64_t) noexcept {
+  scheduler.add_system({"y", [&](warploom::core::World&, std::uint64_t) noexcept {
     order.push_back("y");
   }, {}, {}});
-  scheduler.add_system({"z", [&](omnicpp::core::World&, std::uint64_t) noexcept {
+  scheduler.add_system({"z", [&](warploom::core::World&, std::uint64_t) noexcept {
     order.push_back("z");
   }, {}, {}});
 
   EXPECT_TRUE(scheduler.build_schedule());
-  omnicpp::core::World world;
+  warploom::core::World world;
   scheduler.run(world, 0);
 
   EXPECT_EQ(order[0], "x");
@@ -228,30 +228,30 @@ TEST(SystemScheduler, IndependentSystemsRunInRegistrationOrder) {
 }
 
 TEST(SystemScheduler, ParallelExecutionRunsIndependentSystemsConcurrently) {
-  omnicpp::core::SystemScheduler scheduler;
+  warploom::core::SystemScheduler scheduler;
   std::atomic<int> counter{0};
 
   // Three systems with no dependencies and different component masks
-  omnicpp::core::ComponentMask pos_mask;
-  pos_mask.set(omnicpp::core::component_type_id<Position>());
-  omnicpp::core::ComponentMask vel_mask;
-  vel_mask.set(omnicpp::core::component_type_id<Velocity>());
-  omnicpp::core::ComponentMask hp_mask;
-  hp_mask.set(omnicpp::core::component_type_id<Health>());
+  warploom::core::ComponentMask pos_mask;
+  pos_mask.set(warploom::core::component_type_id<Position>());
+  warploom::core::ComponentMask vel_mask;
+  vel_mask.set(warploom::core::component_type_id<Velocity>());
+  warploom::core::ComponentMask hp_mask;
+  hp_mask.set(warploom::core::component_type_id<Health>());
 
-  scheduler.add_system({"physics", [&](omnicpp::core::World&, std::uint64_t) {
+  scheduler.add_system({"physics", [&](warploom::core::World&, std::uint64_t) {
     counter.fetch_add(1, std::memory_order_relaxed);
   }, {}, pos_mask});
-  scheduler.add_system({"movement", [&](omnicpp::core::World&, std::uint64_t) {
+  scheduler.add_system({"movement", [&](warploom::core::World&, std::uint64_t) {
     counter.fetch_add(1, std::memory_order_relaxed);
   }, {}, vel_mask});
-  scheduler.add_system({"health", [&](omnicpp::core::World&, std::uint64_t) {
+  scheduler.add_system({"health", [&](warploom::core::World&, std::uint64_t) {
     counter.fetch_add(1, std::memory_order_relaxed);
   }, {}, hp_mask});
 
   EXPECT_TRUE(scheduler.build_schedule());
-  omnicpp::core::World world;
-  omnicpp::core::ThreadPool pool(4);
+  warploom::core::World world;
+  warploom::core::ThreadPool pool(4);
   scheduler.run_parallel(world, 0, pool);
   EXPECT_EQ(counter.load(), 3);
 }
@@ -261,16 +261,16 @@ TEST(SystemScheduler, DependentSystemsNeverShareAWaveDespiteDisjointMasks) {
   // disjoint masks in the SAME wave, so run_parallel ran them concurrently
   // and violated the dependency edge. A sabotage that drops the
   // dependency check collapses these two waves back into one.
-  omnicpp::core::SystemScheduler scheduler;
-  omnicpp::core::ComponentMask pos_mask;
-  pos_mask.set(omnicpp::core::component_type_id<Position>());
-  omnicpp::core::ComponentMask vel_mask;
-  vel_mask.set(omnicpp::core::component_type_id<Velocity>());
+  warploom::core::SystemScheduler scheduler;
+  warploom::core::ComponentMask pos_mask;
+  pos_mask.set(warploom::core::component_type_id<Position>());
+  warploom::core::ComponentMask vel_mask;
+  vel_mask.set(warploom::core::component_type_id<Velocity>());
 
   scheduler.add_system(
-      {"producer", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {}, pos_mask});
+      {"producer", [](warploom::core::World&, std::uint64_t) noexcept {}, {}, pos_mask});
   scheduler.add_system(
-      {"consumer", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {"producer"}, vel_mask});
+      {"consumer", [](warploom::core::World&, std::uint64_t) noexcept {}, {"producer"}, vel_mask});
   ASSERT_TRUE(scheduler.build_schedule());
 
   const auto waves = scheduler.partition_into_waves();
@@ -280,24 +280,24 @@ TEST(SystemScheduler, DependentSystemsNeverShareAWaveDespiteDisjointMasks) {
 
   // Ordering is preserved through run_parallel: the consumer observes the
   // producer's write even though the masks are disjoint.
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e = world.create_entity();
   world.add_component<Position>(e, {0.0f, 0.0f});
   world.add_component<Velocity>(e, {0.0f, 0.0f});
-  omnicpp::core::SystemScheduler ordered;
+  warploom::core::SystemScheduler ordered;
   ordered.add_system({"producer",
-                      [](omnicpp::core::World& w, std::uint64_t) {
-                        w.for_each<Position>([](omnicpp::core::Entity, Position& p) { p.x = 42.0f; });
+                      [](warploom::core::World& w, std::uint64_t) {
+                        w.for_each<Position>([](warploom::core::Entity, Position& p) { p.x = 42.0f; });
                       },
                       {}, pos_mask});
   ordered.add_system({"consumer",
-                      [](omnicpp::core::World& w, std::uint64_t) {
+                      [](warploom::core::World& w, std::uint64_t) {
                         w.for_each<Position, Velocity>(
-                            [](omnicpp::core::Entity, Position& p, Velocity& v) { v.dx = p.x; });
+                            [](warploom::core::Entity, Position& p, Velocity& v) { v.dx = p.x; });
                       },
                       {"producer"}, vel_mask});
   ASSERT_TRUE(ordered.build_schedule());
-  omnicpp::core::ThreadPool pool(4);
+  warploom::core::ThreadPool pool(4);
   for (int i = 0; i < 50; ++i) {
     world.get_component<Position>(e).x = 0.0f;
     world.get_component<Velocity>(e).dx = 0.0f;
@@ -309,15 +309,15 @@ TEST(SystemScheduler, DependentSystemsNeverShareAWaveDespiteDisjointMasks) {
 TEST(SystemScheduler, IndependentDisjointMasksShareOneWave) {
   // The other direction: systems with no edge and disjoint masks MUST share
   // a wave, or the fix over-serializes and parallel execution is lost.
-  omnicpp::core::SystemScheduler scheduler;
-  omnicpp::core::ComponentMask pos_mask;
-  pos_mask.set(omnicpp::core::component_type_id<Position>());
-  omnicpp::core::ComponentMask vel_mask;
-  vel_mask.set(omnicpp::core::component_type_id<Velocity>());
+  warploom::core::SystemScheduler scheduler;
+  warploom::core::ComponentMask pos_mask;
+  pos_mask.set(warploom::core::component_type_id<Position>());
+  warploom::core::ComponentMask vel_mask;
+  vel_mask.set(warploom::core::component_type_id<Velocity>());
   scheduler.add_system(
-      {"a", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {}, pos_mask});
+      {"a", [](warploom::core::World&, std::uint64_t) noexcept {}, {}, pos_mask});
   scheduler.add_system(
-      {"b", [](omnicpp::core::World&, std::uint64_t) noexcept {}, {}, vel_mask});
+      {"b", [](warploom::core::World&, std::uint64_t) noexcept {}, {}, vel_mask});
   ASSERT_TRUE(scheduler.build_schedule());
   const auto waves = scheduler.partition_into_waves();
   ASSERT_EQ(waves.size(), 1u);
@@ -325,7 +325,7 @@ TEST(SystemScheduler, IndependentDisjointMasksShareOneWave) {
 }
 
 TEST(Query, SingleComponentQuery) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   auto e2 = world.create_entity();
   auto e3 = world.create_entity();
@@ -334,7 +334,7 @@ TEST(Query, SingleComponentQuery) {
   world.add_component<Health>(e3, {50});
 
   std::vector<float> xs;
-  const auto count = world.query<Position>([&](omnicpp::core::Entity, Position& p) {
+  const auto count = world.query<Position>([&](warploom::core::Entity, Position& p) {
     xs.push_back(p.x);
   });
   EXPECT_EQ(count, 2u);
@@ -344,7 +344,7 @@ TEST(Query, SingleComponentQuery) {
 }
 
 TEST(Query, TwoComponentQuery) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   auto e2 = world.create_entity();
   auto e3 = world.create_entity();
@@ -355,7 +355,7 @@ TEST(Query, TwoComponentQuery) {
   world.add_component<Health>(e3, {50});
 
   int count = 0;
-  (void)world.query<Position, Velocity>([&](omnicpp::core::Entity, Position& p, Velocity& v) {
+  (void)world.query<Position, Velocity>([&](warploom::core::Entity, Position& p, Velocity& v) {
     p.x += v.dx;
     ++count;
   });
@@ -365,7 +365,7 @@ TEST(Query, TwoComponentQuery) {
 }
 
 TEST(Query, QueryIfWithPredicate) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   auto e2 = world.create_entity();
   auto e3 = world.create_entity();
@@ -374,8 +374,8 @@ TEST(Query, QueryIfWithPredicate) {
   world.add_component<Health>(e3, {50});
 
   auto count = world.query_if<Health>(
-      [](omnicpp::core::Entity, Health& h) { return h.hp > 0; },
-      [](omnicpp::core::Entity, Health& h) { h.hp -= 10; });
+      [](warploom::core::Entity, Health& h) { return h.hp > 0; },
+      [](warploom::core::Entity, Health& h) { h.hp -= 10; });
   EXPECT_EQ(count, 2u);
   EXPECT_EQ(world.get_component<Health>(e1).hp, 90);
   EXPECT_EQ(world.get_component<Health>(e2).hp, 0);
@@ -383,7 +383,7 @@ TEST(Query, QueryIfWithPredicate) {
 }
 
 TEST(Query, CountIf) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   auto e2 = world.create_entity();
   auto e3 = world.create_entity();
@@ -392,12 +392,12 @@ TEST(Query, CountIf) {
   world.add_component<Health>(e3, {50});
 
   auto alive = world.count_if<Health>(
-      [](omnicpp::core::Entity, const Health& h) { return h.hp > 0; });
+      [](warploom::core::Entity, const Health& h) { return h.hp > 0; });
   EXPECT_EQ(alive, 2u);
 }
 
 TEST(BumpAllocator, AllocateAndReset) {
-  omnicpp::core::BumpAllocator alloc(1024);
+  warploom::core::BumpAllocator alloc(1024);
   EXPECT_EQ(alloc.bytes_used(), 0u);
   EXPECT_EQ(alloc.capacity(), 1024u);
 
@@ -414,7 +414,7 @@ TEST(BumpAllocator, AllocateAndReset) {
 }
 
 TEST(BumpAllocator, ExhaustionReturnsNull) {
-  omnicpp::core::BumpAllocator alloc(64);
+  warploom::core::BumpAllocator alloc(64);
   auto* p1 = alloc.allocate(64);
   EXPECT_NE(p1, nullptr);
   auto* p2 = alloc.allocate(1);
@@ -422,7 +422,7 @@ TEST(BumpAllocator, ExhaustionReturnsNull) {
 }
 
 TEST(BumpAllocator, AlignedAllocation) {
-  omnicpp::core::BumpAllocator alloc(256);
+  warploom::core::BumpAllocator alloc(256);
   auto* p1 = alloc.allocate(1, 64);
   EXPECT_NE(p1, nullptr);
   EXPECT_EQ(reinterpret_cast<std::uintptr_t>(p1) % 64, 0u);
@@ -432,7 +432,7 @@ TEST(BumpAllocator, AlignedAllocation) {
 }
 
 TEST(EntityRecycling, DestroyAndReuse) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   auto e2 = world.create_entity();
   EXPECT_EQ(e1.id, 1u);
@@ -450,7 +450,7 @@ TEST(EntityRecycling, DestroyAndReuse) {
 }
 
 TEST(EntityRecycling, StaleHandleRejected) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   world.add_component<Position>(e1, {1.0f, 0.0f});
   world.destroy_entity(e1);
@@ -465,7 +465,7 @@ TEST(EntityRecycling, StaleHandleRejected) {
 }
 
 TEST(EntityRecycling, MultipleRecycles) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   world.destroy_entity(e1);
   auto e2 = world.create_entity();
@@ -478,7 +478,7 @@ TEST(EntityRecycling, MultipleRecycles) {
 }
 
 TEST(ChangeTracking, MarkDirtyAndClear) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   world.add_component<Position>(e1, {1.0f, 0.0f});
 
@@ -495,7 +495,7 @@ TEST(ChangeTracking, MarkDirtyAndClear) {
 }
 
 TEST(ChangeTracking, SetComponentMarksDirty) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   world.add_component<Position>(e1, {1.0f, 0.0f});
 
@@ -505,7 +505,7 @@ TEST(ChangeTracking, SetComponentMarksDirty) {
 }
 
 TEST(ChangeTracking, DirtyOnlyForModifiedType) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   auto e1 = world.create_entity();
   world.add_component<Position>(e1, {1.0f, 0.0f});
   world.add_component<Health>(e1, {100});
@@ -516,7 +516,7 @@ TEST(ChangeTracking, DirtyOnlyForModifiedType) {
 }
 
 TEST(ComponentPool, AcquireAndRelease) {
-  omnicpp::core::ComponentPool<Position> pool(16);
+  warploom::core::ComponentPool<Position> pool(16);
   EXPECT_EQ(pool.available(), 16u);
   EXPECT_EQ(pool.capacity(), 16u);
 
@@ -529,7 +529,7 @@ TEST(ComponentPool, AcquireAndRelease) {
 }
 
 TEST(ComponentPool, ExhaustionReturnsNull) {
-  omnicpp::core::ComponentPool<Position> pool(2);
+  warploom::core::ComponentPool<Position> pool(2);
   auto* p1 = pool.acquire();
   auto* p2 = pool.acquire();
   EXPECT_NE(p1, nullptr);
@@ -539,7 +539,7 @@ TEST(ComponentPool, ExhaustionReturnsNull) {
 }
 
 TEST(ComponentPool, ReleasedSlotIsReused) {
-  omnicpp::core::ComponentPool<Position> pool(1);
+  warploom::core::ComponentPool<Position> pool(1);
   auto* p1 = pool.acquire();
   EXPECT_NE(p1, nullptr);
   pool.release(p1);
@@ -549,7 +549,7 @@ TEST(ComponentPool, ReleasedSlotIsReused) {
 }
 
 TEST(ComponentPool, NullReleaseIsSafe) {
-  omnicpp::core::ComponentPool<Position> pool(4);
+  warploom::core::ComponentPool<Position> pool(4);
   pool.release(nullptr); // Should not crash
   EXPECT_EQ(pool.available(), 4u);
 }

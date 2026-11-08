@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-Build script for OmniCpp project
+Build script for Warploom project
 
 This script provides a command-line interface for building project targets
-using the omni_scripts.controller.build_controller module.
+using the warploom_scripts.controller.build_controller module.
 """
 
 import sys
 import argparse
 from pathlib import Path
 
-# Add parent directory to path to import omni_scripts
+# Add parent directory to path to import warploom_scripts
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from omni_scripts.controller.build_controller import build
+from warploom_scripts.controller.build_controller import build
 
 
 def main():
     """Main entry point for build script."""
     parser = argparse.ArgumentParser(
-        description="Build OmniCpp project targets",
+        description="Build Warploom project targets",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

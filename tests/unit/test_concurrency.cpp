@@ -26,7 +26,7 @@ TEST(SpscChannel, CrossThreadTransfer) {
   constexpr std::size_t kCapacity = 64;
   constexpr std::size_t kCount = 10000;
 
-  omnicpp::core::SpscChannel<std::uint64_t, kCapacity> channel;
+  warploom::core::SpscChannel<std::uint64_t, kCapacity> channel;
 
   std::thread producer([&] {
     for (std::uint64_t i = 0; i < kCount; ++i) {
@@ -64,7 +64,7 @@ TEST(SpscChannel, HighContentionBurst) {
   constexpr std::size_t kCapacity = 16;
   constexpr std::size_t kCount = 50000;
 
-  omnicpp::core::SpscChannel<std::uint64_t, kCapacity> channel;
+  warploom::core::SpscChannel<std::uint64_t, kCapacity> channel;
   std::atomic<bool> done_producing{false};
   std::atomic<std::size_t> consumed_count{0};
 
@@ -109,7 +109,7 @@ TEST(SpscChannel, HighContentionBurst) {
 
 TEST(SpscChannel, RejectsWhenFull) {
   constexpr std::size_t kCapacity = 8;
-  omnicpp::core::SpscChannel<int, kCapacity> channel;
+  warploom::core::SpscChannel<int, kCapacity> channel;
 
   // Fill to capacity (usable capacity is Capacity-1)
   for (std::size_t i = 0; i < channel.capacity(); ++i) {
@@ -121,7 +121,7 @@ TEST(SpscChannel, RejectsWhenFull) {
 
 TEST(SpscChannel, RejectsWhenEmpty) {
   constexpr std::size_t kCapacity = 8;
-  omnicpp::core::SpscChannel<int, kCapacity> channel;
+  warploom::core::SpscChannel<int, kCapacity> channel;
 
   int value = -1;
   EXPECT_FALSE(channel.try_pop(value));
@@ -134,7 +134,7 @@ TEST(SpscChannel, RejectsWhenEmpty) {
 
 TEST(BoundedQueue, PushPopOrdering) {
   constexpr std::size_t kCapacity = 4;
-  omnicpp::core::BoundedQueue<int, kCapacity> queue;
+  warploom::core::BoundedQueue<int, kCapacity> queue;
 
   EXPECT_TRUE(queue.try_push(10));
   EXPECT_TRUE(queue.try_push(20));
@@ -152,7 +152,7 @@ TEST(BoundedQueue, PushPopOrdering) {
 
 TEST(BoundedQueue, RejectsWhenFull) {
   constexpr std::size_t kCapacity = 2;
-  omnicpp::core::BoundedQueue<int, kCapacity> queue;
+  warploom::core::BoundedQueue<int, kCapacity> queue;
 
   EXPECT_TRUE(queue.try_push(1));
   EXPECT_TRUE(queue.try_push(2));
@@ -162,7 +162,7 @@ TEST(BoundedQueue, RejectsWhenFull) {
 
 TEST(BoundedQueue, OverflowTracking) {
   constexpr std::size_t kCapacity = 4;
-  omnicpp::core::BoundedQueue<int, kCapacity> queue;
+  warploom::core::BoundedQueue<int, kCapacity> queue;
 
   for (int i = 0; i < 10; ++i) {
     static_cast<void>(queue.try_push(i));
@@ -182,7 +182,7 @@ TEST(DeterministicRuntime, ConcurrentEventPost) {
   // works correctly and all events are accounted for.
   constexpr std::size_t kEventCount = 1000;
 
-  omnicpp::core::DeterministicRuntime runtime(1.0 / 60.0);
+  warploom::core::DeterministicRuntime runtime(1.0 / 60.0);
   ASSERT_TRUE(runtime.start().is_ok());
 
   // Single producer thread posts events
@@ -200,7 +200,7 @@ TEST(DeterministicRuntime, ConcurrentEventPost) {
 
   // Advance should drain all queued events
   std::size_t received_count = 0;
-  runtime.advance(10.0, [&](omnicpp::core::DeterministicRuntime::Event) {
+  runtime.advance(10.0, [&](warploom::core::DeterministicRuntime::Event) {
     ++received_count;
   }, [](std::uint64_t) {});
 
@@ -213,7 +213,7 @@ TEST(DeterministicRuntime, ProducerConsumerLockFree) {
   constexpr std::size_t kCapacity = 256;
   constexpr std::size_t kCount = 5000;
 
-  omnicpp::core::SpscChannel<std::uint64_t, kCapacity> channel;
+  warploom::core::SpscChannel<std::uint64_t, kCapacity> channel;
 
   // Simulate a typical game loop: producer posts events, consumer drains them
   std::atomic<bool> done_producing{false};
@@ -260,7 +260,7 @@ TEST(DeterministicRuntime, ProducerConsumerLockFree) {
 
 TEST(DeterministicRuntime, StateHashReproducibility) {
   auto run_simulation = [](std::uint64_t event_seed, std::size_t ticks) -> std::uint64_t {
-    omnicpp::core::DeterministicRuntime runtime(1.0 / 60.0);
+    warploom::core::DeterministicRuntime runtime(1.0 / 60.0);
     static_cast<void>(runtime.start().is_ok());
 
     // Inject events at deterministic intervals
@@ -268,7 +268,7 @@ TEST(DeterministicRuntime, StateHashReproducibility) {
       if (i % 10 == 0) {
         static_cast<void>(runtime.post_event(event_seed + i));
       }
-      runtime.advance(1.0 / 60.0, [](omnicpp::core::DeterministicRuntime::Event) {},
+      runtime.advance(1.0 / 60.0, [](warploom::core::DeterministicRuntime::Event) {},
                        [](std::uint64_t) {});
     }
 
@@ -291,7 +291,7 @@ TEST(MpscChannel, SingleProducerTransfer) {
   constexpr std::size_t kCapacity = 64;
   constexpr std::size_t kCount = 10000;
 
-  omnicpp::core::MpscChannel<std::uint64_t, kCapacity> channel;
+  warploom::core::MpscChannel<std::uint64_t, kCapacity> channel;
   std::atomic<bool> done_producing{false};
   std::vector<std::uint64_t> received;
 
@@ -332,7 +332,7 @@ TEST(MpscChannel, MultiProducerCrossThread) {
   constexpr std::size_t kEventsPerThread = 5000;
   constexpr std::size_t kTotal = kThreadCount * kEventsPerThread;
 
-  omnicpp::core::MpscChannel<std::uint64_t, kCapacity> channel;
+  warploom::core::MpscChannel<std::uint64_t, kCapacity> channel;
   std::atomic<bool> done_producing{false};
 
   // Multiple producer threads
@@ -389,7 +389,7 @@ TEST(MpscChannel, MultiProducerCrossThread) {
 
 TEST(MpscChannel, RejectsWhenFull) {
   constexpr std::size_t kCapacity = 8;
-  omnicpp::core::MpscChannel<int, kCapacity> channel;
+  warploom::core::MpscChannel<int, kCapacity> channel;
 
   // Fill to capacity
   for (std::size_t i = 0; i < channel.capacity(); ++i) {
@@ -401,7 +401,7 @@ TEST(MpscChannel, RejectsWhenFull) {
 
 TEST(MpscChannel, RejectsWhenEmpty) {
   constexpr std::size_t kCapacity = 8;
-  omnicpp::core::MpscChannel<int, kCapacity> channel;
+  warploom::core::MpscChannel<int, kCapacity> channel;
 
   int value = -1;
   EXPECT_FALSE(channel.try_pop(value));
@@ -410,7 +410,7 @@ TEST(MpscChannel, RejectsWhenEmpty) {
 
 TEST(MpscChannel, SizeTracking) {
   constexpr std::size_t kCapacity = 16;
-  omnicpp::core::MpscChannel<int, kCapacity> channel;
+  warploom::core::MpscChannel<int, kCapacity> channel;
 
   EXPECT_EQ(channel.size(), 0u);
   EXPECT_TRUE(channel.try_push(1));
@@ -429,7 +429,7 @@ TEST(MpscChannel, HighContentionStress) {
   constexpr std::size_t kEventsPerThread = 10000;
   constexpr std::size_t kTotal = kThreadCount * kEventsPerThread;
 
-  omnicpp::core::MpscChannel<std::uint64_t, kCapacity> channel;
+  warploom::core::MpscChannel<std::uint64_t, kCapacity> channel;
   std::atomic<bool> done_producing{false};
   std::atomic<std::size_t> consumed_count{0};
 

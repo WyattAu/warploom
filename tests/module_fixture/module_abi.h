@@ -9,8 +9,8 @@
 //! prior declaration. This header is that declaration.
 //!
 //! Two prefixes exist: `warploom_module_*` is the current name and
-//! `omnicpp_module_*` is the legacy one the host still falls back to
-//! (script_module.cpp tries warploom first, then omnicpp). Both are declared
+//! `warploom_module_*` is the legacy one the host still falls back to
+//! (script_module.cpp tries warploom first, then warploom). Both are declared
 //! so a fixture can export either and still compile; a module should export
 //! the warploom_ set.
 //!
@@ -53,9 +53,9 @@ int32_t warploom_module_tick(double dt, const double* inputs,
 
 //! Legacy prefix, still resolved as a fallback. Declared so legacy modules
 //! compile; do not export these in new modules.
-int32_t omnicpp_module_abi(void);
-const char* omnicpp_module_name(void);
-int32_t omnicpp_module_tick(double dt, const double* inputs,
+int32_t warploom_module_abi(void);
+const char* warploom_module_name(void);
+int32_t warploom_module_tick(double dt, const double* inputs,
                             uint32_t input_count, double* outputs,
                             uint32_t output_capacity);
 

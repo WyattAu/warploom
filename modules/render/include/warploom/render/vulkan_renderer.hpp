@@ -774,7 +774,7 @@ private:
   //! AsyncComputeQueue::record callback: reduce + pack for one snapshot
   //! slot onto the compute command buffer.
   static void record_hiz_compute_work(VkCommandBuffer command_buffer, void* user_data);
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   //! Ensure the snapshot slot holds a depth image matching width/height/
   //! format (loop28 step 2, lazy: the compose HDR depth may not exist when
   //! recreate_hiz_resources runs). Creates on first use and recreates on
@@ -822,7 +822,7 @@ private:
   //! next reuse of the slot waits exactly this kick.
   void kick_hiz_compute_reduce(std::uint32_t slot) noexcept;
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   [[nodiscard]] bool record_hiz_reduction(VkCommandBuffer command_buffer,
                                            const HiZFrameRecord& record);
   //! Snapshot format owning `record.depth_image` (compose HDR depth vs
@@ -863,7 +863,7 @@ private:
   static void record_unified_frame_dynamic_node(
       VkCommandBuffer command_buffer, const GraphDynamicPass& pass,
       void* user_data);
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   //! Scene contents for the unified graph's scene node: viewport/scissor
   //! plus the application callback (or the built-in demo draw). Returns
   //! false when the application callback fails the frame.
@@ -1048,16 +1048,3 @@ private:
 };
 
 } // namespace warploom::render
-
-// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
-// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
-// in a namespace extension (NOT a type alias - ill-formed for namespaces)
-// makes the old spellings name the SAME types. Guarded per namespace (a
-// shared guard would suppress later headers' distinct directives). The
-// nested render::depth family resolves through this directive.
-#ifndef WARPLOOM_COMPAT_RENDER_NS
-#define WARPLOOM_COMPAT_RENDER_NS
-namespace omnicpp::render {
-    using namespace ::warploom::render;
-}
-#endif  // WARPLOOM_COMPAT_RENDER_NS

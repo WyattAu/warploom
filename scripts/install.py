@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-Install script for OmniCpp project
+Install script for Warploom project
 
 This script provides a command-line interface for installing dependencies
-and built artifacts using the omni_scripts.controller.install_controller module.
+and built artifacts using the warploom_scripts.controller.install_controller module.
 """
 
 import sys
 import argparse
 from pathlib import Path
 
-# Add parent directory to path to import omni_scripts
+# Add parent directory to path to import warploom_scripts
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from omni_scripts.controller.install_controller import install
+from warploom_scripts.controller.install_controller import install
 
 
 def main():
     """Main entry point for install script."""
     parser = argparse.ArgumentParser(
-        description="Install OmniCpp dependencies and artifacts",
+        description="Install Warploom dependencies and artifacts",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

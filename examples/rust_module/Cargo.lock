@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "omnicpp_example_module"
+name = "warploom_example_module"
 version = "0.1.0"

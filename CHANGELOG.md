@@ -9,8 +9,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 The project was renamed from OmniCPP to **Warploom**. Modules, namespaces,
 build options, binaries and the script-module C ABI now carry the new name;
-the compatibility surface decays on the schedule in
-`docs/warploom-identity-plan.md`.
+the `OMNICPP_*`/`omnicpp_*` compatibility surface (CMake option shims,
+namespace compat footers, target aliases, `src/engine`) is removed.
 
 ### Added
 

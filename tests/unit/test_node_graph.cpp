@@ -11,7 +11,7 @@
 
 namespace {
 
-using namespace omnicpp::editor;
+using namespace warploom::editor;
 
 //! const(3) + const(4) -> add -> out; returns node ids.
 struct AddGraph {
@@ -282,7 +282,7 @@ TEST(NodeGraph, SubgraphCopyLayoutRoundTrip) {
 
 namespace {
 
-namespace ed = omnicpp::editor;
+namespace ed = warploom::editor;
 
 using ed::GraphContext;
 using ed::NodeValue;

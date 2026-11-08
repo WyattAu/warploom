@@ -115,14 +115,14 @@ public:
   [[nodiscard]] bool has_ray_tracing_pipeline() const noexcept { return rt_pipeline_enabled_; }
   //! scratch/AS size limits from the RT properties (0 when absent).
   [[nodiscard]] std::uint64_t max_ray_tracing_scratch() const noexcept {
-#if defined(OMNICPP_HAS_VULKAN)
+#if defined(WARPLOOM_HAS_VULKAN)
     return as_properties_.maxGeometryCount > 0U ? 1U : 0U;
 #else
     return 0U;
 #endif
   }
   [[nodiscard]] std::uint64_t max_acceleration_structure_geometry_count() const noexcept {
-#if defined(OMNICPP_HAS_VULKAN)
+#if defined(WARPLOOM_HAS_VULKAN)
     return as_properties_.maxGeometryCount;
 #else
     return 0U;
@@ -156,7 +156,7 @@ private:
   bool dynamic_rendering_enabled_{false};
   bool ray_tracing_enabled_{false};
   bool rt_pipeline_enabled_{false};
-#if defined(OMNICPP_HAS_VULKAN)
+#if defined(WARPLOOM_HAS_VULKAN)
   VkPhysicalDeviceAccelerationStructurePropertiesKHR as_properties_{};
   //! Feature-struct members for the negotiation chain (RT-capable devices).
   VkPhysicalDeviceAccelerationStructureFeaturesKHR as_features_{};
@@ -175,7 +175,7 @@ private:
   //! Probes VK_KHR_ray_tracing_position_fetch extension presence.
   static bool device_supports_position_fetch_extension(VkPhysicalDevice device);
 
-#if !defined(OMNICPP_HAS_VULKAN)
+#if !defined(WARPLOOM_HAS_VULKAN)
   //! Opaque stand-ins keep the header compiling without Vulkan (the members
   //! above are compiled out; the negotiation code is entirely #ifdef'd).
   struct VkPhysicalDeviceAccelerationStructurePropertiesKHR {};
@@ -194,16 +194,3 @@ private:
 };
 
 } // namespace warploom::render
-
-// S5-B compat footer: legacy `omnicpp::render` spellings keep resolving during the
-// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
-// in a namespace extension (NOT a type alias - ill-formed for namespaces)
-// makes the old spellings name the SAME types. Guarded per namespace (a
-// shared guard would suppress later headers' distinct directives). The
-// nested render::depth family resolves through this directive.
-#ifndef WARPLOOM_COMPAT_RENDER_NS
-#define WARPLOOM_COMPAT_RENDER_NS
-namespace omnicpp::render {
-    using namespace ::warploom::render;
-}
-#endif  // WARPLOOM_COMPAT_RENDER_NS

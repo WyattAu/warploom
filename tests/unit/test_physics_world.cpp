@@ -18,8 +18,8 @@
 
 namespace {
 
-using omnicpp::physics::PhysicsBody;
-using omnicpp::physics::PhysicsWorld;
+using warploom::physics::PhysicsBody;
+using warploom::physics::PhysicsWorld;
 
 constexpr float kDt = 1.0f / 120.0f;
 
@@ -336,11 +336,11 @@ TEST(PhysicsWorld, BroadphaseAgreesWithAllPairsAtSeveralScales) {
   // scale. Order is structural — both paths end at the same trailing sort.
   const auto run = [](std::size_t count, bool force_all_pairs,
                        bool speculative) {
-    omnicpp::physics::PhysicsWorld world(-9.81F);
+    warploom::physics::PhysicsWorld world(-9.81F);
     world.set_force_all_pairs(force_all_pairs);
     if (speculative) world.set_speculative_contacts(true);
     for (std::size_t i = 0; i < count; ++i) {
-      omnicpp::physics::PhysicsBody b;
+      warploom::physics::PhysicsBody b;
       const float f = static_cast<float>(i);
       b.position[0] = -10.0F + std::fmod(f * 0.37F, 20.0F);
       b.position[1] = 2.0F + std::fmod(f * 0.11F, 8.0F);
@@ -354,7 +354,7 @@ TEST(PhysicsWorld, BroadphaseAgreesWithAllPairsAtSeveralScales) {
         // segment narrowphase, so the agreement must hold for mixed
         // shapes too — not just the sphere path the gate covers.
         if (i % 50U == 0U) {
-          b.shape = omnicpp::physics::BodyShape::Capsule;
+          b.shape = warploom::physics::BodyShape::Capsule;
           b.half_height = 0.4F;
         }
       }
@@ -375,7 +375,7 @@ TEST(PhysicsWorld, BroadphaseAgreesWithAllPairsAtSeveralScales) {
 }
 
 TEST(PhysicsWorld, ForceAllPairsIsHonouredAndReversible) {
-  omnicpp::physics::PhysicsWorld world(-9.81F);
+  warploom::physics::PhysicsWorld world(-9.81F);
   EXPECT_FALSE(world.force_all_pairs());
   world.set_force_all_pairs(true);
   EXPECT_TRUE(world.force_all_pairs());
@@ -387,7 +387,7 @@ TEST(PhysicsWorld, ForceAllPairsIsHonouredAndReversible) {
 // record-rewind-replay validator and an XPBD compliance opt-in as adopted,
 // but neither existed in code. These cases pin both.
 TEST(PhysicsWorld, Loop12DeterminismCheckPassesOnCollidingScene) {
-  omnicpp::physics::PhysicsWorld w(-9.81F);
+  warploom::physics::PhysicsWorld w(-9.81F);
   EXPECT_FALSE(w.determinism_check());
   w.set_determinism_check(true);
   EXPECT_TRUE(w.determinism_check());
@@ -396,7 +396,7 @@ TEST(PhysicsWorld, Loop12DeterminismCheckPassesOnCollidingScene) {
   w.set_substeps(2U);
   w.set_solver_iterations(4U);
   for (std::uint32_t i = 0; i < 6U; ++i) {
-    omnicpp::physics::PhysicsBody b;
+    warploom::physics::PhysicsBody b;
     b.position[0] = (i % 2U == 0U) ? -0.4F : 0.4F;
     b.position[1] = 0.5F + 1.0F * static_cast<float>(i);
     b.restitution = 0.2F;
@@ -419,12 +419,12 @@ TEST(PhysicsWorld, Loop12DeterminismCheckPassesOnCollidingScene) {
 
 TEST(PhysicsWorld, Loop12ComplianceZeroIsBitIdentical) {
   auto run = [](float alpha) {
-    omnicpp::physics::PhysicsWorld w(-9.81F);
+    warploom::physics::PhysicsWorld w(-9.81F);
     w.set_contact_compliance(alpha);
     w.set_substeps(2U);
     w.set_solver_iterations(4U);
     for (std::uint32_t i = 0; i < 6U; ++i) {
-      omnicpp::physics::PhysicsBody b;
+      warploom::physics::PhysicsBody b;
       b.position[0] = (i % 2U == 0U) ? -0.4F : 0.4F;
       b.position[1] = 0.5F + 1.0F * static_cast<float>(i);
       b.restitution = 0.2F;
@@ -438,7 +438,7 @@ TEST(PhysicsWorld, Loop12ComplianceZeroIsBitIdentical) {
   // Default (never set) and explicit 0 agree bit-for-bit: opting in is
   // what changes output, not the existence of the knob.
   EXPECT_EQ(run(-1.0F), run(0.0F));  // negative clamps to 0
-  EXPECT_EQ(omnicpp::physics::PhysicsWorld(-9.81F).contact_compliance(), 0.0F);
+  EXPECT_EQ(warploom::physics::PhysicsWorld(-9.81F).contact_compliance(), 0.0F);
 }
 
 TEST(PhysicsWorld, RestitutionThresholdKillsMicroBounce) {
@@ -628,7 +628,7 @@ TEST(PhysicsWorld, CapsuleFallsAndRestsUpright) {
     w.set_restitution_threshold(0.5F);
     w.set_solver_iterations(4U);
     PhysicsBody b;
-    b.shape = omnicpp::physics::BodyShape::Capsule;
+    b.shape = warploom::physics::BodyShape::Capsule;
     b.half_height = 0.5F;
     b.radius = 0.25F;
     b.position[1] = 2.0F;
@@ -657,7 +657,7 @@ TEST(PhysicsWorld, CapsuleCapsuleNarrowphaseSeparates) {
   PhysicsWorld w(0.0F);  // no gravity: pure separation test
   w.set_determinism_check(true);
   PhysicsBody a;
-  a.shape = omnicpp::physics::BodyShape::Capsule;
+  a.shape = warploom::physics::BodyShape::Capsule;
   a.half_height = 0.5F;
   a.radius = 0.25F;
   a.position[1] = 5.0F;
@@ -667,7 +667,7 @@ TEST(PhysicsWorld, CapsuleCapsuleNarrowphaseSeparates) {
   a.orientation[2] = 0.70710678F;
   a.orientation[3] = 0.70710678F;
   PhysicsBody b;
-  b.shape = omnicpp::physics::BodyShape::Capsule;
+  b.shape = warploom::physics::BodyShape::Capsule;
   b.half_height = 0.5F;
   b.radius = 0.25F;
   b.position[0] = 0.6F;
@@ -797,10 +797,10 @@ TEST(PhysicsWorld, SleepingKeepsSpinningBodiesAwake) {
 
 TEST(PhysicsWorld, Loop12ComplianceSoftensAndStaysDeterministic) {
   auto settle_top = [](float alpha) {
-    omnicpp::physics::PhysicsWorld w(-9.81F);
+    warploom::physics::PhysicsWorld w(-9.81F);
     w.set_contact_compliance(alpha);
     for (std::uint32_t i = 0; i < 6U; ++i) {
-      omnicpp::physics::PhysicsBody b;
+      warploom::physics::PhysicsBody b;
       b.position[1] = 0.5F + 1.0F * static_cast<float>(i);
       b.restitution = 0.0F;
       (void)w.add_body(b);
@@ -939,7 +939,7 @@ TEST(PhysicsWorld, FastCapsuleTunnelsOnSomePhases) {
     wall.inverse_mass = 0.0f;
     (void)w.add_body(wall);
     PhysicsBody shot;
-    shot.shape = omnicpp::physics::BodyShape::Capsule;
+    shot.shape = warploom::physics::BodyShape::Capsule;
     shot.radius = kShotR;
     shot.half_height = kHalf;
     const float phase = static_cast<float>(p) * kStepTravel /
@@ -1332,7 +1332,7 @@ TEST(PhysicsWorld, SpinningCapsuleStillStopsAtWall) {
       wall.restitution = 0.0f;
       (void)w.add_body(wall);
       PhysicsBody shot;
-      shot.shape = omnicpp::physics::BodyShape::Capsule;
+      shot.shape = warploom::physics::BodyShape::Capsule;
       shot.radius = kShotR;
       shot.half_height = kHalf;
       const float phase = static_cast<float>(p) * kStepTravel /

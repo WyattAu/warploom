@@ -30,19 +30,19 @@
 
 namespace {
 
-namespace ed = omnicpp::editor;
-using CK = omnicpp::core::ControlCommand::Kind;
+namespace ed = warploom::editor;
+using CK = warploom::core::ControlCommand::Kind;
 
 //! Sends one command and asserts the reply was ok (returns the detail).
-std::string ok(ed::EditorSession& s, const omnicpp::core::ControlCommand& cmd) {
+std::string ok(ed::EditorSession& s, const warploom::core::ControlCommand& cmd) {
   const auto reply = s.on_control(cmd);
   EXPECT_TRUE(reply.ok) << reply.error;
   return reply.detail;
 }
 
-omnicpp::core::ControlCommand set_position(ed::EditorSession& s, double x,
+warploom::core::ControlCommand set_position(ed::EditorSession& s, double x,
                                            double y, double z) {
-  omnicpp::core::ControlCommand set;
+  warploom::core::ControlCommand set;
   set.kind = CK::SetProperty;
   set.text = s.document().objects.back().name;
   set.text2 = "position";
@@ -53,8 +53,8 @@ omnicpp::core::ControlCommand set_position(ed::EditorSession& s, double x,
   return set;
 }
 
-omnicpp::core::ControlCommand step_cmd(std::uint64_t ticks) {
-  omnicpp::core::ControlCommand step;
+warploom::core::ControlCommand step_cmd(std::uint64_t ticks) {
+  warploom::core::ControlCommand step;
   step.kind = CK::Step;
   step.numbers[0] = static_cast<double>(ticks);
   step.number_count = 1;
@@ -255,13 +255,13 @@ TEST(TimelineCommands, MoveAndRemoveRoundTrip) {
 TEST(TimelineSession, RecordAndPlaybackDeterministic) {
   ed::EditorSession s;
   ok(s, [] {
-    omnicpp::core::ControlCommand c;
+    warploom::core::ControlCommand c;
     c.kind = CK::SpawnCube;
     c.number_count = 0;
     return c;
   }());
 
-  omnicpp::core::ControlCommand add;
+  warploom::core::ControlCommand add;
   add.kind = CK::ClipAdd;
   add.text = "intro";
   add.numbers[0] = 5;
@@ -273,7 +273,7 @@ TEST(TimelineSession, RecordAndPlaybackDeterministic) {
   const auto cube_id = s.document().objects.back().id;
   ok(s, set_position(s, 7.0, 0.0, 0.0));
 
-  omnicpp::core::ControlCommand rec;
+  warploom::core::ControlCommand rec;
   rec.kind = CK::ClipRecord;
   rec.numbers[0] = 1;
   rec.numbers[1] = static_cast<double>(cube_id);
@@ -308,13 +308,13 @@ TEST(TimelineSession, RecordAndPlaybackDeterministic) {
   // the clip's authored span on the absolute timeline — then play it back
   // through the same tick path: the property follows the trajectory.
   ok(s, set_position(s, 0.0, 0.0, 0.0));
-  omnicpp::core::ControlCommand move;
+  warploom::core::ControlCommand move;
   move.kind = CK::ClipMove;
   move.numbers[0] = 1;
   move.numbers[1] = 12;
   move.number_count = 2;
   ok(s, move);
-  omnicpp::core::ControlCommand play;
+  warploom::core::ControlCommand play;
   play.kind = CK::ClipPlay;
   play.numbers[0] = 1;
   play.number_count = 1;
@@ -388,7 +388,7 @@ TEST(TimelineSession, SubFrameFractionRecordsAndReplaysDeterministically) {
 
   tick_once();
   ok(s, [] {
-    omnicpp::core::ControlCommand c;
+    warploom::core::ControlCommand c;
     c.kind = CK::SpawnCube;
     c.number_count = 0;
     return c;
@@ -397,7 +397,7 @@ TEST(TimelineSession, SubFrameFractionRecordsAndReplaysDeterministically) {
   tick_once();
   ok(s, set_position(s, 7.0, 0.0, 0.0));
 
-  omnicpp::core::ControlCommand add;
+  warploom::core::ControlCommand add;
   add.kind = CK::ClipAdd;
   add.text = "frac";
   add.numbers[0] = 4;  // start frame
@@ -405,7 +405,7 @@ TEST(TimelineSession, SubFrameFractionRecordsAndReplaysDeterministically) {
   add.number_count = 2;
   tick_once();
   ok(s, add);
-  omnicpp::core::ControlCommand rec;
+  warploom::core::ControlCommand rec;
   rec.kind = CK::ClipRecord;
   rec.numbers[0] = 1;
   rec.numbers[1] = static_cast<double>(cube_id);
@@ -433,14 +433,14 @@ TEST(TimelineSession, SubFrameFractionRecordsAndReplaysDeterministically) {
   // are 11 (offset 1, holds 7.0) and 12.5 (offset 2.5, the interpolated
   // midpoint 8.125 with frac = 0.5). Same numbers live and on replay —
   // the frame source is the accumulated tick count, not the wall clock.
-  omnicpp::core::ControlCommand move;
+  warploom::core::ControlCommand move;
   move.kind = CK::ClipMove;
   move.numbers[0] = 1;
   move.numbers[1] = 10;
   move.number_count = 2;
   tick_once();
   ok(s, move);
-  omnicpp::core::ControlCommand play;
+  warploom::core::ControlCommand play;
   play.kind = CK::ClipPlay;
   play.numbers[0] = 1;
   play.number_count = 1;
@@ -452,7 +452,7 @@ TEST(TimelineSession, SubFrameFractionRecordsAndReplaysDeterministically) {
   ASSERT_NE(held, nullptr);
   EXPECT_DOUBLE_EQ(held->properties.at("position").vec[0], 7.0);
   (void)s.tick({tick_frame++, kDt, 0.5, false});
-  omnicpp::core::ControlCommand frac_step;
+  warploom::core::ControlCommand frac_step;
   frac_step.kind = CK::Step;
   frac_step.numbers[0] = 1.0;
   frac_step.numbers[1] = 0.5;
@@ -514,7 +514,7 @@ TEST(TimelineSession, ConcurrentRecordAndPlayArmsBoth) {
   auto tick = [&](std::uint64_t frame) { (void)s.tick({frame, 1.0 / 60.0, 0.0, false}); };
   tick(0);
   ok(s, [] {
-    omnicpp::core::ControlCommand c;
+    warploom::core::ControlCommand c;
     c.kind = CK::SpawnCube;
     c.number_count = 0;
     return c;
@@ -524,7 +524,7 @@ TEST(TimelineSession, ConcurrentRecordAndPlayArmsBoth) {
   // Source clip [10, 14): record position.x = 5, 6, 7, 8 at offsets 0..3.
   // Samples land only inside the clip's authored span (frame >= start and
   // frame < start + length), so the ticks that sample are exactly 10..13.
-  omnicpp::core::ControlCommand add;
+  warploom::core::ControlCommand add;
   add.kind = CK::ClipAdd;
   add.text = "src";
   add.numbers[0] = 10;
@@ -532,7 +532,7 @@ TEST(TimelineSession, ConcurrentRecordAndPlayArmsBoth) {
   add.number_count = 2;
   tick(1);
   ok(s, add);
-  omnicpp::core::ControlCommand rec;
+  warploom::core::ControlCommand rec;
   rec.kind = CK::ClipRecord;
   rec.numbers[0] = 1;
   rec.numbers[1] = static_cast<double>(cube_id);
@@ -562,7 +562,7 @@ TEST(TimelineSession, ConcurrentRecordAndPlayArmsBoth) {
   // on pre-span ticks: arming on a tick past the clip's end would trip the
   // (correct) end-of-clip auto-disarm before the take loop even starts.
   ok(s, set_position(s, 0.0, 0.0, 0.0));
-  omnicpp::core::ControlCommand add_dst;
+  warploom::core::ControlCommand add_dst;
   add_dst.kind = CK::ClipAdd;
   add_dst.text = "take";
   add_dst.numbers[0] = 10;
@@ -570,13 +570,13 @@ TEST(TimelineSession, ConcurrentRecordAndPlayArmsBoth) {
   add_dst.number_count = 2;
   tick(7);
   ok(s, add_dst);
-  omnicpp::core::ControlCommand play;
+  warploom::core::ControlCommand play;
   play.kind = CK::ClipPlay;
   play.numbers[0] = 1;
   play.number_count = 1;
   tick(8);
   ok(s, play);
-  omnicpp::core::ControlCommand rec_dst = rec;
+  warploom::core::ControlCommand rec_dst = rec;
   rec_dst.numbers[0] = 2;
   tick(9);
   ok(s, rec_dst);
@@ -608,14 +608,14 @@ TEST(TimelineSession, ConcurrentRecordAndPlayArmsBoth) {
   // still live (take span [10,16) was never left), so it is stopped first
   // — re-arming an identical track is rejected, not duplicated.
   ok(s, set_position(s, 0.0, 0.0, 0.0));
-  omnicpp::core::ControlCommand stop;
+  warploom::core::ControlCommand stop;
   stop.kind = CK::ClipRecordStop;
   stop.number_count = 0;
-  omnicpp::core::ControlCommand rec_take = rec_dst;
+  warploom::core::ControlCommand rec_take = rec_dst;
   tick(18);
   ok(s, stop);
   ok(s, rec_take);
-  omnicpp::core::ControlCommand play_take;
+  warploom::core::ControlCommand play_take;
   play_take.kind = CK::ClipPlay;
   play_take.numbers[0] = 2;
   play_take.number_count = 1;
@@ -658,12 +658,12 @@ TEST(TimelineSession, ConcurrentArmsSurviveReplay) {
   // lands between the same two ticks live and on replay, so sampled
   // values agree. Any other shape (rewound frames, unticked commands,
   // unlogged ticks) is unreplayable by construction.
-  auto ring = [&](omnicpp::core::ControlCommand cmd) {
+  auto ring = [&](warploom::core::ControlCommand cmd) {
     (void)s.tick({live_frame++, kDt, 0.0, false});
     ok(s, cmd);
   };
   auto spawn_cube = [] {
-    omnicpp::core::ControlCommand c;
+    warploom::core::ControlCommand c;
     c.kind = CK::SpawnCube;
     c.number_count = 0;
     return c;
@@ -674,14 +674,14 @@ TEST(TimelineSession, ConcurrentArmsSurviveReplay) {
   ring(set_position(s, 5.0, 0.0, 0.0));
   // Source clip [10, 20): long enough to stay alive through the take loop;
   // its arm stops after offset 3 so it keeps exactly {5,6,7,8}.
-  omnicpp::core::ControlCommand add;
+  warploom::core::ControlCommand add;
   add.kind = CK::ClipAdd;
   add.text = "src";
   add.numbers[0] = 10;
   add.numbers[1] = 10;
   add.number_count = 2;
   ring(add);
-  omnicpp::core::ControlCommand rec;
+  warploom::core::ControlCommand rec;
   rec.kind = CK::ClipRecord;
   rec.numbers[0] = 1;
   rec.numbers[1] = static_cast<double>(cube_id);
@@ -696,7 +696,7 @@ TEST(TimelineSession, ConcurrentArmsSurviveReplay) {
   ring(set_position(s, 7.0, 0.0, 0.0));  // tick@11 samples 6.0
   ring(set_position(s, 8.0, 0.0, 0.0));  // tick@12 samples 7.0
   // Stop the src arm: offsets 4+ would otherwise keep sampling 8s.
-  omnicpp::core::ControlCommand stop;
+  warploom::core::ControlCommand stop;
   stop.kind = CK::ClipRecordStop;
   stop.number_count = 0;
   ring(stop);  // tick@13 samples 8.0, then disarms
@@ -708,7 +708,7 @@ TEST(TimelineSession, ConcurrentArmsSurviveReplay) {
   // through frame 19). Playback step-holds 8 past src's last sample, so
   // the take captures 8s; the take outlives src's end, which pins
   // per-arm disarm (recording continues after playback ends).
-  omnicpp::core::ControlCommand add_dst;
+  warploom::core::ControlCommand add_dst;
   add_dst.kind = CK::ClipAdd;
   add_dst.text = "take";
   add_dst.numbers[0] = 18;
@@ -716,12 +716,12 @@ TEST(TimelineSession, ConcurrentArmsSurviveReplay) {
   add_dst.number_count = 2;
   ring(add_dst);  // tick@15
   // Arm both, one after the other: playback then record, every tick.
-  omnicpp::core::ControlCommand play;
+  warploom::core::ControlCommand play;
   play.kind = CK::ClipPlay;
   play.numbers[0] = 1;
   play.number_count = 1;
   ring(play);  // tick@16
-  omnicpp::core::ControlCommand rec_dst = rec;
+  warploom::core::ControlCommand rec_dst = rec;
   rec_dst.numbers[0] = 2;
   ring(rec_dst);  // tick@17: play applies 8.0, take not yet armed
   // Frames 18..25 give 8 samples, all step-held 8 (play dies at 20).
@@ -771,10 +771,10 @@ TEST(TimelineSession, ConcurrentArmsSurviveReplay) {
 // across a clip: 3 + 3 + 1 + 3 (sun_direction) = 10 tracks. Playback
 // reproduces the pose bit-identically and the take survives save/load
 // byte-identically (acceptance 2).
-omnicpp::core::ControlCommand set_camera_cmd(double ex, double ey, double ez,
+warploom::core::ControlCommand set_camera_cmd(double ex, double ey, double ez,
                                              double tx, double ty, double tz,
                                              double fov) {
-  omnicpp::core::ControlCommand c;
+  warploom::core::ControlCommand c;
   c.kind = CK::SetCamera;
   c.numbers[0] = ex;
   c.numbers[1] = ey;
@@ -793,7 +793,7 @@ TEST(TimelineSession, RecordAllCapturesCameraPoseAtomically) {
   static constexpr std::uint64_t kEnv = 1;  // seeded environment object
   ASSERT_NE(s.document().find(kEnv), nullptr);
 
-  omnicpp::core::ControlCommand add;
+  warploom::core::ControlCommand add;
   add.kind = CK::ClipAdd;
   add.text = "cam";
   add.numbers[0] = 10;
@@ -801,7 +801,7 @@ TEST(TimelineSession, RecordAllCapturesCameraPoseAtomically) {
   add.number_count = 2;
   tick(0);
   ok(s, add);
-  omnicpp::core::ControlCommand all;
+  warploom::core::ControlCommand all;
   all.kind = CK::ClipRecordAll;
   all.numbers[0] = 1;
   all.numbers[1] = static_cast<double>(kEnv);
@@ -852,7 +852,7 @@ TEST(TimelineSession, RecordAllCapturesCameraPoseAtomically) {
 
   // Playback reproduces the pose bit-identically, tick by tick.
   ok(s, set_camera_cmd(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0));
-  omnicpp::core::ControlCommand play;
+  warploom::core::ControlCommand play;
   play.kind = CK::ClipPlay;
   play.numbers[0] = 1;
   play.number_count = 1;
@@ -870,12 +870,12 @@ TEST(TimelineSession, RecordAllCapturesCameraPoseAtomically) {
 
   // Save/load round-trips byte-identically (document incl. all 10 tracks).
   const std::string bytes_before = s.document().to_json();
-  omnicpp::core::ControlCommand save;
+  warploom::core::ControlCommand save;
   save.kind = CK::SaveDocument;
   save.text = "/tmp/t5b_record_all.json";
   ASSERT_TRUE(s.on_control(save).ok) << s.on_control(save).error;
   ed::EditorSession fresh;
-  omnicpp::core::ControlCommand load;
+  warploom::core::ControlCommand load;
   load.kind = CK::LoadDocument;
   load.text = "/tmp/t5b_record_all.json";
   const auto load_reply = fresh.on_control(load);
@@ -888,7 +888,7 @@ TEST(TimelineSession, RecordAllCapturesCameraPoseAtomically) {
 // objects with no recordable property.
 TEST(TimelineSession, RecordAllRejectsBadPayloads) {
   ed::EditorSession s;
-  omnicpp::core::ControlCommand all;
+  warploom::core::ControlCommand all;
   all.kind = CK::ClipRecordAll;
   EXPECT_FALSE(s.on_control(all).ok);  // needs clip, oid
   all.numbers[0] = 99;
@@ -913,7 +913,7 @@ TEST(TimelineSession, RenderChannelsRecordAndPlayOntoRenderConfig) {
   EXPECT_DOUBLE_EQ(s.render_config().bloom, 0.0);
   EXPECT_DOUBLE_EQ(s.render_config().render_mode, 0.0);
 
-  omnicpp::core::ControlCommand add;
+  warploom::core::ControlCommand add;
   add.kind = CK::ClipAdd;
   add.text = "grade";
   add.numbers[0] = 10;
@@ -922,7 +922,7 @@ TEST(TimelineSession, RenderChannelsRecordAndPlayOntoRenderConfig) {
   tick(0);
   ok(s, add);
   // oid 0 + bare channel: creates the reserved object.
-  omnicpp::core::ControlCommand rec;
+  warploom::core::ControlCommand rec;
   rec.kind = CK::ClipRecord;
   rec.numbers[0] = 1;
   rec.numbers[1] = 0.0;
@@ -931,7 +931,7 @@ TEST(TimelineSession, RenderChannelsRecordAndPlayOntoRenderConfig) {
   tick(1);
   const auto rec_reply = s.on_control(rec);
   ASSERT_TRUE(rec_reply.ok) << rec_reply.error;
-  omnicpp::core::ControlCommand rec_bloom;
+  warploom::core::ControlCommand rec_bloom;
   rec_bloom.kind = CK::ClipRecord;
   rec_bloom.numbers[0] = 1;
   rec_bloom.numbers[1] = 0.0;  // resolves to the SAME reserved object
@@ -942,7 +942,7 @@ TEST(TimelineSession, RenderChannelsRecordAndPlayOntoRenderConfig) {
   EXPECT_EQ(s.record_arm_count(), 2U);
   // clip_record_all with oid 0 arms every render channel (dupes rejected
   // atomically here because exposure+bloom are already armed).
-  omnicpp::core::ControlCommand all;
+  warploom::core::ControlCommand all;
   all.kind = CK::ClipRecordAll;
   all.numbers[0] = 1;
   all.numbers[1] = 0.0;
@@ -952,7 +952,7 @@ TEST(TimelineSession, RenderChannelsRecordAndPlayOntoRenderConfig) {
   // Drive exposure 1..4 and bloom 0,1,0,1 across the span.
   for (std::uint64_t f = 10; f < 14; ++f) {
     ok(s, [&] {
-      omnicpp::core::ControlCommand c;
+      warploom::core::ControlCommand c;
       c.kind = CK::SetProperty;
       c.text = "render_settings";
       c.text2 = "exposure";
@@ -961,7 +961,7 @@ TEST(TimelineSession, RenderChannelsRecordAndPlayOntoRenderConfig) {
       return c;
     }());
     ok(s, [&] {
-      omnicpp::core::ControlCommand c;
+      warploom::core::ControlCommand c;
       c.kind = CK::SetProperty;
       c.text = "render_settings";
       c.text2 = "bloom";
@@ -978,7 +978,7 @@ TEST(TimelineSession, RenderChannelsRecordAndPlayOntoRenderConfig) {
   ASSERT_EQ(grade->tracks.size(), 2U);
 
   // Playback lands on render_config tick by tick.
-  omnicpp::core::ControlCommand play;
+  warploom::core::ControlCommand play;
   play.kind = CK::ClipPlay;
   play.numbers[0] = 1;
   play.number_count = 1;
@@ -1010,7 +1010,7 @@ TEST(TimelineSession, RenderChannelsRecordAndPlayOntoRenderConfig) {
 TEST(TimelineSession, RenderSettingsGuardsAndDefaults) {
   ed::EditorSession s;
   auto tick = [&](std::uint64_t frame) { (void)s.tick({frame, 1.0 / 60.0, 0.0, false}); };
-  omnicpp::core::ControlCommand add;
+  warploom::core::ControlCommand add;
   add.kind = CK::ClipAdd;
   add.text = "mode";
   add.numbers[0] = 0;
@@ -1018,7 +1018,7 @@ TEST(TimelineSession, RenderSettingsGuardsAndDefaults) {
   add.number_count = 2;
   tick(0);
   ok(s, add);
-  omnicpp::core::ControlCommand rec;
+  warploom::core::ControlCommand rec;
   rec.kind = CK::ClipRecord;
   rec.numbers[0] = 1;
   rec.numbers[1] = 0.0;
@@ -1035,7 +1035,7 @@ TEST(TimelineSession, RenderSettingsGuardsAndDefaults) {
   }
   ASSERT_NE(rs_id, 0U);
   ASSERT_EQ(s.document().find_clip(1)->tracks.size(), 1U);
-  omnicpp::core::ControlCommand destroy;
+  warploom::core::ControlCommand destroy;
   destroy.kind = CK::DestroyObject;
   destroy.numbers[0] = static_cast<double>(rs_id);
   destroy.number_count = 1;
@@ -1047,7 +1047,7 @@ TEST(TimelineSession, RenderSettingsGuardsAndDefaults) {
   // projection never turns it into an entity (it would otherwise be a
   // document object with no transform, indistinguishable from a broken
   // cube in the report).
-  omnicpp::core::ControlCommand select;
+  warploom::core::ControlCommand select;
   select.kind = CK::Select;
   select.numbers[0] = static_cast<double>(rs_id);
   select.number_count = 1;
@@ -1060,14 +1060,14 @@ TEST(TimelineSession, RenderSettingsGuardsAndDefaults) {
 
   // Unknown oid + bare channel still rejects (0 is only special for a
   // render channel name; and a non-channel with oid 0 rejects too).
-  omnicpp::core::ControlCommand bad;
+  warploom::core::ControlCommand bad;
   bad.kind = CK::ClipRecord;
   bad.numbers[0] = 1;
   bad.numbers[1] = 999.0;
   bad.text = "exposure";
   bad.number_count = 2;
   EXPECT_FALSE(s.on_control(bad).ok);
-  omnicpp::core::ControlCommand bad_key = bad;
+  warploom::core::ControlCommand bad_key = bad;
   bad_key.numbers[1] = 0.0;
   bad_key.text = "position.x";  // oid 0 + non-channel: no object 0
   EXPECT_FALSE(s.on_control(bad_key).ok);
@@ -1085,13 +1085,13 @@ TEST(TimelineSession, ConcurrentRecordArmsAreIndependent) {
   auto tick = [&](std::uint64_t frame) { (void)s.tick({frame, 1.0 / 60.0, 0.0, false}); };
   tick(0);
   ok(s, [] {
-    omnicpp::core::ControlCommand c;
+    warploom::core::ControlCommand c;
     c.kind = CK::SpawnCube;
     c.number_count = 0;
     return c;
   }());
   ok(s, [] {
-    omnicpp::core::ControlCommand c;
+    warploom::core::ControlCommand c;
     c.kind = CK::SpawnCube;
     c.number_count = 0;
     return c;
@@ -1101,7 +1101,7 @@ TEST(TimelineSession, ConcurrentRecordArmsAreIndependent) {
   const auto id_a = s.document().objects[1].id;
   const auto id_b = s.document().objects[2].id;
   auto set_named = [&](const std::string& name, double x, double y, double z) {
-    omnicpp::core::ControlCommand c;
+    warploom::core::ControlCommand c;
     c.kind = CK::SetProperty;
     c.text = name;
     c.text2 = "position";
@@ -1113,7 +1113,7 @@ TEST(TimelineSession, ConcurrentRecordArmsAreIndependent) {
   };
 
   for (std::uint64_t cid : {1U, 2U}) {
-    omnicpp::core::ControlCommand add;
+    warploom::core::ControlCommand add;
     add.kind = CK::ClipAdd;
     add.text = cid == 1U ? "a" : "b";
     add.numbers[0] = 10;
@@ -1123,7 +1123,7 @@ TEST(TimelineSession, ConcurrentRecordArmsAreIndependent) {
     ok(s, add);
   }
   // Arm A.x on clip 1, B.y on clip 2.
-  omnicpp::core::ControlCommand rec_a;
+  warploom::core::ControlCommand rec_a;
   rec_a.kind = CK::ClipRecord;
   rec_a.numbers[0] = 1;
   rec_a.numbers[1] = static_cast<double>(id_a);
@@ -1131,7 +1131,7 @@ TEST(TimelineSession, ConcurrentRecordArmsAreIndependent) {
   rec_a.number_count = 2;
   tick(3);
   ok(s, rec_a);
-  omnicpp::core::ControlCommand rec_b;
+  warploom::core::ControlCommand rec_b;
   rec_b.kind = CK::ClipRecord;
   rec_b.numbers[0] = 2;
   rec_b.numbers[1] = static_cast<double>(id_b);
@@ -1163,14 +1163,14 @@ TEST(TimelineSession, ConcurrentRecordArmsAreIndependent) {
   EXPECT_DOUBLE_EQ(clip_b->tracks.begin()->second.samples[0].value.number, 4.0);
   EXPECT_DOUBLE_EQ(clip_b->tracks.begin()->second.samples[1].value.number, 5.0);
   // clips_info reports the arm set sorted by (object, property).
-  omnicpp::core::ControlCommand info;
+  warploom::core::ControlCommand info;
   info.kind = CK::ClipsInfo;
   const std::string detail = s.on_control(info).detail;
   const std::string want_armed = "\"armed\":[\"" +
                                   std::to_string(id_a) + ":position.x\"]";
   EXPECT_NE(detail.find(want_armed), std::string::npos) << detail;
   // Disarm-by-clip removes only the matching arms.
-  omnicpp::core::ControlCommand rm;
+  warploom::core::ControlCommand rm;
   rm.kind = CK::ClipRemove;
   rm.numbers[0] = 1;
   rm.number_count = 1;
@@ -1196,24 +1196,24 @@ TEST(TimelineSession, ConcurrentRecordArmsAreIndependent) {
 TEST(TimelineSession, ProtocolValidationAndInfo) {
   ed::EditorSession s;
   // clip_add without name.
-  omnicpp::core::ControlCommand add;
+  warploom::core::ControlCommand add;
   add.kind = CK::ClipAdd;
   EXPECT_FALSE(s.on_control(add).ok);
   // clip_remove unknown id.
-  omnicpp::core::ControlCommand rm;
+  warploom::core::ControlCommand rm;
   rm.kind = CK::ClipRemove;
   rm.numbers[0] = 99;
   rm.number_count = 1;
   EXPECT_FALSE(s.on_control(rm).ok);
   // clip_record without payload.
-  omnicpp::core::ControlCommand rec;
+  warploom::core::ControlCommand rec;
   rec.kind = CK::ClipRecord;
   EXPECT_FALSE(s.on_control(rec).ok);
   // Valid add; play of an EMPTY clip is rejected.
   add.text = "empty";
   add.number_count = 0;
   ASSERT_TRUE(s.on_control(add).ok);
-  omnicpp::core::ControlCommand play;
+  warploom::core::ControlCommand play;
   play.kind = CK::ClipPlay;
   play.numbers[0] = 1;
   play.number_count = 1;
@@ -1221,7 +1221,7 @@ TEST(TimelineSession, ProtocolValidationAndInfo) {
   EXPECT_FALSE(play_reply.ok);
   EXPECT_NE(play_reply.error.find("no tracks"), std::string::npos);
   // clips_info reports the clip.
-  omnicpp::core::ControlCommand info;
+  warploom::core::ControlCommand info;
   info.kind = CK::ClipsInfo;
   const auto detail = s.on_control(info).detail;
   EXPECT_NE(detail.find("\"name\":\"empty\""), std::string::npos);
@@ -1238,7 +1238,7 @@ TEST(TimelineSession, ProtocolValidationAndInfo) {
       << detail;
   EXPECT_EQ(detail.find("\"tracks\":{,"), std::string::npos) << detail;
   // Warp path: scrub_start + scrub_to disarm anything armed (nothing is).
-  omnicpp::core::ControlCommand scrub;
+  warploom::core::ControlCommand scrub;
   scrub.kind = CK::ScrubStart;
   scrub.number_count = 0;
   ASSERT_TRUE(s.on_control(scrub).ok);
@@ -1253,14 +1253,14 @@ TEST(TimelineSession, ProtocolValidationAndInfo) {
 TEST(TimelineSession, ClipEditsAreRecordedAndReplay) {
   ed::EditorSession s;
   ok(s, [] {
-    omnicpp::core::ControlCommand c;
+    warploom::core::ControlCommand c;
     c.kind = CK::SpawnCube;
     c.number_count = 0;
     return c;
   }());
   std::string capture_error;
   ASSERT_TRUE(s.capture_start(0, "g3", capture_error)) << capture_error;
-  omnicpp::core::ControlCommand add;
+  warploom::core::ControlCommand add;
   add.kind = CK::ClipAdd;
   add.text = "c";
   add.numbers[0] = 2;
@@ -1268,7 +1268,7 @@ TEST(TimelineSession, ClipEditsAreRecordedAndReplay) {
   add.number_count = 2;
   ok(s, add);
   ok(s, step_cmd(4));
-  omnicpp::core::ControlCommand move;
+  warploom::core::ControlCommand move;
   move.kind = CK::ClipMove;
   move.numbers[0] = 1;
   move.numbers[1] = 7;
@@ -1299,7 +1299,7 @@ TEST(TimelineSession, LoadDocumentDuringCaptureIsRejected) {
   // load from the record — a file that diverges on replay. Now loud.
   ed::EditorSession s;
   ok(s, [] {
-    omnicpp::core::ControlCommand c;
+    warploom::core::ControlCommand c;
     c.kind = CK::SpawnCube;
     c.number_count = 0;
     return c;
@@ -1307,7 +1307,7 @@ TEST(TimelineSession, LoadDocumentDuringCaptureIsRejected) {
   const std::string before = s.document().to_json();
   std::string capture_error;
   ASSERT_TRUE(s.capture_start(0, "g3", capture_error)) << capture_error;
-  omnicpp::core::ControlCommand load;
+  warploom::core::ControlCommand load;
   load.kind = CK::LoadDocument;
   load.text = "/nonexistent-doc.warploom";
   const auto reply = s.on_control(load);
@@ -1326,7 +1326,7 @@ TEST(TimelineSession, LoadReplayDuringCaptureIsRejected) {
   ed::EditorSession s;
   std::string capture_error;
   ASSERT_TRUE(s.capture_start(0, "g3", capture_error)) << capture_error;
-  omnicpp::core::ControlCommand load;
+  warploom::core::ControlCommand load;
   load.kind = CK::LoadReplay;
   load.text = "/nonexistent.replay";
   const auto reply = s.on_control(load);
@@ -1344,12 +1344,12 @@ TEST(TimelineSession, ScrubToDuringCaptureCarriesTargetBytes) {
   // scrub_to finds no checkpoint — a capture that cannot replay itself.
   ed::EditorSession s;
   ok(s, [] {
-    omnicpp::core::ControlCommand c;
+    warploom::core::ControlCommand c;
     c.kind = CK::SpawnCube;
     c.number_count = 0;
     return c;
   }());
-  omnicpp::core::ControlCommand scrub_start;
+  warploom::core::ControlCommand scrub_start;
   scrub_start.kind = CK::ScrubStart;
   scrub_start.numbers[0] = 5;
   scrub_start.number_count = 1;
@@ -1363,7 +1363,7 @@ TEST(TimelineSession, ScrubToDuringCaptureCarriesTargetBytes) {
   ASSERT_TRUE(s.capture_start(0, "g3", capture_error)) << capture_error;
   // Warp back to the pre-capture checkpoint: live restore must succeed
   // AND the bytes must be embedded for the file.
-  omnicpp::core::ControlCommand scrub_to;
+  warploom::core::ControlCommand scrub_to;
   scrub_to.kind = CK::ScrubTo;
   scrub_to.numbers[0] = 5;
   scrub_to.number_count = 1;
@@ -1387,7 +1387,7 @@ TEST(TimelineSession, LoadReplayVerifiesEndStateAgainstClosingCheckpoint) {
   // ticks. Without the check the load succeeds on divergent bytes.
   ed::EditorSession s;
   ok(s, [] {
-    omnicpp::core::ControlCommand c;
+    warploom::core::ControlCommand c;
     c.kind = CK::SpawnCube;
     c.number_count = 0;
     return c;
@@ -1396,14 +1396,14 @@ TEST(TimelineSession, LoadReplayVerifiesEndStateAgainstClosingCheckpoint) {
   ok(s, set_position(s, 7.0, 0.0, 0.0));
   std::string capture_error;
   ASSERT_TRUE(s.capture_start(0, "g3", capture_error)) << capture_error;
-  omnicpp::core::ControlCommand add;
+  warploom::core::ControlCommand add;
   add.kind = CK::ClipAdd;
   add.text = "intro";
   add.numbers[0] = 0;
   add.numbers[1] = 8;
   add.number_count = 2;
   ok(s, add);
-  omnicpp::core::ControlCommand rec;
+  warploom::core::ControlCommand rec;
   rec.kind = CK::ClipRecord;
   rec.numbers[0] = 1;
   rec.numbers[1] = static_cast<double>(cube_id);

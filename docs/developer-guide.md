@@ -1,4 +1,4 @@
-# OmniCpp Game Engine - Developer Guide
+# Warploom Game Engine - Developer Guide
 
 ## Table of Contents
 - [Introduction](#introduction)
@@ -14,7 +14,7 @@
 
 ## Introduction
 
-This guide is for developers who want to contribute to the OmniCpp Game Engine or extend it for their own projects.
+This guide is for developers who want to contribute to the Warploom Game Engine or extend it for their own projects.
 
 ### Development Philosophy
 
@@ -133,25 +133,25 @@ pip install -r requirements-docs.txt
 ### Debug Build
 
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug
+python WarploomController.py build standalone "Build Project" default debug
 ```
 
 ### Release Build
 
 ```bash
-python OmniCppController.py build standalone "Build Project" default release
+python WarploomController.py build standalone "Build Project" default release
 ```
 
 ### Building Specific Components
 
 Build only the engine library:
 ```bash
-python OmniCppController.py build targets/qt-vulkan/library "Build Project" default debug
+python WarploomController.py build targets/qt-vulkan/library "Build Project" default debug
 ```
 
 Build only tests:
 ```bash
-python OmniCppController.py build tests "Build Tests" default debug
+python WarploomController.py build tests "Build Tests" default debug
 ```
 
 ## Code Structure
@@ -162,12 +162,12 @@ python OmniCppController.py build tests "Build Tests" default debug
 OmniCPP-template/
 ├── include/           # Public headers
 │   ├── engine/       # Engine interfaces
-│   └── OmniCppLib/  # Library headers
+│   └── WarploomLib/  # Library headers
 ├── src/              # Implementation
 │   ├── engine/       # Engine implementation
 │   └── game/        # Game implementation
 ├── tests/            # Test suite
-├── omni_scripts/     # Build system
+├── warploom_scripts/     # Build system
 ├── cmake/            # CMake modules
 ├── docs/             # Documentation
 ├── examples/          # Example code
@@ -297,11 +297,11 @@ public:
 2. Add to CMake build:
 
 ```cmake
-if(OMNICPP_USE_OPENGL)
-    target_sources(omnicpp_engine PRIVATE
+if(WARPLOOM_USE_OPENGL)
+    target_sources(warploom_engine PRIVATE
         src/engine/OpenGLRenderer.cpp
     )
-    target_link_libraries(omnicpp_engine PRIVATE
+    target_link_libraries(warploom_engine PRIVATE
         OpenGL::GL
     )
 endif()
@@ -418,7 +418,7 @@ python tests/run_all_tests.py --coverage
 Always use debug builds during development:
 
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug
+python WarploomController.py build standalone "Build Project" default debug
 ```
 
 ### Logging
@@ -464,7 +464,7 @@ Use RenderDoc for graphics debugging:
 Configure Visual Studio for debugging:
 
 1. Open `OmniCPP-template.sln`
-2. Set startup project to `omnicpp_tests`
+2. Set startup project to `warploom_tests`
 3. Set breakpoints
 4. Press F5 to start debugging
 
@@ -473,7 +473,7 @@ Configure Visual Studio for debugging:
 Use GDB for debugging on Linux:
 
 ```bash
-gdb ./build/debug/omnicpp
+gdb ./build/debug/warploom
 (gdb) break main
 (gdb) run
 (gdb) step
@@ -667,7 +667,7 @@ Follow semantic versioning: `MAJOR.MINOR.PATCH`
 
 Before releasing:
 
-1. [ ] Update version in `include/OmniCppLib/version.h`
+1. [ ] Update version in `include/WarploomLib/version.h`
 2. [ ] Update CHANGELOG.md
 3. [ ] Run full test suite
 4. [ ] Test on all platforms
@@ -681,12 +681,12 @@ Before releasing:
 
 ```bash
 # Update version
-echo "#define OMNICPP_VERSION_MAJOR 1" > include/OmniCppLib/version.h
-echo "#define OMNICPP_VERSION_MINOR 1" >> include/OmniCppLib/version.h
-echo "#define OMNICPP_VERSION_PATCH 0" >> include/OmniCppLib/version.h
+echo "#define WARPLOOM_VERSION_MAJOR 1" > include/WarploomLib/version.h
+echo "#define WARPLOOM_VERSION_MINOR 1" >> include/WarploomLib/version.h
+echo "#define WARPLOOM_VERSION_PATCH 0" >> include/WarploomLib/version.h
 
 # Commit changes
-git add include/OmniCppLib/version.h
+git add include/WarploomLib/version.h
 git commit -m "chore: bump version to 1.1.0"
 
 # Create tag
@@ -694,8 +694,8 @@ git tag -a v1.1.0 -m "Release 1.1.0"
 git push origin v1.1.0
 
 # Build release
-python OmniCppController.py build standalone "Build Project" default release
-python OmniCppController.py build standalone "Create Distribution Tarballs" default release
+python WarploomController.py build standalone "Build Project" default release
+python WarploomController.py build standalone "Create Distribution Tarballs" default release
 ```
 
 ## Additional Resources

@@ -1,5 +1,5 @@
 ---
-# C++23 Formatting Configuration for OmniCpp Template
+# C++23 Formatting Configuration for Warploom Template
 # Based on GNU style with C++23 best practices
 BasedOnStyle: GNU
 AccessModifierOffset: -2

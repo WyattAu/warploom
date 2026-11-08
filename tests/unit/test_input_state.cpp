@@ -15,7 +15,7 @@ namespace {
 
 //! Writes a JSONL script to a temp file and returns its path.
 std::string write_script(const std::string& content) {
-  const std::string path = "/tmp/omnicpp_input_script_test.jsonl";
+  const std::string path = "/tmp/warploom_input_script_test.jsonl";
   std::ofstream out(path, std::ios::binary | std::ios::trunc);
   out << content;
   return path;
@@ -24,7 +24,7 @@ std::string write_script(const std::string& content) {
 }  // namespace
 
 TEST(InputState, EdgeDetectionAcrossTicks) {
-  omnicpp::core::InputState input;
+  warploom::core::InputState input;
 
   // Tick 1: press.
   input.begin_tick();
@@ -59,7 +59,7 @@ TEST(InputState, EdgeDetectionAcrossTicks) {
 }
 
 TEST(InputState, AxisAccumulationAndClamping) {
-  omnicpp::core::InputState input;
+  warploom::core::InputState input;
   input.begin_tick();
   // Two devices contribute to the same axis; a third pushes past 1.
   input.set_axis("move_x", 0.6f);
@@ -85,12 +85,12 @@ TEST(VirtualInputDriver, ReplaysScriptWithHeldState) {
       "{\"tick\": 4, \"action\": \"jump\", \"value\": 0.0}\n"
       "{\"tick\": 2, \"axis\": \"move_x\", \"value\": 0.5}\n");
 
-  omnicpp::core::VirtualInputDriver driver;
+  warploom::core::VirtualInputDriver driver;
   std::string error;
   ASSERT_TRUE(driver.load_script(path, error)) << error;
   ASSERT_EQ(driver.event_count(), 3U);
 
-  omnicpp::core::InputState input;
+  warploom::core::InputState input;
   // Tick 0 (index 0): nothing yet.
   input.begin_tick();
   driver.poll(input);
@@ -136,7 +136,7 @@ TEST(VirtualInputDriver, RejectsMalformedScripts) {
   // Missing value.
   {
     const std::string path = write_script("{\"tick\": 1, \"action\": \"x\"}\n");
-    omnicpp::core::VirtualInputDriver driver;
+    warploom::core::VirtualInputDriver driver;
     std::string error;
     EXPECT_FALSE(driver.load_script(path, error));
     EXPECT_NE(error.find("value"), std::string::npos) << error;
@@ -145,7 +145,7 @@ TEST(VirtualInputDriver, RejectsMalformedScripts) {
   {
     const std::string path = write_script(
         "{\"tick\": 1, \"action\": \"a\", \"axis\": \"b\", \"value\": 1}\n");
-    omnicpp::core::VirtualInputDriver driver;
+    warploom::core::VirtualInputDriver driver;
     std::string error;
     EXPECT_FALSE(driver.load_script(path, error));
     EXPECT_NE(error.find("exactly one"), std::string::npos) << error;
@@ -154,14 +154,14 @@ TEST(VirtualInputDriver, RejectsMalformedScripts) {
   {
     const std::string path = write_script(
         "{\"tick\": -3, \"action\": \"a\", \"value\": 1}\n");
-    omnicpp::core::VirtualInputDriver driver;
+    warploom::core::VirtualInputDriver driver;
     std::string error;
     EXPECT_FALSE(driver.load_script(path, error));
     EXPECT_NE(error.find("non-negative"), std::string::npos) << error;
   }
   // Unopenable file.
   {
-    omnicpp::core::VirtualInputDriver driver;
+    warploom::core::VirtualInputDriver driver;
     std::string error;
     EXPECT_FALSE(driver.load_script("/nonexistent/script.jsonl", error));
     EXPECT_NE(error.find("cannot open"), std::string::npos) << error;

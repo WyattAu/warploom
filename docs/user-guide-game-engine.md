@@ -1,4 +1,4 @@
-# OmniCpp Game Engine - User Guide
+# Warploom Game Engine - User Guide
 
 ## Table of Contents
 - [Introduction](#introduction)
@@ -16,7 +16,7 @@
 
 ## Introduction
 
-The OmniCpp Game Engine is a modern, high-performance C++ game engine built with Vulkan and Qt. It provides a comprehensive set of tools and systems for creating 2D and 3D games.
+The Warploom Game Engine is a modern, high-performance C++ game engine built with Vulkan and Qt. It provides a comprehensive set of tools and systems for creating 2D and 3D games.
 
 ### Key Features
 
@@ -47,12 +47,12 @@ cd OmniCPP-template
 
 2. Build the engine library:
 ```bash
-python OmniCppController.py build targets/qt-vulkan/library "Build Project" default release
+python WarploomController.py build targets/qt-vulkan/library "Build Project" default release
 ```
 
 3. Build the game executable:
 ```bash
-python OmniCppController.py build standalone "Build Project" default release
+python WarploomController.py build standalone "Build Project" default release
 ```
 
 ### Your First Game
@@ -65,14 +65,14 @@ Create a simple game in 5 steps:
 
 int main() {
     // 1. Create engine
-    omnicpp::EngineConfig config;
+    warploom::EngineConfig config;
     config.renderer = nullptr;  // Use default renderer
     config.logger = nullptr;    // Use default logger
     
-    omnicpp::IEngine* engine = omnicpp::create_engine(config);
+    warploom::IEngine* engine = warploom::create_engine(config);
     
     // 2. Create game
-    omnicpp::Game game;
+    warploom::Game game;
     game.initialize();
     
     // 3. Run game loop
@@ -80,7 +80,7 @@ int main() {
     
     // 4. Cleanup
     game.shutdown();
-    omnicpp::destroy_engine(engine);
+    warploom::destroy_engine(engine);
     
     return 0;
 }
@@ -131,14 +131,14 @@ The engine uses an ECS architecture for game logic:
 #include "engine/Component.hpp"
 
 // Create entity
-omnicpp::Entity entity = scene.create_entity();
+warploom::Entity entity = scene.create_entity();
 
 // Add components
-omnicpp::TransformComponent transform;
+warploom::TransformComponent transform;
 transform.position = {0.0f, 0.0f, 0.0f};
 entity.add_component(transform);
 
-omnicpp::MeshComponent mesh;
+warploom::MeshComponent mesh;
 mesh.model = resource_manager.load_model("cube.obj");
 entity.add_component(mesh);
 ```
@@ -152,14 +152,14 @@ The scene graph organizes entities in a hierarchical structure:
 #include "engine/SceneNode.hpp"
 
 // Create scene
-omnicpp::Scene scene;
+warploom::Scene scene;
 
 // Create root node
-omnicpp::SceneNode* root = scene.get_root();
+warploom::SceneNode* root = scene.get_root();
 
 // Add child nodes
-omnicpp::SceneNode* child1 = root->create_child();
-omnicpp::SceneNode* child2 = root->create_child();
+warploom::SceneNode* child1 = root->create_child();
+warploom::SceneNode* child2 = root->create_child();
 
 // Attach entities to nodes
 child1->attach_entity(entity1);
@@ -173,7 +173,7 @@ child2->attach_entity(entity2);
 ```cpp
 #include "game/Game.hpp"
 
-class MyGame : public omnicpp::Game {
+class MyGame : public warploom::Game {
 public:
     bool initialize() override {
         // Initialize game systems
@@ -200,8 +200,8 @@ public:
     }
 
 private:
-    omnicpp::Scene scene;
-    omnicpp::IRenderer* renderer;
+    warploom::Scene scene;
+    warploom::IRenderer* renderer;
     // ... other members
 };
 ```
@@ -242,7 +242,7 @@ void Game::run() {
 #include "engine/VulkanRenderer.hpp"
 
 // Create Vulkan renderer
-omnicpp::VulkanRenderer renderer;
+warploom::VulkanRenderer renderer;
 renderer.initialize(window, vulkan_instance);
 
 // Set clear color
@@ -278,7 +278,7 @@ void Game::render() {
 
 ```cpp
 // Load shader
-omnicpp::Shader* shader = resource_manager.load_shader(
+warploom::Shader* shader = resource_manager.load_shader(
     "vertex.glsl",
     "fragment.glsl"
 );
@@ -300,13 +300,13 @@ shader.set_uniform("projection", projection_matrix);
 #include "engine/IInputManager.hpp"
 
 void Game::update(float delta_time) {
-    omnicpp::IInputManager* input = engine->get_input_manager();
+    warploom::IInputManager* input = engine->get_input_manager();
     
     // Check key state
-    if (input->is_key_pressed(omnicpp::Key::W)) {
+    if (input->is_key_pressed(warploom::Key::W)) {
         camera.move_forward(delta_time);
     }
-    if (input->is_key_pressed(omnicpp::Key::S)) {
+    if (input->is_key_pressed(warploom::Key::S)) {
         camera.move_backward(delta_time);
     }
 }
@@ -316,7 +316,7 @@ void Game::update(float delta_time) {
 
 ```cpp
 void Game::update(float delta_time) {
-    omnicpp::IInputManager* input = engine->get_input_manager();
+    warploom::IInputManager* input = engine->get_input_manager();
     
     // Get mouse position
     float x, y;
@@ -335,8 +335,8 @@ void Game::update(float delta_time) {
 
 ```cpp
 // Register key callback
-input->register_key_callback([](omnicpp::Key key, bool pressed) {
-    if (key == omnicpp::Key::Escape && pressed) {
+input->register_key_callback([](warploom::Key key, bool pressed) {
+    if (key == warploom::Key::Escape && pressed) {
         game->quit();
     }
 });
@@ -355,10 +355,10 @@ input->register_mouse_callback([](float x, float y) {
 #include "engine/IAudioManager.hpp"
 
 // Load sound
-omnicpp::Sound* sound = resource_manager.load_sound("explosion.wav");
+warploom::Sound* sound = resource_manager.load_sound("explosion.wav");
 
 // Play sound
-omnicpp::IAudioManager* audio = engine->get_audio_manager();
+warploom::IAudioManager* audio = engine->get_audio_manager();
 audio->play_sound(sound, 1.0f, 1.0f);  // volume, pitch
 ```
 
@@ -366,7 +366,7 @@ audio->play_sound(sound, 1.0f, 1.0f);  // volume, pitch
 
 ```cpp
 // Load music
-omnicpp::Music* music = resource_manager.load_music("background.mp3");
+warploom::Music* music = resource_manager.load_music("background.mp3");
 
 // Play music
 audio->play_music(music, true);  // loop
@@ -379,7 +379,7 @@ audio->set_music_volume(0.5f);
 
 ```cpp
 // Play 3D sound
-omnicpp::Vector3 position = {10.0f, 0.0f, 5.0f};
+warploom::Vector3 position = {10.0f, 0.0f, 5.0f};
 audio->play_sound_3d(sound, position, 1.0f);
 ```
 
@@ -391,7 +391,7 @@ audio->play_sound_3d(sound, position, 1.0f);
 #include "engine/IPhysicsEngine.hpp"
 
 // Create physics engine
-omnicpp::IPhysicsEngine* physics = engine->get_physics_engine();
+warploom::IPhysicsEngine* physics = engine->get_physics_engine();
 physics->initialize();
 
 // Set gravity
@@ -402,9 +402,9 @@ physics->set_gravity({0.0f, -9.81f, 0.0f});
 
 ```cpp
 // Create rigid body
-omnicpp::RigidBody body;
+warploom::RigidBody body;
 body.mass = 1.0f;
-body.shape = omnicpp::Shape::Box;
+body.shape = warploom::Shape::Box;
 body.size = {1.0f, 1.0f, 1.0f};
 body.position = {0.0f, 10.0f, 0.0f};
 
@@ -422,7 +422,7 @@ if (physics->check_collision(body1, body2)) {
 }
 
 // Get collision events
-physics->set_collision_callback([](const omnicpp::Collision& collision) {
+physics->set_collision_callback([](const warploom::Collision& collision) {
     std::cout << "Collision detected!" << std::endl;
 });
 ```
@@ -435,11 +435,11 @@ physics->set_collision_callback([](const omnicpp::Collision& collision) {
 #include "engine/IResourceManager.hpp"
 
 // Load 3D model
-omnicpp::Model* model = resource_manager.load_model("character.fbx");
+warploom::Model* model = resource_manager.load_model("character.fbx");
 
 // Create entity with model
-omnicpp::Entity entity = scene.create_entity();
-omnicpp::MeshComponent mesh;
+warploom::Entity entity = scene.create_entity();
+warploom::MeshComponent mesh;
 mesh.model = model;
 entity.add_component(mesh);
 ```
@@ -448,10 +448,10 @@ entity.add_component(mesh);
 
 ```cpp
 // Load texture
-omnicpp::Texture* texture = resource_manager.load_texture("diffuse.png");
+warploom::Texture* texture = resource_manager.load_texture("diffuse.png");
 
 // Apply to material
-omnicpp::Material material;
+warploom::Material material;
 material.diffuse_texture = texture;
 material.shininess = 32.0f;
 ```
@@ -462,10 +462,10 @@ Resources are automatically cached for performance:
 
 ```cpp
 // First call loads from disk
-omnicpp::Model* model1 = resource_manager.load_model("cube.obj");
+warploom::Model* model1 = resource_manager.load_model("cube.obj");
 
 // Second call returns cached version
-omnicpp::Model* model2 = resource_manager.load_model("cube.obj");
+warploom::Model* model2 = resource_manager.load_model("cube.obj");
 
 // model1 == model2 (same pointer)
 ```
@@ -493,7 +493,7 @@ end
 
 ```cpp
 // Load script
-omnicpp::Script* script = resource_manager.load_script("script.lua");
+warploom::Script* script = resource_manager.load_script("script.lua");
 
 // Attach to entity
 entity.add_script(script);
@@ -514,17 +514,17 @@ entity:set_position(position.x + 1, position.y, position.z)
 ```cpp
 #include "game/Game.hpp"
 
-class RotatingCubeGame : public omnicpp::Game {
+class RotatingCubeGame : public warploom::Game {
 public:
     bool initialize() override {
         // Create cube entity
         cube = scene.create_entity();
         
-        omnicpp::MeshComponent mesh;
+        warploom::MeshComponent mesh;
         mesh.model = resource_manager.load_model("cube.obj");
         cube.add_component(mesh);
         
-        omnicpp::TransformComponent transform;
+        warploom::TransformComponent transform;
         transform.position = {0.0f, 0.0f, -5.0f};
         cube.add_component(transform);
         
@@ -533,12 +533,12 @@ public:
     
     void update(float delta_time) override {
         // Rotate cube
-        auto& transform = cube.get_component<omnicpp::TransformComponent>();
+        auto& transform = cube.get_component<warploom::TransformComponent>();
         transform.rotation.y += delta_time * 2.0f;
     }
 
 private:
-    omnicpp::Entity cube;
+    warploom::Entity cube;
 };
 ```
 
@@ -547,7 +547,7 @@ private:
 ```cpp
 class FirstPersonCamera {
 public:
-    void update(float delta_time, omnicpp::IInputManager* input) {
+    void update(float delta_time, warploom::IInputManager* input) {
         // Mouse look
         float dx, dy;
         input->get_mouse_delta(dx, dy);
@@ -556,18 +556,18 @@ public:
         
         // Movement
         float speed = 5.0f;
-        if (input->is_key_pressed(omnicpp::Key::W))
+        if (input->is_key_pressed(warploom::Key::W))
             position += forward * speed * delta_time;
-        if (input->is_key_pressed(omnicpp::Key::S))
+        if (input->is_key_pressed(warploom::Key::S))
             position -= forward * speed * delta_time;
-        if (input->is_key_pressed(omnicpp::Key::A))
+        if (input->is_key_pressed(warploom::Key::A))
             position -= right * speed * delta_time;
-        if (input->is_key_pressed(omnicpp::Key::D))
+        if (input->is_key_pressed(warploom::Key::D))
             position += right * speed * delta_time;
     }
 
 private:
-    omnicpp::Vector3 position;
+    warploom::Vector3 position;
     float yaw = 0.0f;
     float pitch = 0.0f;
     float sensitivity = 0.1f;

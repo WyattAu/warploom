@@ -93,8 +93,8 @@ ls -la /usr/lib/cachyos-release
 2. **Manual distribution specification:**
    ```bash
    # Set distribution manually for build system
-   export OMNICPP_LINUX_DISTRO="cachyos"
-   export OMNICPP_LINUX_FAMILY="arch"
+   export WARPLOOM_LINUX_DISTRO="cachyos"
+   export WARPLOOM_LINUX_FAMILY="arch"
    ```
 
 3. **Run validation script:**
@@ -196,7 +196,7 @@ type -a gcc
 
 ```bash
 # Check library dependencies of executable
-ldd ./build/debug/default/bin/OmniCppStandalone
+ldd ./build/debug/default/bin/WarploomStandalone
 
 # Check if library is installed
 ldconfig -p | grep library_name
@@ -1116,8 +1116,8 @@ ls -la /usr/lib/cachyos-release
 2. **Manual CachyOS specification:**
    ```bash
    # Set distribution manually
-   export OMNICPP_LINUX_DISTRO="cachyos"
-   export OMNICPP_LINUX_FAMILY="arch"
+   export WARPLOOM_LINUX_DISTRO="cachyos"
+   export WARPLOOM_LINUX_FAMILY="arch"
    ```
 
 3. **Reinstall CachyOS release files:**
@@ -1557,7 +1557,7 @@ ls -la $VULKAN_SDK 2>/dev/null || echo "VULKAN_SDK not set"
          "type": "shell",
          "command": "python",
          "args": [
-           "OmniCppController.py",
+           "WarploomController.py",
            "build",
            "standalone",
            "Zero to Build",
@@ -1593,7 +1593,7 @@ ls -la $VULKAN_SDK 2>/dev/null || echo "VULKAN_SDK not set"
          "name": "Debug Standalone (GDB)",
          "type": "cppdbg",
          "request": "launch",
-         "program": "${workspaceFolder}/build/debug/default/bin/OmniCppStandalone",
+         "program": "${workspaceFolder}/build/debug/default/bin/WarploomStandalone",
          "args": [],
          "stopAtEntry": false,
          "cwd": "${workspaceFolder}",
@@ -1626,10 +1626,10 @@ ls -la $VULKAN_SDK 2>/dev/null || echo "VULKAN_SDK not set"
 3. **Verify debug symbols:**
    ```bash
    # Check if executable has debug symbols
-   file build/debug/default/bin/OmniCppStandalone
+   file build/debug/default/bin/WarploomStandalone
 
    # Check with readelf
-   readelf -S build/debug/default/bin/OmniCppStandalone | grep debug
+   readelf -S build/debug/default/bin/WarploomStandalone | grep debug
 
    # Rebuild with debug info if needed
    cmake -DCMAKE_BUILD_TYPE=Debug ../..
@@ -1776,7 +1776,7 @@ journalctl -u systemd-journald
 **GDB (GNU Debugger):**
 ```bash
 # Start GDB with executable
-gdb ./build/debug/default/bin/OmniCppStandalone
+gdb ./build/debug/default/bin/WarploomStandalone
 
 # Common GDB commands
 (gdb) break main          # Set breakpoint
@@ -1792,7 +1792,7 @@ gdb ./build/debug/default/bin/OmniCppStandalone
 **LLDB (LLVM Debugger):**
 ```bash
 # Start LLDB with executable
-lldb ./build/debug/default/bin/OmniCppStandalone
+lldb ./build/debug/default/bin/WarploomStandalone
 
 # Common LLDB commands
 (lldb) breakpoint set --name main  # Set breakpoint
@@ -1808,13 +1808,13 @@ lldb ./build/debug/default/bin/OmniCppStandalone
 **Valgrind (Memory Debugger):**
 ```bash
 # Check for memory leaks
-valgrind --leak-check=full ./build/debug/default/bin/OmniCppStandalone
+valgrind --leak-check=full ./build/debug/default/bin/WarploomStandalone
 
 # Check for memory errors
-valgrind --tool=memcheck ./build/debug/default/bin/OmniCppStandalone
+valgrind --tool=memcheck ./build/debug/default/bin/WarploomStandalone
 
 # Generate suppression file
-valgrind --gen-suppressions=all ./build/debug/default/bin/OmniCppStandalone
+valgrind --gen-suppressions=all ./build/debug/default/bin/WarploomStandalone
 ```
 
 **AddressSanitizer (ASan):**
@@ -1826,7 +1826,7 @@ cmake -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
 
 # Build and run
 cmake --build build/
-./build/debug/default/bin/OmniCppStandalone
+./build/debug/default/bin/WarploomStandalone
 ```
 
 **UndefinedBehaviorSanitizer (UBSan):**
@@ -1838,7 +1838,7 @@ cmake -DCMAKE_CXX_FLAGS="-fsanitize=undefined -fno-sanitize-recover=all -g" \
 
 # Build and run
 cmake --build build/
-./build/debug/default/bin/OmniCppStandalone
+./build/debug/default/bin/WarploomStandalone
 ```
 
 ### Isolate Issues
@@ -1885,7 +1885,7 @@ cmake --build --preset cachyos-gcc-debug
 **perf (Linux Performance Tool):**
 ```bash
 # Record performance data
-perf record -g ./build/release/default/bin/OmniCppStandalone
+perf record -g ./build/release/default/bin/WarploomStandalone
 
 # Analyze performance data
 perf report
@@ -1901,10 +1901,10 @@ cmake -DCMAKE_CXX_FLAGS="-pg" -DCMAKE_C_FLAGS="-pg" ../..
 
 # Build and run
 cmake --build build/
-./build/release/default/bin/OmniCppStandalone
+./build/release/default/bin/WarploomStandalone
 
 # Analyze profile
-gprof ./build/release/default/bin/OmniCppStandalone gmon.out > analysis.txt
+gprof ./build/release/default/bin/WarploomStandalone gmon.out > analysis.txt
 ```
 
 ---
@@ -2074,7 +2074,7 @@ conan install . --profile cachyos
 sudo pacman -Syu
 
 # Check library dependencies
-ldd ./build/debug/default/bin/OmniCppStandalone
+ldd ./build/debug/default/bin/WarploomStandalone
 
 # View kernel messages
 dmesg | tail -n 50

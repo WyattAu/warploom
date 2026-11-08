@@ -20,15 +20,15 @@
 
 namespace {
 
-using omnicpp::editor::EditorSession;
-using omnicpp::editor::ReplayScrubber;
-using omnicpp::editor::state_hash;
+using warploom::editor::EditorSession;
+using warploom::editor::ReplayScrubber;
+using warploom::editor::state_hash;
 
-using CK = omnicpp::core::ControlCommand::Kind;
+using CK = warploom::core::ControlCommand::Kind;
 
 //! Spawns a document cube through the session bridge and returns its id.
 std::uint64_t spawn_cube(EditorSession& session, const char* name) {
-  omnicpp::core::ControlCommand cmd;
+  warploom::core::ControlCommand cmd;
   cmd.kind = CK::SpawnCube;
   cmd.text = name;
   cmd.numbers[0] = 1.0;
@@ -43,7 +43,7 @@ std::uint64_t spawn_cube(EditorSession& session, const char* name) {
 
 //! Moves a cube through the session (undoable, document-authoritative).
 void move_cube(EditorSession& session, std::uint64_t oid, double x) {
-  omnicpp::core::ControlCommand cmd;
+  warploom::core::ControlCommand cmd;
   cmd.kind = CK::SetProperty;
   for (const auto& obj : session.document().objects) {
     if (obj.id == oid) {
@@ -78,7 +78,7 @@ TEST(ReplayScrubber, RestoreReproducesByteIdenticalState) {
   (void)spawn_cube(session, "second");
   ASSERT_NE(session.document().to_json(), before);
 
-  omnicpp::editor::SceneDocument restored;
+  warploom::editor::SceneDocument restored;
   ASSERT_TRUE(scrubber.restore(100U, restored, error)) << error;
   // Byte-identical to the capture-time serialization...
   EXPECT_EQ(restored.to_json(), before);
@@ -93,7 +93,7 @@ TEST(ReplayScrubber, RestoreUnknownFrameFailsCleanly) {
 
   ReplayScrubber scrubber;
   std::string error;
-  omnicpp::editor::SceneDocument out;
+  warploom::editor::SceneDocument out;
   EXPECT_FALSE(scrubber.restore(1234U, out, error));
   EXPECT_NE(error.find("no checkpoint"), std::string::npos);
   // Untouched on failure.
@@ -103,7 +103,7 @@ TEST(ReplayScrubber, RestoreUnknownFrameFailsCleanly) {
 TEST(ReplayScrubber, RingEvictsOldestAtCapacity) {
   ReplayScrubber scrubber(3U);
   ASSERT_EQ(scrubber.capacity(), 3U);
-  omnicpp::editor::SceneDocument doc;
+  warploom::editor::SceneDocument doc;
   std::string error;
   for (std::uint64_t frame = 10U; frame <= 13U; ++frame) {
     ASSERT_TRUE(scrubber.capture(frame, doc, error));
@@ -115,7 +115,7 @@ TEST(ReplayScrubber, RingEvictsOldestAtCapacity) {
   EXPECT_EQ(frames[0], 11U);
   EXPECT_EQ(frames[1], 12U);
   EXPECT_EQ(frames[2], 13U);
-  omnicpp::editor::SceneDocument out;
+  warploom::editor::SceneDocument out;
   EXPECT_TRUE(scrubber.restore(11U, out, error));
   EXPECT_FALSE(scrubber.restore(10U, out, error));
 }
@@ -129,7 +129,7 @@ TEST(ReplayScrubber, VerifyDetectsCorruptedCheckpoint) {
   EXPECT_TRUE(scrubber.verify(7U));
 
   // Corrupt the checkpoint bytes out-of-band (simulates bit rot / bad save).
-  omnicpp::editor::SceneDocument& doc = const_cast<omnicpp::editor::SceneDocument&>(
+  warploom::editor::SceneDocument& doc = const_cast<warploom::editor::SceneDocument&>(
       session.document());
   // Re-capture, then tamper via a second scrubber sharing serialized bytes:
   // corrupt by capturing again after mutating, then re-verify the OLD frame
@@ -165,7 +165,7 @@ TEST(ReplayScrubber, GraphDrivenChangesGiveTimelineSignal) {
   }
   EXPECT_NE(h0, h1);
   // Scrub backwards to frame 0 and verify the position came back.
-  omnicpp::editor::SceneDocument restored;
+  warploom::editor::SceneDocument restored;
   ASSERT_TRUE(scrubber.restore(0U, restored, error)) << error;
   const auto* obj = restored.find(oid);
   ASSERT_NE(obj, nullptr);
@@ -180,7 +180,7 @@ TEST(ReplayScrubber, ProtocolStartToInfoToTimeWarp) {
   ASSERT_NE(oid, 0U);
 
   // scrub_start @ frame 50 through the protocol.
-  omnicpp::core::ControlCommand start;
+  warploom::core::ControlCommand start;
   start.kind = CK::ScrubStart;
   start.numbers[0] = 50.0;
   start.number_count = 1;
@@ -193,7 +193,7 @@ TEST(ReplayScrubber, ProtocolStartToInfoToTimeWarp) {
   const std::string mutated = session.document().to_json();
 
   // scrub_info lists the checkpoint.
-  omnicpp::core::ControlCommand info;
+  warploom::core::ControlCommand info;
   info.kind = CK::ScrubInfo;
   reply = session.on_control(info);
   ASSERT_TRUE(reply.ok);
@@ -201,7 +201,7 @@ TEST(ReplayScrubber, ProtocolStartToInfoToTimeWarp) {
   EXPECT_NE(reply.detail.find("\"capacity\":4096"), std::string::npos);
 
   // scrub_to @ 50: time warp.
-  omnicpp::core::ControlCommand to;
+  warploom::core::ControlCommand to;
   to.kind = CK::ScrubTo;
   to.numbers[0] = 50.0;
   to.number_count = 1;
@@ -217,7 +217,7 @@ TEST(ReplayScrubber, ProtocolStartToInfoToTimeWarp) {
   ASSERT_NE(pos, obj->properties.end());
   EXPECT_EQ(pos->second.vec[0], 1.0);  // spawn position, not the moved one
   // ...history cleared (undo cannot cross the warp)...
-  omnicpp::core::ControlCommand undo;
+  warploom::core::ControlCommand undo;
   undo.kind = CK::Undo;
   reply = session.on_control(undo);
   EXPECT_FALSE(reply.ok);
@@ -227,7 +227,7 @@ TEST(ReplayScrubber, ProtocolStartToInfoToTimeWarp) {
 
 TEST(ReplayScrubber, ProtocolScrubToUnknownFrameRejected) {
   EditorSession session;
-  omnicpp::core::ControlCommand to;
+  warploom::core::ControlCommand to;
   to.kind = CK::ScrubTo;
   to.numbers[0] = 42.0;
   to.number_count = 1;
@@ -244,7 +244,7 @@ TEST(ReplayScrubber, ProtocolScrubToUnknownFrameRejected) {
 TEST(ReplayScrubber, RestoreWithGraphNodesSeedsRegistry) {
   EditorSession session;
 
-  omnicpp::core::ControlCommand add;
+  warploom::core::ControlCommand add;
   add.kind = CK::NodeAdd;
   add.text = "const_number";
   add.numbers[0] = 10.0;
@@ -254,7 +254,7 @@ TEST(ReplayScrubber, RestoreWithGraphNodesSeedsRegistry) {
   ASSERT_TRUE(reply.ok) << reply.error;
   ASSERT_EQ(session.document().node_graph.node_count(), 1U);
 
-  omnicpp::core::ControlCommand start;
+  warploom::core::ControlCommand start;
   start.kind = CK::ScrubStart;
   start.numbers[0] = 30.0;
   start.number_count = 1;
@@ -262,7 +262,7 @@ TEST(ReplayScrubber, RestoreWithGraphNodesSeedsRegistry) {
   ASSERT_TRUE(reply.ok) << reply.error;
 
   // Mutate the graph after the checkpoint.
-  omnicpp::core::ControlCommand rm;
+  warploom::core::ControlCommand rm;
   rm.kind = CK::NodeRemove;
   rm.numbers[0] = static_cast<double>(session.document().node_graph.nodes()[0].id);
   rm.number_count = 1;
@@ -271,7 +271,7 @@ TEST(ReplayScrubber, RestoreWithGraphNodesSeedsRegistry) {
   ASSERT_EQ(session.document().node_graph.node_count(), 0U);
 
   // Time warp: the node must come back.
-  omnicpp::core::ControlCommand to;
+  warploom::core::ControlCommand to;
   to.kind = CK::ScrubTo;
   to.numbers[0] = 30.0;
   to.number_count = 1;

@@ -1,5 +1,5 @@
 # ============================================================================
-# OmniCpp Template - Package Configuration
+# Warploom Template - Package Configuration
 # ============================================================================
 # Configures CPack for distribution package creation
 # ============================================================================
@@ -13,9 +13,9 @@ include(CPack)
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_DESCRIPTION ${PROJECT_DESCRIPTION})
-set(CPACK_PACKAGE_VENDOR "OmniCpp")
+set(CPACK_PACKAGE_VENDOR "Warploom")
 set(CPACK_PACKAGE_CONTACT "maintainers@github.com")
-set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/omnicpp/omnicpp-template")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/warploom/warploom-template")
 set(CPACK_PACKAGE_LICENSE_FILE "${CMAKE_SOURCE_DIR}/LICENSE")
 
 # ============================================================================

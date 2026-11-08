@@ -6,6 +6,6 @@
 
 #include <cstdint>
 
-extern "C" std::int32_t omnicpp_module_abi() { return 1; }
+extern "C" std::int32_t warploom_module_abi() { return 1; }
 
-extern "C" const char* omnicpp_module_name() { return "fixture_missing"; }
+extern "C" const char* warploom_module_name() { return "fixture_missing"; }

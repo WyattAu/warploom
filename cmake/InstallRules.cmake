@@ -1,5 +1,5 @@
 # ============================================================================
-# OmniCpp Template - Installation Rules
+# Warploom Template - Installation Rules
 # ============================================================================
 # Defines installation rules for all targets
 # ============================================================================
@@ -77,7 +77,7 @@ endif()
 # The five modules and the headerless aggregate each install their own
 # Warploom<Name>Config.cmake + version file from modules/*/CMakeLists.txt.
 # There is no root-level target to export: the S5-A aggregate replaced the
-# omnicpp_runtime monolith, so the old OmniCppEngine export block is gone.
+# warploom_runtime monolith, so the old WarploomEngine export block is gone.
 
 # ============================================================================
 # Platform-Specific Installation

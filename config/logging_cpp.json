@@ -3,7 +3,7 @@
   "pattern": "[%Y-%m-%d %H:%M:%S.%e] [%n] [%l] %v",
   "console_sink_enabled": true,
   "file_sink_enabled": true,
-  "file_path": "logs/omnicpp_engine.log",
+  "file_path": "logs/warploom_engine.log",
   "max_file_size": 10485760,
   "max_files": 5,
   "flush_level": "error"

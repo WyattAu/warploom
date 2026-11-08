@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-Lint script for OmniCpp project
+Lint script for Warploom project
 
 This script provides a command-line interface for linting code
-using the omni_scripts.controller.lint_controller module.
+using the warploom_scripts.controller.lint_controller module.
 """
 
 import sys
 import argparse
 from pathlib import Path
 
-# Add parent directory to path to import omni_scripts
+# Add parent directory to path to import warploom_scripts
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from omni_scripts.controller.lint_controller import lint
+from warploom_scripts.controller.lint_controller import lint
 
 
 def main():
     """Main entry point for lint script."""
     parser = argparse.ArgumentParser(
-        description="Lint OmniCpp code with clang-tidy and pylint",
+        description="Lint Warploom code with clang-tidy and pylint",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

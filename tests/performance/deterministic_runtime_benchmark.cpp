@@ -24,7 +24,7 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  omnicpp::core::DeterministicRuntime runtime(fixed_step);
+  warploom::core::DeterministicRuntime runtime(fixed_step);
   if (!runtime.start().is_ok()) return 1;
 
   std::vector<std::int64_t> samples;

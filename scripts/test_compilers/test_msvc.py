@@ -11,9 +11,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from omni_scripts.compilers.detector import detect_compiler, validate_cpp23_support
-from omni_scripts.platform.detector import detect_platform
-from omni_scripts.logging.logger import get_logger, setup_logging
+from warploom_scripts.compilers.detector import detect_compiler, validate_cpp23_support
+from warploom_scripts.platform.detector import detect_platform
+from warploom_scripts.logging.logger import get_logger, setup_logging
 
 logger = get_logger(__name__)
 

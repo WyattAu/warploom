@@ -1,5 +1,5 @@
 @echo off
-REM OmniCpp Environment Setup Script
+REM Warploom Environment Setup Script
 REM Automatically configures VULKAN_SDK and QT_DIR for Windows builds
 
 setlocal enabledelayedexpansion
@@ -220,6 +220,6 @@ echo 📝 To use this environment, restart your terminal or run:
 echo    call "%~f0"
 
 echo.
-echo 🚀 Ready for OmniCpp development!
+echo 🚀 Ready for Warploom development!
 
 endlocal

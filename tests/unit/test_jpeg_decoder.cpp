@@ -21,10 +21,10 @@
 
 namespace {
 
-using omnicpp::asset::DecodedImage;
-using omnicpp::asset::decode_image;
-using omnicpp::asset::decode_jpeg;
-using omnicpp::core::RuntimeError;
+using warploom::asset::DecodedImage;
+using warploom::asset::decode_image;
+using warploom::asset::decode_jpeg;
+using warploom::core::RuntimeError;
 
 // ============================================================================
 // Golden blobs from Pillow / libjpeg (independent encoder)

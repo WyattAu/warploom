@@ -16,24 +16,24 @@ below are measured on this tree, not estimated.
   (`examples/viewport/main.cpp`, 3 headers), the sources themselves
   (2), and 3 unit tests (`test_node_editor.cpp`, `test_inspector.cpp`,
   `test_graph_anim_bridge.cpp`). `tools/headless_host.cpp` touches the
-  layer only through `omnicpp::editor::EditorSession` (core; no widget
+  layer only through `warploom::editor::EditorSession` (core; no widget
   header).
 - Dependency direction is already correct: both sources include only
   `engine/core/*` (control_server contract, node_graph, document,
   editor_session, property_registry, prop_value) + `warploom/ui/widget.hpp`
   + std. **Zero render/asset includes.** `graph_anim_bridge.hpp` is
   header-only and core-only (no ui include at all).
-- Namespace today: all 3 widget headers declare `omnicpp::editor` (with
+- Namespace today: all 3 widget headers declare `warploom::editor` (with
   the S1 `namespace ui = ::warploom::ui;` alias inside node_editor.hpp and
   inspector.hpp).
 
-## The truthful `omnicpp::editor` split (S4 owns this)
+## The truthful `warploom::editor` split (S4 owns this)
 
 S2's audit was conservative; this re-audit corrects one finding and pins
 the full map. **`include/engine/render/vulkan_parallel_recorder.hpp` does
-NOT declare `omnicpp::editor`** (it opens `omnicpp::core` then
-`omnicpp::render`); no render header needs to move for this split. The
-complete measured map of `omnicpp::editor`-declaring files:
+NOT declare `warploom::editor`** (it opens `warploom::core` then
+`warploom::render`); no render header needs to move for this split. The
+complete measured map of `warploom::editor`-declaring files:
 
 - **7 core headers** (stay in `warploom-core`, own the document/session
   identity): `document.hpp`, `editor_session.hpp`, `node_graph.hpp`,
@@ -48,7 +48,7 @@ complete measured map of `omnicpp::editor`-declaring files:
 
 Decision: the namespace name itself does NOT change in S4 (that is the
 S2 phase-B / S-decision identifier pass). S4 makes the split *truthful*
-by ownership: after this move, every `omnicpp::editor`-declaring header in
+by ownership: after this move, every `warploom::editor`-declaring header in
 `warploom-editor` is a widget/view header and every one in `warploom-core`
 is a document/session header. A file-scoped rename in phase B then has a
 mechanical rule: core headers → `warploom::editor`, widget headers →
@@ -129,7 +129,7 @@ before the next editor-facing feature.
    also includes `engine/render/software_rasterizer.hpp` for two golden-pixel
    tests; rasterization is a view concern and the test exercises the
    paint list end-to-end; keep the test whole by linking the
-   `omnicpp_render` INTERFACE target (header-only, include-path only, no
+   `warploom_render` INTERFACE target (header-only, include-path only, no
    link-time dep). This is the only reason the module test binary needs
    the superproject include root; documented, not hidden.
 3. **Compat layer**: `include/engine/editor/` keeps one-line forwarders
@@ -138,18 +138,18 @@ before the next editor-facing feature.
    exposes only `warploom/editor/*`.
 4. **Link updates**:
    - `src/engine/CMakeLists.txt`: drop `editor/*.cpp` from
-     `omnicpp_runtime`; add `target_link_libraries(omnicpp_runtime PUBLIC
+     `warploom_runtime`; add `target_link_libraries(warploom_runtime PUBLIC
      Warploom::editor)` (PUBLIC: main.cpp includes the widget headers
-     through the runtime's transitive usage). Note: `omnicpp_runtime` is
+     through the runtime's transitive usage). Note: `warploom_runtime` is
      now purely render+asset+glue; it keeps its name (binary rename is the
      S-decision pass).
-   - `add_library(omnicpp_editor ALIAS warploom_editor)` next to the
+   - `add_library(warploom_editor ALIAS warploom_editor)` next to the
      existing alias block.
    - `warploom_editor` links `PUBLIC Warploom::ui Warploom::core Threads::Threads`.
-   - Viewport/test CMake unchanged (they link `omnicpp_runtime`, which now
+   - Viewport/test CMake unchanged (they link `warploom_runtime`, which now
      PUBLIC-links the editor).
 5. **Root CMake**: `add_subdirectory(modules/editor)` after
-   `modules/core` (order: ui → core → editor) under `OMNICPP_BUILD_ENGINE`.
+   `modules/core` (order: ui → core → editor) under `WARPLOOM_BUILD_ENGINE`.
 6. **Verification gate (S4 phase-A exit)**:
    - 6/6 suites on all four CI legs (adds `WarploomEditorTests`; ui, core,
      unit, runtime-only, ui-gpu stay);
@@ -165,14 +165,14 @@ before the next editor-facing feature.
 1. **SHARED + visibility**: editor TUs export no symbols consumed
    cross-DSO beyond what tests already use; S1/S2 pattern (SHARED + PIE)
    applies unchanged.
-2. **`namespace ui = ::warploom::ui;` inside `omnicpp::editor`** moves with
+2. **`namespace ui = ::warploom::ui;` inside `warploom::editor`** moves with
    the headers verbatim; no churn until phase B.
 3. **Test binary needs gtest + the superproject include root** (rasterizer
    header). The `if(TARGET gtest)` guard from modules/ui covers
    standalone-configure; the module's own smoke tests must not depend on
    the rasterizer (they don't; see allowlist note in CMake comments).
 4. **Load order in `live_proof` / headless host**: the headless host links
-   `omnicpp_runtime` only (session, no widgets); it must keep working with
+   `warploom_runtime` only (session, no widgets); it must keep working with
    the editor moved out of the runtime object list; this is exactly what
    the runtime-only suite + live proofs verify.
 5. **Config template dependency graph**: `WarploomEditorConfig.cmake.in`

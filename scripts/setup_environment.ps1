@@ -1,5 +1,5 @@
 <#
-OmniCpp Environment Setup Script
+Warploom Environment Setup Script
 Automatically configures VULKAN_SDK and QT_DIR for Windows builds
 #>
 
@@ -307,7 +307,7 @@ Write-Host
 Write-Color "    . \"$($MyInvocation.MyCommand.Path)\"" -Color "Magenta"
 
 Write-Host
-Write-Success "🚀 Ready for OmniCpp development!"
+Write-Success "🚀 Ready for Warploom development!"
 
 # Return success
 return 0

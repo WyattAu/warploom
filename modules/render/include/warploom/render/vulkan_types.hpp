@@ -5,7 +5,7 @@
 // S5-B phase 2 name normalization (docs/warploom-identity-plan.md): the
 // new primary name is WARPLOOM_HAS_VULKAN; the legacy name is honored so
 // existing build definitions keep working (removed post-0.1).
-#if !defined(WARPLOOM_HAS_VULKAN) && defined(OMNICPP_HAS_VULKAN)
+#if !defined(WARPLOOM_HAS_VULKAN) && defined(WARPLOOM_HAS_VULKAN)
 #define WARPLOOM_HAS_VULKAN
 #endif
 
@@ -197,12 +197,6 @@ constexpr VkAccessFlags VK_ACCESS_SHADER_WRITE_BIT = 0x00000040;
 constexpr VkPipelineStageFlags VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR =
     0x00000400;
 
-#endif
-
-// S5-B phase 2 shim: legacy availability flag aliases the new one
-// (docs/warploom-identity-plan.md); removed post-0.1.
-#ifndef OMNICPP_VULKAN_TYPES_AVAILABLE
-#define OMNICPP_VULKAN_TYPES_AVAILABLE WARPLOOM_VULKAN_TYPES_AVAILABLE
 #endif
 
 namespace warploom::render {

@@ -77,7 +77,7 @@ public:
     stats.p999_ns = nearest_rank_percentile(snapshot, 0.999);
     // snapshot has exactly filled_ elements and filled_ != 0 past the early
     // return above, so max_element cannot be end().
-    OMNICPP_CONTRACT(!snapshot.empty());
+    WARPLOOM_CONTRACT(!snapshot.empty());
     stats.max_ns = *std::max_element(snapshot.begin(), snapshot.end());
     return stats;
   }
@@ -100,18 +100,3 @@ private:
 };
 
 }  // namespace warploom::core
-// S2-B compat footer: legacy `omnicpp::*` spellings keep resolving
-// during the transition (removed with the S5 identity pass -
-// docs/warploom-core-plan.md, phase B). A using-directive in a
-// namespace extension (NOT a type alias - ill-formed for namespaces)
-// makes the old spellings name the SAME types, and legally coexists
-// with real `omnicpp::core` extension blocks elsewhere (extension
-// blocks merge). One directive per namespace THIS header declares,
-// each under its OWN guard (a shared guard would suppress later
-// headers' distinct directives).
-#ifndef WARPLOOM_COMPAT_CORE_NS
-#define WARPLOOM_COMPAT_CORE_NS
-namespace omnicpp::core {
-    using namespace ::warploom::core;
-}
-#endif  // WARPLOOM_COMPAT_CORE_NS

@@ -1,6 +1,6 @@
 # C++23 Modules Guide
 
-This guide explains how to use C++23 modules in the OmniCpp project.
+This guide explains how to use C++23 modules in the Warploom project.
 
 ## Overview
 

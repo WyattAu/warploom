@@ -15,17 +15,17 @@
 
 namespace {
 
-using omnicpp::core::Entity;
-using omnicpp::core::World;
-using omnicpp::render::OrbitCameraController;
-using omnicpp::render::OrbitCameraInput;
-using omnicpp::render::SceneCameraComponent;
-using omnicpp::render::SceneMatrix;
-using omnicpp::render::scene_camera_look_at;
-using omnicpp::render::scene_camera_projection;
-using omnicpp::render::scene_camera_view_projection;
-using omnicpp::render::scene_identity_matrix;
-using omnicpp::render::update_orbit_cameras;
+using warploom::core::Entity;
+using warploom::core::World;
+using warploom::render::OrbitCameraController;
+using warploom::render::OrbitCameraInput;
+using warploom::render::SceneCameraComponent;
+using warploom::render::SceneMatrix;
+using warploom::render::scene_camera_look_at;
+using warploom::render::scene_camera_projection;
+using warploom::render::scene_camera_view_projection;
+using warploom::render::scene_identity_matrix;
+using warploom::render::update_orbit_cameras;
 
 constexpr float kPi = 3.14159265358979323846f;
 

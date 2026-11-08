@@ -1,7 +1,7 @@
 {
   "project_name": "Warploom",
   "project_version": "1.0.0",
-  "project_description": "OmniCpp Template Project",
+  "project_description": "Warploom Template Project",
   "cpp_standard": "23",
   "compilers": [],
   "targets": []

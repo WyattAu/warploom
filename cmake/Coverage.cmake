@@ -1,5 +1,5 @@
 # ============================================================================
-# OmniCpp Template - Code Coverage Configuration
+# Warploom Template - Code Coverage Configuration
 # ============================================================================
 # Configures code coverage tools and targets
 # ============================================================================

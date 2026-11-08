@@ -31,15 +31,15 @@
 
 namespace {
 
-using namespace omnicpp::editor;
+using namespace warploom::editor;
 
 constexpr double kDt = 1.0 / 60.0;
 
-using CK = omnicpp::core::ControlCommand::Kind;
+using CK = warploom::core::ControlCommand::Kind;
 
 //! One cube with a full transform, filled in place (sessions are
 //! non-copyable). Mirrors test_session_tick's seeder.
-void seed_cube(::omnicpp::editor::EditorSession& session) {
+void seed_cube(::warploom::editor::EditorSession& session) {
   SceneObject cube{};
   cube.id = 1U;
   cube.type_id = 1U;
@@ -55,8 +55,8 @@ void seed_cube(::omnicpp::editor::EditorSession& session) {
 
 //! A body high above the ground: every tick moves it, so fingerprints
 //! distinguish integrated from frozen state.
-::omnicpp::physics::PhysicsBody falling_body() {
-  ::omnicpp::physics::PhysicsBody body{};
+::warploom::physics::PhysicsBody falling_body() {
+  ::warploom::physics::PhysicsBody body{};
   body.position[1] = 10.0F;
   body.radius = 0.5F;
   body.inverse_mass = 1.0F;
@@ -80,7 +80,7 @@ struct LiveDriver {
 
   void send(CK kind, double number = 0.0, bool has_number = false) {
     tick_once();
-    omnicpp::core::ControlCommand cmd;
+    warploom::core::ControlCommand cmd;
     cmd.kind = kind;
     if (has_number) {
       cmd.numbers[0] = number;
@@ -93,7 +93,7 @@ struct LiveDriver {
 
   void step(std::uint64_t ticks) {
     for (std::uint64_t i = 0; i < ticks; ++i) tick_once();
-    omnicpp::core::ControlCommand cmd;
+    warploom::core::ControlCommand cmd;
     cmd.kind = CK::Step;
     cmd.numbers[0] = static_cast<double>(ticks);
     cmd.number_count = 1;
@@ -186,7 +186,7 @@ TEST(PhysicsScrub, CorruptedPhysicsCheckpointFailsWithStateUntouched) {
 
   // Codec layer (owns the schema): all-or-nothing commit — a failed
   // restore leaves the world AND the map exactly as they were.
-  ::omnicpp::physics::PhysicsWorld world;
+  ::warploom::physics::PhysicsWorld world;
   // Body id 0 by construction; only its presence matters to this case.
   (void)world.add_body(falling_body());
   std::map<std::uint64_t, std::uint32_t> map{{1U, 0U}};
@@ -206,7 +206,7 @@ TEST(PhysicsScrub, CorruptedPhysicsCheckpointFailsWithStateUntouched) {
   // File layer, two torn variants. Variant H (shown): a capture whose
   // physics line is tampered with must fail to load with a clean protocol
   // error, not a silent divergence.
-  const std::string path = "/tmp/omnicpp_test_physics_tamper.replay";
+  const std::string path = "/tmp/warploom_test_physics_tamper.replay";
   {
     EditorSession live{};
     seed_cube(live);
@@ -285,19 +285,19 @@ TEST(PhysicsScrub, CorruptedPhysicsCheckpointFailsWithStateUntouched) {
 }
 
 TEST(PhysicsScrub, CodecRoundTripsKnobsJointsAndCapsules) {
-  ::omnicpp::physics::PhysicsWorld world(-3.7F);
+  ::warploom::physics::PhysicsWorld world(-3.7F);
   world.set_substeps(4U);
   world.set_solver_iterations(8U);
   world.set_contact_compliance(0.001F);
   world.set_restitution_threshold(0.2F);
   world.set_sleep_threshold(0.05F);
   world.set_velocity_from_position(true);
-  ::omnicpp::physics::PhysicsBody sphere{};
+  ::warploom::physics::PhysicsBody sphere{};
   sphere.position[1] = 5.0F;
   sphere.velocity[0] = 1.0F;
   const std::uint32_t s0 = world.add_body(sphere);
-  ::omnicpp::physics::PhysicsBody capsule{};
-  capsule.shape = ::omnicpp::physics::BodyShape::Capsule;
+  ::warploom::physics::PhysicsBody capsule{};
+  capsule.shape = ::warploom::physics::BodyShape::Capsule;
   capsule.half_height = 1.5F;
   capsule.orientation[0] = 0.5F;
   capsule.orientation[3] = 0.8660254F;
@@ -310,7 +310,7 @@ TEST(PhysicsScrub, CodecRoundTripsKnobsJointsAndCapsules) {
   const std::string bytes = physics_snapshot_json(world, map);
   EXPECT_FALSE(bytes.empty());
 
-  ::omnicpp::physics::PhysicsWorld restored;
+  ::warploom::physics::PhysicsWorld restored;
   std::map<std::uint64_t, std::uint32_t> restored_map{{1U, 1U}};  // poison
   std::string restore_error;
   ASSERT_TRUE(
@@ -335,7 +335,7 @@ TEST(PhysicsScrub, CodecRoundTripsKnobsJointsAndCapsules) {
 }
 
 TEST(PhysicsScrub, ReplayFileRoundTripsPhysicsBitIdentically) {
-  const std::string path = "/tmp/omnicpp_test_physics_roundtrip.replay";
+  const std::string path = "/tmp/warploom_test_physics_roundtrip.replay";
   EditorSession live{};
   seed_cube(live);
   (void)live.tick({0U, kDt, 0.0, false});
@@ -364,7 +364,7 @@ TEST(PhysicsScrub, ReplayFileRoundTripsPhysicsBitIdentically) {
 }
 
 TEST(PhysicsScrub, ReplayPausesFreezePhysicsOnReload) {
-  const std::string path = "/tmp/omnicpp_test_physics_pause.replay";
+  const std::string path = "/tmp/warploom_test_physics_pause.replay";
   EditorSession live{};
   seed_cube(live);
   (void)live.tick({0U, kDt, 0.0, false});

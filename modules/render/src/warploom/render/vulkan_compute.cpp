@@ -12,7 +12,7 @@
 #include "warploom/core/contract.hpp"
 
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -21,16 +21,16 @@ namespace warploom::render {
 void cmd_signal_event([[maybe_unused]] VkCommandBuffer command_buffer,
                       [[maybe_unused]] VkEvent event,
                       [[maybe_unused]] std::uint32_t src_stage) {
-#ifdef OMNICPP_HAS_VULKAN
-  OMNICPP_CONTRACT(event != VK_NULL_HANDLE);
+#ifdef WARPLOOM_HAS_VULKAN
+  WARPLOOM_CONTRACT(event != VK_NULL_HANDLE);
   vkCmdSetEvent(command_buffer, event, src_stage);
 #endif
 }
 
 void cmd_acquire_shared_image(VkCommandBuffer command_buffer, VkEvent event,
                               const QueueImageState& state) {
-#ifdef OMNICPP_HAS_VULKAN
-  OMNICPP_CONTRACT(event != VK_NULL_HANDLE && state.image != VK_NULL_HANDLE);
+#ifdef WARPLOOM_HAS_VULKAN
+  WARPLOOM_CONTRACT(event != VK_NULL_HANDLE && state.image != VK_NULL_HANDLE);
 
   // Concurrent-usage images: queue ownership transfers via RELEASE (producer
   // side) then ACQUIRE (this call). With single-queue testing the acquire
@@ -62,7 +62,7 @@ void cmd_release_image_to_family(VkCommandBuffer command_buffer, VkImage image,
                                  std::uint32_t src_family, std::uint32_t dst_family,
                                  VkImageLayout layout, std::uint32_t src_access,
                                  std::uint32_t src_stage, std::uint32_t dst_stage) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   VkImageMemoryBarrier release{};
   release.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
   release.srcAccessMask = src_access;
@@ -85,7 +85,7 @@ void cmd_acquire_image_from_family(VkCommandBuffer command_buffer, VkImage image
                                    std::uint32_t src_family, std::uint32_t dst_family,
                                    VkImageLayout layout, std::uint32_t dst_access,
                                    std::uint32_t src_stage, std::uint32_t dst_stage) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   VkImageMemoryBarrier acquire{};
   acquire.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
   acquire.srcAccessMask = 0;  // Producer's release + semaphore ordering.
@@ -109,7 +109,7 @@ void cmd_release_buffer_to_family(VkCommandBuffer command_buffer, VkBuffer buffe
                                   std::uint32_t src_family, std::uint32_t dst_family,
                                   std::uint32_t src_access, std::uint32_t src_stage,
                                   std::uint32_t dst_stage) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   VkBufferMemoryBarrier release{};
   release.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
   release.srcAccessMask = src_access;
@@ -132,7 +132,7 @@ void cmd_acquire_buffer_from_family(VkCommandBuffer command_buffer, VkBuffer buf
                                     std::uint32_t src_family, std::uint32_t dst_family,
                                     std::uint32_t dst_access, std::uint32_t src_stage,
                                     std::uint32_t dst_stage) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   VkBufferMemoryBarrier acquire{};
   acquire.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
   acquire.srcAccessMask = 0;
@@ -159,7 +159,7 @@ AsyncComputeQueue::~AsyncComputeQueue() { cleanup(); }
 ::warploom::core::Result<void> AsyncComputeQueue::initialize(VkDevice device,
                                                           VkQueue compute_queue,
                                                           std::uint32_t compute_family) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || !compute_queue) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -215,7 +215,7 @@ AsyncComputeQueue::~AsyncComputeQueue() { cleanup(); }
 }
 
 void AsyncComputeQueue::cleanup() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device_) {
     for (auto& fence : fences_) {
       if (fence) vkDestroyFence(device_, fence, nullptr);
@@ -237,8 +237,8 @@ void AsyncComputeQueue::cleanup() noexcept {
 }
 
 void AsyncComputeQueue::begin() {
-#ifdef OMNICPP_HAS_VULKAN
-  OMNICPP_CONTRACT(device_ && pool_);
+#ifdef WARPLOOM_HAS_VULKAN
+  WARPLOOM_CONTRACT(device_ && pool_);
   // Submission N (0-based) uses ring slot N % kInFlight: its own command
   // buffer and fence. A slot in use still carries submission N - kInFlight;
   // retire it before re-recording. Other slots remain in flight — that is
@@ -248,7 +248,7 @@ void AsyncComputeQueue::begin() {
   VkFence slot_fence = fences_[n % kInFlight];
   if (n >= kInFlight) {
     const VkResult waited = vkWaitForFences(device_, 1, &slot_fence, VK_TRUE, 1'000'000'000ULL);
-    OMNICPP_CONTRACT(waited == VK_SUCCESS);
+    WARPLOOM_CONTRACT(waited == VK_SUCCESS);
     (void)waited;
   }
   vkResetFences(device_, 1, &slot_fence);
@@ -262,8 +262,8 @@ void AsyncComputeQueue::begin() {
 }
 
 void AsyncComputeQueue::record(void (*record_fn)(VkCommandBuffer, void*), void* user_data) {
-#ifdef OMNICPP_HAS_VULKAN
-  OMNICPP_CONTRACT(recording_ && record_fn);
+#ifdef WARPLOOM_HAS_VULKAN
+  WARPLOOM_CONTRACT(recording_ && record_fn);
   record_fn(buffer_, user_data);
 #else
   (void)record_fn; (void)user_data;
@@ -276,7 +276,7 @@ void AsyncComputeQueue::record(void (*record_fn)(VkCommandBuffer, void*), void* 
 
 ::warploom::core::Result<std::uint64_t> AsyncComputeQueue::submit_waiting(
     VkSemaphore wait_semaphore, VkPipelineStageFlags wait_stage) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!recording_) {
     return ::warploom::core::Result<std::uint64_t>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -321,7 +321,7 @@ void AsyncComputeQueue::record(void (*record_fn)(VkCommandBuffer, void*), void* 
 }
 
 bool AsyncComputeQueue::wait_done(std::uint64_t timeout_ns) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device_ || fences_[0] == nullptr) return false;
   // Wait only the slots that carried submissions: never-submitted fences are
   // unsignaled by definition and would make a whole-array wait time out.

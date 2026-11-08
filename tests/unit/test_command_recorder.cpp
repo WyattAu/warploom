@@ -19,14 +19,14 @@
 
 namespace {
 
-using omnicpp::editor::EditorSession;
-using omnicpp::editor::ReplayScrubber;
+using warploom::editor::EditorSession;
+using warploom::editor::ReplayScrubber;
 
-using CK = omnicpp::core::ControlCommand::Kind;
+using CK = warploom::core::ControlCommand::Kind;
 
 //! Spawns a cube through the session protocol path.
 void spawn_cube(EditorSession& session, const char* name, double x) {
-  omnicpp::core::ControlCommand cmd;
+  warploom::core::ControlCommand cmd;
   cmd.kind = CK::SpawnCube;
   cmd.text = name;
   cmd.numbers[0] = x;
@@ -40,7 +40,7 @@ void spawn_cube(EditorSession& session, const char* name, double x) {
 
 //! Steps the sim `ticks` frames through the protocol.
 void step(EditorSession& session, std::uint64_t ticks) {
-  omnicpp::core::ControlCommand cmd;
+  warploom::core::ControlCommand cmd;
   cmd.kind = CK::Step;
   cmd.numbers[0] = static_cast<double>(ticks);
   cmd.number_count = 1;
@@ -58,9 +58,9 @@ std::string read_file(const std::string& path) {
 
 TEST(CommandRecorder, CaptureMutateStopWritesValidFile) {
   EditorSession session;
-  const std::string path = "/tmp/omnicpp_test_recorder_basic.replay";
+  const std::string path = "/tmp/warploom_test_recorder_basic.replay";
 
-  omnicpp::core::ControlCommand start;
+  warploom::core::ControlCommand start;
   start.kind = CK::StartCapture;
   start.numbers[0] = 10.0;
   start.number_count = 1;
@@ -76,12 +76,12 @@ TEST(CommandRecorder, CaptureMutateStopWritesValidFile) {
   spawn_cube(session, "rc", 1.0);
 
   // Queries are never recorded.
-  omnicpp::core::ControlCommand list;
+  warploom::core::ControlCommand list;
   list.kind = CK::ListObjects;
   (void)session.on_control(list);
   EXPECT_EQ(session.recorder().command_count(), 2U);  // step + spawn
 
-  omnicpp::core::ControlCommand stop;
+  warploom::core::ControlCommand stop;
   stop.kind = CK::StopCapture;
   stop.text = path;
   const auto stop_reply = session.on_control(stop);
@@ -130,13 +130,13 @@ TEST(CommandRecorder, DoubleStartRejectedAndFailedStopKeepsSession) {
   EXPECT_EQ(session.recorder().command_count(), 1U);  // the post-failure edit
 
   // Unwritable path: failure keeps the session + log intact for a retry.
-  const std::string bad = "/tmp/omnicpp_no_such_dir_9x/replay.json";
+  const std::string bad = "/tmp/warploom_no_such_dir_9x/replay.json";
   error.clear();
   EXPECT_FALSE(session.capture_stop(bad, error));
   EXPECT_TRUE(session.recorder().active());
   EXPECT_EQ(session.recorder().command_count(), 1U);
 
-  const std::string good = "/tmp/omnicpp_test_recorder_retry.replay";
+  const std::string good = "/tmp/warploom_test_recorder_retry.replay";
   error.clear();
   ASSERT_TRUE(session.capture_stop(good, error)) << error;
   EXPECT_NE(read_file(good).find("\"cmd\":\"spawn_cube\""), std::string::npos);
@@ -146,12 +146,12 @@ TEST(CommandRecorder, DoubleStartRejectedAndFailedStopKeepsSession) {
 
 TEST(CommandRecorder, FreshSessionLoadReproducesByteIdenticalState) {
   EditorSession live;
-  const std::string path = "/tmp/omnicpp_test_recorder_load.replay";
+  const std::string path = "/tmp/warploom_test_recorder_load.replay";
   std::string error;
   ASSERT_TRUE(live.capture_start(2, "city", error)) << error;
 
   // scrub_start during capture embeds a checkpoint at the TARGET frame.
-  omnicpp::core::ControlCommand scrub;
+  warploom::core::ControlCommand scrub;
   scrub.kind = CK::ScrubStart;
   scrub.numbers[0] = 7.0;
   scrub.number_count = 1;
@@ -164,13 +164,13 @@ TEST(CommandRecorder, FreshSessionLoadReproducesByteIdenticalState) {
   error.clear();
   ASSERT_TRUE(live.capture_stop(path, error)) << error;
   const std::string saved_bytes = read_file(path);
-  const std::uint64_t live_hash = omnicpp::editor::state_hash(live.document());
+  const std::uint64_t live_hash = warploom::editor::state_hash(live.document());
 
   // A FRESH session loads the replay and reproduces the state exactly.
   EditorSession loaded;
   error.clear();
   ASSERT_TRUE(loaded.load_replay(path, error)) << error;
-  EXPECT_EQ(omnicpp::editor::state_hash(loaded.document()), live_hash);
+  EXPECT_EQ(warploom::editor::state_hash(loaded.document()), live_hash);
   EXPECT_EQ(loaded.document().to_json(), live.document().to_json());
   // Checkpoints hydrated: both capture targets are warpable.
   EXPECT_TRUE(loaded.scrubber().has(2U));
@@ -181,7 +181,7 @@ TEST(CommandRecorder, FreshSessionLoadReproducesByteIdenticalState) {
 
   // Time warp to the opening checkpoint on the LOADED session: state
   // returns to the capture-start bytes.
-  omnicpp::core::ControlCommand to;
+  warploom::core::ControlCommand to;
   to.kind = CK::ScrubTo;
   to.numbers[0] = 2.0;
   to.number_count = 1;
@@ -201,7 +201,7 @@ TEST(CommandRecorder, LoadSucceedsWhenOpenAndCloseShareAFrame) {
   // (duplicated cube + closing-hash mismatch). load_replay restores the
   // opening from the hydrated bytes, so this loads clean.
   EditorSession live;
-  const std::string path = "/tmp/omnicpp_test_recorder_sameframe.replay";
+  const std::string path = "/tmp/warploom_test_recorder_sameframe.replay";
   std::string error;
   ASSERT_TRUE(live.capture_start(0, "sameframe", error)) << error;
   spawn_cube(live, "solo", 1.0);
@@ -220,12 +220,12 @@ TEST(CommandRecorder, LoadRejectsGarbageTruncatedAndMissing) {
   EditorSession session;
   std::string error;
 
-  const std::string missing = "/tmp/omnicpp_replay_missing_9x.replay";
+  const std::string missing = "/tmp/warploom_replay_missing_9x.replay";
   error.clear();
   EXPECT_FALSE(session.load_replay(missing, error));
   EXPECT_NE(error.find("cannot open"), std::string::npos) << error;
 
-  const std::string garbage = "/tmp/omnicpp_replay_garbage.replay";
+  const std::string garbage = "/tmp/warploom_replay_garbage.replay";
   {
     std::ofstream out(garbage, std::ios::binary);
     out << "not a replay at all\njust two lines\n";
@@ -236,7 +236,7 @@ TEST(CommandRecorder, LoadRejectsGarbageTruncatedAndMissing) {
   std::remove(garbage.c_str());
 
   // Valid header but no end record: truncated -> rejected.
-  const std::string truncated = "/tmp/omnicpp_replay_truncated.replay";
+  const std::string truncated = "/tmp/warploom_replay_truncated.replay";
   {
     std::ofstream out(truncated, std::ios::binary);
     out << "{\"record\":\"header\",\"schema_version\":1,"

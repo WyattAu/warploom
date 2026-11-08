@@ -16,7 +16,7 @@
 #include <vulkan/vulkan.h>
 
 
-namespace omnicpp_test {
+namespace warploom_test {
 
 struct BufferReadback {
   std::vector<std::uint32_t> words;  //!< whole 32-bit words, buffer order
@@ -144,4 +144,4 @@ struct BufferReadback {
   return fail();  // frees everything; `out` already holds the words
 }
 
-}  // namespace omnicpp_test
+}  // namespace warploom_test

@@ -1,6 +1,6 @@
 #include "warploom/core/engine.hpp"
 
-namespace OmniCpp::Engine::Core {
+namespace Warploom::Engine::Core {
 
 struct Engine::Impl {
   EngineConfig config{};
@@ -77,4 +77,4 @@ double Engine::dropped_time_seconds() const noexcept {
   return (m_impl && m_impl->runtime) ? m_impl->runtime->dropped_time_seconds() : 0.0;
 }
 
-} // namespace OmniCpp::Engine::Core
+} // namespace Warploom::Engine::Core

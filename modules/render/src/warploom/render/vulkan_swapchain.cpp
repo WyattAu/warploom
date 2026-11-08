@@ -8,7 +8,7 @@ VulkanSwapchain::~VulkanSwapchain() { cleanup(VK_NULL_HANDLE); }
 
 ::warploom::core::Result<void> VulkanSwapchain::query_support(
     VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!physical_device || !surface) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
@@ -24,7 +24,7 @@ VulkanSwapchain::~VulkanSwapchain() { cleanup(VK_NULL_HANDLE); }
 ::warploom::core::Result<void> VulkanSwapchain::create(
     VkDevice device, VkPhysicalDevice physical_device,
     VkSurfaceKHR surface, const SwapchainConfig& config) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || !physical_device || !surface || config.width == 0 || config.height == 0) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -114,7 +114,7 @@ VulkanSwapchain::~VulkanSwapchain() { cleanup(VK_NULL_HANDLE); }
 }
 
 ::warploom::core::Result<void> VulkanSwapchain::create_image_views(VkDevice device) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || images_.empty()) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
@@ -152,7 +152,7 @@ VulkanSwapchain::~VulkanSwapchain() { cleanup(VK_NULL_HANDLE); }
 }
 
 void VulkanSwapchain::cleanup([[maybe_unused]] VkDevice device) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device) {
     for (auto view : image_views_) if (view) vkDestroyImageView(device, view, nullptr);
     if (swapchain_) vkDestroySwapchainKHR(device, swapchain_, nullptr);
@@ -172,7 +172,7 @@ void VulkanSwapchain::cleanup([[maybe_unused]] VkDevice device) noexcept {
   if (width == 0 || height == 0) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || !physical_device || !surface) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -192,7 +192,7 @@ void VulkanSwapchain::cleanup([[maybe_unused]] VkDevice device) noexcept {
 SwapchainSupportDetails VulkanSwapchain::query_swapchain_support(
     VkPhysicalDevice device, VkSurfaceKHR surface) {
   SwapchainSupportDetails details;
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || !surface) return details;
   vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
   std::uint32_t format_count = 0;
@@ -209,7 +209,7 @@ SwapchainSupportDetails VulkanSwapchain::query_swapchain_support(
   return details;
 }
 
-#if OMNICPP_VULKAN_TYPES_AVAILABLE
+#if WARPLOOM_VULKAN_TYPES_AVAILABLE
 VkSurfaceFormatKHR VulkanSwapchain::choose_surface_format(
     const std::vector<VkSurfaceFormatKHR>& available) {
   for (const auto& format : available) {

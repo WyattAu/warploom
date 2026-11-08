@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -14,7 +14,7 @@ VulkanHiZPyramid::~VulkanHiZPyramid() { cleanup(device_); }
     VkDevice device, VkPhysicalDevice physical_device,
     std::uint32_t width, std::uint32_t height, std::uint32_t levels,
     VulkanMemoryAllocator* allocator, const ImageSharing& sharing) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || !physical_device || width == 0 || height == 0 ||
       image_ != VK_NULL_HANDLE) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
@@ -163,10 +163,10 @@ VkImageView VulkanHiZPyramid::mip_view(std::uint32_t level) const noexcept {
 }
 
 void VulkanHiZPyramid::cleanup(VkDevice device) noexcept {
-#ifndef OMNICPP_HAS_VULKAN
+#ifndef WARPLOOM_HAS_VULKAN
   (void)device;
 #endif
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device) device = device_;
   if (device) {
     if (sampler_) vkDestroySampler(device, sampler_, nullptr);

@@ -1,6 +1,6 @@
 # WebAssembly (WASM) Builds
 
-This document outlines the requirements and expected behavior for WebAssembly (WASM) builds in the OmniCpp project using Emscripten.
+This document outlines the requirements and expected behavior for WebAssembly (WASM) builds in the Warploom project using Emscripten.
 
 ## Prerequisites
 
@@ -115,11 +115,11 @@ The build pipeline executes:
 build/
 ├── debug/emscripten/
 │   ├── bin/                    # Web deployment files
-│   │   ├── OmniCppStandalone.html    # Main HTML file
-│   │   ├── OmniCppStandalone.js      # JavaScript wrapper
-│   │   ├── OmniCppStandalone.wasm    # WebAssembly binary
-│   │   ├── OmniCppStandalone.data    # Preloaded assets
-│   │   └── OmniCppStandalone.wasm.map # Source map (debug builds)
+│   │   ├── WarploomStandalone.html    # Main HTML file
+│   │   ├── WarploomStandalone.js      # JavaScript wrapper
+│   │   ├── WarploomStandalone.wasm    # WebAssembly binary
+│   │   ├── WarploomStandalone.data    # Preloaded assets
+│   │   └── WarploomStandalone.wasm.map # Source map (debug builds)
 │   ├── CMakeFiles/             # Build artifacts
 │   └── conan/                  # Conan artifacts
 └── release/emscripten/
@@ -171,13 +171,13 @@ Assets are preloaded into Emscripten's virtual filesystem:
 
 ```cmake
 # Preload assets command
---preload-file ${CMAKE_SOURCE_DIR}/assets@share/OmniCppStandalone/assets
+--preload-file ${CMAKE_SOURCE_DIR}/assets@share/WarploomStandalone/assets
 ```
 
 Assets are accessed at runtime via:
 ```cpp
 // Load file from virtual filesystem
-std::ifstream file("share/OmniCppStandalone/assets/OmniCppLogo.svg");
+std::ifstream file("share/WarploomStandalone/assets/WarploomLogo.svg");
 ```
 
 ### HTML Shell File
@@ -234,15 +234,15 @@ Vulkan is **replaced with WebGL2** in web builds:
 
 ```bash
 # Complete WebAssembly build
-python OmniCppController.py build both "Zero to Hero" emscripten Debug
+python WarploomController.py build both "Zero to Hero" emscripten Debug
 
 # Individual steps
-python OmniCppController.py build standalone "Conan install" emscripten Debug
-python OmniCppController.py build standalone "CMake configure" emscripten Debug
-python OmniCppController.py build standalone "Build" emscripten Debug
+python WarploomController.py build standalone "Conan install" emscripten Debug
+python WarploomController.py build standalone "CMake configure" emscripten Debug
+python WarploomController.py build standalone "Build" emscripten Debug
 
 # Launch development server
-python OmniCppController.py build standalone "Launch Emscripten Server" noNeedArch
+python WarploomController.py build standalone "Launch Emscripten Server" noNeedArch
 ```
 
 ### CMake Direct
@@ -255,7 +255,7 @@ cmake --preset emscripten-debug -DBUILD_LIBRARY=ON -DBUILD_STANDALONE=ON
 cmake --build build/debug/emscripten -j $(nproc)
 
 # Serve locally
-emrun build/debug/emscripten/bin/OmniCppStandalone.html
+emrun build/debug/emscripten/bin/WarploomStandalone.html
 ```
 
 ### Makefile
@@ -281,7 +281,7 @@ The build system includes a development server:
 
 ```bash
 # Launch server (Ctrl+Alt+E in VSCode)
-python OmniCppController.py build standalone "Launch Emscripten Server" noNeedArch
+python WarploomController.py build standalone "Launch Emscripten Server" noNeedArch
 ```
 
 Features:
@@ -295,7 +295,7 @@ Features:
 ```bash
 cd build/debug/emscripten/bin
 python3 -m http.server 8000
-# Access at http://localhost:8000/OmniCppStandalone.html
+# Access at http://localhost:8000/WarploomStandalone.html
 ```
 
 ## Troubleshooting
@@ -455,7 +455,7 @@ WebAssembly builds are supported in GitHub Actions:
   run: |
     source $EMSDK/emsdk_env.sh
     export EM_CACHE=${{ github.workspace }}/.emscripten_cache
-    python OmniCppController.py build both "Zero to Hero" emscripten Release
+    python WarploomController.py build both "Zero to Hero" emscripten Release
 ```
 
 ## Browser Compatibility

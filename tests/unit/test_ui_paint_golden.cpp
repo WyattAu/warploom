@@ -19,7 +19,7 @@
 namespace {
 
 namespace ui = warploom::ui;
-using omnicpp::render::SoftwareRasterizer;
+using warploom::render::SoftwareRasterizer;
 
 constexpr ui::TextMetrics kMetrics{};  // 8 px chars, 16 px lines
 

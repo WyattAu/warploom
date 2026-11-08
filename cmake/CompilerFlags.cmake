@@ -1,5 +1,5 @@
 # ============================================================================
-# OmniCpp Template - Compiler Flags Configuration
+# Warploom Template - Compiler Flags Configuration
 # ============================================================================
 # Defines compiler-specific flags for all supported compilers
 # Supports: MSVC, MSVC-Clang, MinGW-GCC, MinGW-Clang, GCC, Clang
@@ -50,7 +50,7 @@ endif()
 # ============================================================================
 # Warning Flags - STRICT COMPLIANCE MODE
 # NOTE: Warnings are NOT treated as errors globally to avoid breaking external dependencies
-# Use omnicpp_set_strict_warnings(target) to apply strict flags to project targets only
+# Use warploom_set_strict_warnings(target) to apply strict flags to project targets only
 # ============================================================================
 if(MSVC OR WARPLOOM_COMPILER_MSVC_CLANG)
     # MSVC warning flags - Maximum strictness (but not global Werror)
@@ -197,7 +197,7 @@ function(warploom_set_strict_warnings target)
     endif()
 endfunction()
 # Legacy spelling kept for the transition window (S5-B identity plan).
-function(omnicpp_set_strict_warnings target)
+function(warploom_set_strict_warnings target)
     warploom_set_strict_warnings(${target})
 endfunction()
 
@@ -388,7 +388,7 @@ endif()
 # Clang-Tidy Integration (Phase 1 Compliance)
 # ============================================================================
 # NOTE: clang-tidy is configured per-target to avoid linting external dependencies
-# Use omnicpp_enable_clang_tidy(target) to enable for specific targets
+# Use warploom_enable_clang_tidy(target) to enable for specific targets
 # ============================================================================
 find_program(CLANG_TIDY_EXE NAMES clang-tidy clang-tidy-19 clang-tidy-18 clang-tidy-17)
 
@@ -398,7 +398,7 @@ if(CLANG_TIDY_EXE)
     if(WARPLOOM_ENABLE_CLANG_TIDY)
         # Define a function to enable clang-tidy for specific targets only
         # This prevents clang-tidy from running on external dependencies
-        function(omnicpp_enable_clang_tidy target)
+        function(warploom_enable_clang_tidy target)
             set(CLANG_TIDY_CHECKS
                 "*,-readability-magic-numbers,-cppcoreguidelines-avoid-magic-numbers,-misc-include-cleaner,-portability-template-virtual-member-function"
             )
@@ -414,7 +414,7 @@ else()
     message(STATUS "clang-tidy not found, static analysis disabled")
     
     # Define a no-op function if clang-tidy is not available
-    function(omnicpp_enable_clang_tidy target)
+    function(warploom_enable_clang_tidy target)
         # No-op
     endfunction()
 endif()

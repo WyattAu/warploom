@@ -17,10 +17,10 @@
 
 namespace {
 
-using omnicpp::core::ControlCommand;
-using omnicpp::core::ControlHost;
-using omnicpp::core::ControlReply;
-using omnicpp::core::ControlServer;
+using warploom::core::ControlCommand;
+using warploom::core::ControlHost;
+using warploom::core::ControlReply;
+using warploom::core::ControlServer;
 
 //! Deterministic fake host: pauses/steps/counts, records camera/sun/cube.
 class FakeHost final : public ControlHost {
@@ -120,7 +120,7 @@ class FakeHost final : public ControlHost {
 class ControlServerTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    path_ = std::string("/tmp/omnicpp_test_control_") +
+    path_ = std::string("/tmp/warploom_test_control_") +
             std::to_string(::getpid()) + "_" +
             std::to_string(reinterpret_cast<std::uintptr_t>(this)) + ".sock";
     ::unlink(path_.c_str());
@@ -352,7 +352,7 @@ TEST_F(ControlServerTest, WireParityEveryKindParsesAndEnforcesPayloads) {
   (void)server.poll(host);
   (void)read_message(fd);  // swallow welcome
 
-  const auto& table = omnicpp::core::ControlCommand::kind_names();
+  const auto& table = warploom::core::ControlCommand::kind_names();
   ASSERT_FALSE(table.empty());
 
   // Names unique; reverse lookup agrees.
@@ -537,7 +537,7 @@ TEST(ControlServerBasics, DoubleStartRejectedAndStopIsIdempotent) {
   FakeHost host;
   ControlServer server;
   const std::string path =
-      std::string("/tmp/omnicpp_test_control_basics_") +
+      std::string("/tmp/warploom_test_control_basics_") +
       std::to_string(reinterpret_cast<std::uintptr_t>(&server)) + ".sock";
   ::unlink(path.c_str());
   std::string error;

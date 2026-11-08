@@ -444,7 +444,7 @@ python --version
 pip install -r requirements.txt
 
 # Run Python scripts
-python OmniCppController.py --help
+python WarploomController.py --help
 ```
 
 ### Checking Available Tools

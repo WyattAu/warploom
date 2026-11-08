@@ -3,7 +3,7 @@
 
 The mkdocs check was added because mkdocs.yml pointed at eight pages that
 have never existed (api/modules/math.md, development/building.md,
-about/changelog.md, ...) while still naming the project "OmniCppLib" and
+about/changelog.md, ...) while still naming the project "WarploomLib" and
 "your-org/your-repo". This script only ever looked at Markdown link syntax,
 so the documentation CI job stayed green the whole time.
 """
@@ -99,7 +99,7 @@ def main() -> int:
             # Some docs use source-reference links with line numbers or point
             # at files omitted from this trimmed checkout. Keep the checker
             # focused on links that can be validated locally.
-            if target.startswith(("../.specs/", "../impl/", "../cmake/", "../omni_scripts/", "../include/", "../src/", "../tests/")) or original_target.endswith("/"):
+            if target.startswith(("../.specs/", "../impl/", "../cmake/", "../warploom_scripts/", "../include/", "../src/", "../tests/")) or original_target.endswith("/"):
                 continue
             if not (resolved.is_dir() and (resolved / "index.md").exists()):
                 missing.append(f"{source.relative_to(root)}: {raw_target}")

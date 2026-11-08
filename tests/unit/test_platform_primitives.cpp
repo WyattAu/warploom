@@ -12,18 +12,18 @@ namespace {
 // ============================================================================
 
 TEST(SteadyClock, NowIsMonotonic) {
-  auto a = omnicpp::core::SteadyClock::now();
-  auto b = omnicpp::core::SteadyClock::now();
+  auto a = warploom::core::SteadyClock::now();
+  auto b = warploom::core::SteadyClock::now();
   EXPECT_GE(b.time_since_epoch().count(), a.time_since_epoch().count());
 }
 
 TEST(SteadyClock, NowNsIsPositive) {
-  const auto ns = omnicpp::core::SteadyClock::now_ns();
+  const auto ns = warploom::core::SteadyClock::now_ns();
   EXPECT_GT(ns, 0);
 }
 
 TEST(SteadyClock, NowSecondsIsPositive) {
-  const auto s = omnicpp::core::SteadyClock::now_seconds();
+  const auto s = warploom::core::SteadyClock::now_seconds();
   EXPECT_GT(s, 0.0);
 }
 
@@ -32,7 +32,7 @@ TEST(SteadyClock, NowSecondsIsPositive) {
 // ============================================================================
 
 TEST(ManualTimer, ElapsedIncreases) {
-  omnicpp::core::ManualTimer timer;
+  warploom::core::ManualTimer timer;
   EXPECT_GE(timer.elapsed_ns(), 0);
   volatile int x = 0;
   for (int i = 0; i < 1000; ++i) x += i;
@@ -43,7 +43,7 @@ TEST(ManualTimer, ElapsedIncreases) {
 }
 
 TEST(ManualTimer, ResetReturnsToZero) {
-  omnicpp::core::ManualTimer timer;
+  warploom::core::ManualTimer timer;
   volatile int x = 0;
   for (int i = 0; i < 1000; ++i) x += i;
   // Reading x is what keeps the busy-work alive; the sum is not the point,
@@ -54,7 +54,7 @@ TEST(ManualTimer, ResetReturnsToZero) {
 }
 
 TEST(ManualTimer, ElapsedSecondsMatchesNs) {
-  omnicpp::core::ManualTimer timer;
+  warploom::core::ManualTimer timer;
   volatile int x = 0;
   for (int i = 0; i < 1000; ++i) x += i;
   // Reading x is what keeps the busy-work alive; the sum is not the point,
@@ -72,7 +72,7 @@ TEST(ManualTimer, ElapsedSecondsMatchesNs) {
 TEST(ScopedTimer, MeasuresElapsedNanoseconds) {
   std::int64_t elapsed = 0;
   {
-    omnicpp::core::ScopedTimer timer(elapsed);
+    warploom::core::ScopedTimer timer(elapsed);
     volatile int x = 0;
     for (int i = 0; i < 1000; ++i) x += i;
   // Reading x is what keeps the busy-work alive; the sum is not the point,
@@ -87,20 +87,20 @@ TEST(ScopedTimer, MeasuresElapsedNanoseconds) {
 // ============================================================================
 
 TEST(ThreadPool, DefaultSizeIsHardwareConcurrency) {
-  omnicpp::core::ThreadPool pool;
+  warploom::core::ThreadPool pool;
   EXPECT_GE(pool.size(), 1u);
   EXPECT_EQ(pool.size(), std::thread::hardware_concurrency());
   pool.shutdown();
 }
 
 TEST(ThreadPool, ExplicitSize) {
-  omnicpp::core::ThreadPool pool(4);
+  warploom::core::ThreadPool pool(4);
   EXPECT_EQ(pool.size(), 4u);
   pool.shutdown();
 }
 
 TEST(ThreadPool, SubmitsAndExecutesWork) {
-  omnicpp::core::ThreadPool pool(2);
+  warploom::core::ThreadPool pool(2);
   std::atomic<int> counter{0};
 
   for (std::size_t i = 0; i < static_cast<std::size_t>(10); ++i) {
@@ -114,7 +114,7 @@ TEST(ThreadPool, SubmitsAndExecutesWork) {
 }
 
 TEST(ThreadPool, ConcurrentSubmission) {
-  omnicpp::core::ThreadPool pool(4);
+  warploom::core::ThreadPool pool(4);
   std::atomic<int> counter{0};
 
   std::vector<std::thread> submitters;
@@ -134,7 +134,7 @@ TEST(ThreadPool, ConcurrentSubmission) {
 }
 
 TEST(ThreadPool, RejectsAfterShutdown) {
-  omnicpp::core::ThreadPool pool(1);
+  warploom::core::ThreadPool pool(1);
   pool.shutdown();
   EXPECT_FALSE(pool.submit([]() noexcept {}));
   EXPECT_TRUE(pool.is_shutdown());
@@ -145,11 +145,11 @@ TEST(ThreadPool, RejectsAfterShutdown) {
 // ============================================================================
 
 TEST(Affinity, HardwareConcurrencyIsPositive) {
-  EXPECT_GE(omnicpp::core::Affinity::hardware_concurrency(), 1u);
+  EXPECT_GE(warploom::core::Affinity::hardware_concurrency(), 1u);
 }
 
 TEST(Affinity, PinToCpuSucceeds) {
-  EXPECT_TRUE(omnicpp::core::Affinity::pin_to_cpu(0));
+  EXPECT_TRUE(warploom::core::Affinity::pin_to_cpu(0));
 }
 
 } // namespace

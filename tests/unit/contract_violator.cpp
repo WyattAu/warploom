@@ -7,6 +7,6 @@ int main() {
   // every test run. The violation diagnostic (stderr) is the contract.
   struct rlimit zero { 0, 0 };
   setrlimit(RLIMIT_CORE, &zero);
-  OMNICPP_CONTRACT(1 == 2);
+  WARPLOOM_CONTRACT(1 == 2);
   return 0;
 }

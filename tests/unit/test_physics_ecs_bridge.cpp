@@ -23,28 +23,28 @@
 
 namespace {
 
-using omnicpp::editor::DocumentProjection;
-using omnicpp::editor::DocumentTransform;
-using omnicpp::editor::EditorSession;
-using omnicpp::physics::PhysicsBody;
-using omnicpp::physics::PhysicsWorld;
+using warploom::editor::DocumentProjection;
+using warploom::editor::DocumentTransform;
+using warploom::editor::EditorSession;
+using warploom::physics::PhysicsBody;
+using warploom::physics::PhysicsWorld;
 
 constexpr double kDt = 1.0 / 60.0;
 
 //! Give a session `count` cubes with full transforms, each with a body.
 void seed_scene(EditorSession& session, int count, float inverse_mass) {
-  omnicpp::editor::SceneDocument document{};
+  warploom::editor::SceneDocument document{};
   for (std::size_t i = 0; i < static_cast<std::size_t>(count); ++i) {
-    omnicpp::editor::SceneObject object{};
+    warploom::editor::SceneObject object{};
     object.id = static_cast<std::uint64_t>(i) + 1U;
     object.type_id = 1U;
     object.name = "body";
-    object.properties["position"] = omnicpp::editor::PropValue::make_vec3(
+    object.properties["position"] = warploom::editor::PropValue::make_vec3(
         0.0, 5.0, 0.0);
     object.properties["rotation"] =
-        omnicpp::editor::PropValue::make_vec3(0.0, 0.0, 0.0);
+        warploom::editor::PropValue::make_vec3(0.0, 0.0, 0.0);
     object.properties["scale"] =
-        omnicpp::editor::PropValue::make_vec3(1.0, 1.0, 1.0);
+        warploom::editor::PropValue::make_vec3(1.0, 1.0, 1.0);
     document.objects.push_back(object);
     if (object.id >= document.next_object_id) {
       document.next_object_id = object.id + 1U;

@@ -140,8 +140,8 @@ examples/rust_module/target/
 # Compiled SPIR-V is a build product of cmake/Shaders.cmake, not a source.
 assets/shaders/*.spv
 
-# Pre-rename Python build controller artifacts (omni_scripts is retired)
-omni_scripts/**/__pycache__/
+# Python build controller artifacts
+warploom_scripts/**/__pycache__/
 *.egg-info/
 .pytest_cache/
 

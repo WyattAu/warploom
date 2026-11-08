@@ -36,10 +36,10 @@
 
 namespace {
 
-using omnicpp::render::SceneMatrix;
-using omnicpp::render::SceneMesh;
-using omnicpp::render::VulkanPbrScene;
-using omnicpp::render::scene_identity_matrix;
+using warploom::render::SceneMatrix;
+using warploom::render::SceneMesh;
+using warploom::render::VulkanPbrScene;
+using warploom::render::scene_identity_matrix;
 
 SceneMatrix make_perspective(float fov, float aspect, float zn, float zf) {
   SceneMatrix m = scene_identity_matrix();
@@ -77,9 +77,9 @@ void build_unit_cube(std::vector<float>& verts, std::vector<uint32_t>& idx) {
   }
 }
 
-struct SolidTexture { VkImage img{}; VkImageView view{}; VkSampler sampler{}; omnicpp::render::Allocation alloc{}; };
+struct SolidTexture { VkImage img{}; VkImageView view{}; VkSampler sampler{}; warploom::render::Allocation alloc{}; };
 bool make_white(VkDevice d, VkPhysicalDevice pd, VkQueue q, uint32_t f,
-    omnicpp::render::VulkanMemoryAllocator& a, SolidTexture& out) {
+    warploom::render::VulkanMemoryAllocator& a, SolidTexture& out) {
   out = {};
   VkImageCreateInfo ii{};
   ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO; ii.imageType = VK_IMAGE_TYPE_2D;
@@ -90,7 +90,7 @@ bool make_white(VkDevice d, VkPhysicalDevice pd, VkQueue q, uint32_t f,
   auto m = a.bind_image(out.img, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   if (!m.is_ok()) return false;
   out.alloc = m.value();
-  omnicpp::render::VulkanFrameUploadArena arena;
+  warploom::render::VulkanFrameUploadArena arena;
   if (!arena.initialize(d, pd, f, 1, 1<<20).is_ok()) return false;
   if (!arena.begin_frame(0).is_ok()) return false;
   auto s = arena.acquire(4);
@@ -112,7 +112,7 @@ bool make_white(VkDevice d, VkPhysicalDevice pd, VkQueue q, uint32_t f,
   vkCreateSampler(d, &si, nullptr, &out.sampler);
   return true;
 }
-void destroy_solid(VkDevice d, omnicpp::render::VulkanMemoryAllocator& a, SolidTexture& t) {
+void destroy_solid(VkDevice d, warploom::render::VulkanMemoryAllocator& a, SolidTexture& t) {
   if (t.sampler) vkDestroySampler(d, t.sampler, nullptr);
   if (t.view) vkDestroyImageView(d, t.view, nullptr);
   if (t.alloc.is_valid()) a.destroy_allocation(t.alloc);
@@ -124,9 +124,9 @@ void destroy_solid(VkDevice d, omnicpp::render::VulkanMemoryAllocator& a, SolidT
 // Post-process test harness
 // ============================================================================
 struct PostProcessHarness {
-  omnicpp::render::VulkanContext ctx;
-  omnicpp::render::VulkanMemoryAllocator alloc;
-  omnicpp::render::VulkanDescriptorManager desc;
+  warploom::render::VulkanContext ctx;
+  warploom::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanDescriptorManager desc;
   VkDescriptorSetLayout mesh_layout{};
   VkDescriptorSetLayout tex_layout{};
   VkDescriptorSetLayout mat_layout{};
@@ -137,15 +137,15 @@ struct PostProcessHarness {
   //! Stands in for an absent bloom buffer: tonemap_fxaa.frag always samples
   //! binding 1, and a black 1x1 makes the additive term exactly zero.
   SolidTexture black;
-  omnicpp::render::Allocation cube_va{}, cube_ia{};
+  warploom::render::Allocation cube_va{}, cube_ia{};
   SceneMesh cube_mesh{};
   VkDescriptorSet cube_ds{};
-  omnicpp::render::Allocation mat_buf{};
+  warploom::render::Allocation mat_buf{};
   uint32_t qf{0};
 
   // HDR scene target (R16G16B16A16_SFLOAT).
   VkImage hdr_image{};
-  omnicpp::render::Allocation hdr_mem{};
+  warploom::render::Allocation hdr_mem{};
   VkImageView hdr_view{};
   VkSampler hdr_sampler{};
   VkRenderPass hdr_rp{};
@@ -153,18 +153,18 @@ struct PostProcessHarness {
   VkDescriptorSet hdr_ds{};
 
   // Post-process pipelines.
-  omnicpp::render::VulkanPipeline tonemap_pipe;
-  omnicpp::render::VulkanPipeline bloom_down_pipe;
-  omnicpp::render::VulkanPipeline bloom_up_pipe;
+  warploom::render::VulkanPipeline tonemap_pipe;
+  warploom::render::VulkanPipeline bloom_down_pipe;
+  warploom::render::VulkanPipeline bloom_up_pipe;
 
   // Half-res bloom targets (same format/layout contract as hdr_image).
   VkImage bloom_a_image{};
-  omnicpp::render::Allocation bloom_a_mem{};
+  warploom::render::Allocation bloom_a_mem{};
   VkImageView bloom_a_view{};
   VkRenderPass bloom_a_rp{};
   VkFramebuffer bloom_a_fb{};
   VkImage bloom_b_image{};
-  omnicpp::render::Allocation bloom_b_mem{};
+  warploom::render::Allocation bloom_b_mem{};
   VkImageView bloom_b_view{};
   VkRenderPass bloom_b_rp{};
   VkFramebuffer bloom_b_fb{};
@@ -252,7 +252,7 @@ struct PostProcessHarness {
                            const VkImageViewCreateInfo& vi_base,
                            const VkRenderPassCreateInfo& rpc,
                            const VkFramebufferCreateInfo& fbi_base,
-                           VkImage& image, omnicpp::render::Allocation* mem,
+                           VkImage& image, warploom::render::Allocation* mem,
                            VkImageView& view, VkRenderPass& rp,
                            VkFramebuffer& fb) {
     if (vkCreateImage(dev, &ii, nullptr, &image) != VK_SUCCESS) { std::fprintf(stderr, "bloom: vkCreateImage failed\n"); return false; }
@@ -410,9 +410,9 @@ struct PostProcessHarness {
     // Binding 1: the bloom slot. Bound to the black texture so the tonemap's
     // additive term is zero and the existing assertions stay meaningful.
     {
-      auto pool = omnicpp::render::VulkanRenderer::create_command_pool(dev, qf);
+      auto pool = warploom::render::VulkanRenderer::create_command_pool(dev, qf);
       if (pool.is_ok()) {
-        auto cb = omnicpp::render::VulkanRenderer::allocate_command_buffer(dev, pool.value());
+        auto cb = warploom::render::VulkanRenderer::allocate_command_buffer(dev, pool.value());
         if (cb.is_ok()) {
           VkCommandBuffer cmd = cb.value();
           VkCommandBufferBeginInfo bi{};
@@ -476,13 +476,13 @@ struct PostProcessHarness {
   }
 
   // Render an HDR scene to hdr_image, then tonemap+FXAA to out_target.
-  omnicpp_test::ReadbackResult render_and_postprocess(
+  warploom_test::ReadbackResult render_and_postprocess(
       const VulkanPbrScene& scene,
-      omnicpp::render::VulkanOffscreenTarget& out_target) {
+      warploom::render::VulkanOffscreenTarget& out_target) {
     VkDevice dev = ctx.device();
-    auto pr = omnicpp::render::VulkanRenderer::create_command_pool(dev, qf);
+    auto pr = warploom::render::VulkanRenderer::create_command_pool(dev, qf);
     if (!pr.is_ok()) return {};
-    auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(dev, pr.value());
+    auto cr = warploom::render::VulkanRenderer::allocate_command_buffer(dev, pr.value());
     if (!cr.is_ok()) { vkDestroyCommandPool(dev, pr.value(), nullptr); return {}; }
     VkCommandBuffer cb = cr.value();
     VkFenceCreateInfo fi{}; fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -497,15 +497,15 @@ struct PostProcessHarness {
     // the write -> read barrier between the nodes from the attachment
     // finalLayout + tonemap sampled declaration. Pass contexts travel via
     // user_data shims.
-    omnicpp::render::VulkanRenderer frame_renderer;
+    warploom::render::VulkanRenderer frame_renderer;
 
-    omnicpp::render::GraphPass hdr_pass{};
+    warploom::render::GraphPass hdr_pass{};
     hdr_pass.name = "hdr_scene";
     hdr_pass.render_pass = hdr_rp;
     hdr_pass.framebuffer = hdr_fb;
     hdr_pass.width = 256;
     hdr_pass.height = 256;
-    hdr_pass.attachments = {omnicpp::render::color_attachment(
+    hdr_pass.attachments = {warploom::render::color_attachment(
         hdr_image, hdr_view, VK_FORMAT_R16G16B16A16_SFLOAT,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)};
     VkClearValue hdr_clear{};
@@ -514,15 +514,15 @@ struct PostProcessHarness {
     hdr_pass.clear_value_count = 1;
     struct SceneCtx {
       const VulkanPbrScene* scene;
-      omnicpp::render::VulkanRenderer* self;
+      warploom::render::VulkanRenderer* self;
     } scene_ctx{&scene, &frame_renderer};
     struct TmCtx {
-      omnicpp::render::VulkanRenderer* self;
-      omnicpp::render::FullscreenPass* pass;
+      warploom::render::VulkanRenderer* self;
+      warploom::render::FullscreenPass* pass;
       VkDescriptorSet set0;
     } tm_ctx{&frame_renderer, nullptr, hdr_ds};
     hdr_pass.user_data = &scene_ctx;
-    omnicpp::render::FullscreenPass tm{};
+    warploom::render::FullscreenPass tm{};
     tm.pipeline = tonemap_pipe.pipeline();
     tm.pipeline_layout = tonemap_pipe.pipeline_layout();
     tm.render_pass = out_target.render_pass();
@@ -548,19 +548,19 @@ struct PostProcessHarness {
     tm.push_stage_flags = VK_SHADER_STAGE_FRAGMENT_BIT;
     tm_ctx.pass = &tm;
 
-    omnicpp::render::GraphPass tm_pass =
-        omnicpp::render::fullscreen_graph_pass(tm);
+    warploom::render::GraphPass tm_pass =
+        warploom::render::fullscreen_graph_pass(tm);
     tm_pass.name = "tonemap_fxaa";
     tm_pass.user_data = &tm_ctx;
 
-    const std::vector<omnicpp::render::GraphNode> nodes = {
-        omnicpp::render::GraphNode::from_render(hdr_pass),
-        omnicpp::render::GraphNode::from_render(tm_pass),
+    const std::vector<warploom::render::GraphNode> nodes = {
+        warploom::render::GraphNode::from_render(hdr_pass),
+        warploom::render::GraphNode::from_render(tm_pass),
     };
-    const auto compiled = omnicpp::render::compile_graph(nodes);
+    const auto compiled = warploom::render::compile_graph(nodes);
 
-    omnicpp::render::execute_graph(cb, nodes, compiled,
-        [](VkCommandBuffer command_buffer, const omnicpp::render::GraphPass& p,
+    warploom::render::execute_graph(cb, nodes, compiled,
+        [](VkCommandBuffer command_buffer, const warploom::render::GraphPass& p,
            void* user_data) {
           if (p.name != nullptr && std::strcmp(p.name, "hdr_scene") == 0) {
             auto& sc = *static_cast<SceneCtx*>(user_data);
@@ -568,7 +568,7 @@ struct PostProcessHarness {
                                             p.height);
           } else {
             auto& fx = *static_cast<TmCtx*>(user_data);
-            (void)omnicpp::render::record_fullscreen_draw(command_buffer, *fx.pass,
+            (void)warploom::render::record_fullscreen_draw(command_buffer, *fx.pass,
                                                   fx.set0);
           }
         },
@@ -583,7 +583,7 @@ struct PostProcessHarness {
     vkDestroyFence(dev, fence, nullptr);
     vkDestroyCommandPool(dev, pr.value(), nullptr);
 
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         ctx.physical_device(), dev, ctx.graphics_queue(), qf,
         out_target.image(), out_target.format(), 256, 256,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -631,7 +631,7 @@ TEST(VulkanHardware, PostProcessTonemapFxaa) {
     GTEST_SKIP() << "Vulkan unavailable";
 
   // Out target for the tonemapped output (B8G8R8A8_UNORM, color + depth).
-  omnicpp::render::VulkanOffscreenTarget out;
+  warploom::render::VulkanOffscreenTarget out;
   if (!out.create(h.ctx.device(), h.ctx.physical_device(), VK_FORMAT_B8G8R8A8_UNORM, 256, 256, &h.alloc).is_ok()||
       !out.create_depth(h.ctx.device(), h.ctx.physical_device(), VK_FORMAT_D32_SFLOAT).is_ok()||
       !out.create_render_pass(h.ctx.device()).is_ok()||
@@ -647,7 +647,7 @@ TEST(VulkanHardware, PostProcessTonemapFxaa) {
   }
 
   // Scene pipeline: renders to hdr_rp (R16G16B16A16_SFLOAT, no depth).
-  omnicpp::render::VulkanPipeline scene_pipe;
+  warploom::render::VulkanPipeline scene_pipe;
   std::string sd = WARPLOOM_TEST_SHADER_DIR;
   if (!scene_pipe.load_shader_stage_file(h.ctx.device(), sd+"/pbr_scene.vert.spv","vertex").is_ok()||
       !scene_pipe.load_shader_stage_file(h.ctx.device(), sd+"/pbr_scene.frag.spv","fragment").is_ok()) {
@@ -664,7 +664,7 @@ TEST(VulkanHardware, PostProcessTonemapFxaa) {
   }
 
   // Material: bright white (HDR, base_color 5.0).
-  omnicpp::render::PbrMaterialData mat{};
+  warploom::render::PbrMaterialData mat{};
   mat.base_color_factor = {5.0f, 5.0f, 5.0f, 1.0f};
   mat.metallic_factor = 0; mat.roughness_factor = 0.5f;
   std::memcpy(h.mat_buf.mapped, &mat, sizeof(mat));
@@ -677,7 +677,7 @@ TEST(VulkanHardware, PostProcessTonemapFxaa) {
   scene.texture_set = h.tex_set;
   scene.material_set = h.mat_set;
 
-  omnicpp::render::ScenePbrObject obj{};
+  warploom::render::ScenePbrObject obj{};
   obj.mesh = &h.cube_mesh;
   obj.model = make_translation(0,0,-4);
   obj.material_index = 0;
@@ -709,12 +709,12 @@ namespace {
 
 //! Runs the bloom half of the chain over the already-rendered HDR image and
 //! returns the bloom output (bloom_b, 128x128) read back.
-omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
-                                          omnicpp::render::VulkanOffscreenTarget& /*out*/) {
+warploom_test::ReadbackResult render_bloom(PostProcessHarness& h,
+                                          warploom::render::VulkanOffscreenTarget& /*out*/) {
   VkDevice dev = h.ctx.device();
-  auto pr = omnicpp::render::VulkanRenderer::create_command_pool(dev, h.qf);
+  auto pr = warploom::render::VulkanRenderer::create_command_pool(dev, h.qf);
   if (!pr.is_ok()) return {};
-  auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(dev, pr.value());
+  auto cr = warploom::render::VulkanRenderer::allocate_command_buffer(dev, pr.value());
   if (!cr.is_ok()) { vkDestroyCommandPool(dev, pr.value(), nullptr); return {}; }
   VkCommandBuffer cb = cr.value();
   VkFenceCreateInfo fi{}; fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -724,8 +724,8 @@ omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
   bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(cb, &bi);
 
-  omnicpp::render::VulkanRenderer frame_renderer;
-  omnicpp::render::FullscreenPass down{};
+  warploom::render::VulkanRenderer frame_renderer;
+  warploom::render::FullscreenPass down{};
   down.pipeline = h.bloom_down_pipe.pipeline();
   down.pipeline_layout = h.bloom_down_pipe.pipeline_layout();
   down.render_pass = h.bloom_a_rp;
@@ -737,15 +737,15 @@ omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
   down.samples[0] = {h.hdr_image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                      VK_IMAGE_ASPECT_COLOR_BIT};
   down.sample_count = 1;
-  auto down_pass = omnicpp::render::fullscreen_graph_pass(down);
+  auto down_pass = warploom::render::fullscreen_graph_pass(down);
   down_pass.name = "bloom_down";
   // Declare the write: bloom_a is the color attachment (graph metadata so
   // compile_graph emits the write->sample barrier for the up pass).
-  down_pass.attachments = {omnicpp::render::color_attachment(
+  down_pass.attachments = {warploom::render::color_attachment(
       h.bloom_a_image, h.bloom_a_view, VK_FORMAT_R16G16B16A16_SFLOAT,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)};
 
-  omnicpp::render::FullscreenPass up{};
+  warploom::render::FullscreenPass up{};
   up.pipeline = h.bloom_up_pipe.pipeline();
   up.pipeline_layout = h.bloom_up_pipe.pipeline_layout();
   up.render_pass = h.bloom_b_rp;
@@ -755,28 +755,28 @@ omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
   up.samples[0] = {h.bloom_a_image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                    VK_IMAGE_ASPECT_COLOR_BIT};
   up.sample_count = 1;
-  auto up_pass = omnicpp::render::fullscreen_graph_pass(up);
+  auto up_pass = warploom::render::fullscreen_graph_pass(up);
   up_pass.name = "bloom_up";
 
-  struct Ctx { omnicpp::render::VulkanRenderer* self;
-               omnicpp::render::FullscreenPass* pass;
+  struct Ctx { warploom::render::VulkanRenderer* self;
+               warploom::render::FullscreenPass* pass;
                VkDescriptorSet set; } dctx{&frame_renderer, &down, h.bloom_src_ds};
-  struct Uctx { omnicpp::render::VulkanRenderer* self;
-                omnicpp::render::FullscreenPass* pass;
+  struct Uctx { warploom::render::VulkanRenderer* self;
+                warploom::render::FullscreenPass* pass;
                 VkDescriptorSet set; } uctx{&frame_renderer, &up, h.bloom_a_ds};
   down_pass.user_data = &dctx;
   up_pass.user_data = &uctx;
 
-  const std::vector<omnicpp::render::GraphNode> nodes = {
-      omnicpp::render::GraphNode::from_render(down_pass),
-      omnicpp::render::GraphNode::from_render(up_pass),
+  const std::vector<warploom::render::GraphNode> nodes = {
+      warploom::render::GraphNode::from_render(down_pass),
+      warploom::render::GraphNode::from_render(up_pass),
   };
-  const auto compiled = omnicpp::render::compile_graph(nodes);
-  omnicpp::render::execute_graph(cb, nodes, compiled,
-      [](VkCommandBuffer command_buffer, const omnicpp::render::GraphPass& /*p*/,
+  const auto compiled = warploom::render::compile_graph(nodes);
+  warploom::render::execute_graph(cb, nodes, compiled,
+      [](VkCommandBuffer command_buffer, const warploom::render::GraphPass& /*p*/,
          void* user_data) {
         auto* cx = static_cast<Ctx*>(user_data);
-        (void)omnicpp::render::record_fullscreen_draw(command_buffer, *cx->pass,
+        (void)warploom::render::record_fullscreen_draw(command_buffer, *cx->pass,
                                                cx->set);
       },
       nullptr);
@@ -791,7 +791,7 @@ omnicpp_test::ReadbackResult render_bloom(PostProcessHarness& h,
   vkDestroyFence(dev, fence, nullptr);
   vkDestroyCommandPool(dev, pr.value(), nullptr);
 
-  return omnicpp_test::readback_swapchain_image(
+  return warploom_test::readback_swapchain_image(
       h.ctx.physical_device(), dev, h.ctx.graphics_queue(), h.qf,
       h.bloom_b_image, VK_FORMAT_R16G16B16A16_SFLOAT, 128, 128,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -808,7 +808,7 @@ TEST(VulkanHardware, BloomExtractsAndSpreadsBrightEnergy) {
   }
 
   // Out target + pipelines: same contract as the tonemap test.
-  omnicpp::render::VulkanOffscreenTarget out;
+  warploom::render::VulkanOffscreenTarget out;
   if (!out.create(h.ctx.device(), h.ctx.physical_device(), VK_FORMAT_B8G8R8A8_UNORM, 256, 256, &h.alloc).is_ok() ||
       !out.create_depth(h.ctx.device(), h.ctx.physical_device(), VK_FORMAT_D32_SFLOAT).is_ok() ||
       !out.create_render_pass(h.ctx.device()).is_ok() ||
@@ -821,7 +821,7 @@ TEST(VulkanHardware, BloomExtractsAndSpreadsBrightEnergy) {
     h.cleanup(); out.cleanup(h.ctx.device());
     GTEST_SKIP() << "Bloom pipelines failed";
   }
-  omnicpp::render::VulkanPipeline scene_pipe;
+  warploom::render::VulkanPipeline scene_pipe;
   std::string sd = WARPLOOM_TEST_SHADER_DIR;
   if (!scene_pipe.load_shader_stage_file(h.ctx.device(), sd+"/pbr_scene.vert.spv","vertex").is_ok() ||
       !scene_pipe.load_shader_stage_file(h.ctx.device(), sd+"/pbr_scene.frag.spv","fragment").is_ok()) {
@@ -836,7 +836,7 @@ TEST(VulkanHardware, BloomExtractsAndSpreadsBrightEnergy) {
   }
 
   // HDR-bright cube: base_color 5.0 far exceeds the 0.8 bloom threshold.
-  omnicpp::render::PbrMaterialData mat{};
+  warploom::render::PbrMaterialData mat{};
   mat.base_color_factor = {5.0f, 5.0f, 5.0f, 1.0f};
   mat.metallic_factor = 0; mat.roughness_factor = 0.5f;
   std::memcpy(h.mat_buf.mapped, &mat, sizeof(mat));
@@ -848,7 +848,7 @@ TEST(VulkanHardware, BloomExtractsAndSpreadsBrightEnergy) {
   scene.camera_position = {0,0,10,1};
   scene.texture_set = h.tex_set;
   scene.material_set = h.mat_set;
-  omnicpp::render::ScenePbrObject obj{};
+  warploom::render::ScenePbrObject obj{};
   obj.mesh = &h.cube_mesh;
   obj.model = make_translation(0,0,-4);
   obj.material_index = 0;
@@ -887,22 +887,22 @@ TEST(VulkanHardware, BloomExtractsAndSpreadsBrightEnergy) {
 //! change that changes nothing is not something a brightness assertion would
 //! ever catch, because both readings were "reasonable".
 TEST(VulkanHardware, ComposeChainHonoursConfiguredExposure) {
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppExposureConfig", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomExposureConfig", true).is_ok());
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
-  omnicpp::render::VulkanRenderPass present;
+  warploom::render::VulkanRenderPass present;
   ASSERT_TRUE(present.create(ctx.device(), VK_FORMAT_B8G8R8A8_UNORM,
                              VK_FORMAT_D32_SFLOAT)
                   .is_ok());
 
   constexpr std::uint32_t kSize = 32U;
-  omnicpp::render::VulkanOffscreenTarget hdr;
+  warploom::render::VulkanOffscreenTarget hdr;
   if (!hdr.create(ctx.device(), ctx.physical_device(), VK_FORMAT_R16G16B16A16_SFLOAT,
                   kSize, kSize, &alloc).is_ok() ||
       !hdr.create_render_pass(ctx.device(),
@@ -928,14 +928,14 @@ TEST(VulkanHardware, ComposeChainHonoursConfiguredExposure) {
   // exposure they were configured with, and require the recorded push value to
   // differ. Reading the push constant back is the point: comparing two rendered
   // frames would only prove they differ, not that the CONFIGURED one won.
-  omnicpp::render::ComposeChainConfig cfg{};
+  warploom::render::ComposeChainConfig cfg{};
   cfg.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
 
   // Neither value may be the default (1.0f). The first version of this test
   // configured 1.0 -- which is exactly what the bug leaves in place -- so it
   // PASSED a sabotaged build. A regression test whose chosen value coincides
   // with the buggy value tests nothing.
-  omnicpp::render::VulkanComposeChain dim;
+  warploom::render::VulkanComposeChain dim;
   cfg.exposure = 0.37F;
   const bool dim_ok =
       dim.ensure(ctx.device(), ctx.physical_device(), ctx.graphics_queue(), cfg,
@@ -943,7 +943,7 @@ TEST(VulkanHardware, ComposeChainHonoursConfiguredExposure) {
           .is_ok() &&
       dim.ready();
 
-  omnicpp::render::VulkanComposeChain bright;
+  warploom::render::VulkanComposeChain bright;
   cfg.exposure = 2.75F;
   const bool bright_ok =
       bright.ensure(ctx.device(), ctx.physical_device(), ctx.graphics_queue(), cfg,

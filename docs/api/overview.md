@@ -1,6 +1,6 @@
 # API Overview
 
-This document provides an overview of the OmniCpp API.
+This document provides an overview of the Warploom API.
 
 ## Table of Contents
 

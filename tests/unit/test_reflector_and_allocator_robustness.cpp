@@ -46,7 +46,7 @@ constexpr std::uint32_t kSpirvMagic = 0x07230203U;
 
 TEST(SpirvReflector, RejectsNullAndTrivialInputs) {
   // Null code / zero length must be rejected, not dereferenced.
-  EXPECT_TRUE(omnicpp::render::reflect_spirv_resources(
+  EXPECT_TRUE(warploom::render::reflect_spirv_resources(
                   static_cast<const std::uint32_t*>(nullptr), 100).empty());
   std::vector<std::uint32_t> tiny = {kSpirvMagic};
   // Every sub-minimum word count is safely rejected (loop never over-reads).
@@ -60,19 +60,19 @@ TEST(SpirvReflector, RejectsNullAndTrivialInputs) {
     // These fuzz malformed SPIR-V on purpose. The claim under test is that
     // reflection survives it -- not any particular return value -- so the
     // reflected bindings are deliberately discarded.
-    EXPECT_NO_FATAL_FAILURE((void)(omnicpp::render::reflect_spirv_resources(truncated.data(), words)));;
+    EXPECT_NO_FATAL_FAILURE((void)(warploom::render::reflect_spirv_resources(truncated.data(), words)));;
   }
-  EXPECT_TRUE(omnicpp::render::reflect_spirv_resources(
+  EXPECT_TRUE(warploom::render::reflect_spirv_resources(
                   static_cast<const std::uint32_t*>(nullptr), 0).empty());
 }
 
 TEST(SpirvReflector, RejectsWrongMagic) {
   std::vector<std::uint32_t> words(64, 0x11111111U);
-  const auto out = omnicpp::render::reflect_spirv_resources(words.data(), words.size());
+  const auto out = warploom::render::reflect_spirv_resources(words.data(), words.size());
   EXPECT_TRUE(out.empty());
   // Byte overload: wrong magic via unaligned-length buffer is also rejected.
   const auto bytes = reinterpret_cast<const std::uint8_t*>(words.data());
-  EXPECT_TRUE(omnicpp::render::reflect_spirv_resources(bytes, words.size() * 4U).empty());
+  EXPECT_TRUE(warploom::render::reflect_spirv_resources(bytes, words.size() * 4U).empty());
 }
 
 TEST(SpirvReflector, ByteOverloadRejectsBadLengths) {
@@ -80,7 +80,7 @@ TEST(SpirvReflector, ByteOverloadRejectsBadLengths) {
   const auto* bytes = reinterpret_cast<const std::uint8_t*>(words.data());
   // Non-multiple-of-4 lengths must be rejected outright.
   for (std::size_t bad_bytes : {std::size_t{0}, std::size_t{3}, std::size_t{7}, std::size_t{19}}) {
-    EXPECT_TRUE(omnicpp::render::reflect_spirv_resources(bytes, bad_bytes).empty());
+    EXPECT_TRUE(warploom::render::reflect_spirv_resources(bytes, bad_bytes).empty());
   }
 }
 
@@ -88,14 +88,14 @@ TEST(SpirvReflector, ByteOverloadRejectsBadLengths) {
 TEST(SpirvReflector, SurvivesTruncationOfRealShader) {
   const auto words = load_shader_words(WARPLOOM_TEST_SHADER_DIR "/ubo_triangle.frag.spv");
   ASSERT_GE(words.size(), 10U);
-  EXPECT_FALSE(omnicpp::render::reflect_spirv_resources(words.data(), words.size()).empty());
+  EXPECT_FALSE(warploom::render::reflect_spirv_resources(words.data(), words.size()).empty());
   // Truncate at every boundary: the parser must stop cleanly each time.
   for (std::size_t keep = 5; keep < words.size(); keep += 3) {
     std::vector<std::uint32_t> truncated(words.begin(), words.begin() + static_cast<std::ptrdiff_t>(keep));
     // These fuzz malformed SPIR-V on purpose. The claim under test is that
     // reflection survives it -- not any particular return value -- so the
     // reflected bindings are deliberately discarded.
-    EXPECT_NO_FATAL_FAILURE((void)(omnicpp::render::reflect_spirv_resources(truncated.data(), truncated.size())););
+    EXPECT_NO_FATAL_FAILURE((void)(warploom::render::reflect_spirv_resources(truncated.data(), truncated.size())););
   }
 }
 
@@ -110,12 +110,12 @@ TEST(SpirvReflector, SurvivesWordCountLies) {
     // These fuzz malformed SPIR-V on purpose. The claim under test is that
     // reflection survives it -- not any particular return value -- so the
     // reflected bindings are deliberately discarded.
-    EXPECT_NO_FATAL_FAILURE((void)(omnicpp::render::reflect_spirv_resources(mutated.data(), mutated.size())););
+    EXPECT_NO_FATAL_FAILURE((void)(warploom::render::reflect_spirv_resources(mutated.data(), mutated.size())););
     mutated[i] = mutated[i] & 0xFFFFU;  // claim zero length
     // These fuzz malformed SPIR-V on purpose. The claim under test is that
     // reflection survives it -- not any particular return value -- so the
     // reflected bindings are deliberately discarded.
-    EXPECT_NO_FATAL_FAILURE((void)(omnicpp::render::reflect_spirv_resources(mutated.data(), mutated.size())););
+    EXPECT_NO_FATAL_FAILURE((void)(warploom::render::reflect_spirv_resources(mutated.data(), mutated.size())););
   }
 }
 
@@ -136,7 +136,7 @@ TEST(SpirvReflector, SurvivesRandomByteCorruption) {
     // These fuzz malformed SPIR-V on purpose. The claim under test is that
     // reflection survives it -- not any particular return value -- so the
     // reflected bindings are deliberately discarded.
-    EXPECT_NO_FATAL_FAILURE((void)(omnicpp::render::reflect_spirv_resources(mutated.data(), mutated.size())););
+    EXPECT_NO_FATAL_FAILURE((void)(warploom::render::reflect_spirv_resources(mutated.data(), mutated.size())););
   }
 }
 #endif  // WARPLOOM_TEST_SHADER_DIR
@@ -149,7 +149,7 @@ TEST(SpirvReflector, SurvivesRandomByteCorruption) {
 namespace {
 
 struct LiveAlloc {
-  omnicpp::render::Allocation allocation;
+  warploom::render::Allocation allocation;
   std::size_t block_index;
 };
 
@@ -172,11 +172,11 @@ void verify_no_overlap(const std::vector<LiveAlloc>& live) {
 }  // namespace
 
 TEST(VulkanAllocator, RandomizedAllocFreePreservesDisjointness) {
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppAllocatorPropertyTest", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomAllocatorPropertyTest", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   constexpr VkBufferUsageFlags kUsage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |

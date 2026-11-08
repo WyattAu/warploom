@@ -21,7 +21,7 @@ Questions and solutions related to performance optimization, profiling, and debu
 **Windows - Visual Studio Profiler:**
 ```bash
 # Build with debug symbols
-python OmniCppController.py build standalone "Build Project" default relwithdebinfo
+python WarploomController.py build standalone "Build Project" default relwithdebinfo
 
 # Run with profiler
 # In Visual Studio: Debug > Performance Profiler
@@ -33,7 +33,7 @@ python OmniCppController.py build standalone "Build Project" default relwithdebi
 sudo apt install linux-tools-generic
 
 # Profile application
-perf record -g ./build/release/bin/omnicpp
+perf record -g ./build/release/bin/warploom
 
 # Analyze results
 perf report
@@ -42,7 +42,7 @@ perf report
 **macOS - Instruments:**
 ```bash
 # Build with debug symbols
-python OmniCppController.py build standalone "Build Project" default relwithdebinfo
+python WarploomController.py build standalone "Build Project" default relwithdebinfo
 
 # Open Instruments
 # Applications > Xcode > Open Developer Tool > Instruments
@@ -76,7 +76,7 @@ createInfo.ppEnabledLayerNames = validationLayers;
 # Download from NVIDIA Developer website
 
 # Profile application
-nsight -- ./build/release/bin/omnicpp
+nsight -- ./build/release/bin/warploom
 ```
 
 **AMD Radeon GPU Profiler:**
@@ -85,7 +85,7 @@ nsight -- ./build/release/bin/omnicpp
 # Download from AMD Developer website
 
 # Profile application
-rgp -- ./build/release/bin/omnicpp
+rgp -- ./build/release/bin/warploom
 ```
 
 ## Memory Management
@@ -102,7 +102,7 @@ rgp -- ./build/release/bin/omnicpp
 sudo apt install valgrind
 
 # Run with Valgrind
-valgrind --leak-check=full --show-leak-kinds=all ./build/debug/bin/omnicpp
+valgrind --leak-check=full --show-leak-kinds=all ./build/debug/bin/warploom
 ```
 
 **Windows - Dr. Memory:**
@@ -111,7 +111,7 @@ valgrind --leak-check=full --show-leak-kinds=all ./build/debug/bin/omnicpp
 # Download from drmemory.org
 
 # Run with Dr. Memory
-drmemory -- ./build/debug/bin/omnicpp.exe
+drmemory -- ./build/debug/bin/warploom.exe
 ```
 
 **AddressSanitizer (Cross-Platform):**
@@ -385,7 +385,7 @@ bool narrowPhaseCollision(const Collider& a, const Collider& b) {
 **Linux/macOS:**
 ```bash
 # Measure build time
-time python OmniCppController.py build standalone "Build Project" default release
+time python WarploomController.py build standalone "Build Project" default release
 
 # Output:
 # real    2m15.345s
@@ -396,7 +396,7 @@ time python OmniCppController.py build standalone "Build Project" default releas
 **Windows (PowerShell):**
 ```powershell
 # Measure build time
-Measure-Command { python OmniCppController.py build standalone "Build Project" default release }
+Measure-Command { python WarploomController.py build standalone "Build Project" default release }
 
 # Output:
 # Days              : 0

@@ -28,10 +28,10 @@
 namespace {
 
 namespace ui = warploom::ui;
-using omnicpp::render::VulkanContext;
-using omnicpp::render::VulkanMemoryAllocator;
-using omnicpp::render::VulkanOffscreenTarget;
-using omnicpp::render::VulkanUiRenderer;
+using warploom::render::VulkanContext;
+using warploom::render::VulkanMemoryAllocator;
+using warploom::render::VulkanOffscreenTarget;
+using warploom::render::VulkanUiRenderer;
 
 constexpr std::uint32_t kW = 320;
 constexpr std::uint32_t kH = 240;
@@ -44,7 +44,7 @@ struct UiGpuHarness {
   std::uint32_t qf = 0;
 
   bool init() {
-    if (!ctx.initialize("omnicpp_ui_gpu", true).is_ok()) return false;
+    if (!ctx.initialize("warploom_ui_gpu", true).is_ok()) return false;
     if (!alloc.initialize(ctx.device(), ctx.physical_device()).is_ok()) {
       return false;
     }
@@ -60,16 +60,16 @@ struct UiGpuHarness {
                          target.render_pass(), alloc, sd).is_ok();
   }
 
-  omnicpp_test::ReadbackResult render(const ui::PaintList& paint) {
+  warploom_test::ReadbackResult render(const ui::PaintList& paint) {
     auto quads = ui.upload_paint_list(paint, static_cast<float>(kW),
                                       static_cast<float>(kH));
     if (!quads.is_ok()) return {};
 
     VkDevice dev = ctx.device();
-    auto pr = omnicpp::render::VulkanRenderer::create_command_pool(dev, qf);
+    auto pr = warploom::render::VulkanRenderer::create_command_pool(dev, qf);
     if (!pr.is_ok()) return {};
     auto cr =
-        omnicpp::render::VulkanRenderer::allocate_command_buffer(dev, pr.value());
+        warploom::render::VulkanRenderer::allocate_command_buffer(dev, pr.value());
     if (!cr.is_ok()) {
       vkDestroyCommandPool(dev, pr.value(), nullptr);
       return {};
@@ -114,7 +114,7 @@ struct UiGpuHarness {
     vkDestroyCommandPool(dev, pr.value(), nullptr);
 
     // Offscreen target leaves the image in TRANSFER_SRC for readback.
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         ctx.physical_device(), dev, ctx.graphics_queue(), qf, target.image(),
         target.format(), kW, kH, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*store_pixels=*/true);
@@ -149,7 +149,7 @@ ui::PaintList demo_paint() {
 }
 
 //! BGRA decode matching the readback helper (B lowest byte... see helper).
-std::uint32_t pixel_at(const omnicpp_test::ReadbackResult& r,
+std::uint32_t pixel_at(const warploom_test::ReadbackResult& r,
                        std::uint32_t x, std::uint32_t y) {
   return r.pixels[static_cast<std::size_t>(y) * kW + x];
 }

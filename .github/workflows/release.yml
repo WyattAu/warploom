@@ -11,7 +11,7 @@ on:
         required: true
         type: string
 
-# The old workflow drove OmniCppController.py with pre-module CLI shapes
+# The old workflow drove WarploomController.py with pre-module CLI shapes
 # ("build all \"Clean Build Pipeline\" default release --compiler gcc"). Every
 # one of those invocations failed: the positional arguments no longer parse,
 # and the project it configured was src/game with C++20, which stopped

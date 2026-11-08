@@ -3,7 +3,7 @@
 
 #include <warploom/render/vulkan_command.hpp>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -11,7 +11,7 @@ namespace warploom::render {
 
 ::warploom::core::Result<VkCommandPool> create_command_pool(
     VkDevice device, std::uint32_t queue_family_index) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device)
     return ::warploom::core::Result<VkCommandPool>::error(
         ::warploom::core::RuntimeError::vulkan_not_available);
@@ -37,7 +37,7 @@ namespace warploom::render {
 
 ::warploom::core::Result<VkCommandBuffer> allocate_command_buffer(
     VkDevice device, VkCommandPool pool) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || !pool)
     return ::warploom::core::Result<VkCommandBuffer>::error(
         ::warploom::core::RuntimeError::vulkan_not_available);

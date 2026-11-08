@@ -36,29 +36,6 @@ include(cmake/CompilerFlags.cmake)
 # ============================================================================
 # Build Options
 # ============================================================================
-# ============================================================================
-# S5-B phase 2 compat (docs/warploom-identity-plan.md): the legacy
-# OMNICPP_* option names keep working for one window. If an old name is
-# set and the new one is not, mirror it. Removed post-0.1.
-macro(_warploom_compat_option _new _old)
-    if(DEFINED ${_old} AND NOT DEFINED ${_new})
-        set(${_new} ${${_old}})
-    endif()
-endmacro()
-_warploom_compat_option(WARPLOOM_BUILD_ENGINE OMNICPP_BUILD_ENGINE)
-_warploom_compat_option(WARPLOOM_BUILD_TESTS OMNICPP_BUILD_TESTS)
-_warploom_compat_option(WARPLOOM_BUILD_EXAMPLES OMNICPP_BUILD_EXAMPLES)
-_warploom_compat_option(WARPLOOM_ENABLE_COVERAGE OMNICPP_ENABLE_COVERAGE)
-_warploom_compat_option(WARPLOOM_ENABLE_FORMATTING OMNICPP_ENABLE_FORMATTING)
-_warploom_compat_option(WARPLOOM_ENABLE_LINTING OMNICPP_ENABLE_LINTING)
-_warploom_compat_option(WARPLOOM_ENABLE_ASAN OMNICPP_ENABLE_ASAN)
-_warploom_compat_option(WARPLOOM_ENABLE_UBSAN OMNICPP_ENABLE_UBSAN)
-_warploom_compat_option(WARPLOOM_ENABLE_TSAN OMNICPP_ENABLE_TSAN)
-_warploom_compat_option(WARPLOOM_VULKAN_VALIDATION_TESTS OMNICPP_VULKAN_VALIDATION_TESTS)
-_warploom_compat_option(WARPLOOM_USE_VULKAN OMNICPP_USE_VULKAN)
-_warploom_compat_option(WARPLOOM_USE_VCPKG OMNICPP_USE_VCPKG)
-_warploom_compat_option(WARPLOOM_USE_CPM OMNICPP_USE_CPM)
-
 option(WARPLOOM_BUILD_ENGINE "Build engine library" ON)
 option(WARPLOOM_BUILD_TESTS "Build tests" ON)
 option(WARPLOOM_BUILD_EXAMPLES "Build examples" OFF)
@@ -157,14 +134,12 @@ if(WARPLOOM_BUILD_ENGINE)
     # S4: the editor widget/view layer is a real module (Warploom::editor).
     add_subdirectory(modules/editor)
     # S3: Vulkan rendering + scene projection is a real module
-    # (Warploom::render). Must precede src/engine (plain-name resolution,
-    # same reason core/ui/editor do).
+    # (Warploom::render).
     add_subdirectory(modules/render)
     # S3.5: asset import is a real module (Warploom::asset), same ordering.
     add_subdirectory(modules/asset)
     # S5-A: the aggregate (Warploom::engine) over all five modules.
     add_subdirectory(modules/engine)
-    add_subdirectory(src/engine)
     # Headless proof host (P0): runs the live-proof harness in CI —
     # EditorSession + ControlServer, no GPU/window. Builds on every leg.
     add_subdirectory(tools)
@@ -212,7 +187,7 @@ include(cmake/PackageConfig.cmake)
 # Configuration Summary
 # ============================================================================
 message(STATUS "")
-message(STATUS "=== OmniCpp Configuration Summary ===")
+message(STATUS "=== Warploom Configuration Summary ===")
 message(STATUS "Project: ${PROJECT_NAME}")
 message(STATUS "Version: ${PROJECT_VERSION}")
 message(STATUS "Description: ${PROJECT_DESCRIPTION}")

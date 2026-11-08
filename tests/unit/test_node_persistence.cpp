@@ -18,7 +18,7 @@
 
 namespace {
 
-namespace ed = omnicpp::editor;
+namespace ed = warploom::editor;
 
 //! A document with the builtin node types registered.
 ed::SceneDocument make_doc() {
@@ -310,7 +310,7 @@ TEST(NodeDisk, SaveLoadRoundTripByteIdentical) {
   doc.node_layout.emplace(a, std::make_pair(15.0, 25.0));
   doc.node_layout.emplace(b, std::make_pair(215.0, 25.0));
 
-  const std::string path = "/tmp/omnicpp_test_doc.json";
+  const std::string path = "/tmp/warploom_test_doc.json";
   ASSERT_TRUE(doc.save_to_file(path, err)) << err;
 
   ed::SceneDocument loaded;
@@ -323,7 +323,7 @@ TEST(NodeDisk, SaveLoadRoundTripByteIdentical) {
 TEST(NodeDisk, SaveIsAtomicAndLeavesNoTemp) {
   auto doc = make_doc();
   (void)doc.node_graph.add_node("const_number", {});
-  const std::string path = "/tmp/omnicpp_test_atomic.json";
+  const std::string path = "/tmp/warploom_test_atomic.json";
   std::string err;
   ASSERT_TRUE(doc.save_to_file(path, err)) << err;
   // No temp residue.
@@ -336,7 +336,7 @@ TEST(NodeDisk, SaveIsAtomicAndLeavesNoTemp) {
 }
 
 TEST(NodeDisk, LoadRejectsGarbageAndMissingFiles) {
-  const std::string path = "/tmp/omnicpp_test_bad.json";
+  const std::string path = "/tmp/warploom_test_bad.json";
   {
     std::ofstream out(path, std::ios::binary);
     out << "{\"schema_version\":99,\"junk\":true}";
@@ -349,7 +349,7 @@ TEST(NodeDisk, LoadRejectsGarbageAndMissingFiles) {
 
   err.clear();
   EXPECT_FALSE(ed::SceneDocument::load_from_file(
-      "/tmp/omnicpp_definitely_missing_9x.json", loaded, err));
+      "/tmp/warploom_definitely_missing_9x.json", loaded, err));
   EXPECT_NE(err.find("cannot open"), std::string::npos) << err;
   std::remove(path.c_str());
 }
@@ -358,7 +358,7 @@ TEST(NodeDisk, LoadRejectsGarbageAndMissingFiles) {
 // G1: protocol-path save/load round-trip (session semantics, not just bytes)
 // ============================================================================
 
-bool protocol_spawn(omnicpp::editor::EditorSession& session, double x,
+bool protocol_spawn(warploom::editor::EditorSession& session, double x,
                     double y, double z, double size);
 
 //! save_document → mutate → load_document through the protocol must restore
@@ -370,8 +370,8 @@ TEST(NodeDisk, ProtocolSaveLoadRoundTripRestoresStateAndResetsSession) {
   // D3 (v1.20): untitled sessions reject a pathless save loudly — the
   // save-to-current rule only applies once a current file exists.
   {
-    omnicpp::core::ControlCommand untitled;
-    untitled.kind = omnicpp::core::ControlCommand::Kind::SaveDocument;
+    warploom::core::ControlCommand untitled;
+    untitled.kind = warploom::core::ControlCommand::Kind::SaveDocument;
     const auto untitled_reply = session.on_control(untitled);
     EXPECT_FALSE(untitled_reply.ok);
     EXPECT_NE(untitled_reply.error.find("needs \"path\""),
@@ -381,16 +381,16 @@ TEST(NodeDisk, ProtocolSaveLoadRoundTripRestoresStateAndResetsSession) {
   ASSERT_TRUE(protocol_spawn(session, 1.0, 2.0, 3.0, 0.75));
   const std::uint64_t spawned_id = 2U;  // constructor seeds object 1
 
-  omnicpp::core::ControlCommand sel;
-  sel.kind = omnicpp::core::ControlCommand::Kind::Select;
+  warploom::core::ControlCommand sel;
+  sel.kind = warploom::core::ControlCommand::Kind::Select;
   sel.numbers[0] = static_cast<double>(spawned_id);
   sel.number_count = 1;
   ASSERT_TRUE(session.on_control(sel).ok);
   EXPECT_EQ(session.selected_id(), spawned_id);
 
-  const std::string path = "/tmp/omnicpp_test_g1_roundtrip.json";
-  omnicpp::core::ControlCommand save;
-  save.kind = omnicpp::core::ControlCommand::Kind::SaveDocument;
+  const std::string path = "/tmp/warploom_test_g1_roundtrip.json";
+  warploom::core::ControlCommand save;
+  save.kind = warploom::core::ControlCommand::Kind::SaveDocument;
   save.text = path;
   auto reply = session.on_control(save);
   ASSERT_TRUE(reply.ok) << reply.error;
@@ -406,16 +406,16 @@ TEST(NodeDisk, ProtocolSaveLoadRoundTripRestoresStateAndResetsSession) {
   // Mutate past the save point (undoable): spawn, verify undo works, spawn
   // again so the session diverges from the file.
   ASSERT_TRUE(protocol_spawn(session, -1.0, 0.0, 0.5, 1.0));
-  omnicpp::core::ControlCommand undo;
-  undo.kind = omnicpp::core::ControlCommand::Kind::Undo;
+  warploom::core::ControlCommand undo;
+  undo.kind = warploom::core::ControlCommand::Kind::Undo;
   ASSERT_TRUE(session.on_control(undo).ok);
   ASSERT_TRUE(protocol_spawn(session, -1.0, 0.0, 0.5, 1.0));
   ASSERT_NE(session.document().to_json(), saved_bytes);
 
   // Missing file: clean protocol error, state untouched.
-  omnicpp::core::ControlCommand bad_load;
-  bad_load.kind = omnicpp::core::ControlCommand::Kind::LoadDocument;
-  bad_load.text = "/tmp/omnicpp_g1_definitely_missing_9x.json";
+  warploom::core::ControlCommand bad_load;
+  bad_load.kind = warploom::core::ControlCommand::Kind::LoadDocument;
+  bad_load.text = "/tmp/warploom_g1_definitely_missing_9x.json";
   reply = session.on_control(bad_load);
   ASSERT_FALSE(reply.ok);
   EXPECT_NE(reply.error.find("cannot open"), std::string::npos) << reply.error;
@@ -428,15 +428,15 @@ TEST(NodeDisk, ProtocolSaveLoadRoundTripRestoresStateAndResetsSession) {
   // below restores the DIVERGED bytes — still a byte-exact restore of
   // whatever the file holds, which is what the round-trip proves.
   const std::string diverged_bytes = session.document().to_json();
-  omnicpp::core::ControlCommand no_path;
-  no_path.kind = omnicpp::core::ControlCommand::Kind::SaveDocument;
+  warploom::core::ControlCommand no_path;
+  no_path.kind = warploom::core::ControlCommand::Kind::SaveDocument;
   reply = session.on_control(no_path);
   ASSERT_TRUE(reply.ok) << reply.error;
   EXPECT_EQ(reply.detail, "saved " + path);
 
   // The real load: state returns to the save point...
-  omnicpp::core::ControlCommand load;
-  load.kind = omnicpp::core::ControlCommand::Kind::LoadDocument;
+  warploom::core::ControlCommand load;
+  load.kind = warploom::core::ControlCommand::Kind::LoadDocument;
   load.text = path;
   reply = session.on_control(load);
   ASSERT_TRUE(reply.ok) << reply.error;
@@ -473,17 +473,17 @@ std::int32_t doubler_tick(double, const double* inputs,
 
 const char* doubler_name() noexcept { return "test_doubler"; }
 std::int32_t doubler_abi() noexcept {
-  return omnicpp::core::kScriptModuleAbi;
+  return warploom::core::kScriptModuleAbi;
 }
 
 //! Registers the doubler builtin once per process.
 void register_doubler() {
   static const bool done = [] {
-    omnicpp::core::ScriptModuleApi api;
+    warploom::core::ScriptModuleApi api;
     api.abi_version = &doubler_abi;
     api.name = &doubler_name;
     api.tick = &doubler_tick;
-    return omnicpp::core::ScriptModule::register_builtin("test_doubler", api);
+    return warploom::core::ScriptModule::register_builtin("test_doubler", api);
   }();
   (void)done;
 }
@@ -604,10 +604,10 @@ TEST(NodeScriptNodes, ScriptNodeSurvivesDocumentRoundTrip) {
 
 
 //! Spawns a cube via the session's protocol path (bridge tests).
-bool protocol_spawn(omnicpp::editor::EditorSession& session, double x,
+bool protocol_spawn(warploom::editor::EditorSession& session, double x,
                     double y, double z, double size) {
-  omnicpp::core::ControlCommand c;
-  c.kind = omnicpp::core::ControlCommand::Kind::SpawnCube;
+  warploom::core::ControlCommand c;
+  c.kind = warploom::core::ControlCommand::Kind::SpawnCube;
   c.id = 7;
   c.numbers[0] = x;
   c.numbers[1] = y;

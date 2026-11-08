@@ -14,16 +14,16 @@
 
 namespace {
 
-using namespace omnicpp::editor;
+using namespace warploom::editor;
 // The projection bridges warploom::editor (document) and warploom::core (ECS),
-// so its own symbols live in omnicpp::editor with core types pulled in.
-using omnicpp::editor::DocumentProjection;
-using omnicpp::editor::DocumentRef;
-using omnicpp::editor::DocumentTransform;
-using omnicpp::editor::TimelineDriven;
+// so its own symbols live in warploom::editor with core types pulled in.
+using warploom::editor::DocumentProjection;
+using warploom::editor::DocumentRef;
+using warploom::editor::DocumentTransform;
+using warploom::editor::TimelineDriven;
 
 //! A cube with a complete transform: the shape the projection accepts.
-::omnicpp::editor::SceneObject make_cube(std::uint64_t id, double x, double y,
+::warploom::editor::SceneObject make_cube(std::uint64_t id, double x, double y,
                                          double z) {
   SceneObject object{};
   object.id = id;
@@ -36,8 +36,8 @@ using omnicpp::editor::TimelineDriven;
   return object;
 }
 
-::omnicpp::editor::SceneDocument doc_with(
-    std::vector<::omnicpp::editor::SceneObject> objects) {
+::warploom::editor::SceneDocument doc_with(
+    std::vector<::warploom::editor::SceneObject> objects) {
   SceneDocument document{};
   document.objects = std::move(objects);
   for (const auto& o : document.objects) {

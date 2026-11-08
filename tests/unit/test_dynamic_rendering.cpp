@@ -541,7 +541,7 @@ TEST(DynamicRendering, UnifiedFrameWithDynamicBloomRecordsClean) {
                   .is_ok());
   ASSERT_TRUE(renderer.submit_frame().is_ok());
   renderer.wait_idle();
-  const auto readback_baked_parity = omnicpp_test::readback_swapchain_image(
+  const auto readback_baked_parity = warploom_test::readback_swapchain_image(
       h.context.physical_device(), h.context.device(),
       h.context.graphics_queue(),
       static_cast<std::uint32_t>(h.context.queue_families().graphics_family),
@@ -573,7 +573,7 @@ TEST(DynamicRendering, UnifiedFrameWithDynamicBloomRecordsClean) {
                   .is_ok());
   ASSERT_TRUE(renderer.submit_frame().is_ok());
   renderer.wait_idle();
-  const auto readback = omnicpp_test::readback_swapchain_image(
+  const auto readback = warploom_test::readback_swapchain_image(
       h.context.physical_device(), h.context.device(),
       h.context.graphics_queue(),
       static_cast<std::uint32_t>(h.context.queue_families().graphics_family),
@@ -681,7 +681,7 @@ TEST(DynamicRendering, UnifiedFrameWithDynamicSceneMatchesGolden) {
                   .is_ok());
   ASSERT_TRUE(renderer.submit_frame().is_ok());
   renderer.wait_idle();
-  const auto readback = omnicpp_test::readback_swapchain_image(
+  const auto readback = warploom_test::readback_swapchain_image(
       h.context.physical_device(), h.context.device(),
       h.context.graphics_queue(),
       static_cast<std::uint32_t>(h.context.queue_families().graphics_family),

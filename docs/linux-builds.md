@@ -7,7 +7,7 @@
 > build path.
 
 
-This document outlines requirements and expected behavior for Linux builds in OmniCpp project.
+This document outlines requirements and expected behavior for Linux builds in Warploom project.
 
 ## Overview
 
@@ -154,10 +154,10 @@ The build pipeline executes:
 build/
 ├── debug/default/
 │   ├── bin/                    # Executables
-│   │   ├── OmniCppStandalone
+│   │   ├── WarploomStandalone
 │   │   └── test executables
 │   ├── lib/                    # Libraries
-│   │   ├── libOmniCppLib.so
+│   │   ├── libWarploomLib.so
 │   │   └── static libraries (.a)
 │   ├── CMakeFiles/             # Build artifacts
 │   ├── compile_commands.json   # LSP database
@@ -219,12 +219,12 @@ Linux builds use standard dynamic linking:
 
 ```bash
 # Complete Linux build
-python OmniCppController.py build both "Zero to Hero" default Debug
+python WarploomController.py build both "Zero to Hero" default Debug
 
 # Individual steps
-python OmniCppController.py build standalone "Conan install" default Debug
-python OmniCppController.py build standalone "CMake configure" default Debug
-python OmniCppController.py build standalone "Build" default Debug
+python WarploomController.py build standalone "Conan install" default Debug
+python WarploomController.py build standalone "CMake configure" default Debug
+python WarploomController.py build standalone "Build" default Debug
 ```
 
 ### CMake Direct
@@ -444,7 +444,7 @@ Linux builds are supported in GitHub Actions and other CI systems:
     sudo apt install build-essential cmake ninja-build python3 python3-pip
     pip install conan
     conan profile detect
-    python OmniCppController.py build both "Zero to Hero" default Release
+    python WarploomController.py build both "Zero to Hero" default Release
 ```
 
 ## Cross-Platform Compatibility

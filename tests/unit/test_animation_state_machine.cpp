@@ -14,7 +14,7 @@
 
 namespace {
 
-//! Minimal input snapshot mirroring omnicpp::core::InputSnapshot's interface.
+//! Minimal input snapshot mirroring warploom::core::InputSnapshot's interface.
 struct FakeSnapshot {
   std::string held;
   [[nodiscard]] bool action(const std::string& name) const {
@@ -24,18 +24,18 @@ struct FakeSnapshot {
 
 //! Builds the mannequin configuration: Walk (level 0) <-> Idle (level 1),
 //! bidirectional "fade_toggle" edges with a 0.25 s re-trigger guard.
-omnicpp::anim::AnimationStateMachine<FakeSnapshot> make_walk_idle() {
-  omnicpp::anim::AnimationStateMachine<FakeSnapshot> m;
+warploom::anim::AnimationStateMachine<FakeSnapshot> make_walk_idle() {
+  warploom::anim::AnimationStateMachine<FakeSnapshot> m;
   m.add_state("walk", 0.0f);
   m.add_state("idle", 1.0f);
-  omnicpp::anim::AnimTransition to_idle;
+  warploom::anim::AnimTransition to_idle;
   to_idle.from = "walk";
   to_idle.to = "idle";
   to_idle.action = "fade_toggle";
   to_idle.min_time_in_state = 0.25f;
   to_idle.fade_duration = 0.4f;
   m.add_transition(to_idle);
-  omnicpp::anim::AnimTransition to_walk;
+  warploom::anim::AnimTransition to_walk;
   to_walk.from = "idle";
   to_walk.to = "walk";
   to_walk.action = "fade_toggle";
@@ -90,15 +90,15 @@ TEST(AnimationStateMachine, TransitionEasesWeightAtFadeRate) {
 }
 
 TEST(AnimationStateMachine, FirstMatchWinsOnOverlappingEdges) {
-  omnicpp::anim::AnimationStateMachine<FakeSnapshot> m;
+  warploom::anim::AnimationStateMachine<FakeSnapshot> m;
   m.add_state("a", 0.0f);
   m.add_state("b", 1.0f);
   m.add_state("c", 0.5f);
-  omnicpp::anim::AnimTransition first;
+  warploom::anim::AnimTransition first;
   first.from = "a";
   first.to = "b";
   first.action = "go";
-  omnicpp::anim::AnimTransition second;
+  warploom::anim::AnimTransition second;
   second.from = "a";
   second.to = "c";
   second.action = "go";

@@ -1,5 +1,5 @@
 """
-Integration tests for OmniCpp build system.
+Integration tests for Warploom build system.
 
 This module contains integration tests that verify the complete build pipeline
 from configuration to artifact generation.
@@ -17,9 +17,9 @@ import json
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from omni_scripts.build import BuildManager, BuildContext
-from omni_scripts.cmake import CMakeManager
-from omni_scripts.conan import ConanManager
+from warploom_scripts.build import BuildManager, BuildContext
+from warploom_scripts.cmake import CMakeManager
+from warploom_scripts.conan import ConanManager
 
 
 class TestBuildPipelineIntegration(unittest.TestCase):
@@ -40,7 +40,7 @@ class TestBuildPipelineIntegration(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
     
-    @patch('omni_scripts.build.run_command')
+    @patch('warploom_scripts.build.run_command')
     def test_full_build_pipeline(self, mock_run):
         """Test complete build pipeline from configure to install."""
         # Mock successful command execution
@@ -65,7 +65,7 @@ class TestBuildPipelineIntegration(unittest.TestCase):
         install_result = self.build_manager.install(context)
         self.assertTrue(install_result)
     
-    @patch('omni_scripts.build.run_command')
+    @patch('warploom_scripts.build.run_command')
     def test_clean_build_pipeline(self, mock_run):
         """Test clean build pipeline."""
         mock_run.return_value = (0, "", "")
@@ -89,7 +89,7 @@ class TestBuildPipelineIntegration(unittest.TestCase):
         build_result = self.build_manager.build(context)
         self.assertTrue(build_result)
     
-    @patch('omni_scripts.cmake.run_command')
+    @patch('warploom_scripts.cmake.run_command')
     def test_cmake_integration(self, mock_run):
         """Test CMake integration with build system."""
         mock_run.return_value = (0, "", "")
@@ -118,7 +118,7 @@ class TestBuildPipelineIntegration(unittest.TestCase):
         )
         self.assertTrue(install_result)
     
-    @patch('omni_scripts.conan.run_command')
+    @patch('warploom_scripts.conan.run_command')
     def test_conan_integration(self, mock_run):
         """Test Conan integration with build system."""
         mock_run.return_value = (0, "", "")
@@ -152,7 +152,7 @@ class TestMultiCompilerIntegration(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
     
-    @patch('omni_scripts.build.run_command')
+    @patch('warploom_scripts.build.run_command')
     def test_msvc_build(self, mock_run):
         """Test MSVC compiler build."""
         mock_run.return_value = (0, "", "")
@@ -167,7 +167,7 @@ class TestMultiCompilerIntegration(unittest.TestCase):
         result = self.build_manager.build(context)
         self.assertTrue(result)
     
-    @patch('omni_scripts.build.run_command')
+    @patch('warploom_scripts.build.run_command')
     def test_mingw_gcc_build(self, mock_run):
         """Test MinGW-GCC compiler build."""
         mock_run.return_value = (0, "", "")
@@ -182,7 +182,7 @@ class TestMultiCompilerIntegration(unittest.TestCase):
         result = self.build_manager.build(context)
         self.assertTrue(result)
     
-    @patch('omni_scripts.build.run_command')
+    @patch('warploom_scripts.build.run_command')
     def test_clang_mingw_build(self, mock_run):
         """Test Clang-MinGW compiler build."""
         mock_run.return_value = (0, "", "")
@@ -211,7 +211,7 @@ class TestBuildTypeIntegration(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
     
-    @patch('omni_scripts.build.run_command')
+    @patch('warploom_scripts.build.run_command')
     def test_debug_build(self, mock_run):
         """Test debug build configuration."""
         mock_run.return_value = (0, "", "")
@@ -226,7 +226,7 @@ class TestBuildTypeIntegration(unittest.TestCase):
         result = self.build_manager.build(context)
         self.assertTrue(result)
     
-    @patch('omni_scripts.build.run_command')
+    @patch('warploom_scripts.build.run_command')
     def test_release_build(self, mock_run):
         """Test release build configuration."""
         mock_run.return_value = (0, "", "")
@@ -255,7 +255,7 @@ class TestTargetIntegration(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
     
-    @patch('omni_scripts.build.run_command')
+    @patch('warploom_scripts.build.run_command')
     def test_standalone_target(self, mock_run):
         """Test standalone target build."""
         mock_run.return_value = (0, "", "")
@@ -270,7 +270,7 @@ class TestTargetIntegration(unittest.TestCase):
         result = self.build_manager.build(context)
         self.assertTrue(result)
     
-    @patch('omni_scripts.build.run_command')
+    @patch('warploom_scripts.build.run_command')
     def test_library_target(self, mock_run):
         """Test library target build."""
         mock_run.return_value = (0, "", "")
@@ -299,7 +299,7 @@ class TestErrorHandlingIntegration(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
     
-    @patch('omni_scripts.build.run_command')
+    @patch('warploom_scripts.build.run_command')
     def test_build_failure_handling(self, mock_run):
         """Test handling of build failures."""
         # Mock build failure
@@ -315,7 +315,7 @@ class TestErrorHandlingIntegration(unittest.TestCase):
         result = self.build_manager.build(context)
         self.assertFalse(result)
     
-    @patch('omni_scripts.build.run_command')
+    @patch('warploom_scripts.build.run_command')
     def test_configure_failure_handling(self, mock_run):
         """Test handling of configuration failures."""
         # Mock configure failure

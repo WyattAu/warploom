@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28...4.0)
-project(OmniCppTests VERSION 1.0.0 LANGUAGES CXX)
+project(WarploomTests VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,8 +10,8 @@ find_package(Threads REQUIRED)
 
 # ============================================================================
 # Canonical runtime tests — these link ONLY to the Warploom::engine
-# aggregate (the five modules transitively; omnicpp_runtime was deleted
-# in S5-A). They must never depend on omnicpp_engine.
+# aggregate (the five modules transitively; warploom_runtime was deleted
+# in S5-A). They must never depend on warploom_engine.
 # ============================================================================
 
 # GPU-dependent runtime tests (raw Vulkan symbols in the TU): only added
@@ -182,15 +182,15 @@ target_compile_definitions(warploom_unit_tests PRIVATE
 find_program(WARPLOOM_CARGO_EXECUTABLE cargo)
 if(WARPLOOM_CARGO_EXECUTABLE)
     add_custom_command(
-        OUTPUT ${CMAKE_SOURCE_DIR}/examples/rust_module/target/release/libomnicpp_example_module.so
+        OUTPUT ${CMAKE_SOURCE_DIR}/examples/rust_module/target/release/libwarploom_example_module.so
         COMMAND ${WARPLOOM_CARGO_EXECUTABLE} build --release
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/examples/rust_module
         VERBATIM)
-    add_custom_target(omnicpp_rust_module
-        DEPENDS ${CMAKE_SOURCE_DIR}/examples/rust_module/target/release/libomnicpp_example_module.so)
-    add_dependencies(warploom_unit_tests omnicpp_rust_module)
+    add_custom_target(warploom_rust_module
+        DEPENDS ${CMAKE_SOURCE_DIR}/examples/rust_module/target/release/libwarploom_example_module.so)
+    add_dependencies(warploom_unit_tests warploom_rust_module)
     target_compile_definitions(warploom_unit_tests PRIVATE
-        WARPLOOM_TEST_RUST_MODULE="${CMAKE_SOURCE_DIR}/examples/rust_module/target/release/libomnicpp_example_module.so")
+        WARPLOOM_TEST_RUST_MODULE="${CMAKE_SOURCE_DIR}/examples/rust_module/target/release/libwarploom_example_module.so")
 endif()
 
 # Contract-violator child binary: the violation test asserts that

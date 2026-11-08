@@ -5,7 +5,7 @@
 
 #include "warploom/core/job_system.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -13,7 +13,7 @@ namespace warploom::render {
 
 namespace {
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 //! Function-pointer trampoline: records one band's secondary command buffer.
 void run_band_job(void* raw) {
   auto* job = static_cast<VulkanParallelRecorder::BandJob*>(raw);
@@ -36,7 +36,7 @@ void run_band_job(void* raw) {
 
   vkEndCommandBuffer(job->buffer);
 }
-#endif // OMNICPP_HAS_VULKAN
+#endif // WARPLOOM_HAS_VULKAN
 
 } // namespace
 
@@ -44,7 +44,7 @@ VulkanParallelRecorder::~VulkanParallelRecorder() { cleanup(); }
 
 ::warploom::core::Result<void> VulkanParallelRecorder::initialize(
     VkDevice device, std::uint32_t queue_family_index, std::uint32_t band_count) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || band_count == 0) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -87,7 +87,7 @@ VulkanParallelRecorder::~VulkanParallelRecorder() { cleanup(); }
 }
 
 void VulkanParallelRecorder::cleanup() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device_) {
     for (auto& band : bands_) {
       if (band.pool) vkDestroyCommandPool(device_, band.pool, nullptr);
@@ -103,7 +103,7 @@ void VulkanParallelRecorder::cleanup() noexcept {
 ::warploom::core::Result<std::vector<VkCommandBuffer>> VulkanParallelRecorder::record_parallel(
     std::uint32_t width, std::uint32_t height, const RecordBandFn& record_band,
     VkRenderPass compatible_pass, VkFramebuffer framebuffer) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device_ || !record_band || width == 0 || height == 0 || !compatible_pass) {
     return ::warploom::core::Result<std::vector<VkCommandBuffer>>::error(
         ::warploom::core::RuntimeError::invalid_config);
@@ -187,7 +187,7 @@ void VulkanParallelRecorder::cleanup() noexcept {
 }
 
 ::warploom::core::Result<void> VulkanParallelRecorder::reset() {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device_) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }

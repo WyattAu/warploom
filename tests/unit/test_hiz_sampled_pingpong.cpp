@@ -87,16 +87,16 @@ void transition_hiz(VkCommandBuffer command_buffer, VkImage image,
 
 TEST(VulkanHardware, SampledHiZPreviousFramePingPong) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppSampledHiZ", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomSampledHiZ", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator).is_ok());
   ASSERT_TRUE(target.create_depth(context.device(), context.physical_device(),
@@ -107,8 +107,8 @@ TEST(VulkanHardware, SampledHiZPreviousFramePingPong) {
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
-  omnicpp::render::VulkanHiZPyramid hiz_a;
-  omnicpp::render::VulkanHiZPyramid hiz_b;
+  warploom::render::VulkanHiZPyramid hiz_a;
+  warploom::render::VulkanHiZPyramid hiz_b;
   ASSERT_TRUE(hiz_a.create(context.device(), context.physical_device(),
                            kPyramidWidth, kPyramidWidth, kLevels, &allocator).is_ok());
   ASSERT_TRUE(hiz_b.create(context.device(), context.physical_device(),
@@ -170,12 +170,12 @@ TEST(VulkanHardware, SampledHiZPreviousFramePingPong) {
     draw_words[3] = 0U;
   };
 
-  omnicpp::render::VulkanDescriptorManager descriptors;
+  warploom::render::VulkanDescriptorManager descriptors;
   ASSERT_TRUE(descriptors.initialize(context.device()).is_ok());
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
 
   // Scene pipeline.
-  std::vector<omnicpp::render::ReflectedBinding> scene_bindings = {
+  std::vector<warploom::render::ReflectedBinding> scene_bindings = {
       {0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT}};
   auto scene_layout = descriptors.create_layout(scene_bindings, 1);
   ASSERT_TRUE(scene_layout.is_ok());
@@ -184,7 +184,7 @@ TEST(VulkanHardware, SampledHiZPreviousFramePingPong) {
   ASSERT_TRUE(descriptors.write_buffer(scene_set.value(), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                        scene_buffer.value().buffer, 0, VK_WHOLE_SIZE).is_ok());
   const VkPushConstantRange scene_push_range{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ScenePush)};
-  omnicpp::render::VulkanPipeline scene_pipeline;
+  warploom::render::VulkanPipeline scene_pipeline;
   ASSERT_TRUE(scene_pipeline.load_shader_stage_file(
       context.device(), shader_dir + "/gpu_objects.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(scene_pipeline.load_shader_stage_file(
@@ -198,7 +198,7 @@ TEST(VulkanHardware, SampledHiZPreviousFramePingPong) {
   // Reduction layout and two descriptor-set families: one family writes A,
   // the other writes B. Binding 2 is the preceding single-mip view; at level
   // 0 it points at depth because that binding is not read in that branch.
-  std::vector<omnicpp::render::ReflectedBinding> reduce_bindings = {
+  std::vector<warploom::render::ReflectedBinding> reduce_bindings = {
       {0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT},
       {0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT},
       {0, 2, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT},
@@ -206,7 +206,7 @@ TEST(VulkanHardware, SampledHiZPreviousFramePingPong) {
   auto reduce_layout = descriptors.create_layout(reduce_bindings, 2U * kLevels);
   ASSERT_TRUE(reduce_layout.is_ok());
 
-  const auto make_reduce_sets = [&](omnicpp::render::VulkanHiZPyramid& destination)
+  const auto make_reduce_sets = [&](warploom::render::VulkanHiZPyramid& destination)
       -> std::vector<VkDescriptorSet> {
     std::vector<VkDescriptorSet> sets;
     for (std::uint32_t level = 0; level < kLevels; ++level) {
@@ -237,7 +237,7 @@ TEST(VulkanHardware, SampledHiZPreviousFramePingPong) {
   const auto reduce_sets_a = make_reduce_sets(hiz_a);
   const auto reduce_sets_b = make_reduce_sets(hiz_b);
   const VkPushConstantRange reduce_push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 16U};
-  omnicpp::render::VulkanPipeline reduce_pipeline;
+  warploom::render::VulkanPipeline reduce_pipeline;
   ASSERT_TRUE(reduce_pipeline.load_shader_stage_file(
       context.device(), shader_dir + "/depth_reduce_image.comp.spv", "compute").is_ok());
   ASSERT_TRUE(reduce_pipeline.create_pipeline_layout(
@@ -247,14 +247,14 @@ TEST(VulkanHardware, SampledHiZPreviousFramePingPong) {
 
   // Culler has one descriptor set per completed pyramid so switching the
   // previous-frame source never mutates a descriptor in flight.
-  std::vector<omnicpp::render::ReflectedBinding> cull_bindings = {
+  std::vector<warploom::render::ReflectedBinding> cull_bindings = {
       {0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT},
       {0, 1, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT},
       {0, 2, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT},
   };
   auto cull_layout = descriptors.create_layout(cull_bindings, 2);
   ASSERT_TRUE(cull_layout.is_ok());
-  const auto make_cull_set = [&](omnicpp::render::VulkanHiZPyramid& previous)
+  const auto make_cull_set = [&](warploom::render::VulkanHiZPyramid& previous)
       -> VkDescriptorSet {
     auto set = descriptors.allocate_set(cull_layout.value());
     if (!set.is_ok()) {
@@ -279,7 +279,7 @@ TEST(VulkanHardware, SampledHiZPreviousFramePingPong) {
   const VkDescriptorSet cull_set_a = make_cull_set(hiz_a);
   const VkDescriptorSet cull_set_b = make_cull_set(hiz_b);
   const VkPushConstantRange cull_push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 44U};
-  omnicpp::render::VulkanPipeline cull_pipeline;
+  warploom::render::VulkanPipeline cull_pipeline;
   ASSERT_TRUE(cull_pipeline.load_shader_stage_file(
       context.device(), shader_dir + "/cull_hiz_sampled.comp.spv", "compute").is_ok());
   ASSERT_TRUE(cull_pipeline.create_pipeline_layout(
@@ -287,11 +287,11 @@ TEST(VulkanHardware, SampledHiZPreviousFramePingPong) {
   ASSERT_TRUE(cull_pipeline.create_compute_pipeline(
       context.device(), cull_pipeline.pipeline_layout()).is_ok());
 
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool pool = pool_result.value();
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer cb = cb_result.value();

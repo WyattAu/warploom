@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-Format script for OmniCpp project
+Format script for Warploom project
 
 This script provides a command-line interface for formatting code
-using the omni_scripts.controller.format_controller module.
+using the warploom_scripts.controller.format_controller module.
 """
 
 import sys
 import argparse
 from pathlib import Path
 
-# Add parent directory to path to import omni_scripts
+# Add parent directory to path to import warploom_scripts
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from omni_scripts.controller.format_controller import format_code
+from warploom_scripts.controller.format_controller import format_code
 
 
 def main():
     """Main entry point for format script."""
     parser = argparse.ArgumentParser(
-        description="Format OmniCpp code with clang-format and black",
+        description="Format Warploom code with clang-format and black",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

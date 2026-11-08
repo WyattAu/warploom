@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-Before building OmniCppLib, ensure you have the following installed:
+Before building WarploomLib, ensure you have the following installed:
 
 ### Required Tools
 

@@ -155,15 +155,3 @@ class ClipTimelineView final {
 };
 
 }  // namespace warploom::editor
-
-// S5-B compat footer: legacy `omnicpp::editor` spellings keep resolving
-// during the transition (docs/warploom-identity-plan.md, phase 1b). This
-// is the SAME guarded directive core's headers carry (the editor
-// namespace hosts both core session types and module widgets - extension
-// blocks merge), so one include of either family suffices.
-#ifndef WARPLOOM_COMPAT_EDITOR_NS
-#define WARPLOOM_COMPAT_EDITOR_NS
-namespace omnicpp::editor {
-    using namespace ::warploom::editor;
-}
-#endif  // WARPLOOM_COMPAT_EDITOR_NS

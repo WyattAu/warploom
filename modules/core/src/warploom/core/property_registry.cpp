@@ -13,11 +13,11 @@ namespace warploom::editor {
 
 std::uint32_t PropertyRegistry::register_type(
     std::string name, std::string doc, std::vector<PropertyDesc> properties) {
-  OMNICPP_CONTRACT(!name.empty());
+  WARPLOOM_CONTRACT(!name.empty());
   for (const auto& existing : types_) {
-    OMNICPP_CONTRACT(existing.name != name && "duplicate registry type");
+    WARPLOOM_CONTRACT(existing.name != name && "duplicate registry type");
   }
-  OMNICPP_CONTRACT(types_.size() < UINT32_MAX);
+  WARPLOOM_CONTRACT(types_.size() < UINT32_MAX);
   const auto id = static_cast<std::uint32_t>(types_.size());
   types_.push_back(
       ObjectTypeDesc{id, std::move(name), std::move(doc), std::move(properties)});
@@ -122,7 +122,7 @@ BridgeOutcome bridge_control_command(const ::warploom::core::ControlCommand& c,
   using BK = BridgeOutcome::Kind;
 
   const auto* env = registry.find_by_name(kTypeEnvironment);
-  OMNICPP_CONTRACT(env != nullptr);
+  WARPLOOM_CONTRACT(env != nullptr);
   (void)env;
 
   switch (c.kind) {
@@ -135,7 +135,7 @@ BridgeOutcome bridge_control_command(const ::warploom::core::ControlCommand& c,
 
     case CK::SpawnCube: {
       const auto* cube = registry.find_by_name(kTypeCube);
-      OMNICPP_CONTRACT(cube != nullptr);
+      WARPLOOM_CONTRACT(cube != nullptr);
       // Typed defaults from the registry, then payload overrides.
       std::map<std::string, PropValue> props;
       for (const auto& desc : cube->properties) {

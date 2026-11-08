@@ -1,12 +1,12 @@
-"""Focused tests for the active OmniCpp Python build helpers."""
+"""Focused tests for the active Warploom Python build helpers."""
 
 from pathlib import Path
 from unittest.mock import patch
 
-from omni_scripts.build import BuildContext, BuildManager, BuildError
-from omni_scripts.cmake import CMakeManager
-from omni_scripts.conan import ConanManager
-from omni_scripts.utils import (
+from warploom_scripts.build import BuildContext, BuildManager, BuildError
+from warploom_scripts.cmake import CMakeManager
+from warploom_scripts.conan import ConanManager
+from warploom_scripts.utils import (
     detect_platform,
     format_duration,
     get_compiler_path,
@@ -45,7 +45,7 @@ def test_cmake_manager_generate_is_side_effect_free() -> None:
 
 def test_cmake_manager_commands_are_delegated() -> None:
     manager = CMakeManager()
-    with patch("omni_scripts.cmake.execute_command") as execute:
+    with patch("warploom_scripts.cmake.execute_command") as execute:
         execute.return_value = 0
         build_dir = Path("/tmp")
         manager.build(build_dir, config="debug")
@@ -60,7 +60,7 @@ def test_conan_profile_creation(tmp_path: Path) -> None:
 
 
 def test_command_and_format_helpers() -> None:
-    with patch("omni_scripts.utils.subprocess.run") as run:
+    with patch("warploom_scripts.utils.subprocess.run") as run:
         run.return_value.returncode = 0
         run.return_value.stdout = "ok"
         run.return_value.stderr = ""

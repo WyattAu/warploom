@@ -3,15 +3,15 @@
         {
             "id": "Author",
             "data": {
-                "en": "OmniCpp Template",
-                "cs": "OmniCpp Šablona"
+                "en": "Warploom Template",
+                "cs": "Warploom Šablona"
             }
         },
         {
             "id": "Email",
             "data": {
                 "en": "Email",
-                "email": "omnicpp-template@example.com"
+                "email": "warploom-template@example.com"
             }
         },
         {

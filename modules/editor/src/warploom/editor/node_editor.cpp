@@ -88,7 +88,7 @@ void bezier_point(float x0, float y0, float x1, float y1, float t, float& px,
 }  // namespace
 
 void pin_canvas(ui::WidgetTree& tree, std::uint32_t canvas) {
-  OMNICPP_CONTRACT(canvas != ui::kInvalidWidget);
+  WARPLOOM_CONTRACT(canvas != ui::kInvalidWidget);
   ui::Widget& w = tree.get(canvas);
   w.layout = ui::LayoutMode::Absolute;
   w.direction = ui::StackDirection::Vertical;  // unused in absolute mode
@@ -98,7 +98,7 @@ void pin_canvas(ui::WidgetTree& tree, std::uint32_t canvas) {
 
 void NodeEditorView::rebuild(ui::WidgetTree& tree,
                              std::uint32_t canvas_parent) {
-  OMNICPP_CONTRACT(canvas_parent != ui::kInvalidWidget);
+  WARPLOOM_CONTRACT(canvas_parent != ui::kInvalidWidget);
   canvas_parent_ = canvas_parent;
   tree_ref_ = &tree;
   pin_canvas(tree, canvas_parent);

@@ -12,13 +12,13 @@ import sys
 from pathlib import Path
 from typing import Dict
 
-from omni_scripts.compilers.detector import (
+from warploom_scripts.compilers.detector import (
     CompilerInfo,
     detect_all_compilers,
     validate_cpp23_support,
 )
-from omni_scripts.platform.detector import detect_platform
-from omni_scripts.logging.logger import get_logger, setup_logging
+from warploom_scripts.platform.detector import detect_platform
+from warploom_scripts.logging.logger import get_logger, setup_logging
 
 logger = get_logger(__name__)
 

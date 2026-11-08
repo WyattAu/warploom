@@ -1,6 +1,6 @@
 # Windows GCC (MinGW) Builds
 
-This document outlines the requirements and expected behavior for Windows GCC (MinGW) builds in the OmniCpp project.
+This document outlines the requirements and expected behavior for Windows GCC (MinGW) builds in the Warploom project.
 
 ## Prerequisites
 
@@ -117,10 +117,10 @@ The build pipeline executes:
 build/
 ├── debug/gcc-mingw-ucrt/
 │   ├── bin/                    # Executables
-│   │   ├── OmniCppStandalone.exe
+│   │   ├── WarploomStandalone.exe
 │   │   └── test executables
 │   ├── lib/                    # Libraries
-│   │   ├── OmniCppLib.dll
+│   │   ├── WarploomLib.dll
 │   │   └── static libraries
 │   ├── CMakeFiles/             # Build artifacts
 │   ├── compile_commands.json   # LSP database
@@ -184,12 +184,12 @@ MinGW builds inherit standard GCC flags with Windows-specific additions:
 
 ```bash
 # Complete MinGW build
-python OmniCppController.py build both "Zero to Hero" gcc-mingw-ucrt Debug
+python WarploomController.py build both "Zero to Hero" gcc-mingw-ucrt Debug
 
 # Individual steps
-python OmniCppController.py build standalone "Conan install" gcc-mingw-ucrt Debug
-python OmniCppController.py build standalone "CMake configure" gcc-mingw-ucrt Debug
-python OmniCppController.py build standalone "Build" gcc-mingw-ucrt Debug
+python WarploomController.py build standalone "Conan install" gcc-mingw-ucrt Debug
+python WarploomController.py build standalone "CMake configure" gcc-mingw-ucrt Debug
+python WarploomController.py build standalone "Build" gcc-mingw-ucrt Debug
 ```
 
 ### CMake Presets
@@ -333,7 +333,7 @@ MinGW builds are supported in GitHub Actions:
   run: |
     choco install msys2
     # MSYS2 setup commands
-    python OmniCppController.py build both "Zero to Hero" gcc-mingw-ucrt Release
+    python WarploomController.py build both "Zero to Hero" gcc-mingw-ucrt Release
 ```
 
 ## Migration from Other Toolchains

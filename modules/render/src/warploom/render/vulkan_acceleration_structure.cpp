@@ -10,13 +10,13 @@
 
 #include <cstring>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
 namespace warploom::render {
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 namespace {
 
@@ -506,6 +506,6 @@ void VulkanAccelerationStructureBuilder::destroy_tlas(
   tlas.capacity = 0U;
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN
 
 }  // namespace warploom::render

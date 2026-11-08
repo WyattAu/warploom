@@ -28,7 +28,7 @@
 #include "warploom/render/vulkan_renderer.hpp"
 #ifdef WARPLOOM_HAS_VULKAN
 #include "vulkan_test_readback.hpp"
-using omnicpp_test::readback_swapchain_image;
+using warploom_test::readback_swapchain_image;
 #endif
 
 namespace {
@@ -91,12 +91,12 @@ namespace {
 
 TEST(VulkanHardware, Scene3DObjectsLightingAnimation) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppScene3D", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomScene3D", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(),
                                    context.physical_device()).is_ok());
 
@@ -135,9 +135,9 @@ TEST(VulkanHardware, Scene3DObjectsLightingAnimation) {
   }
 
   // --- Descriptors + pipelines. ---
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> bindings(1);
+  std::vector<warploom::render::ReflectedBinding> bindings(1);
   bindings[0] = {0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                  VK_SHADER_STAGE_VERTEX_BIT};
   auto layout = manager.create_layout(bindings, 1);
@@ -156,7 +156,7 @@ TEST(VulkanHardware, Scene3DObjectsLightingAnimation) {
   constexpr std::uint32_t kPushBytes = 128U;  // GLSL pads vec3 tails to 16
   const VkPushConstantRange push_range{
       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, kPushBytes};
-  omnicpp::render::VulkanPipeline gfx_pipe;
+  warploom::render::VulkanPipeline gfx_pipe;
   ASSERT_TRUE(gfx_pipe.load_shader_stage_file(
       context.device(), shader_dir + "/scene.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(gfx_pipe.load_shader_stage_file(
@@ -164,7 +164,7 @@ TEST(VulkanHardware, Scene3DObjectsLightingAnimation) {
   ASSERT_TRUE(gfx_pipe.create_pipeline_layout(
       context.device(), &layout.value(), 1, &push_range).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator).is_ok());
   ASSERT_TRUE(target.create_depth(context.device(), context.physical_device(),
@@ -176,12 +176,12 @@ TEST(VulkanHardware, Scene3DObjectsLightingAnimation) {
       gfx_pipe.pipeline_layout(), true, true, true).is_ok());
 
   // --- Command infrastructure. ---
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool pool = pool_result.value();
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer cb = cb_result.value();
@@ -222,7 +222,7 @@ TEST(VulkanHardware, Scene3DObjectsLightingAnimation) {
   const float light[3] = {0.4472f, 0.7453f, -0.4930f};  // normalized
   std::memcpy(push.light_dir, light, 12U);
 
-  const auto render = [&]() -> omnicpp_test::ReadbackResult {
+  const auto render = [&]() -> warploom_test::ReadbackResult {
     EXPECT_EQ(vkResetCommandBuffer(cb, 0), VK_SUCCESS);
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -327,7 +327,7 @@ TEST(VulkanHardware, Scene3DObjectsLightingAnimation) {
   vkDestroyCommandPool(context.device(), pool, nullptr);
   gfx_pipe.cleanup(context.device());
   target.cleanup(context.device());
-  omnicpp::render::Allocation b = inst_buf.value();
+  warploom::render::Allocation b = inst_buf.value();
   allocator.destroy_allocation(b);
   manager.cleanup();
   allocator.cleanup();

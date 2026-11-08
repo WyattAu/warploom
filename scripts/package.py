@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-Package script for OmniCpp project
+Package script for Warploom project
 
 This script provides a command-line interface for creating distribution packages
-using the omni_scripts.controller.package_controller module.
+using the warploom_scripts.controller.package_controller module.
 """
 
 import sys
 import argparse
 from pathlib import Path
 
-# Add parent directory to path to import omni_scripts
+# Add parent directory to path to import warploom_scripts
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from omni_scripts.controller.package_controller import package
+from warploom_scripts.controller.package_controller import package
 
 
 def main():
     """Main entry point for package script."""
     parser = argparse.ArgumentParser(
-        description="Create OmniCpp distribution packages",
+        description="Create Warploom distribution packages",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

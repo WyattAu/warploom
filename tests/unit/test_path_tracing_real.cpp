@@ -53,14 +53,14 @@ namespace {
 //! %f varargs consume a double; make the required promotion explicit.
 inline double dbl(float v) noexcept { return static_cast<double>(v); }
 
-using omnicpp::render::Allocation;
-using omnicpp::render::PathTracerCamera;
-using omnicpp::render::PathTracerConfig;
-using omnicpp::render::PathTracerInstance;
-using omnicpp::render::PathTracerMesh;
-using omnicpp::render::VulkanContext;
-using omnicpp::render::VulkanMemoryAllocator;
-using omnicpp::render::VulkanPathTracer;
+using warploom::render::Allocation;
+using warploom::render::PathTracerCamera;
+using warploom::render::PathTracerConfig;
+using warploom::render::PathTracerInstance;
+using warploom::render::PathTracerMesh;
+using warploom::render::VulkanContext;
+using warploom::render::VulkanMemoryAllocator;
+using warploom::render::VulkanPathTracer;
 
 constexpr std::uint32_t kImg = 64;
 constexpr std::uint32_t kFrames = 64;   // accumulation samples per pass
@@ -637,7 +637,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   cam.forward = kCamFwd;
   tracer.set_camera(cam);
 
-  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool_r = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool_r.is_ok());
   VkCommandPool cmd_pool = pool_r.value();
@@ -646,7 +646,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
   // tracer owns the image, the clear barrier and the cross-round visibility
   // barrier -- this lambda is now just "record and submit".
   auto record_round = [&](std::uint32_t frame, bool clear_first) {
-    auto r_cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto r_cb_r = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), cmd_pool);
     EXPECT_TRUE(r_cb_r.is_ok());
     VkCommandBuffer cb = r_cb_r.value();
@@ -850,7 +850,7 @@ TEST(path_tracing_real, loop_pt_interior_mc_determinism) {
 //! instrument rather than sharing the MC's blindness.
 TEST(path_tracing_real, faceforward_normals_face_outward) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
   VulkanContext ctx;
@@ -968,10 +968,10 @@ TEST(path_tracing_real, faceforward_normals_face_outward) {
   cam.forward = kCamFwd;
   tracer.set_camera(cam);
 
-  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool_r = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool_r.is_ok());
-  auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cb_r = warploom::render::VulkanRenderer::allocate_command_buffer(
       ctx.device(), pool_r.value());
   ASSERT_TRUE(cb_r.is_ok());
   VkCommandBufferBeginInfo bi{};
@@ -1024,7 +1024,7 @@ TEST(path_tracing_real, faceforward_normals_face_outward) {
 //! the same geometry; only the BLAS count differs (3 vs 2).
 TEST(path_tracing_real, shared_mesh_renders_identically) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
   VulkanContext ctx;
@@ -1097,11 +1097,11 @@ TEST(path_tracing_real, shared_mesh_renders_identically) {
     std::vector<float> img;
     if (created && tracer.ready()) {
       tracer.set_camera(cam);
-      auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
+      auto pool_r = warploom::render::VulkanRenderer::create_command_pool(
           ctx.device(), qf);
       if (pool_r.is_ok()) {
         for (std::uint32_t f = 0; f < 8U; ++f) {
-          auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+          auto cb_r = warploom::render::VulkanRenderer::allocate_command_buffer(
               ctx.device(), pool_r.value());
           if (!cb_r.is_ok()) break;
           VkCommandBufferBeginInfo bi{};
@@ -1170,7 +1170,7 @@ TEST(path_tracing_real, shared_mesh_renders_identically) {
 //! changes the image, so an unwired mesh cannot hide behind a passing test.
 TEST(path_tracing_real, app_scene_general_transforms_contribute) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
   VulkanContext ctx;
@@ -1242,11 +1242,11 @@ TEST(path_tracing_real, app_scene_general_transforms_contribute) {
     std::vector<float> img;
     if (created && tracer.ready()) {
       tracer.set_camera(cam);
-      auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
+      auto pool_r = warploom::render::VulkanRenderer::create_command_pool(
           ctx.device(), qf);
       if (pool_r.is_ok()) {
         for (std::uint32_t f = 0; f < 8U; ++f) {
-          auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+          auto cb_r = warploom::render::VulkanRenderer::allocate_command_buffer(
               ctx.device(), pool_r.value());
           if (!cb_r.is_ok()) break;
           VkCommandBufferBeginInfo bi{};
@@ -1332,11 +1332,11 @@ TEST(path_tracing_real, app_scene_general_transforms_contribute) {
 //! the geometric one; the floor control probe passes on both.
 TEST(path_tracing_real, rotated_box_matches_reference) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
   VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtrRotated", true).is_ok());
+  ASSERT_TRUE(ctx.initialize("WarploomPtrRotated", true).is_ok());
   if (!ctx.has_ray_tracing() || !ctx.has_ray_tracing_pipeline()) {
     ctx.cleanup();
     GTEST_SKIP() << "ray tracing pipeline not available on this device";
@@ -1477,11 +1477,11 @@ TEST(path_tracing_real, rotated_box_matches_reference) {
   cam.forward = kCamFwd;
   tracer.set_camera(cam);
 
-  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(ctx.device(), qf);
+  auto pool_r = warploom::render::VulkanRenderer::create_command_pool(ctx.device(), qf);
   ASSERT_TRUE(pool_r.is_ok());
   VkCommandPool cmd_pool = pool_r.value();
   auto record_round = [&](std::uint32_t frame, bool clear_first) {
-    auto r_cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto r_cb_r = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), cmd_pool);
     ASSERT_TRUE(r_cb_r.is_ok());
     VkCommandBuffer cb = r_cb_r.value();
@@ -1705,7 +1705,7 @@ TEST(path_tracing_real, tracer_resize_and_sample_count) {
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
 
-  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool_r = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool_r.is_ok());
   VkCommandPool cmd_pool = pool_r.value();
@@ -1768,7 +1768,7 @@ TEST(path_tracing_real, tracer_resize_and_sample_count) {
   };
   const auto accumulate = [&](std::uint32_t frames) {
     for (std::uint32_t i = 0; i < frames; ++i) {
-      auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cb_r = warploom::render::VulkanRenderer::allocate_command_buffer(
           ctx.device(), cmd_pool);
       EXPECT_TRUE(cb_r.is_ok());
       VkCommandBuffer cb = cb_r.value();
@@ -1834,7 +1834,7 @@ TEST(path_tracing_real, stepped_target_holds_and_repeats_exactly) {
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
 
-  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool_r = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool_r.is_ok());
   VkCommandPool cmd_pool = pool_r.value();
@@ -1901,7 +1901,7 @@ TEST(path_tracing_real, stepped_target_holds_and_repeats_exactly) {
   // round-trips abort the test (ASSERT), so callers see only success.
   const auto record_rounds = [&](std::uint32_t rounds) {
     for (std::uint32_t i = 0; i < rounds; ++i) {
-      auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cb_r = warploom::render::VulkanRenderer::allocate_command_buffer(
           ctx.device(), cmd_pool);
       ASSERT_TRUE(cb_r.is_ok());
       VkCommandBuffer cb = cb_r.value();
@@ -2067,10 +2067,10 @@ TEST(path_tracing_real, viewport_cube_geometry_builds) {
       << "the viewport's own PT geometry must build on this device";
 
   // And it must trace, not merely build: one round, then read the mean.
-  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(ctx.device(), qf);
+  auto pool_r = warploom::render::VulkanRenderer::create_command_pool(ctx.device(), qf);
   ASSERT_TRUE(pool_r.is_ok());
   VkCommandPool pool = pool_r.value();
-  auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cb_r = warploom::render::VulkanRenderer::allocate_command_buffer(
       ctx.device(), pool);
   ASSERT_TRUE(cb_r.is_ok());
   VkCommandBuffer cb = cb_r.value();
@@ -2123,14 +2123,14 @@ TEST(path_tracing_real, viewport_cube_geometry_builds) {
 //! converges; if this drifts, the accumulator or the sample counter is wrong,
 //! and the whole visible convergence is an artifact.
 TEST(path_tracing_real, linear_mean_converges_to_a_constant) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtMeanStability", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtMeanStability", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
   const std::uint32_t side = 32U;
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   const std::vector<float> box = {
@@ -2149,33 +2149,33 @@ TEST(path_tracing_real, linear_mean_converges_to_a_constant) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
-  omnicpp::render::PathTracerMesh cube{};
+  warploom::render::PathTracerMesh cube{};
   cube.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   cube.triangle_count = 12U;
   cube.max_vertex = 35U;
   cfg.meshes = {cube};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
 
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
 
@@ -2185,7 +2185,7 @@ TEST(path_tracing_real, linear_mean_converges_to_a_constant) {
   // invalid VkCommandPool -- a bug in the measurement, not the engine.
   const auto mean_after = [&](std::uint32_t rounds) -> double {
     for (std::uint32_t r = 0; r < rounds; ++r) {
-      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
           ctx.device(), pool.value());
       EXPECT_TRUE(cbr.is_ok());
       VkCommandBuffer cb = cbr.value();
@@ -2308,14 +2308,14 @@ TEST(path_tracing_real, linear_mean_converges_to_a_constant) {
 //! The moment image is also pinned byte-identical across repeats, mirroring
 //! the accumulation contract (determinism test, pass 2).
 TEST(path_tracing_real, second_moment_tracks_squares) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtSecondMoment", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtSecondMoment", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
   const std::uint32_t side = 32U;
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   const std::vector<float> box = {
@@ -2334,38 +2334,38 @@ TEST(path_tracing_real, second_moment_tracks_squares) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
-  omnicpp::render::PathTracerMesh cube{};
+  warploom::render::PathTracerMesh cube{};
   cube.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   cube.triangle_count = 12U;
   cube.max_vertex = 35U;
   cfg.meshes = {cube};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
 
   const auto accumulate = [&](std::uint32_t rounds) {
     for (std::uint32_t r = 0; r < rounds; ++r) {
-      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
           ctx.device(), pool.value());
       EXPECT_TRUE(cbr.is_ok());
       VkCommandBuffer cb = cbr.value();
@@ -2524,14 +2524,14 @@ TEST(path_tracing_real, second_moment_tracks_squares) {
 // sample_count at 5 instead of 1; always-dirty (restart on every upload)
 // breaks the hold-path count (1 instead of 5).
 TEST(path_tracing_real, camera_move_restarts_sequence) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtStepDiscipline", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtStepDiscipline", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
   const std::uint32_t side = 32U;
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   const std::vector<float> box = {
@@ -2550,38 +2550,38 @@ TEST(path_tracing_real, camera_move_restarts_sequence) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
-  omnicpp::render::PathTracerMesh cube{};
+  warploom::render::PathTracerMesh cube{};
   cube.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   cube.triangle_count = 12U;
   cube.max_vertex = 35U;
   cfg.meshes = {cube};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
 
-  const auto record_one = [&](omnicpp::render::VulkanPathTracer& t,
+  const auto record_one = [&](warploom::render::VulkanPathTracer& t,
                               std::uint32_t frame, bool clear_first) {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -2613,7 +2613,7 @@ TEST(path_tracing_real, camera_move_restarts_sequence) {
       << "identical camera re-upload restarted the sequence";
 
   // A real move restarts even with clear_first=false.
-  omnicpp::render::PathTracerCamera moved = cam;
+  warploom::render::PathTracerCamera moved = cam;
   moved.position[0] += 0.5F;
   tracer.set_camera(moved);
   record_one(tracer, 5U, false);
@@ -2667,7 +2667,7 @@ TEST(path_tracing_real, camera_move_restarts_sequence) {
                         held.value().size() * sizeof(float)),
             0)
       << "held sequence drifted without a camera move";
-  omnicpp::render::PathTracerCamera moved_again = moved;
+  warploom::render::PathTracerCamera moved_again = moved;
   moved_again.position[1] += 0.5F;
   tracer.set_camera(moved_again);
   record_one(tracer, 7U, false);
@@ -2700,15 +2700,15 @@ TEST(path_tracing_real, camera_move_restarts_sequence) {
 // Thresholds below are scene-specific (like the moment test's kExpected),
 // measured 2026-11-03 on the RTX 2060, with margin for Monte Carlo wobble.
 TEST(path_tracing_real, variance_concentration_spike) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtVarianceSpike", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtVarianceSpike", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
   const std::uint32_t side = 64U;
   constexpr std::uint32_t kSpikeFrames = 16U;
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   const std::vector<float> box = {
@@ -2727,36 +2727,36 @@ TEST(path_tracing_real, variance_concentration_spike) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
-  omnicpp::render::PathTracerMesh cube{};
+  warploom::render::PathTracerMesh cube{};
   cube.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   cube.triangle_count = 12U;
   cube.max_vertex = 35U;
   cfg.meshes = {cube};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
   for (std::uint32_t r = 0; r < kSpikeFrames; ++r) {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     ASSERT_TRUE(cbr.is_ok());
     VkCommandBuffer cb = cbr.value();
@@ -2848,8 +2848,8 @@ TEST(path_tracing_real, variance_concentration_spike) {
 // MSE(4spp raw). If no k beats raw by the pinned margin, variance-only
 // guidance is insufficient and the full build waits on the G-buffer.
 TEST(path_tracing_real, denoise_variance_spike) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtDenoiseSpike", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtDenoiseSpike", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
@@ -2863,7 +2863,7 @@ TEST(path_tracing_real, denoise_variance_spike) {
   // wrong thing. The sun disk in mode 1 supplies the variance the claim is
   // about.
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   const std::vector<float> box = {
@@ -2882,33 +2882,33 @@ TEST(path_tracing_real, denoise_variance_spike) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
   cfg.sky.mode = 1U;  // see the note at kNoisyFrames
-  omnicpp::render::PathTracerMesh cube{};
+  warploom::render::PathTracerMesh cube{};
   cube.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   cube.triangle_count = 12U;
   cube.max_vertex = 35U;
   cfg.meshes = {cube};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
   const auto submit_cb =
@@ -2923,7 +2923,7 @@ TEST(path_tracing_real, denoise_variance_spike) {
       };
   const auto record_rounds = [&](std::uint32_t frames) {
     for (std::uint32_t r = 0; r < frames; ++r) {
-      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
           ctx.device(), pool.value());
       EXPECT_TRUE(cbr.is_ok());
       if (!cbr.is_ok()) return;
@@ -2950,7 +2950,7 @@ TEST(path_tracing_real, denoise_variance_spike) {
   // Filter output image (rgba32f storage + transfer-src for readback).
   VkImage out_image{VK_NULL_HANDLE};
   VkImageView out_view{VK_NULL_HANDLE};
-  omnicpp::render::Allocation out_mem{};
+  warploom::render::Allocation out_mem{};
   {
     VkImageCreateInfo ii{};
     ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -2985,7 +2985,7 @@ TEST(path_tracing_real, denoise_variance_spike) {
   // be the copy source for the final readback).
   VkImage ping_image{VK_NULL_HANDLE};
   VkImageView ping_view{VK_NULL_HANDLE};
-  omnicpp::render::Allocation ping_mem{};
+  warploom::render::Allocation ping_mem{};
   {
     VkImageCreateInfo ii{};
     ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -3018,9 +3018,9 @@ TEST(path_tracing_real, denoise_variance_spike) {
 
   // Compute pipeline: variance-guided a-trous (auto-compiled by the shader
   // glob into WARPLOOM_TEST_SHADER_DIR).
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(ctx.device()).is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> bindings(3);
+  std::vector<warploom::render::ReflectedBinding> bindings(3);
   for (std::uint32_t b = 0; b < 3U; ++b) {
     bindings[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                    VK_SHADER_STAGE_COMPUTE_BIT};
@@ -3040,7 +3040,7 @@ TEST(path_tracing_real, denoise_variance_spike) {
                                   VK_IMAGE_LAYOUT_GENERAL).is_ok());
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 28U};
-  omnicpp::render::VulkanPipeline pipe;
+  warploom::render::VulkanPipeline pipe;
   ASSERT_TRUE(pipe.load_shader_stage_file(
       ctx.device(), shader_dir + "/denoise_variance_atrous.comp.spv", "compute")
                   .is_ok());
@@ -3050,7 +3050,7 @@ TEST(path_tracing_real, denoise_variance_spike) {
                   .is_ok());
 
   const auto dispatch_filter = [&](float k) {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -3196,7 +3196,7 @@ TEST(path_tracing_real, denoise_variance_spike) {
                                    VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_NULL_HANDLE,
                                    dst_view, VK_IMAGE_LAYOUT_GENERAL)
                       .is_ok());
-      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
           ctx.device(), pool.value());
       EXPECT_TRUE(cbr.is_ok());
       if (!cbr.is_ok()) return;
@@ -3473,8 +3473,8 @@ TEST(path_tracing_real, denoise_variance_spike) {
 //! s4 verdict). Bit-identical re-dispatch pins the temporal-history
 //! constraint for the 4-binding form.
 TEST(path_tracing_real, denoise_edge_gbuffer_spike) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtEdgeSpike", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtEdgeSpike", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
@@ -3482,7 +3482,7 @@ TEST(path_tracing_real, denoise_edge_gbuffer_spike) {
   constexpr std::uint32_t kNoisyFrames = 4U;
   constexpr std::uint32_t kRefFrames = 128U;
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   const std::vector<float> box = {
@@ -3501,33 +3501,33 @@ TEST(path_tracing_real, denoise_edge_gbuffer_spike) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
   cfg.sky.mode = 1U;
-  omnicpp::render::PathTracerMesh cube{};
+  warploom::render::PathTracerMesh cube{};
   cube.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   cube.triangle_count = 12U;
   cube.max_vertex = 35U;
   cfg.meshes = {cube};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
   const auto submit_wait = [&](VkCommandBuffer cb) {
@@ -3541,7 +3541,7 @@ TEST(path_tracing_real, denoise_edge_gbuffer_spike) {
   };
   const auto record_rounds = [&](std::uint32_t frames) {
     for (std::uint32_t r = 0; r < frames; ++r) {
-      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
           ctx.device(), pool.value());
       EXPECT_TRUE(cbr.is_ok());
       if (!cbr.is_ok()) return;
@@ -3567,8 +3567,8 @@ TEST(path_tracing_real, denoise_edge_gbuffer_spike) {
   struct OutBuf {
     VkImage img{VK_NULL_HANDLE};
     VkImageView view{VK_NULL_HANDLE};
-    omnicpp::render::Allocation mem{};
-    omnicpp::render::Allocation buf{};
+    warploom::render::Allocation mem{};
+    warploom::render::Allocation buf{};
   };
   auto make_out = [&]() {
     OutBuf o{};
@@ -3608,7 +3608,7 @@ TEST(path_tracing_real, denoise_edge_gbuffer_spike) {
   // Uniform-geometry control image: same shape, cleared to (0,0,1,+1).
   OutBuf uni_geo = make_out();
   {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     ASSERT_TRUE(cbr.is_ok());
     VkCommandBuffer cb = cbr.value();
@@ -3641,10 +3641,10 @@ TEST(path_tracing_real, denoise_edge_gbuffer_spike) {
     vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
   }
 
-  omnicpp::render::VulkanDescriptorManager var_mgr, edge_mgr;
+  warploom::render::VulkanDescriptorManager var_mgr, edge_mgr;
   ASSERT_TRUE(var_mgr.initialize(ctx.device()).is_ok());
   ASSERT_TRUE(edge_mgr.initialize(ctx.device()).is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> var_b(3);
+  std::vector<warploom::render::ReflectedBinding> var_b(3);
   for (std::uint32_t b = 0; b < 3U; ++b) {
     var_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                 VK_SHADER_STAGE_COMPUTE_BIT};
@@ -3665,7 +3665,7 @@ TEST(path_tracing_real, denoise_edge_gbuffer_spike) {
                                   VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_NULL_HANDLE,
                                   var_out.view, VK_IMAGE_LAYOUT_GENERAL)
                   .is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> edge_b(4);
+  std::vector<warploom::render::ReflectedBinding> edge_b(4);
   for (std::uint32_t b = 0; b < 4U; ++b) {
     edge_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                  VK_SHADER_STAGE_COMPUTE_BIT};
@@ -3692,7 +3692,7 @@ TEST(path_tracing_real, denoise_edge_gbuffer_spike) {
                   .is_ok());
 
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
-  omnicpp::render::VulkanPipeline var_pipe, edge_pipe;
+  warploom::render::VulkanPipeline var_pipe, edge_pipe;
   {
     const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 28U};
     ASSERT_TRUE(var_pipe.load_shader_stage_file(
@@ -3775,7 +3775,7 @@ TEST(path_tracing_real, denoise_edge_gbuffer_spike) {
                            buf, 1, &region);
   };
   const auto dispatch_var = [&](float k, OutBuf& out) {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -3811,7 +3811,7 @@ TEST(path_tracing_real, denoise_edge_gbuffer_spike) {
                                      VK_NULL_HANDLE, gview,
                                      VK_IMAGE_LAYOUT_GENERAL)
                     .is_ok());
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -4000,8 +4000,8 @@ TEST(path_tracing_real, denoise_edge_gbuffer_spike) {
 }
 
 TEST(path_tracing_real, denoise_edge_curved_spike) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtCurveSpike", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtCurveSpike", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
@@ -4009,7 +4009,7 @@ TEST(path_tracing_real, denoise_edge_curved_spike) {
   constexpr std::uint32_t kNoisyFrames = 4U;
   constexpr std::uint32_t kRefFrames = 128U;
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   // Curved scene: a tessellated sphere (radius 0.5) at the origin, same
@@ -4032,34 +4032,34 @@ TEST(path_tracing_real, denoise_edge_curved_spike) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
   cfg.sky.mode = 1U;
   // 24x48 lat/long sphere: 2*48*(24-1) = 2208 tris, 6624 verts.
-  omnicpp::render::PathTracerMesh ball{};
+  warploom::render::PathTracerMesh ball{};
   ball.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   ball.triangle_count = 2208U;
   ball.max_vertex = 6623U;
   cfg.meshes = {ball};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
   const auto submit_wait = [&](VkCommandBuffer cb) {
@@ -4073,7 +4073,7 @@ TEST(path_tracing_real, denoise_edge_curved_spike) {
   };
   const auto record_rounds = [&](std::uint32_t frames) {
     for (std::uint32_t r = 0; r < frames; ++r) {
-      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
           ctx.device(), pool.value());
       EXPECT_TRUE(cbr.is_ok());
       if (!cbr.is_ok()) return;
@@ -4099,8 +4099,8 @@ TEST(path_tracing_real, denoise_edge_curved_spike) {
   struct OutBuf {
     VkImage img{VK_NULL_HANDLE};
     VkImageView view{VK_NULL_HANDLE};
-    omnicpp::render::Allocation mem{};
-    omnicpp::render::Allocation buf{};
+    warploom::render::Allocation mem{};
+    warploom::render::Allocation buf{};
   };
   auto make_out = [&]() {
     OutBuf o{};
@@ -4140,7 +4140,7 @@ TEST(path_tracing_real, denoise_edge_curved_spike) {
   // Uniform-geometry control image: same shape, cleared to (0,0,1,+1).
   OutBuf uni_geo = make_out();
   {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     ASSERT_TRUE(cbr.is_ok());
     VkCommandBuffer cb = cbr.value();
@@ -4173,10 +4173,10 @@ TEST(path_tracing_real, denoise_edge_curved_spike) {
     vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
   }
 
-  omnicpp::render::VulkanDescriptorManager var_mgr, edge_mgr;
+  warploom::render::VulkanDescriptorManager var_mgr, edge_mgr;
   ASSERT_TRUE(var_mgr.initialize(ctx.device()).is_ok());
   ASSERT_TRUE(edge_mgr.initialize(ctx.device()).is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> var_b(3);
+  std::vector<warploom::render::ReflectedBinding> var_b(3);
   for (std::uint32_t b = 0; b < 3U; ++b) {
     var_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                 VK_SHADER_STAGE_COMPUTE_BIT};
@@ -4197,7 +4197,7 @@ TEST(path_tracing_real, denoise_edge_curved_spike) {
                                   VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_NULL_HANDLE,
                                   var_out.view, VK_IMAGE_LAYOUT_GENERAL)
                   .is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> edge_b(4);
+  std::vector<warploom::render::ReflectedBinding> edge_b(4);
   for (std::uint32_t b = 0; b < 4U; ++b) {
     edge_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                  VK_SHADER_STAGE_COMPUTE_BIT};
@@ -4224,7 +4224,7 @@ TEST(path_tracing_real, denoise_edge_curved_spike) {
                   .is_ok());
 
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
-  omnicpp::render::VulkanPipeline var_pipe, edge_pipe;
+  warploom::render::VulkanPipeline var_pipe, edge_pipe;
   {
     const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 28U};
     ASSERT_TRUE(var_pipe.load_shader_stage_file(
@@ -4307,7 +4307,7 @@ TEST(path_tracing_real, denoise_edge_curved_spike) {
                            buf, 1, &region);
   };
   const auto dispatch_var = [&](float k, OutBuf& out) {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -4343,7 +4343,7 @@ TEST(path_tracing_real, denoise_edge_curved_spike) {
                                      VK_NULL_HANDLE, gview,
                                      VK_IMAGE_LAYOUT_GENERAL)
                     .is_ok());
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -4542,8 +4542,8 @@ TEST(path_tracing_real, denoise_edge_curved_spike) {
 }
 
 TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtEdgeIterSpike", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtEdgeIterSpike", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
@@ -4551,7 +4551,7 @@ TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
   constexpr std::uint32_t kNoisyFrames = 4U;
   constexpr std::uint32_t kRefFrames = 128U;
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   const std::vector<float> box = {
@@ -4570,33 +4570,33 @@ TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
   cfg.sky.mode = 1U;
-  omnicpp::render::PathTracerMesh cube{};
+  warploom::render::PathTracerMesh cube{};
   cube.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   cube.triangle_count = 12U;
   cube.max_vertex = 35U;
   cfg.meshes = {cube};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
   const auto submit_wait = [&](VkCommandBuffer cb) {
@@ -4610,7 +4610,7 @@ TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
   };
   const auto record_rounds = [&](std::uint32_t frames) {
     for (std::uint32_t r = 0; r < frames; ++r) {
-      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
           ctx.device(), pool.value());
       EXPECT_TRUE(cbr.is_ok());
       if (!cbr.is_ok()) return;
@@ -4636,8 +4636,8 @@ TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
   struct OutBuf {
     VkImage img{VK_NULL_HANDLE};
     VkImageView view{VK_NULL_HANDLE};
-    omnicpp::render::Allocation mem{};
-    omnicpp::render::Allocation buf{};
+    warploom::render::Allocation mem{};
+    warploom::render::Allocation buf{};
   };
   auto make_out = [&]() {
     OutBuf o{};
@@ -4676,7 +4676,7 @@ TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
   // Uniform-geometry control image: same shape, cleared to (0,0,1,+1).
   OutBuf uni_geo = make_out();
   {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     ASSERT_TRUE(cbr.is_ok());
     VkCommandBuffer cb = cbr.value();
@@ -4717,7 +4717,7 @@ TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
   // are idle-separated submits, so no inter-dispatch barriers are needed
   // beyond the layout contract.
   {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     ASSERT_TRUE(cbr.is_ok());
     VkCommandBuffer cb = cbr.value();
@@ -4745,10 +4745,10 @@ TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
     vkFreeCommandBuffers(ctx.device(), pool.value(), 1U, &cb);
   }
 
-  omnicpp::render::VulkanDescriptorManager var_mgr, edge_mgr;
+  warploom::render::VulkanDescriptorManager var_mgr, edge_mgr;
   ASSERT_TRUE(var_mgr.initialize(ctx.device()).is_ok());
   ASSERT_TRUE(edge_mgr.initialize(ctx.device()).is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> var_b(3);
+  std::vector<warploom::render::ReflectedBinding> var_b(3);
   for (std::uint32_t b = 0; b < 3U; ++b) {
     var_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                 VK_SHADER_STAGE_COMPUTE_BIT};
@@ -4769,7 +4769,7 @@ TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
                                   VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_NULL_HANDLE,
                                   var_out.view, VK_IMAGE_LAYOUT_GENERAL)
                   .is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> edge_b(4);
+  std::vector<warploom::render::ReflectedBinding> edge_b(4);
   for (std::uint32_t b = 0; b < 4U; ++b) {
     edge_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                  VK_SHADER_STAGE_COMPUTE_BIT};
@@ -4798,7 +4798,7 @@ TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
                   .is_ok());
 
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
-  omnicpp::render::VulkanPipeline var_pipe, edge_pipe;
+  warploom::render::VulkanPipeline var_pipe, edge_pipe;
   {
     const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 28U};
     ASSERT_TRUE(var_pipe.load_shader_stage_file(
@@ -4897,7 +4897,7 @@ TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
                          0, nullptr, 1, &ret);
   };
   const auto dispatch_var = [&](float k, OutBuf& out) {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -4953,7 +4953,7 @@ TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
                                      VK_NULL_HANDLE, out.view,
                                      VK_IMAGE_LAYOUT_GENERAL)
                     .is_ok());
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -5229,8 +5229,8 @@ TEST(path_tracing_real, denoise_edge_multi_iteration_spike) {
 //! K-wire, stride-wire, geometry-wire, all K-matched where the loop33
 //! trap applies) are what stop a dead chain from passing silently.
 TEST(path_tracing_real, denoise_edge_variance_update_spike) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtVarUpdateSpike", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtVarUpdateSpike", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
@@ -5238,7 +5238,7 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
   constexpr std::uint32_t kNoisyFrames = 4U;
   constexpr std::uint32_t kRefFrames = 128U;
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   const std::vector<float> box = {
@@ -5257,33 +5257,33 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
   cfg.sky.mode = 1U;
-  omnicpp::render::PathTracerMesh cube{};
+  warploom::render::PathTracerMesh cube{};
   cube.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   cube.triangle_count = 12U;
   cube.max_vertex = 35U;
   cfg.meshes = {cube};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
   const auto submit_wait = [&](VkCommandBuffer cb) {
@@ -5297,7 +5297,7 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
   };
   const auto record_rounds = [&](std::uint32_t frames) {
     for (std::uint32_t r = 0; r < frames; ++r) {
-      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
           ctx.device(), pool.value());
       EXPECT_TRUE(cbr.is_ok());
       if (!cbr.is_ok()) return;
@@ -5323,8 +5323,8 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
   struct OutBuf {
     VkImage img{VK_NULL_HANDLE};
     VkImageView view{VK_NULL_HANDLE};
-    omnicpp::render::Allocation mem{};
-    omnicpp::render::Allocation buf{};
+    warploom::render::Allocation mem{};
+    warploom::render::Allocation buf{};
   };
   auto make_out = [&]() {
     OutBuf o{};
@@ -5366,7 +5366,7 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
   OutBuf uni_geo = make_out();
   OutBuf zero_geo = make_out();
   {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     ASSERT_TRUE(cbr.is_ok());
     VkCommandBuffer cb = cbr.value();
@@ -5417,7 +5417,7 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
   // dispatches are idle-separated submits, so no inter-dispatch barriers
   // are needed beyond the layout contract.
   {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     ASSERT_TRUE(cbr.is_ok());
     VkCommandBuffer cb = cbr.value();
@@ -5453,7 +5453,7 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
   ASSERT_TRUE(mbuf_r.is_ok());
   auto mbuf = mbuf_r.value();
   const auto copy_moment = [&]() {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -5551,11 +5551,11 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
   std::printf("LoopT2 var-update spike: E2 mean %.6e neighbor-energy %.6e\n",
               e2_mean, e2_energy);
 
-  omnicpp::render::VulkanDescriptorManager var_mgr, edge_mgr, smooth_mgr;
+  warploom::render::VulkanDescriptorManager var_mgr, edge_mgr, smooth_mgr;
   ASSERT_TRUE(var_mgr.initialize(ctx.device()).is_ok());
   ASSERT_TRUE(edge_mgr.initialize(ctx.device()).is_ok());
   ASSERT_TRUE(smooth_mgr.initialize(ctx.device()).is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> var_b(3);
+  std::vector<warploom::render::ReflectedBinding> var_b(3);
   for (std::uint32_t b = 0; b < 3U; ++b) {
     var_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                 VK_SHADER_STAGE_COMPUTE_BIT};
@@ -5576,7 +5576,7 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
                                   VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_NULL_HANDLE,
                                   var_out.view, VK_IMAGE_LAYOUT_GENERAL)
                   .is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> edge_b(4);
+  std::vector<warploom::render::ReflectedBinding> edge_b(4);
   for (std::uint32_t b = 0; b < 4U; ++b) {
     edge_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                  VK_SHADER_STAGE_COMPUTE_BIT};
@@ -5603,7 +5603,7 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
                                    VK_NULL_HANDLE, ping.view,
                                    VK_IMAGE_LAYOUT_GENERAL)
                   .is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> smooth_b(3);
+  std::vector<warploom::render::ReflectedBinding> smooth_b(3);
   for (std::uint32_t b = 0; b < 3U; ++b) {
     smooth_b[b] = {0, b, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                    VK_SHADER_STAGE_COMPUTE_BIT};
@@ -5624,7 +5624,7 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
                   .is_ok());
 
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
-  omnicpp::render::VulkanPipeline var_pipe, edge_pipe, smooth_pipe;
+  warploom::render::VulkanPipeline var_pipe, edge_pipe, smooth_pipe;
   {
     const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 28U};
     ASSERT_TRUE(var_pipe.load_shader_stage_file(
@@ -5736,7 +5736,7 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
                          0, nullptr, 1, &ret);
   };
   const auto dispatch_var = [&](float k, OutBuf& out) {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -5798,7 +5798,7 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
                                      VK_NULL_HANDLE, out.view,
                                      VK_IMAGE_LAYOUT_GENERAL)
                     .is_ok());
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -5867,7 +5867,7 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
                                        VK_NULL_HANDLE, out.view,
                                        VK_IMAGE_LAYOUT_GENERAL)
                     .is_ok());
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -6124,8 +6124,8 @@ TEST(path_tracing_real, denoise_edge_variance_update_spike) {
 //! (k=2.0/sigma=1.5/ns=0.1/ds=1.0, the engine's baked values) over the
 //! same 4spp accumulation and the outputs must be bit-identical.
 TEST(path_tracing_real, denoise_render_path_uniform_parity) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtDenoisePath", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtDenoisePath", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
@@ -6133,7 +6133,7 @@ TEST(path_tracing_real, denoise_render_path_uniform_parity) {
   constexpr std::uint32_t kNoisyFrames = 4U;
   constexpr std::uint32_t kRefFrames = 128U;
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   const std::vector<float> box = {
@@ -6152,33 +6152,33 @@ TEST(path_tracing_real, denoise_render_path_uniform_parity) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
   cfg.sky.mode = 1U;
-  omnicpp::render::PathTracerMesh cube{};
+  warploom::render::PathTracerMesh cube{};
   cube.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   cube.triangle_count = 12U;
   cube.max_vertex = 35U;
   cfg.meshes = {cube};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
   const auto submit_wait = [&](VkCommandBuffer cb) {
@@ -6192,7 +6192,7 @@ TEST(path_tracing_real, denoise_render_path_uniform_parity) {
   };
   const auto record_rounds = [&](std::uint32_t frames) {
     for (std::uint32_t r = 0; r < frames; ++r) {
-      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
           ctx.device(), pool.value());
       EXPECT_TRUE(cbr.is_ok());
       if (!cbr.is_ok()) return;
@@ -6208,7 +6208,7 @@ TEST(path_tracing_real, denoise_render_path_uniform_parity) {
     }
   };
   const auto record_denoise_once = [&]() {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -6268,9 +6268,9 @@ TEST(path_tracing_real, denoise_render_path_uniform_parity) {
         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     ASSERT_TRUE(buf.is_ok());
-    omnicpp::render::VulkanDescriptorManager mgr;
+    warploom::render::VulkanDescriptorManager mgr;
     ASSERT_TRUE(mgr.initialize(ctx.device()).is_ok());
-    std::vector<omnicpp::render::ReflectedBinding> b(4);
+    std::vector<warploom::render::ReflectedBinding> b(4);
     for (std::uint32_t k = 0; k < 4U; ++k) {
       b[k] = {0, k, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
               VK_SHADER_STAGE_COMPUTE_BIT};
@@ -6294,7 +6294,7 @@ TEST(path_tracing_real, denoise_render_path_uniform_parity) {
     ASSERT_TRUE(mgr.write_image(set.value(), 3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                                 VK_NULL_HANDLE, out_view, VK_IMAGE_LAYOUT_GENERAL)
                     .is_ok());
-    omnicpp::render::VulkanPipeline pipe;
+    warploom::render::VulkanPipeline pipe;
     const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
     ASSERT_TRUE(pipe.load_shader_stage_file(
         ctx.device(), shader_dir + "/denoise_edge_atrous.comp.spv", "compute")
@@ -6304,7 +6304,7 @@ TEST(path_tracing_real, denoise_render_path_uniform_parity) {
                     .is_ok());
     ASSERT_TRUE(pipe.create_compute_pipeline(ctx.device(), pipe.pipeline_layout())
                     .is_ok());
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     ASSERT_TRUE(cbr.is_ok());
     VkCommandBuffer cb = cbr.value();
@@ -6500,8 +6500,8 @@ TEST(path_tracing_real, denoise_render_path_uniform_parity) {
 //! and an all-held zero stack must filter to exact zeros (no garbage
 //! from the output image's first layout transition).
 TEST(path_tracing_real, denoise_render_path_adaptive) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtDenoiseAdapt", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtDenoiseAdapt", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
@@ -6510,7 +6510,7 @@ TEST(path_tracing_real, denoise_render_path_adaptive) {
   constexpr std::uint32_t kMasked = 4U;
   constexpr std::uint32_t kRefFrames = 128U;
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   const std::vector<float> box = {
@@ -6529,33 +6529,33 @@ TEST(path_tracing_real, denoise_render_path_adaptive) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
   cfg.sky.mode = 1U;
-  omnicpp::render::PathTracerMesh cube{};
+  warploom::render::PathTracerMesh cube{};
   cube.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   cube.triangle_count = 12U;
   cube.max_vertex = 35U;
   cfg.meshes = {cube};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
   const auto submit_wait = [&](VkCommandBuffer cb) {
@@ -6569,7 +6569,7 @@ TEST(path_tracing_real, denoise_render_path_adaptive) {
   };
   const auto record_rounds = [&](std::uint32_t frames, bool clear_first) {
     for (std::uint32_t r = 0; r < frames; ++r) {
-      auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
           ctx.device(), pool.value());
       EXPECT_TRUE(cbr.is_ok());
       if (!cbr.is_ok()) return;
@@ -6585,7 +6585,7 @@ TEST(path_tracing_real, denoise_render_path_adaptive) {
     }
   };
   const auto record_denoise_once = [&]() {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -6605,7 +6605,7 @@ TEST(path_tracing_real, denoise_render_path_adaptive) {
   auto moment = tracer.read_second_moment();
   ASSERT_TRUE(mean.is_ok() && moment.is_ok());
   const auto mask =
-      omnicpp::render::adaptive_mask_from_variance(mean.value(),
+      warploom::render::adaptive_mask_from_variance(mean.value(),
                                                    moment.value(), 0.25);
   EXPECT_TRUE(tracer.upload_adaptive_mask(mask.mask));
   tracer.set_adaptive_enabled(true);
@@ -6625,7 +6625,7 @@ TEST(path_tracing_real, denoise_render_path_adaptive) {
   // (The overwrite runs before the reference below because the reference
   // re-traces and would replace the stack under test.)
   {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     ASSERT_TRUE(cbr.is_ok());
     VkCommandBuffer cb = cbr.value();
@@ -6748,15 +6748,15 @@ TEST(path_tracing_real, denoise_render_path_adaptive) {
 //! directions: a wrong-size upload fails, and disabling the flag refines
 //! everything (held counts advance to 8).
 TEST(path_tracing_real, adaptive_masked_rounds_hold_unmasked_bit_exact) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtAdaptive", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtAdaptive", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
   const std::uint32_t side = 32U;
   const std::size_t texels = static_cast<std::size_t>(side) * side;
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   const std::vector<float> box = {
@@ -6775,36 +6775,36 @@ TEST(path_tracing_real, adaptive_masked_rounds_hold_unmasked_bit_exact) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
-  omnicpp::render::PathTracerMesh cube{};
+  warploom::render::PathTracerMesh cube{};
   cube.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   cube.triangle_count = 12U;
   cube.max_vertex = 35U;
   cfg.meshes = {cube};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
   const auto run_round = [&](std::uint32_t frame, bool clear) {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -6843,7 +6843,7 @@ TEST(path_tracing_real, adaptive_masked_rounds_hold_unmasked_bit_exact) {
   ASSERT_TRUE(m4.is_ok());
   ASSERT_TRUE(e2_4.is_ok());
   const auto mask =
-      omnicpp::render::adaptive_mask_from_variance(m4.value(), e2_4.value(), 0.25);
+      warploom::render::adaptive_mask_from_variance(m4.value(), e2_4.value(), 0.25);
   ASSERT_EQ(mask.mask.size(), texels);
   EXPECT_GT(mask.selected, 0U);
   EXPECT_LT(mask.selected, texels)
@@ -6922,15 +6922,15 @@ TEST(path_tracing_real, adaptive_masked_rounds_hold_unmasked_bit_exact) {
 //! advances every count, so the device mask tracks the LATEST upload in
 //! both directions rather than sticking on the first.
 TEST(path_tracing_real, adaptive_iterative_remask_refines_new_texels) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtReMask", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtReMask", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
   const std::uint32_t side = 32U;
   const std::size_t texels = static_cast<std::size_t>(side) * side;
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   const std::vector<float> box = {
@@ -6949,36 +6949,36 @@ TEST(path_tracing_real, adaptive_iterative_remask_refines_new_texels) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
-  omnicpp::render::PathTracerMesh cube{};
+  warploom::render::PathTracerMesh cube{};
   cube.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   cube.triangle_count = 12U;
   cube.max_vertex = 35U;
   cfg.meshes = {cube};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
   const auto run_round = [&](std::uint32_t frame, bool clear) {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -7007,7 +7007,7 @@ TEST(path_tracing_real, adaptive_iterative_remask_refines_new_texels) {
     auto e = tracer.read_second_moment();
     EXPECT_TRUE(m.is_ok());
     EXPECT_TRUE(e.is_ok());
-    return omnicpp::render::adaptive_mask_from_variance(m.value(), e.value(),
+    return warploom::render::adaptive_mask_from_variance(m.value(), e.value(),
                                                         frac);
   };
 
@@ -7019,7 +7019,7 @@ TEST(path_tracing_real, adaptive_iterative_remask_refines_new_texels) {
 
   // Generation 1: mask from the prefix, 4 masked rounds.
   const auto mask1 =
-      omnicpp::render::adaptive_mask_from_variance(m4.value(),
+      warploom::render::adaptive_mask_from_variance(m4.value(),
                                                    tracer.read_second_moment().value(),
                                                    0.25);
   ASSERT_EQ(mask1.mask.size(), texels);
@@ -7160,15 +7160,15 @@ TEST(path_tracing_real, adaptive_iterative_remask_refines_new_texels) {
 //! Sabotage-checked: deleting the rgen store leaves the clear value
 //! everywhere, so no hit texel can pass.
 TEST(path_tracing_real, gbuffer_first_hit_normal_depth) {
-  omnicpp::render::VulkanContext ctx;
-  ASSERT_TRUE(ctx.initialize("OmniCppPtGbuffer", true).is_ok());
+  warploom::render::VulkanContext ctx;
+  ASSERT_TRUE(ctx.initialize("WarploomPtGbuffer", true).is_ok());
   if (!ctx.has_ray_tracing()) GTEST_SKIP() << "device lacks ray tracing";
   const std::uint32_t qf =
       static_cast<std::uint32_t>(ctx.queue_families().graphics_family);
   const std::uint32_t side = 32U;
   const std::size_t texels = static_cast<std::size_t>(side) * side;
 
-  omnicpp::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanMemoryAllocator alloc;
   ASSERT_TRUE(alloc.initialize(ctx.device(), ctx.physical_device()).is_ok());
 
   // Single triangle at z=0 facing +Z (soup: 3 verts, 1 tri).
@@ -7185,36 +7185,36 @@ TEST(path_tracing_real, gbuffer_first_hit_normal_depth) {
   ai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   ai.buffer = geo.value().buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = side;
   cfg.height = side;
   cfg.max_bounces = 4U;
-  omnicpp::render::PathTracerMesh mesh{};
+  warploom::render::PathTracerMesh mesh{};
   mesh.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(ctx.device(), &ai));
   mesh.triangle_count = 1U;
   mesh.max_vertex = 2U;
   cfg.meshes = {mesh};
   cfg.instances = {
-      omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 1.0F)};
+      warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 1.0F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer.create(ctx.physical_device(), ctx.device(),
                             ctx.graphics_queue(), qf, alloc, cfg)
                   .is_ok());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.6F, 2.6F};
   cam.forward = {0.0F, -0.2F, -1.0F};
   cam.right = {1.0F, 0.0F, 0.0F};
   cam.up = {0.0F, 1.0F, 0.0F};
   tracer.set_camera(cam);
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool.is_ok());
   const auto run_round = [&](std::uint32_t frame, bool clear) {
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         ctx.device(), pool.value());
     EXPECT_TRUE(cbr.is_ok());
     if (!cbr.is_ok()) return;
@@ -7325,7 +7325,7 @@ TEST(adaptive_mask, selects_top_fraction_deterministically) {
     moment[4U + c] = 0.75F;  // luma var = 0.75 - 0.25 = 0.5
   }
   const auto mask =
-      omnicpp::render::adaptive_mask_from_variance(mean, moment, 0.25);
+      warploom::render::adaptive_mask_from_variance(mean, moment, 0.25);
   ASSERT_EQ(mask.mask.size(), 8U);
   EXPECT_EQ(mask.selected, 2U);
   EXPECT_EQ(mask.mask[0], 1U);
@@ -7334,13 +7334,13 @@ TEST(adaptive_mask, selects_top_fraction_deterministically) {
   EXPECT_FLOAT_EQ(mask.threshold, 0.5F);
   // Deterministic: same inputs, same mask bit-for-bit.
   const auto mask2 =
-      omnicpp::render::adaptive_mask_from_variance(mean, moment, 0.25);
+      warploom::render::adaptive_mask_from_variance(mean, moment, 0.25);
   EXPECT_EQ(mask2.mask, mask.mask);
   // Degenerate inputs select nothing (no crash, no selection).
-  EXPECT_EQ(omnicpp::render::adaptive_mask_from_variance({}, {}, 0.25)
+  EXPECT_EQ(warploom::render::adaptive_mask_from_variance({}, {}, 0.25)
                 .selected,
             0U);
-  EXPECT_EQ(omnicpp::render::adaptive_mask_from_variance(mean, moment, 0.0)
+  EXPECT_EQ(warploom::render::adaptive_mask_from_variance(mean, moment, 0.0)
                 .selected,
             0U);
   // All-equal variance selects exactly the top-25% budget by rank (ties
@@ -7349,7 +7349,7 @@ TEST(adaptive_mask, selects_top_fraction_deterministically) {
   std::vector<float> flat_mean(4U * 4U, 0.5F);
   std::vector<float> flat_moment(4U * 4U, 0.5F);
   const auto flat =
-      omnicpp::render::adaptive_mask_from_variance(flat_mean, flat_moment, 0.25);
+      warploom::render::adaptive_mask_from_variance(flat_mean, flat_moment, 0.25);
   EXPECT_EQ(flat.selected, 1U);
   EXPECT_EQ(flat.mask[0], 1U);
 }

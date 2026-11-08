@@ -21,7 +21,7 @@ If you have custom scripts or code that uses the old logging functions, update t
 
 **Old API:**
 ```python
-from omni_scripts.utils import log_info, log_warning, log_error, log_success
+from warploom_scripts.utils import log_info, log_warning, log_error, log_success
 
 log_info("Message")
 log_warning("Warning")
@@ -31,7 +31,7 @@ log_success("Success")
 
 **New API:**
 ```python
-from omni_scripts.logging import get_logger, setup_logging
+from warploom_scripts.logging import get_logger, setup_logging
 
 # Initialize logging once at startup
 setup_logging()
@@ -61,10 +61,10 @@ elif is_linux():
 
 **New Approach:**
 ```python
-from omni_scripts.logging import get_logger, setup_logging
-from omni_scripts.platform.detector import detect_platform, PlatformInfo
-from omni_scripts.compilers.detector import detect_compiler, validate_cpp23_support
-from omni_scripts.utils.terminal_utils import execute_with_terminal_setup
+from warploom_scripts.logging import get_logger, setup_logging
+from warploom_scripts.platform.detector import detect_platform, PlatformInfo
+from warploom_scripts.compilers.detector import detect_compiler, validate_cpp23_support
+from warploom_scripts.utils.terminal_utils import execute_with_terminal_setup
 
 # Initialize logging
 setup_logging()
@@ -109,7 +109,7 @@ The new logging system uses JSON configuration files. Update your configuration 
   "console_handler_enabled": true,
   "colored_output": true,
   "file_handler_enabled": true,
-  "file_path": "logs/omnicpp.log",
+  "file_path": "logs/warploom.log",
   "max_bytes": 10485760,
   "backup_count": 5,
   "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -125,17 +125,17 @@ Update your GitHub Actions workflows to use the new integrated components:
 ```yaml
 - name: Build
   run: |
-    python OmniCppController.py build engine "Clean Build Pipeline" default release
+    python WarploomController.py build engine "Clean Build Pipeline" default release
 ```
 
 **New Workflow:**
 ```yaml
 - name: Build
   run: |
-    python OmniCppController.py build engine "Clean Build Pipeline" default release
+    python WarploomController.py build engine "Clean Build Pipeline" default release
   env:
     # Set log level for CI
-    OMNICPP_LOG_LEVEL: INFO
+    WARPLOOM_LOG_LEVEL: INFO
 ```
 
 ### Step 5: Update Documentation
@@ -164,7 +164,7 @@ The new logging system provides:
 
 **Usage:**
 ```python
-from omni_scripts.logging import setup_logging, get_logger
+from warploom_scripts.logging import setup_logging, get_logger
 
 # Initialize logging
 setup_logging()
@@ -191,7 +191,7 @@ The platform detection system provides:
 
 **Usage:**
 ```python
-from omni_scripts.platform.detector import detect_platform, PlatformInfo
+from warploom_scripts.platform.detector import detect_platform, PlatformInfo
 
 # Detect platform
 platform_info = detect_platform()
@@ -214,7 +214,7 @@ The compiler detection system provides:
 
 **Usage:**
 ```python
-from omni_scripts.compilers.detector import detect_compiler, validate_cpp23_support
+from warploom_scripts.compilers.detector import detect_compiler, validate_cpp23_support
 
 # Detect compiler
 compiler_info = detect_compiler()
@@ -245,7 +245,7 @@ The terminal setup system provides:
 
 **Usage:**
 ```python
-from omni_scripts.utils.terminal_utils import execute_with_terminal_setup
+from warploom_scripts.utils.terminal_utils import execute_with_terminal_setup
 
 # Execute command with terminal setup
 result = execute_with_terminal_setup(
@@ -266,17 +266,17 @@ result = execute_with_terminal_setup(
 
 **Problem:**
 ```
-ImportError: cannot import name 'log_info' from 'omni_scripts.utils'
+ImportError: cannot import name 'log_info' from 'warploom_scripts.utils'
 ```
 
 **Solution:**
 Update imports to use the new logging system:
 ```python
 # Old
-from omni_scripts.utils import log_info
+from warploom_scripts.utils import log_info
 
 # New
-from omni_scripts.logging import get_logger
+from warploom_scripts.logging import get_logger
 
 logger = get_logger(__name__)
 logger.info("Message")
@@ -323,7 +323,7 @@ Log messages are not appearing
 **Solution:**
 Ensure logging is initialized:
 ```python
-from omni_scripts.logging import setup_logging
+from warploom_scripts.logging import setup_logging
 
 # Call once at startup
 setup_logging()
@@ -337,31 +337,31 @@ After completing the migration, test your setup:
 
 ```bash
 # Test logging initialization
-python -c "from omni_scripts.logging import setup_logging, get_logger; setup_logging(); logger = get_logger('test'); logger.info('Logging test')"
+python -c "from warploom_scripts.logging import setup_logging, get_logger; setup_logging(); logger = get_logger('test'); logger.info('Logging test')"
 
 # Test log levels
-python -c "from omni_scripts.logging import setup_logging, get_logger; setup_logging(); logger = get_logger('test'); logger.debug('Debug message'); logger.info('Info message'); logger.warning('Warning message'); logger.error('Error message')"
+python -c "from warploom_scripts.logging import setup_logging, get_logger; setup_logging(); logger = get_logger('test'); logger.debug('Debug message'); logger.info('Info message'); logger.warning('Warning message'); logger.error('Error message')"
 ```
 
 ### 2. Test Platform Detection
 
 ```bash
 # Test platform detection
-python -c "from omni_scripts.platform.detector import detect_platform; info = detect_platform(); print(f'OS: {info.os}, Arch: {info.architecture}')"
+python -c "from warploom_scripts.platform.detector import detect_platform; info = detect_platform(); print(f'OS: {info.os}, Arch: {info.architecture}')"
 ```
 
 ### 3. Test Compiler Detection
 
 ```bash
 # Test compiler detection
-python -c "from omni_scripts.compilers.detector import detect_compiler; info = detect_compiler(); print(f'Compiler: {info.name if info else None}')"
+python -c "from warploom_scripts.compilers.detector import detect_compiler; info = detect_compiler(); print(f'Compiler: {info.name if info else None}')"
 ```
 
 ### 4. Test Terminal Setup
 
 ```bash
 # Test terminal setup
-python OmniCppController.py build engine "Clean Build Pipeline" default release --compiler mingw-gcc
+python WarploomController.py build engine "Clean Build Pipeline" default release --compiler mingw-gcc
 ```
 
 ### 5. Test Full Integration
@@ -377,12 +377,12 @@ If you encounter issues and need to rollback:
 
 1. **Restore Old Imports:**
    ```python
-   from omni_scripts.utils import log_info, log_warning, log_error, log_success
+   from warploom_scripts.utils import log_info, log_warning, log_error, log_success
    ```
 
 2. **Restore Old Build Scripts:**
    - Revert any custom build scripts
-   - Use original OmniCppController.py methods
+   - Use original WarploomController.py methods
 
 3. **Restore Configuration:**
    - Revert any changes to configuration files
@@ -395,7 +395,7 @@ If you encounter issues and need to rollback:
 Always initialize logging at the start of your application:
 ```python
 import sys
-from omni_scripts.logging import setup_logging
+from warploom_scripts.logging import setup_logging
 
 def main():
     # Initialize logging first
@@ -428,7 +428,7 @@ if platform.system() == "Windows":
     compiler = "msvc"
 
 # Good
-from omni_scripts.platform.detector import detect_platform
+from warploom_scripts.platform.detector import detect_platform
 platform_info = detect_platform()
 compiler = detect_compiler(platform_info=platform_info)
 ```
@@ -458,7 +458,7 @@ import subprocess
 subprocess.run(['cmd', '/c', 'vcvars64.bat', '&&', 'cmake', '--build', '.'])
 
 # Good
-from omni_scripts.utils.terminal_utils import execute_with_terminal_setup
+from warploom_scripts.utils.terminal_utils import execute_with_terminal_setup
 result = execute_with_terminal_setup('cmake --build .', compiler='msvc', cwd=str(project_root))
 ```
 

@@ -11,7 +11,7 @@ in dependency order, before any API freeze.
 
 **Decision (2026-09-26): the engine is named Warploom.** The root CMake
 project is `Warploom`; the vcpkg manifest is `warploom`. Internal targets
-(`omnicpp_runtime`), binary names, `OMNICPP_*` env/option flags, and the
+(`warploom_runtime`), binary names, `WARPLOOM_*` env/option flags, and the
 `engine/` include root are unchanged to keep churn low; migrating them is
 a follow-up with its own verification pass.
 
@@ -81,9 +81,9 @@ with its own tests and docs. Order = strictly increasing dependencies.
 3. Then core; **phase A DONE**: lives in `modules/core` as package
    `WarploomCore`, exported target `Warploom::core`, 22-header allowlist,
    compat forwarders keep `include/engine/core/*` valid (zero churn at
-   84 include sites); namespaces stay `omnicpp::*` until phase B (the
+   84 include sites); namespaces stay `warploom::*` until phase B (the
    identifier migration, wired to the S-decision pass; the
-   `omnicpp::editor` namespace spans non-core widget code, so the
+   `warploom::editor` namespace spans non-core widget code, so the
    namespace split waits for S4; see `docs/warploom-core-plan.md`).
    Then render, editor in dependency order
 4. Aggregate package last; viewport moves to `find_package`

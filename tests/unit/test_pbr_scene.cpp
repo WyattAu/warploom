@@ -38,12 +38,12 @@
 
 namespace {
 
-using omnicpp::render::PbrMaterialData;
-using omnicpp::render::SceneMatrix;
-using omnicpp::render::SceneMesh;
-using omnicpp::render::ScenePbrObject;
-using omnicpp::render::VulkanPbrScene;
-using omnicpp::render::scene_identity_matrix;
+using warploom::render::PbrMaterialData;
+using warploom::render::SceneMatrix;
+using warploom::render::SceneMesh;
+using warploom::render::ScenePbrObject;
+using warploom::render::VulkanPbrScene;
+using warploom::render::scene_identity_matrix;
 
 // ============================================================================
 // Matrix helpers (column-major, matching the scene path's SceneMatrix).
@@ -112,8 +112,8 @@ SceneMatrix multiply(const SceneMatrix& a, const SceneMatrix& b) {
 // ============================================================================
 
 struct CubeUpload {
-  omnicpp::render::Allocation vertex_allocation{};
-  omnicpp::render::Allocation index_allocation{};
+  warploom::render::Allocation vertex_allocation{};
+  warploom::render::Allocation index_allocation{};
   SceneMesh mesh{};
 };
 
@@ -184,18 +184,18 @@ struct SolidTexture {
   VkImage image{VK_NULL_HANDLE};
   VkImageView view{VK_NULL_HANDLE};
   VkSampler sampler{VK_NULL_HANDLE};
-  omnicpp::render::Allocation allocation{};
+  warploom::render::Allocation allocation{};
 };
 
 bool make_solid_texture(VkDevice device, VkPhysicalDevice physical_device,
                         VkQueue queue, std::uint32_t queue_family,
-                        omnicpp::render::VulkanMemoryAllocator& allocator,
+                        warploom::render::VulkanMemoryAllocator& allocator,
                         const std::array<std::uint8_t, 4>& rgba,
                         SolidTexture& out) {
   out = {};
   SolidTexture tex{};
   const auto fail = [&]() {
-    omnicpp::render::Allocation allocation = tex.allocation;
+    warploom::render::Allocation allocation = tex.allocation;
     if (allocation.is_valid()) allocator.destroy_allocation(allocation);
     if (tex.view != VK_NULL_HANDLE) vkDestroyImageView(device, tex.view, nullptr);
     if (tex.sampler != VK_NULL_HANDLE) vkDestroySampler(device, tex.sampler, nullptr);
@@ -223,7 +223,7 @@ bool make_solid_texture(VkDevice device, VkPhysicalDevice physical_device,
   if (!memory.is_ok()) return fail();
   tex.allocation = memory.value();
 
-  omnicpp::render::VulkanFrameUploadArena arena;
+  warploom::render::VulkanFrameUploadArena arena;
   if (!arena.initialize(device, physical_device, queue_family,
                         /*frame_count=*/1U, /*bytes_per_frame=*/1U << 20U)
            .is_ok()) {
@@ -262,7 +262,7 @@ bool make_solid_texture(VkDevice device, VkPhysicalDevice physical_device,
 }
 
 void destroy_solid_texture(VkDevice device,
-                           omnicpp::render::VulkanMemoryAllocator& allocator,
+                           warploom::render::VulkanMemoryAllocator& allocator,
                            SolidTexture& texture) {
   if (texture.allocation.is_valid()) {
     allocator.destroy_allocation(texture.allocation);
@@ -281,20 +281,20 @@ void destroy_solid_texture(VkDevice device,
 // ============================================================================
 
 struct PbrSceneHarness {
-  omnicpp::render::VulkanContext context;
-  omnicpp::render::VulkanMemoryAllocator allocator;
-  omnicpp::render::VulkanDescriptorManager descriptors;
+  warploom::render::VulkanContext context;
+  warploom::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanDescriptorManager descriptors;
   VkDescriptorSetLayout mesh_layout{VK_NULL_HANDLE};
   VkDescriptorSetLayout textures_layout{VK_NULL_HANDLE};
   VkDescriptorSetLayout material_layout{VK_NULL_HANDLE};
   VkDescriptorSet textures_set{VK_NULL_HANDLE};
   VkDescriptorSet material_set{VK_NULL_HANDLE};
-  omnicpp::render::Allocation material_allocation{};
+  warploom::render::Allocation material_allocation{};
   SolidTexture white_tex;
   CubeUpload cube;
-  omnicpp::render::VulkanOffscreenTarget target;
-  omnicpp::render::VulkanPipeline pipeline;
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanPipeline pipeline;
+  warploom::render::VulkanRenderer renderer;
   std::uint32_t queue_family{0};
 
   bool initialized() const noexcept { return context.is_initialized(); }
@@ -314,7 +314,7 @@ struct PbrSceneHarness {
         static_cast<std::uint32_t>(context.queue_families().graphics_family);
 
     // Set 0: per-mesh vertex storage (SSBO), shared with the lit path.
-    const std::vector<omnicpp::render::ReflectedBinding> mesh_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> mesh_bindings = {
         {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
          VK_SHADER_STAGE_VERTEX_BIT}};
     auto mesh_layout_result = descriptors.create_layout(mesh_bindings, 8U);
@@ -322,7 +322,7 @@ struct PbrSceneHarness {
     mesh_layout = mesh_layout_result.value();
 
     // Set 1: bindless sampler array (element 0 = opaque-white fallback).
-    const std::vector<omnicpp::render::ReflectedBinding> textures_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> textures_bindings = {
         {1U, 0U, 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
          VK_SHADER_STAGE_FRAGMENT_BIT}};
     auto textures_layout_result = descriptors.create_layout(
@@ -334,7 +334,7 @@ struct PbrSceneHarness {
     textures_set = textures_set_result.value();
 
     // Set 2: material SSBO, two 64-byte slots.
-    const std::vector<omnicpp::render::ReflectedBinding> material_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> material_bindings = {
         {2U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
          VK_SHADER_STAGE_FRAGMENT_BIT}};
     auto material_layout_result = descriptors.create_layout(material_bindings, 8U);
@@ -461,12 +461,12 @@ struct PbrSceneHarness {
   }
 
   //! Render one PBR scene snapshot and read the 256x256 image back.
-  omnicpp_test::ReadbackResult render(const VulkanPbrScene& scene) {
+  warploom_test::ReadbackResult render(const VulkanPbrScene& scene) {
     auto pool_result =
-        omnicpp::render::VulkanRenderer::create_command_pool(context.device(),
+        warploom::render::VulkanRenderer::create_command_pool(context.device(),
                                                              queue_family);
     if (!pool_result.is_ok()) return {};
-    auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
         context.device(), pool_result.value());
     if (!cb_result.is_ok()) {
       vkDestroyCommandPool(context.device(), pool_result.value(), nullptr);
@@ -512,9 +512,9 @@ struct PbrSceneHarness {
             VK_SUCCESS &&
         vkWaitForFences(context.device(), 1U, &fence, VK_TRUE, UINT64_MAX) ==
             VK_SUCCESS;
-    omnicpp_test::ReadbackResult result{};
+    warploom_test::ReadbackResult result{};
     if (submitted) {
-      result = omnicpp_test::readback_swapchain_image(
+      result = warploom_test::readback_swapchain_image(
           context.physical_device(), context.device(), context.graphics_queue(),
           queue_family, target.image(), target.format(), 256U, 256U,
           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -635,7 +635,7 @@ TEST(VulkanHardware, PbrMetallicRoughnessDiscrimination) {
   metallic.model = model;
   metallic.material_index = 0U;
   scene.objects.push_back(metallic);
-  const omnicpp_test::ReadbackResult metallic_result = h.render(scene);
+  const warploom_test::ReadbackResult metallic_result = h.render(scene);
 
   ScenePbrObject rough;
   rough.mesh = &h.cube.mesh;
@@ -643,7 +643,7 @@ TEST(VulkanHardware, PbrMetallicRoughnessDiscrimination) {
   rough.material_index = 1U;
   scene.objects.clear();
   scene.objects.push_back(rough);
-  const omnicpp_test::ReadbackResult rough_result = h.render(scene);
+  const warploom_test::ReadbackResult rough_result = h.render(scene);
 
   h.cleanup();
 
@@ -694,7 +694,7 @@ TEST(VulkanHardware, PbrEmissiveAddsUnlitColor) {
   object.model = make_translation(0.0f, 0.0f, -4.5f);
   object.material_index = 0U;
   scene.objects.push_back(object);
-  const omnicpp_test::ReadbackResult result = h.render(scene);
+  const warploom_test::ReadbackResult result = h.render(scene);
   h.cleanup();
 
   ASSERT_TRUE(result.submitted);
@@ -759,7 +759,7 @@ TEST(VulkanHardware, PbrSceneOrientationIsUpright) {
   lower.material_index = 1U;
   scene.objects.push_back(lower);
 
-  const omnicpp_test::ReadbackResult result = h.render(scene);
+  const warploom_test::ReadbackResult result = h.render(scene);
   h.cleanup();
 
   ASSERT_TRUE(result.submitted);
@@ -825,7 +825,7 @@ TEST(VulkanHardware, PbrAlbedoTextureTintsLitCube) {
   object.model = make_translation(0.0f, 0.0f, -4.5f);
   object.material_index = 0U;
   scene.objects.push_back(object);
-  const omnicpp_test::ReadbackResult result = h.render(scene);
+  const warploom_test::ReadbackResult result = h.render(scene);
   destroy_solid_texture(h.context.device(), h.allocator, red_tex);
   h.cleanup();
 

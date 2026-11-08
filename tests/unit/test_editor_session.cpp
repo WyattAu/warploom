@@ -20,11 +20,11 @@
 
 namespace {
 
-namespace ed = omnicpp::editor;
+namespace ed = warploom::editor;
 
-using omnicpp::core::ControlCommand;
-using omnicpp::core::ControlReply;
-using omnicpp::editor::EditorSession;
+using warploom::core::ControlCommand;
+using warploom::core::ControlReply;
+using warploom::editor::EditorSession;
 
 //! Builds a session and spawns one cube at (1, 0.5, -1) via the protocol,
 //! so edit tests start from a two-object document.
@@ -208,7 +208,7 @@ TEST(EditorSessionQueries, SchemaDescribesRegistry) {
             std::string::npos);
   EXPECT_NE(r.detail.find("\"schema_version\":" +
                           std::to_string(
-                              omnicpp::editor::kDocumentSchemaVersion)),
+                              warploom::editor::kDocumentSchemaVersion)),
             std::string::npos);
 }
 
@@ -253,9 +253,9 @@ TEST(EditorSessionSelect, SelectIsNotDocumentState) {
 
 TEST(EditorSessionE2E, ControlServerDrivesSession) {
   SessionFixture f;
-  omnicpp::core::ControlServer server;
+  warploom::core::ControlServer server;
   std::string error;
-  const std::string path = "/tmp/omnicpp_test_editor_session.sock";
+  const std::string path = "/tmp/warploom_test_editor_session.sock";
   ASSERT_TRUE(server.start(path, error)) << error;
 
   int client = -1;
@@ -468,8 +468,8 @@ TEST(EditorSessionNodes, CopyPasteUndoRedoRoundTrip) {
 
 TEST(EditorSessionNodes, SocketDrivenNodeCommands) {
   SessionFixture f;
-  omnicpp::core::ControlServer server;
-  const std::string path = "/tmp/omnicpp_test_editor_nodes.sock";
+  warploom::core::ControlServer server;
+  const std::string path = "/tmp/warploom_test_editor_nodes.sock";
   std::string error;
   ASSERT_TRUE(server.start(path, error)) << error;
 
@@ -518,8 +518,8 @@ TEST(EditorSessionNodes, SocketDrivenCopyPasteEscapes) {
   // JSON-escaped and must decode to the exact machine bytes the copy
   // produced (layout positions included), then paste + undo over the wire.
   SessionFixture f;
-  omnicpp::core::ControlServer server;
-  const std::string path = "/tmp/omnicpp_test_editor_copypaste.sock";
+  warploom::core::ControlServer server;
+  const std::string path = "/tmp/warploom_test_editor_copypaste.sock";
   std::string error;
   ASSERT_TRUE(server.start(path, error)) << error;
 
@@ -656,9 +656,9 @@ TEST(EditorSessionBindings, ProtocolRoundTrip) {
 
 TEST(EditorSessionBindings, SocketDrivenBindListUnbind) {
   SessionFixture f;
-  omnicpp::core::ControlServer server;
+  warploom::core::ControlServer server;
   std::string error;
-  const std::string path = "/tmp/omnicpp_test_bind_protocol.sock";
+  const std::string path = "/tmp/warploom_test_bind_protocol.sock";
   ASSERT_TRUE(server.start(path, error)) << error;
 
   int client = -1;

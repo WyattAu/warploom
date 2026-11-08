@@ -1,5 +1,5 @@
 //! @file main.cpp
-//! @brief OmniCpp viewport: a real windowed application rendering a lit PBR
+//! @brief Warploom viewport: a real windowed application rendering a lit PBR
 //!        scene through the engine's swapchain path.
 //!
 //! Composition-only code: every subsystem (XCB window, platform surface,
@@ -82,11 +82,11 @@
 #include "warploom/render/vulkan_ui_renderer.hpp"
 #include "telemetry.hpp"
 
-using SceneMatrix = omnicpp::render::SceneMatrix;
+using SceneMatrix = warploom::render::SceneMatrix;
 // C1: projection types, so the scene list is built from the ECS.
-using omnicpp::editor::DocumentProjection;
-using omnicpp::editor::DocumentRef;
-using omnicpp::editor::DocumentTransform;
+using warploom::editor::DocumentProjection;
+using warploom::editor::DocumentRef;
+using warploom::editor::DocumentTransform;
 
 namespace {
 
@@ -152,7 +152,7 @@ void build_unit_cube(std::vector<float>& vertices,
 }
 
 SceneMatrix scale_matrix(float x, float y, float z) {
-  SceneMatrix m = omnicpp::render::scene_identity_matrix();
+  SceneMatrix m = warploom::render::scene_identity_matrix();
   m[0] = x;
   m[5] = y;
   m[10] = z;
@@ -160,7 +160,7 @@ SceneMatrix scale_matrix(float x, float y, float z) {
 }
 
 SceneMatrix translation_matrix(float x, float y, float z) {
-  SceneMatrix m = omnicpp::render::scene_identity_matrix();
+  SceneMatrix m = warploom::render::scene_identity_matrix();
   m[12] = x;
   m[13] = y;
   m[14] = z;
@@ -168,7 +168,7 @@ SceneMatrix translation_matrix(float x, float y, float z) {
 }
 
 SceneMatrix rotation_y_matrix(float radians) {
-  SceneMatrix m = omnicpp::render::scene_identity_matrix();
+  SceneMatrix m = warploom::render::scene_identity_matrix();
   const float c = std::cos(radians);
   const float s = std::sin(radians);
   m[0] = c;
@@ -181,7 +181,7 @@ SceneMatrix rotation_y_matrix(float radians) {
 //! Column-major rotation about +Z (the beam prop's bend axis: joint 1
 //! rotates the top half in the XY plane about the y=1 pivot).
 SceneMatrix rotation_z_matrix(float radians) {
-  SceneMatrix m = omnicpp::render::scene_identity_matrix();
+  SceneMatrix m = warploom::render::scene_identity_matrix();
   const float c = std::cos(radians);
   const float s = std::sin(radians);
   m[0] = c;
@@ -289,7 +289,7 @@ SceneMatrix multiply(const SceneMatrix& a, const SceneMatrix& b) {
 //! (row-diagonal m[0]/m[5], GL z-remap m[10] = 1/(zn-zf), m[14] = zn/(zn-zf)).
 SceneMatrix make_ortho(float l, float r, float b, float t, float zn,
                        float zf) {
-  SceneMatrix m = omnicpp::render::scene_identity_matrix();
+  SceneMatrix m = warploom::render::scene_identity_matrix();
   m[0] = 2.0f / (r - l);
   m[5] = 2.0f / (t - b);
   m[10] = 1.0f / (zn - zf);
@@ -384,7 +384,7 @@ struct TimelinePanel {
 
   //! Updates cursor/fill/label from the live scrubber + sim frame.
   void sync(warploom::ui::WidgetTree& tree,
-            const omnicpp::editor::ReplayScrubber& scrubber, float view_w,
+            const warploom::editor::ReplayScrubber& scrubber, float view_w,
             float view_h, std::uint64_t current_frame, bool paused) {
     if (root == warploom::ui::kInvalidWidget) {
       return;
@@ -444,7 +444,7 @@ struct TimelinePanel {
 
   //! True when (px, py) is inside the track; `frame` = nearest checkpoint.
   [[nodiscard]] bool frame_at(
-      float px, float py, const omnicpp::editor::ReplayScrubber& scrubber,
+      float px, float py, const warploom::editor::ReplayScrubber& scrubber,
       std::uint64_t& frame) const {
     if (px < tx + kPadX || px >= tx + tw - kPadX || py < ty ||
         py >= ty + th) {
@@ -478,10 +478,10 @@ struct ViewportApp {
     return frames_presented;
   }
   // Vulkan stack.
-  omnicpp::render::VulkanContext context;
-  omnicpp::render::VulkanSwapchain swapchain;
-  omnicpp::render::VulkanRenderPass render_pass;
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanContext context;
+  warploom::render::VulkanSwapchain swapchain;
+  warploom::render::VulkanRenderPass render_pass;
+  warploom::render::VulkanRenderer renderer;
 
   //! LIVE framebuffer extent, seeded from the swapchain and updated by
   //! handle_resize().
@@ -518,17 +518,17 @@ struct ViewportApp {
     const VkFormat hdr = renderer.hdr_format();
     return hdr != VK_FORMAT_UNDEFINED ? hdr : swapchain.image_format();
   }
-  omnicpp::render::VulkanMemoryAllocator allocator;
-  omnicpp::render::VulkanDescriptorManager descriptors;
+  warploom::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanDescriptorManager descriptors;
 
   // Scene resources.
-  omnicpp::render::VulkanPipeline pbr_pipeline;
-  omnicpp::render::VulkanPipeline skinned_pipeline;
+  warploom::render::VulkanPipeline pbr_pipeline;
+  warploom::render::VulkanPipeline skinned_pipeline;
   //! Composed full-lighting pipelines (pbr_full.frag: IBL set 5 + shadow
   //! set 4 + optional bones set 3). Built in setup_lighting; when ready,
   //! they replace the basic pipelines in the recorded scene.
-  omnicpp::render::VulkanPipeline full_pipeline;
-  omnicpp::render::VulkanPipeline full_skinned_pipeline;
+  warploom::render::VulkanPipeline full_pipeline;
+  warploom::render::VulkanPipeline full_skinned_pipeline;
   //! True when the composed lighting stack initialized (graceful fallback:
   //! false keeps the basic pbr_scene path and no shadow map).
   bool lighting_ready{false};
@@ -539,61 +539,61 @@ struct ViewportApp {
   //! exact shadow footprint.
   bool no_shadow{false};
   //! Diagnostic: dump the raw shadow map (kShadowRes^2 float32) after a
-  //! frame (OMNICPP_DUMP_SHADOW=<frame>). Makes the depth-only pre-pass
+  //! frame (WARPLOOM_DUMP_SHADOW=<frame>). Makes the depth-only pre-pass
   //! directly observable instead of inferred.
   bool dump_shadow{false};
   std::uint32_t dump_shadow_frame{0};
   VkBuffer dump_shadow_buffer{VK_NULL_HANDLE};
-  omnicpp::render::Allocation dump_shadow_allocation{};
+  warploom::render::Allocation dump_shadow_allocation{};
   //! GPU-driven draw path (WARPLOOM_GPU_DRIVEN=1, cubes scene only): the
   //! compute cull/LOD pass writes indirect draw commands and the main pass
   //! draws the whole scene with ONE vkCmdDrawIndexedIndirect — no CPU
   //! visibility, LOD, or per-draw submission inside the frame.
-  //! Physics-driven scene state (OMNICPP_PHYSICS=1): bodies stepped on the
+  //! Physics-driven scene state (WARPLOOM_PHYSICS=1): bodies stepped on the
   //! CPU each frame; instanceCount includes them + the ground slab.
-  omnicpp::physics::PhysicsWorld physics_world;  // 8 solver passes, set in initialize()
-  std::vector<omnicpp::physics::PhysicsBody> physics_bodies;
+  warploom::physics::PhysicsWorld physics_world;  // 8 solver passes, set in initialize()
+  std::vector<warploom::physics::PhysicsBody> physics_bodies;
   std::uint32_t gd_instance_count{kGdObjectCount};
 
   bool gpu_driven{false};
   //! 11-float cube geometry through the mesh table (shared vertex/index
   //! buffers + per-mesh table slots); one slot per mesh (no LOD chain yet,
   //! lod_count = 1).
-  omnicpp::render::SceneMeshTableBuilder gd_table_builder;
-  omnicpp::render::MeshTableBuild gd_table;
+  warploom::render::SceneMeshTableBuilder gd_table_builder;
+  warploom::render::MeshTableBuild gd_table;
   std::uint32_t gd_slot_cube{0};
   std::uint32_t gd_slot_ground{0};
   //! R3: skinned beam prop (two-segment box column, own table slot + skin
   //! stream, palette joint_base 0, always the last driven object).
   std::uint32_t gd_slot_beam{0};
   VkBuffer gd_shared_vertex_buffer{VK_NULL_HANDLE};
-  omnicpp::render::Allocation gd_shared_vertex_allocation{};
+  warploom::render::Allocation gd_shared_vertex_allocation{};
   VkBuffer gd_shared_index_buffer{VK_NULL_HANDLE};
-  omnicpp::render::Allocation gd_shared_index_allocation{};
+  warploom::render::Allocation gd_shared_index_allocation{};
   //! R3: parallel skin stream (8 floats/vertex, global-vertex order),
   //! bound at set 0 binding 4 for the skinned draw. Static slots carry
   //! identity skin from the builder, so one set serves both pipelines.
   VkBuffer gd_skin_buffer{VK_NULL_HANDLE};
-  omnicpp::render::Allocation gd_skin_allocation{};
+  warploom::render::Allocation gd_skin_allocation{};
   //! R3: beam bone palette (2 joints: identity + animated bend) and its
   //! set, allocated from the shared bone_layout and bound at slot 3 for
   //! the skinned draw only. Dedicated to the prop: the mannequin arena
   //! (absent in driven mode) is never touched.
   VkBuffer gd_beam_bone_buffer{VK_NULL_HANDLE};
-  omnicpp::render::Allocation gd_beam_bone_allocation{};
+  warploom::render::Allocation gd_beam_bone_allocation{};
   VkDescriptorSet gd_beam_bone_set{VK_NULL_HANDLE};
   //! R3: skinned draw pipeline (pbr_gpu_driven_skinned.vert + the same
   //! full fragment). Same 6-set layout + 160-byte push as the static draw;
   //! the partition is by command range, not by state.
-  omnicpp::render::VulkanPipeline gd_draw_skinned_pipeline;
+  warploom::render::VulkanPipeline gd_draw_skinned_pipeline;
   //! Per-frame payload (2 header words + 3 objects x 24 words), one copy
   //! per swapchain image so CPU writes never race in-flight GPU reads.
   std::vector<VkBuffer> gd_payload_buffers;
-  std::vector<omnicpp::render::Allocation> gd_payload_allocations;
+  std::vector<warploom::render::Allocation> gd_payload_allocations;
   VkBuffer gd_indirect_buffer{VK_NULL_HANDLE};
-  omnicpp::render::Allocation gd_indirect_allocation{};
+  warploom::render::Allocation gd_indirect_allocation{};
   VkBuffer gd_table_buffer{VK_NULL_HANDLE};
-  omnicpp::render::Allocation gd_table_allocation{};
+  warploom::render::Allocation gd_table_allocation{};
   //! Set 0 for the cull pass and the draw pass (vertices + payload +
   //! mesh table + draw commands + skin stream on the draw sets;
   //! per-image payload copy -> per-image set).
@@ -603,27 +603,27 @@ struct ViewportApp {
   //! C1: the document stays authoritative; this is its runtime projection.
   //! The scene list is built from the ECS, not re-derived from document
   //! properties, so renderer and physics read the same store.
-  omnicpp::editor::DocumentProjection projection;
-  omnicpp::render::VulkanPipeline gd_cull_pipeline;
-  omnicpp::render::VulkanPipeline gd_draw_pipeline;
+  warploom::editor::DocumentProjection projection;
+  warploom::render::VulkanPipeline gd_cull_pipeline;
+  warploom::render::VulkanPipeline gd_draw_pipeline;
   // --- B5b occlusion cull (cull_and_draw_lod_occlude.comp) ---------------
   // Separate cull-only set layout: binding 0 is the header counters buffer,
   // NOT the shared vertex-pull buffer, and binding 4 is the packed H-Z
   // pyramid. Non-empty only when H-Z is on and its packed pyramid exists.
   VkDescriptorSetLayout gd_occl_set0_layout{VK_NULL_HANDLE};
   std::vector<VkDescriptorSet> gd_occl_cull_sets;
-  omnicpp::render::VulkanPipeline gd_occl_pipeline;
-  omnicpp::render::Allocation gd_occl_counters{};
+  warploom::render::VulkanPipeline gd_occl_pipeline;
+  warploom::render::Allocation gd_occl_counters{};
   std::array<std::byte, 168> gd_occl_push_staging{};
-  // --- Node editor overlay (OMNICPP_NODE_EDITOR=1) --------------------------
+  // --- Node editor overlay (WARPLOOM_NODE_EDITOR=1) --------------------------
   // UI paint path over the scene: graph cards, pins, bezier wires, value
   // readouts; mouse selects/drags node cards. UI failures fail the frame.
   bool node_editor{false};
-  std::unique_ptr<omnicpp::editor::NodeEditorView> node_view;
-  omnicpp::editor::InspectorPanel inspector;
-  //! M13 fusion: graph outputs -> animation actions (OMNICPP_GRAPH_ANIM=1).
+  std::unique_ptr<warploom::editor::NodeEditorView> node_view;
+  warploom::editor::InspectorPanel inspector;
+  //! M13 fusion: graph outputs -> animation actions (WARPLOOM_GRAPH_ANIM=1).
   bool graph_anim_enabled{false};
-  std::unique_ptr<omnicpp::editor::GraphSignalAdapter> graph_anim;
+  std::unique_ptr<warploom::editor::GraphSignalAdapter> graph_anim;
   std::uint32_t inspector_canvas{warploom::ui::kInvalidWidget};
   std::uint32_t inspector_root{warploom::ui::kInvalidWidget};
   warploom::ui::WidgetTree ui_tree;
@@ -631,11 +631,11 @@ struct ViewportApp {
   //! G3-B clip strip above the W1 scrub strip: pure projection of the
   //! session document's clips (address-stable: reset_from move-assigns
   //! into the session member, so the bound pointer survives doc loads).
-  std::optional<omnicpp::editor::ClipTimelineView> clip_strip;
+  std::optional<warploom::editor::ClipTimelineView> clip_strip;
   std::uint32_t clip_track_parent{warploom::ui::kInvalidWidget};
   warploom::ui::PaintList ui_paint;
   std::uint32_t node_canvas{warploom::ui::kInvalidWidget};
-  omnicpp::render::VulkanUiRenderer ui_renderer;
+  warploom::render::VulkanUiRenderer ui_renderer;
   //! Toolbar buttons (per registered type, then undo/redo) + their handles.
   std::vector<std::uint32_t> node_toolbar_buttons{};
   std::uint32_t node_toolbar{warploom::ui::kInvalidWidget};
@@ -662,7 +662,7 @@ struct ViewportApp {
   std::uint64_t drag_node_id{0};
   float drag_grab_dx{0.0f};
   float drag_grab_dy{0.0f};
-  omnicpp::editor::PinRef selected_pin{};
+  warploom::editor::PinRef selected_pin{};
   //! Position a card had when a drag started (undo commit on release).
   float drag_start_x{0.0f};
   float drag_start_y{0.0f};
@@ -675,7 +675,7 @@ struct ViewportApp {
   //! are queued as protocol commands and drained ON the frame thread through
   //! editor.on_control, so every mutation crosses the single session stack.
   struct QueuedEdit {
-    omnicpp::core::ControlCommand command;
+    warploom::core::ControlCommand command;
     //! G2: a copy whose reply fragment lands in clipboard_fragment_.
     bool is_copy{false};
   };
@@ -684,7 +684,7 @@ struct ViewportApp {
   std::string clipboard_fragment_{};
   std::vector<QueuedEdit> edit_queue;
   std::mutex edit_queue_mutex;
-  //! Optional document loaded at startup via OMNICPP_DOC=<path>.
+  //! Optional document loaded at startup via WARPLOOM_DOC=<path>.
   std::string doc_path{};
   //! The draw pipeline's full layout (sets 0..2, 160-byte push) so the
   //! pre-pass hook can bind the compute set under the draw layout when
@@ -699,13 +699,13 @@ struct ViewportApp {
   VkDescriptorSet textures_set{VK_NULL_HANDLE};
   VkDescriptorSet material_set{VK_NULL_HANDLE};
   VkDescriptorSet bone_set{VK_NULL_HANDLE};
-  omnicpp::render::Allocation material_allocation{};
-  omnicpp::render::Allocation bone_allocation{};
+  warploom::render::Allocation material_allocation{};
+  warploom::render::Allocation bone_allocation{};
 
   struct MeshBuffers {
-    omnicpp::render::Allocation vertex_allocation{};
-    omnicpp::render::Allocation index_allocation{};
-    omnicpp::render::SceneMesh mesh{};
+    warploom::render::Allocation vertex_allocation{};
+    warploom::render::Allocation index_allocation{};
+    warploom::render::SceneMesh mesh{};
   };
   MeshBuffers cube{};
   MeshBuffers ground{};
@@ -718,7 +718,7 @@ struct ViewportApp {
   struct CityPart {
     MeshBuffers buffers{};
     std::uint32_t material_index{0U};
-    omnicpp::render::SceneMatrix model{omnicpp::render::scene_identity_matrix()};
+    warploom::render::SceneMatrix model{warploom::render::scene_identity_matrix()};
     //! World-space triangles (x,y,z per vertex) for exact-geometry BLASes.
     std::vector<float> rt_triangles;
   };
@@ -735,10 +735,10 @@ struct ViewportApp {
   // One shared vertex/index pair; one draw per glTF primitive (SceneMesh
   // index_offset/count slices sharing a single mesh SSBO descriptor set).
   struct SponzaLandmark {
-    omnicpp::render::Allocation vertex_allocation{};
-    omnicpp::render::Allocation index_allocation{};
+    warploom::render::Allocation vertex_allocation{};
+    warploom::render::Allocation index_allocation{};
     VkDescriptorSet mesh_set{VK_NULL_HANDLE};
-    std::vector<omnicpp::render::SceneMesh> parts;
+    std::vector<warploom::render::SceneMesh> parts;
     std::vector<SceneMatrix> part_models;
     std::uint32_t material_base{0U};
   };
@@ -746,8 +746,8 @@ struct ViewportApp {
   bool sponza_enabled{false};
   struct SponzaTexture {
     VkImage image{VK_NULL_HANDLE};
-    omnicpp::render::Allocation allocation{};
-    omnicpp::render::SceneTexture scene{};
+    warploom::render::Allocation allocation{};
+    warploom::render::SceneTexture scene{};
   };
   std::vector<SponzaTexture> sponza_textures;
   VkSampler sponza_sampler{VK_NULL_HANDLE};
@@ -758,21 +758,21 @@ struct ViewportApp {
   //! World-space triangle count of the merged landmark BLAS (telemetry).
   std::uint32_t sponza_triangle_count{0U};
   VkBuffer city_lights_buffer{VK_NULL_HANDLE};
-  omnicpp::render::Allocation city_lights_allocation{};
+  warploom::render::Allocation city_lights_allocation{};
   VkDescriptorSetLayout city_lights_layout{VK_NULL_HANDLE};
   VkDescriptorSet city_lights_set{VK_NULL_HANDLE};
   // Walking actors: per-actor world placement + walk-clock phase offset.
   struct CityActor {
-    omnicpp::render::SceneMatrix model{omnicpp::render::scene_identity_matrix()};
+    warploom::render::SceneMatrix model{warploom::render::scene_identity_matrix()};
     float walk_phase{0.0f};
   };
   std::vector<CityActor> city_actors;
   // Many-light composed pipelines (pbr_full_ml / pbr_rt_full_ml fragments;
   // lights SSBO at set 6). Built in setup_lighting when city_scene is on.
-  omnicpp::render::VulkanPipeline full_ml_pipeline;
-  omnicpp::render::VulkanPipeline full_ml_skinned_pipeline;
-  omnicpp::render::VulkanPipeline rt_full_ml_pipeline;
-  omnicpp::render::VulkanPipeline rt_full_ml_skinned_pipeline;
+  warploom::render::VulkanPipeline full_ml_pipeline;
+  warploom::render::VulkanPipeline full_ml_skinned_pipeline;
+  warploom::render::VulkanPipeline rt_full_ml_pipeline;
+  warploom::render::VulkanPipeline rt_full_ml_skinned_pipeline;
   // Skinning arena: slot 0 = identity bone for static meshes, actors at
   // [1 + a * joints_per_actor, ...). One bone SSBO + one bone set serves
   // every actor (per-object joint_base push).
@@ -781,7 +781,7 @@ struct ViewportApp {
 
   // Skeletal mannequin (assets/models/mannequin.gltf); empty when the asset
   // is unavailable and the scene renders cubes only.
-  omnicpp::asset::GltfAnimationDocument mannequin;
+  warploom::asset::GltfAnimationDocument mannequin;
   bool has_mannequin{false};
 
   // --- Full lighting (C1): composed PBR pipeline + IBL + shadow map. ------
@@ -790,36 +790,36 @@ struct ViewportApp {
   VkDescriptorSetLayout ibl5_layout{VK_NULL_HANDLE};
   VkDescriptorSet ibl5_set{VK_NULL_HANDLE};
   //! Engine-side GPU bake: analytic sky -> prefiltered/irradiance/LUT.
-  omnicpp::render::VulkanIblBaker ibl_baker;
+  warploom::render::VulkanIblBaker ibl_baker;
   //! Analytic-sky background (sky.vert/sky.frag): pipeline + SkyParams UBO.
   //! The params are fixed at start-up (the sun direction is the baked
   //! light's); the per-frame view is applied in record_scene_into, so the
   //! background is the same sky the path tracer evaluates in sky mode 1.
-  omnicpp::render::VulkanSkyPass sky_pass;
+  warploom::render::VulkanSkyPass sky_pass;
   bool sky_ready{false};
   //! Shadow resources: D32 image (depth+sampled usage), depth/sample views,
   //! compare sampler, 64-byte light-VP UBO + set-4 descriptor, depth-only
   //! render pass + framebuffer, static and skinned depth-only pipelines.
   static constexpr std::uint32_t kShadowRes = 2048U;
   VkImage shadow_image{VK_NULL_HANDLE};
-  omnicpp::render::Allocation shadow_memory{};
+  warploom::render::Allocation shadow_memory{};
   VkImageView shadow_depth_view{VK_NULL_HANDLE};
   VkImageView shadow_sample_view{VK_NULL_HANDLE};
   VkSampler shadow_sampler{VK_NULL_HANDLE};
-  //! Neutral 1x1 depth image for OMNICPP_NO_SHADOW: the composed fragment
+  //! Neutral 1x1 depth image for WARPLOOM_NO_SHADOW: the composed fragment
   //! stage statically uses set 4, so it must stay bound (UB otherwise) — a
   //! cleared-to-1.0 map makes every PCF comparison pass (fully lit).
   VkImage neutral_shadow_image{VK_NULL_HANDLE};
-  omnicpp::render::Allocation neutral_shadow_memory{};
+  warploom::render::Allocation neutral_shadow_memory{};
   VkImageView neutral_shadow_sample_view{VK_NULL_HANDLE};
   VkDescriptorSet neutral_shadow_set{VK_NULL_HANDLE};
   VkRenderPass shadow_render_pass{VK_NULL_HANDLE};
   VkFramebuffer shadow_framebuffer{VK_NULL_HANDLE};
   VkDescriptorSetLayout shadow_layout{VK_NULL_HANDLE};
   VkDescriptorSet shadow_set{VK_NULL_HANDLE};
-  omnicpp::render::Allocation shadow_ubo_allocation{};
-  omnicpp::render::VulkanPipeline shadow_pipeline_static;
-  omnicpp::render::VulkanPipeline shadow_pipeline_skinned;
+  warploom::render::Allocation shadow_ubo_allocation{};
+  warploom::render::VulkanPipeline shadow_pipeline_static;
+  warploom::render::VulkanPipeline shadow_pipeline_skinned;
   //! Sun direction (normalized, toward the sun) shared by the shadow VP,
   //! the IBL bake, and telemetry.
   std::array<float, 3> sun_direction{0.45f, 0.7f, 0.55f};
@@ -875,15 +875,15 @@ struct ViewportApp {
   //! up as VK_ERROR_DEVICE_LOST inside the acceleration-structure build, with
   //! no validation error at all. Same discipline as control_capture_requested_.
   std::atomic<int> pt_request_{0};
-  std::unique_ptr<omnicpp::render::VulkanPathTracer> pt_tracer;
+  std::unique_ptr<warploom::render::VulkanPathTracer> pt_tracer;
   //! The tracer's config, kept so a resize can rebuild it with a new extent
   //! and nothing else changed.
-  omnicpp::render::PathTracerConfig pt_config{};
+  warploom::render::PathTracerConfig pt_config{};
   //! Triangle soup for the PT scene: one device-address buffer holding every
   //! mesh's triangles back-to-back, with each mesh's address offset into it
   //! (a BLAS build reads from the device address, so one buffer can feed
   //! many BLASes without a copy).
-  std::vector<omnicpp::render::Allocation> pt_geometry{};
+  std::vector<warploom::render::Allocation> pt_geometry{};
   //! Accumulation frame index. It is part of the sample seed, so it is a
   //! counter and never a clock.
   std::uint32_t pt_frame{0};
@@ -916,13 +916,13 @@ struct ViewportApp {
   std::array<float, 3> pt_held_eye{{0.0F, 2.0F, 5.0F}};
   std::array<float, 3> pt_held_target{{0.0F, 0.0F, 0.0F}};
   std::array<float, 3> pt_held_up{{0.0F, 1.0F, 0.0F}};
-  omnicpp::render::VulkanAccelerationStructureBuilder rt_builder;
-  omnicpp::render::VulkanScratchPool rt_scratch;
+  warploom::render::VulkanAccelerationStructureBuilder rt_builder;
+  warploom::render::VulkanScratchPool rt_scratch;
   struct RtBlas {
-    omnicpp::render::BottomLevelAS as{};
+    warploom::render::BottomLevelAS as{};
     //! Geometry feeding the build (must stay alive for rebuilds).
-    omnicpp::render::Allocation geometry{};
-    omnicpp::render::BlasBuildInput input{};
+    warploom::render::Allocation geometry{};
+    warploom::render::BlasBuildInput input{};
   };
   //! One BLAS per scene mesh (cube, ground, each mannequin part), ordered
   //! like the scene-draw objects they correspond to.
@@ -941,23 +941,23 @@ struct ViewportApp {
   //! posed world position — so BLASes stay STATIC and only the TLAS
   //! instance transform (object_model * bones[j]) animates per frame.
   std::vector<std::size_t> rt_part_joint;
-  omnicpp::render::TopLevelAS rt_tlas{};
+  warploom::render::TopLevelAS rt_tlas{};
   //! Geometry scratch needed by the largest BLAS (scratch-pool sizing).
   std::uint64_t rt_blas_scratch_bytes{0};
   std::uint64_t rt_tlas_scratch_bytes{0};
   //! Per-frame TLAS instance list (rebuilt each frame from object models).
-  std::vector<omnicpp::render::TlasInstance> rt_instances;
+  std::vector<warploom::render::TlasInstance> rt_instances;
   //! Instance count of the last build_rt_frame_tlas (telemetry/verification).
   std::uint32_t rt_last_instance_count{0};
   VkDescriptorSetLayout rt_layout{VK_NULL_HANDLE};
   VkDescriptorSet rt_set{VK_NULL_HANDLE};
   //! Composed pipelines with the pbr_rt_full fragment stage (same 6-set
   //! layout shape as the PCF family; set 4 layout is the TLAS).
-  omnicpp::render::VulkanPipeline rt_full_pipeline;
-  omnicpp::render::VulkanPipeline rt_full_skinned_pipeline;
+  warploom::render::VulkanPipeline rt_full_pipeline;
+  warploom::render::VulkanPipeline rt_full_skinned_pipeline;
 
-  std::vector<omnicpp::render::ScenePbrObject> objects;
-  omnicpp::render::VulkanPbrScene scene;
+  std::vector<warploom::render::ScenePbrObject> objects;
+  warploom::render::VulkanPbrScene scene;
 
   // XCB window.
   xcb_connection_t* connection{nullptr};
@@ -1003,14 +1003,14 @@ struct ViewportApp {
   //! what the first B3b attempt did wrong -- bloom's upsample overwrote the
   //! HDR image the capture was reading. Created only when capture is requested
   //! AND HDR compose is on.
-  std::unique_ptr<omnicpp::render::VulkanComposeChain> capture_chain;
+  std::unique_ptr<warploom::render::VulkanComposeChain> capture_chain;
   bool telemetry_enabled{false};
 
-  // ---- M0 control channel (OMNICPP_CONTROL_SOCKET=path). -----------------
+  // ---- M0 control channel (WARPLOOM_CONTROL_SOCKET=path). -----------------
   // Editor/automation surface: pause/step/camera/sun/cube/capture commands
   // over a unix-socket JSONL server polled once per frame. Never blocks.
   std::unique_ptr<ViewportControlHost> control_host;
-  std::unique_ptr<omnicpp::core::ControlServer> control_server;
+  std::unique_ptr<warploom::core::ControlServer> control_server;
 
   bool control_paused() const noexcept { return control_paused_; }
   bool control_paused_{false};
@@ -1043,18 +1043,18 @@ struct ViewportApp {
   std::string last_swing_joint;
   float last_swing_deg{0.0f};
 
-  // Input: virtual driver replays OMNICPP_INPUT_SCRIPT (JSONL by tick);
+  // Input: virtual driver replays WARPLOOM_INPUT_SCRIPT (JSONL by tick);
   // the camera and cross-fade consume actions/axes so scripted runs and
   // human play are indistinguishable downstream.
-  omnicpp::core::InputState input;
-  omnicpp::core::VirtualInputDriver virtual_input;
+  warploom::core::InputState input;
+  warploom::core::VirtualInputDriver virtual_input;
   bool input_scripted{false};
   //! Real-device translation: the XCB event loop feeds raw key/mouse
   //! events in; apply() writes the same actions/axes the virtual driver
   //! produces. The gamepad driver is optional (absent device = no-op).
-  omnicpp::core::XcbKeyMouseTranslator kb_mouse;
+  warploom::core::XcbKeyMouseTranslator kb_mouse;
 #if defined(__linux__)
-  std::unique_ptr<omnicpp::core::LinuxJoystickDriver> gamepad;
+  std::unique_ptr<warploom::core::LinuxJoystickDriver> gamepad;
 #endif
   //! Camera response accumulators driven by input actions.
   float camera_orbit_bias{0.0f};   //!< extra rad/s from orbit_left/right
@@ -1069,7 +1069,7 @@ struct ViewportApp {
   //! mannequin is loaded. Ticked once per window frame after input commit;
   //! the capture path re-records without ticking so both paths render the
   //! identical pose.
-  std::unique_ptr<omnicpp::anim::AnimationStateMachine<omnicpp::core::InputSnapshot>>
+  std::unique_ptr<warploom::anim::AnimationStateMachine<warploom::core::InputSnapshot>>
       machine;
   std::string machine_last_state{"walk"};
   std::chrono::steady_clock::time_point frame_started{};
@@ -1097,26 +1097,26 @@ struct ViewportApp {
   //! M10: the embedded EditorSession IS the mutation authority — every edit
   //! path (protocol, mouse, keys) funnels through its CommandStack, so
   //! undo/redo/replay are one mechanism.
-  [[nodiscard]] omnicpp::editor::SceneDocument& session_document() {
+  [[nodiscard]] warploom::editor::SceneDocument& session_document() {
     return editor.document();
   }
-  omnicpp::editor::EditorSession editor{};
+  warploom::editor::EditorSession editor{};
   //! The session document's graph (borrowed view; the document owns it).
-  omnicpp::editor::NodeGraph* node_graph{nullptr};
+  warploom::editor::NodeGraph* node_graph{nullptr};
 };
 
 //! ControlHost implementation over the viewport: translates protocol
 //! commands into the app's authoritative state (pause/step/camera/sun/cube)
 //! and reports it via snapshot_json. Methods run on the frame thread inside
 //! ControlServer::poll — non-blocking by construction.
-class ViewportControlHost final : public omnicpp::core::ControlHost {
+class ViewportControlHost final : public warploom::core::ControlHost {
  public:
   explicit ViewportControlHost(ViewportApp& app) : app_(app) {}
 
-  omnicpp::core::ControlReply on_control(
-      const omnicpp::core::ControlCommand& command) override {
-    using CK = omnicpp::core::ControlCommand::Kind;
-    omnicpp::core::ControlReply reply;
+  warploom::core::ControlReply on_control(
+      const warploom::core::ControlCommand& command) override {
+    using CK = warploom::core::ControlCommand::Kind;
+    warploom::core::ControlReply reply;
     reply.ok = true;
     switch (command.kind) {
       case CK::Ping:
@@ -1515,7 +1515,7 @@ class ViewportControlHost final : public omnicpp::core::ControlHost {
           reply.error = "adaptive readback failed";
           break;
         }
-        const auto mask = omnicpp::render::adaptive_mask_from_variance(
+        const auto mask = warploom::render::adaptive_mask_from_variance(
             mean.value(), moment.value(), fraction);
         if (!app_.pt_tracer->upload_adaptive_mask(mask.mask)) {
           reply.ok = false;
@@ -1787,13 +1787,13 @@ bool setup_window(ViewportApp& app) {
                     XCB_CW_EVENT_MASK, &event_mask);
   xcb_change_property(app.connection, XCB_PROP_MODE_REPLACE, app.window,
                       XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
-                      sizeof("OmniCpp Viewport") - 1, "OmniCpp Viewport");
+                      sizeof("Warploom Viewport") - 1, "Warploom Viewport");
   // _NET_WM_PID, so the window can be attributed to THIS process. Without it
   // `xdotool search --pid` finds nothing, which is why this machine's window
   // manager turns out to list stale viewports whose windows carry no PID: any
   // tool (a screenshot grab, a resize driver, a compositor rule) that needs to
   // know which window belongs to which build cannot tell them apart. Two
-  // viewports share the title "OmniCpp Viewport", so title matching is not an
+  // viewports share the title "Warploom Viewport", so title matching is not an
   // alternative. This is the fix that makes live window verification possible
   // at all here.
   {
@@ -2254,7 +2254,7 @@ bool setup_wayland_window(ViewportApp& app) {
                                        bool want_chain, bool want_target) {
   auto& context = app.context;
   if (want_chain) {
-    app.capture_chain = std::make_unique<omnicpp::render::VulkanComposeChain>();
+    app.capture_chain = std::make_unique<warploom::render::VulkanComposeChain>();
     const auto ensured = app.capture_chain->ensure(
         context.device(), context.physical_device(), context.graphics_queue(),
         app.renderer.compose_config(), app.render_pass.render_pass(),
@@ -2278,7 +2278,7 @@ bool setup_wayland_window(ViewportApp& app) {
   }
   if (want_target) {
     const VkFormat capture_depth_format =
-        omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+        warploom::render::VulkanRenderPass::find_supported_depth_format(
             context.physical_device());
     if (!app.capture.initialize(
             context.device(), app.allocator, app.render_pass.render_pass(),
@@ -2301,7 +2301,7 @@ bool setup_wayland_window(ViewportApp& app) {
     return true;
   }
 
-  omnicpp::render::VulkanContext& context = app.context;
+  warploom::render::VulkanContext& context = app.context;
   const auto wait = [&]() { app.renderer.wait_idle(); };
 
   wait();
@@ -2321,7 +2321,7 @@ bool setup_wayland_window(ViewportApp& app) {
   // and framebuffers. Reusing the render pass across an extent change leaves
   // depth/framebuffer handles sized for the old extent in flight.
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+      warploom::render::VulkanRenderPass::find_supported_depth_format(
           context.physical_device());
   // Loop28 step 1: the swapchain depth is an H-Z depth source, so it is
   // created CONCURRENT when a dedicated compute family exists (exclusive
@@ -2380,7 +2380,7 @@ bool setup_wayland_window(ViewportApp& app) {
     app.pt_extent_width = width;
     app.pt_extent_height = height;
     app.pt_frame = 0U;  // the old samples described the old resolution
-    omnicpp::render::PathTracerConfig cfg = app.pt_config;
+    warploom::render::PathTracerConfig cfg = app.pt_config;
     cfg.width = width;
     cfg.height = height;
     const auto rebuilt = app.pt_tracer->create(
@@ -2482,8 +2482,8 @@ bool viewport_key_press(ViewportApp& app, std::uint8_t code,
       bool is_number = false;
       if (app.node_view->end_param_edit(
               true, nullptr, nid, param, number, text, is_number)) {
-        omnicpp::core::ControlCommand cmd;
-        cmd.kind = omnicpp::core::ControlCommand::Kind::SetNodeParam;
+        warploom::core::ControlCommand cmd;
+        cmd.kind = warploom::core::ControlCommand::Kind::SetNodeParam;
         cmd.numbers[0] = static_cast<double>(nid);
         cmd.number_count = 1;
         cmd.text = param;
@@ -2552,10 +2552,10 @@ bool viewport_key_press(ViewportApp& app, std::uint8_t code,
     // G2: the nids payload is the tested editor helper; only the
     // keycode mapping above is platform-specific.
     const std::string nids =
-        omnicpp::editor::selected_node_nids(app.node_view->views());
+        warploom::editor::selected_node_nids(app.node_view->views());
     if (!nids.empty()) {
-      omnicpp::core::ControlCommand cmd;
-      cmd.kind = omnicpp::core::ControlCommand::Kind::CopySubgraph;
+      warploom::core::ControlCommand cmd;
+      cmd.kind = warploom::core::ControlCommand::Kind::CopySubgraph;
       cmd.text = nids;
       {
         std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
@@ -2572,8 +2572,8 @@ bool viewport_key_press(ViewportApp& app, std::uint8_t code,
       frag = app.clipboard_fragment_;
     }
     if (!frag.empty()) {
-      omnicpp::core::ControlCommand cmd;
-      cmd.kind = omnicpp::core::ControlCommand::Kind::PasteSubgraph;
+      warploom::core::ControlCommand cmd;
+      cmd.kind = warploom::core::ControlCommand::Kind::PasteSubgraph;
       cmd.text = std::move(frag);
       {
         std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
@@ -2595,8 +2595,8 @@ bool viewport_key_press(ViewportApp& app, std::uint8_t code,
       }
     }
     if (selected != 0U) {
-      omnicpp::core::ControlCommand cmd;
-      cmd.kind = omnicpp::core::ControlCommand::Kind::NodeRemove;
+      warploom::core::ControlCommand cmd;
+      cmd.kind = warploom::core::ControlCommand::Kind::NodeRemove;
       cmd.numbers[0] = static_cast<double>(selected);
       cmd.number_count = 1;
       {
@@ -2658,8 +2658,8 @@ bool viewport_button_press(ViewportApp& app, std::uint8_t detail) {
     const auto* link =
         app.node_view->link_at_index(link_index);
     if (link != nullptr) {
-      omnicpp::core::ControlCommand cmd;
-      cmd.kind = omnicpp::core::ControlCommand::Kind::UnlinkNodes;
+      warploom::core::ControlCommand cmd;
+      cmd.kind = warploom::core::ControlCommand::Kind::UnlinkNodes;
       cmd.numbers[0] = static_cast<double>(link->to_node);
       cmd.number_count = 1;
       cmd.text2 = link->to_pin;
@@ -2688,8 +2688,8 @@ bool viewport_button_press(ViewportApp& app, std::uint8_t detail) {
     std::uint64_t scrub_frame = 0;
     if (app.timeline.frame_at(app.mouse_x, app.mouse_y,
                               app.editor.scrubber(), scrub_frame)) {
-      omnicpp::core::ControlCommand cmd;
-      cmd.kind = omnicpp::core::ControlCommand::Kind::ScrubTo;
+      warploom::core::ControlCommand cmd;
+      cmd.kind = warploom::core::ControlCommand::Kind::ScrubTo;
       cmd.numbers[0] = static_cast<double>(scrub_frame);
       cmd.number_count = 1U;
       {
@@ -2705,13 +2705,13 @@ bool viewport_button_press(ViewportApp& app, std::uint8_t detail) {
   if (app.node_editor && detail == 1 && app.node_view != nullptr) {
     // Toolbar buttons first (they live over the canvas).
     if (!app.node_toolbar_buttons.empty()) {
-      const auto tb = omnicpp::editor::hit_test_toolbar(
+      const auto tb = warploom::editor::hit_test_toolbar(
           app.ui_tree, app.node_toolbar_buttons, *app.node_graph,
           app.mouse_x, app.mouse_y);
-      using TA = omnicpp::editor::ToolbarAction;
+      using TA = warploom::editor::ToolbarAction;
       if (tb.action == TA::AddType) {
-        omnicpp::core::ControlCommand cmd;
-        cmd.kind = omnicpp::core::ControlCommand::Kind::NodeAdd;
+        warploom::core::ControlCommand cmd;
+        cmd.kind = warploom::core::ControlCommand::Kind::NodeAdd;
         cmd.text = app.node_graph->types()[tb.type_index].name;
         cmd.numbers[0] = static_cast<double>(app.mouse_x);
         cmd.numbers[1] = static_cast<double>(app.mouse_y);
@@ -2745,8 +2745,8 @@ bool viewport_button_press(ViewportApp& app, std::uint8_t detail) {
                         app.mouse_y >= w.y && app.mouse_y <= w.y + w.h;
                }();
       };
-      const auto enqueue_scene = [&](omnicpp::core::ControlCommand::Kind kind) {
-        omnicpp::core::ControlCommand cmd;
+      const auto enqueue_scene = [&](warploom::core::ControlCommand::Kind kind) {
+        warploom::core::ControlCommand cmd;
         cmd.kind = kind;
         cmd.text = {};
         {
@@ -2758,11 +2758,11 @@ bool viewport_button_press(ViewportApp& app, std::uint8_t detail) {
       };
       if (header_hit(app.scene_new_handle)) {
         return enqueue_scene(
-            omnicpp::core::ControlCommand::Kind::NewDocument);
+            warploom::core::ControlCommand::Kind::NewDocument);
       }
       if (header_hit(app.scene_save_handle)) {
         return enqueue_scene(
-            omnicpp::core::ControlCommand::Kind::SaveDocument);
+            warploom::core::ControlCommand::Kind::SaveDocument);
       }
     }
     // G5: scene-browser load buttons (absolute right-edge column).
@@ -2774,8 +2774,8 @@ bool viewport_button_press(ViewportApp& app, std::uint8_t detail) {
         const auto& w = app.ui_tree.get(handle);
         if (app.mouse_x >= w.x && app.mouse_x <= w.x + w.w &&
             app.mouse_y >= w.y && app.mouse_y <= w.y + w.h) {
-          omnicpp::core::ControlCommand cmd;
-          cmd.kind = omnicpp::core::ControlCommand::Kind::LoadDocument;
+          warploom::core::ControlCommand cmd;
+          cmd.kind = warploom::core::ControlCommand::Kind::LoadDocument;
           cmd.text = app.browser_dir + "/" + file;
           {
             std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
@@ -2819,9 +2819,9 @@ bool viewport_button_press(ViewportApp& app, std::uint8_t detail) {
         // through the same session path).
         const auto ihit = app.inspector.hit_test(app.ui_tree, app.mouse_x,
                                                  app.mouse_y);
-        if (ihit.kind == omnicpp::editor::InspectorHit::Kind::SelectObject) {
-          omnicpp::core::ControlCommand sel_cmd;
-          sel_cmd.kind = omnicpp::core::ControlCommand::Kind::Select;
+        if (ihit.kind == warploom::editor::InspectorHit::Kind::SelectObject) {
+          warploom::core::ControlCommand sel_cmd;
+          sel_cmd.kind = warploom::core::ControlCommand::Kind::Select;
           sel_cmd.numbers[0] = static_cast<double>(ihit.object_id);
           sel_cmd.number_count = 1;
           {
@@ -2830,7 +2830,7 @@ bool viewport_button_press(ViewportApp& app, std::uint8_t detail) {
           }
           app.inspector_rebuild_requested = true;
         } else if (ihit.kind ==
-                   omnicpp::editor::InspectorHit::Kind::None) {
+                   warploom::editor::InspectorHit::Kind::None) {
           (void)app.node_view->select(0U);
         }
       }
@@ -2852,8 +2852,8 @@ void viewport_button_release(ViewportApp& app, std::uint8_t detail) {
       if (drop.valid()) {
         // Source pin determines direction: output->input, or reversed.
         const auto src = app.node_view->drag_source_pin();
-        omnicpp::core::ControlCommand cmd;
-        cmd.kind = omnicpp::core::ControlCommand::Kind::LinkNodes;
+        warploom::core::ControlCommand cmd;
+        cmd.kind = warploom::core::ControlCommand::Kind::LinkNodes;
         cmd.numbers[0] = static_cast<double>(src.is_input ? drop.node_id
                                                           : src.node_id);
         cmd.numbers[1] = static_cast<double>(src.is_input ? src.node_id
@@ -2874,8 +2874,8 @@ void viewport_button_release(ViewportApp& app, std::uint8_t detail) {
       float ch = 0.0F;
       if (app.node_view != nullptr &&
           app.node_view->node_rect(app.drag_node_id, cx, cy, cw, ch)) {
-        omnicpp::core::ControlCommand cmd;
-        cmd.kind = omnicpp::core::ControlCommand::Kind::SetNodePosition;
+        warploom::core::ControlCommand cmd;
+        cmd.kind = warploom::core::ControlCommand::Kind::SetNodePosition;
         cmd.numbers[0] = static_cast<double>(app.drag_node_id);
         cmd.numbers[1] = static_cast<double>(cx);
         cmd.numbers[2] = static_cast<double>(cy);
@@ -2890,7 +2890,7 @@ void viewport_button_release(ViewportApp& app, std::uint8_t detail) {
       // Clip drag finished: commit the move as ONE undoable step
       // through the session (the view already built the exact ClipMove
       // payload; a no-op drag still ends here and commits nothing).
-      omnicpp::core::ControlCommand cmd;
+      warploom::core::ControlCommand cmd;
       if (app.clip_strip->end_clip_drag(true, cmd)) {
         std::lock_guard<std::mutex> lock(app.edit_queue_mutex);
         app.edit_queue.push_back({std::move(cmd)});
@@ -3000,8 +3000,8 @@ constexpr std::uint32_t kViewportMaxFramesInFlight = 2U;
 //! Push block for the vertex-pull draw pipeline (pbr_gpu_driven.vert +
 //! pbr_gpu_driven_full.frag): 160 bytes, model/material arrive via payload.
 struct GdPush {
-  omnicpp::render::SceneMatrix view_projection;
-  omnicpp::render::SceneMatrix model_unused;
+  warploom::render::SceneMatrix view_projection;
+  warploom::render::SceneMatrix model_unused;
   std::array<float, 4> camera_position;
   std::uint32_t material_index_unused;
   std::array<std::uint32_t, 3> pad{};
@@ -3038,20 +3038,20 @@ std::string find_buffer0_uri(const std::string& json_text) {
 }
 
 bool setup_mannequin(ViewportApp& app) {
-  // Asset resolution: OMNICPP_MODEL selects the skeletal glTF document
+  // Asset resolution: WARPLOOM_MODEL selects the skeletal glTF document
   // (mannequin by default; may name a subdirectory, e.g. "cesiumman/
-  // CesiumMan"), resolved via OMNICPP_ASSET_DIR then conventional fallbacks.
+  // CesiumMan"), resolved via WARPLOOM_ASSET_DIR then conventional fallbacks.
   // Buffer 0 and image files are resolved relative to the document's own
   // directory, exactly as glTF URIs are specified.
-  // OMNICPP_NO_MODEL forces the cubes-only scene (A/B harness hook).
-  if (warploom_env("WARPLOOM_NO_MODEL", "OMNICPP_NO_MODEL") != nullptr) {
+  // WARPLOOM_NO_MODEL forces the cubes-only scene (A/B harness hook).
+  if (warploom_env("WARPLOOM_NO_MODEL", "WARPLOOM_NO_MODEL") != nullptr) {
     std::fprintf(stderr,
-                 "viewport: OMNICPP_NO_MODEL set; rendering cubes only\n");
+                 "viewport: WARPLOOM_NO_MODEL set; rendering cubes only\n");
     return true;  // non-fatal: cubes-only scene
   }
-  const char* model_env = warploom_env("WARPLOOM_MODEL", "OMNICPP_MODEL");
+  const char* model_env = warploom_env("WARPLOOM_MODEL", "WARPLOOM_MODEL");
   const std::string model = model_env != nullptr ? model_env : "mannequin";
-  const char* asset_dir_env = warploom_env("WARPLOOM_ASSET_DIR", "OMNICPP_ASSET_DIR");
+  const char* asset_dir_env = warploom_env("WARPLOOM_ASSET_DIR", "WARPLOOM_ASSET_DIR");
   std::vector<std::string> candidates;
   if (asset_dir_env != nullptr) candidates.emplace_back(asset_dir_env);
   candidates.insert(candidates.end(), {"assets/models", "../assets/models",
@@ -3088,7 +3088,7 @@ bool setup_mannequin(ViewportApp& app) {
     }
 
     // External images (textures) resolve relative to the document dir too.
-    const omnicpp::asset::ExternalFileLoader loader =
+    const warploom::asset::ExternalFileLoader loader =
         [&model_dir](const std::string& uri, std::string& load_error,
                      std::vector<std::uint8_t>& out_bytes) {
           std::vector<char> bytes;
@@ -3102,7 +3102,7 @@ bool setup_mannequin(ViewportApp& app) {
         };
 
     std::string import_error;
-    auto imported = omnicpp::asset::import_gltf_animation_document(
+    auto imported = warploom::asset::import_gltf_animation_document(
         json_bytes.data(), json_bytes.size(),
         bin_bytes.empty() ? nullptr
                           : reinterpret_cast<const std::uint8_t*>(
@@ -3118,7 +3118,7 @@ bool setup_mannequin(ViewportApp& app) {
   }
   if (!loaded) {
     std::fprintf(stderr,
-                 "viewport: mannequin asset not found (set OMNICPP_ASSET_DIR "
+                 "viewport: mannequin asset not found (set WARPLOOM_ASSET_DIR "
                  "to assets/models); rendering cubes only\n");
     return true;  // non-fatal: cubes-only scene
   }
@@ -3211,18 +3211,18 @@ bool setup_mannequin(ViewportApp& app) {
   // D1: build the walk/idle machine (only when both clips exist).
   if (app.mannequin.animations.size() >= 2U) {
     using AnimMachine =
-        omnicpp::anim::AnimationStateMachine<omnicpp::core::InputSnapshot>;
+        warploom::anim::AnimationStateMachine<warploom::core::InputSnapshot>;
     app.machine = std::make_unique<AnimMachine>();
     app.machine->add_state("walk", 0.0f);
     app.machine->add_state("idle", 1.0f);
-    omnicpp::anim::AnimTransition to_idle;
+    warploom::anim::AnimTransition to_idle;
     to_idle.from = "walk";
     to_idle.to = "idle";
     to_idle.action = "fade_toggle";
     to_idle.min_time_in_state = 0.25f;
     to_idle.fade_duration = 0.4f;
     app.machine->add_transition(to_idle);
-    omnicpp::anim::AnimTransition to_walk;
+    warploom::anim::AnimTransition to_walk;
     to_walk.from = "idle";
     to_walk.to = "walk";
     to_walk.action = "fade_toggle";
@@ -3251,22 +3251,22 @@ void update_mannequin_pose(ViewportApp& app, float time,
   // Sample channels into node TRS.
   for (const auto& channel : anim.channels) {
     float out[4];
-    omnicpp::asset::sample_gltf_channel(anim.samplers[channel.sampler], time,
+    warploom::asset::sample_gltf_channel(anim.samplers[channel.sampler], time,
                                         out);
     auto& node = app.mannequin.nodes[channel.target_node];
     switch (channel.path) {
-      case omnicpp::asset::GltfChannel::Path::Translation:
+      case warploom::asset::GltfChannel::Path::Translation:
         node.translation[0] = out[0];
         node.translation[1] = out[1];
         node.translation[2] = out[2];
         break;
-      case omnicpp::asset::GltfChannel::Path::Rotation:
+      case warploom::asset::GltfChannel::Path::Rotation:
         node.rotation[0] = out[0];
         node.rotation[1] = out[1];
         node.rotation[2] = out[2];
         node.rotation[3] = out[3];
         break;
-      case omnicpp::asset::GltfChannel::Path::Scale:
+      case warploom::asset::GltfChannel::Path::Scale:
         node.scale[0] = out[0];
         node.scale[1] = out[1];
         node.scale[2] = out[2];
@@ -3278,7 +3278,7 @@ void update_mannequin_pose(ViewportApp& app, float time,
   std::vector<SceneMatrix> locals(app.mannequin.nodes.size());
   for (std::size_t i = 0; i < app.mannequin.nodes.size(); ++i) {
     const auto& n = app.mannequin.nodes[i];
-    SceneMatrix m = omnicpp::render::scene_identity_matrix();
+    SceneMatrix m = warploom::render::scene_identity_matrix();
     const float x = n.rotation[0];
     const float y = n.rotation[1];
     const float z = n.rotation[2];
@@ -3300,12 +3300,12 @@ void update_mannequin_pose(ViewportApp& app, float time,
 
   // Parent-before-child globals from the roots.
   std::vector<SceneMatrix> globals(app.mannequin.nodes.size(),
-                                   omnicpp::render::scene_identity_matrix());
+                                   warploom::render::scene_identity_matrix());
   std::vector<std::uint8_t> done(app.mannequin.nodes.size(), 0);
   std::vector<std::size_t> stack;
   for (std::size_t root = 0; root < app.mannequin.nodes.size(); ++root) {
     if (app.mannequin.nodes[root].parent !=
-        omnicpp::asset::kGltfNoParent) {
+        warploom::asset::kGltfNoParent) {
       continue;
     }
     stack.push_back(root);
@@ -3316,7 +3316,7 @@ void update_mannequin_pose(ViewportApp& app, float time,
       const SceneMatrix& local = locals[current];
       const std::size_t parent = app.mannequin.nodes[current].parent;
       globals[current] =
-          parent == omnicpp::asset::kGltfNoParent
+          parent == warploom::asset::kGltfNoParent
               ? local
               : multiply(globals[parent], local);
       done[current] = 1;
@@ -3403,7 +3403,7 @@ bool setup_scene(ViewportApp& app) {
   }
 
   // Set 0: per-mesh vertex storage (SSBO).
-  const std::vector<omnicpp::render::ReflectedBinding> mesh_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> mesh_bindings = {
       {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_VERTEX_BIT}};
   // Pool sized for cubes + ground + mannequin meshes + the city scene's
@@ -3413,7 +3413,7 @@ bool setup_scene(ViewportApp& app) {
   app.mesh_layout = mesh_layout.value();
 
   // Set 1: bindless sampler array (element 0 = opaque-white fallback).
-  const std::vector<omnicpp::render::ReflectedBinding> textures_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> textures_bindings = {
       {1U, 0U, 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
        VK_SHADER_STAGE_FRAGMENT_BIT}};
   auto textures_layout =
@@ -3426,7 +3426,7 @@ bool setup_scene(ViewportApp& app) {
 
   // Set 2: material SSBO (city scene: 4 base slots + per-part Sponza
   // materials; each city instance reuses its material slots).
-  const std::vector<omnicpp::render::ReflectedBinding> material_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> material_bindings = {
       {2U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_FRAGMENT_BIT}};
   auto material_layout = app.descriptors.create_layout(material_bindings, 96U);
@@ -3437,7 +3437,7 @@ bool setup_scene(ViewportApp& app) {
   app.material_set = material_set.value();
 
   auto material_buffer = app.allocator.create_buffer(
-      256U * sizeof(omnicpp::render::PbrMaterialData),
+      256U * sizeof(warploom::render::PbrMaterialData),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -3450,7 +3450,7 @@ bool setup_scene(ViewportApp& app) {
            .is_ok()) {
     return false;
   }
-  auto* materials = static_cast<omnicpp::render::PbrMaterialData*>(
+  auto* materials = static_cast<warploom::render::PbrMaterialData*>(
       app.material_allocation.mapped);
   // 0: brushed metal cube, 1: rough dielectric cube, 2: ground, 3: skin.
   // Slots 4+ are city-scene dynamic (Sponza imports at kSponzaMaterialBase).
@@ -3489,7 +3489,7 @@ bool setup_scene(ViewportApp& app) {
                                    "fragment")
            .is_ok()) {
     std::fprintf(stderr,
-                 "viewport: cannot load shaders from %s (set OMNICPP_SHADER_"
+                 "viewport: cannot load shaders from %s (set WARPLOOM_SHADER_"
                  "DIR to the directory containing pbr_scene.*.spv)\n",
                  shader_dir.c_str());
     return false;
@@ -3530,7 +3530,7 @@ bool setup_scene(ViewportApp& app) {
 
   // Skinned-pipeline descriptor layouts (bone SSBO at set 3) and the
   // mannequin itself. Non-fatal when the asset is missing.
-  const std::vector<omnicpp::render::ReflectedBinding> bone_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> bone_bindings = {
       {3U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_VERTEX_BIT}};
   auto bone_layout = app.descriptors.create_layout(bone_bindings, 8U);
@@ -3542,7 +3542,7 @@ bool setup_scene(ViewportApp& app) {
   // the skinned mannequin -- but the bundled asset always loads, so without
   // this selector the gate never opened on a machine that has the asset.
   const bool no_mannequin =
-      warploom_env("WARPLOOM_NO_MANNEQUIN", "OMNICPP_NO_MANNEQUIN") != nullptr;
+      warploom_env("WARPLOOM_NO_MANNEQUIN", "WARPLOOM_NO_MANNEQUIN") != nullptr;
   if (!no_mannequin && !setup_mannequin(app)) return false;
   if (app.city_scene && !setup_city_scene(app)) {
     std::fprintf(stderr,
@@ -3580,9 +3580,9 @@ bool setup_gpu_driven(ViewportApp& app) {
   build_unit_cube(cube_verts, cube_idx);
 
   app.gd_slot_cube = app.gd_table_builder.add(
-      omnicpp::render::SceneMesh{}, cube_verts, cube_idx);
+      warploom::render::SceneMesh{}, cube_verts, cube_idx);
   app.gd_slot_ground = app.gd_table_builder.add(
-      omnicpp::render::SceneMesh{}, cube_verts, cube_idx);
+      warploom::render::SceneMesh{}, cube_verts, cube_idx);
   // R3: the beam prop joins the same shared streams with its skin payload
   // (8 floats/vertex, joint split at the y=1 pivot). Appended AFTER the
   // cubes, so their slots/bytes are untouched and the static A/B is exact;
@@ -3594,13 +3594,13 @@ bool setup_gpu_driven(ViewportApp& app) {
   build_beam_column(beam_verts, beam_idx);
   build_beam_column_skin(beam_verts, beam_skin);
   app.gd_slot_beam = app.gd_table_builder.add(
-      omnicpp::render::SceneMesh{}, beam_verts, beam_idx, beam_skin);
+      warploom::render::SceneMesh{}, beam_verts, beam_idx, beam_skin);
   if (app.gd_slot_cube ==
-          omnicpp::render::SceneMeshTableBuilder::kInvalidSlot ||
+          warploom::render::SceneMeshTableBuilder::kInvalidSlot ||
       app.gd_slot_ground ==
-          omnicpp::render::SceneMeshTableBuilder::kInvalidSlot ||
+          warploom::render::SceneMeshTableBuilder::kInvalidSlot ||
       app.gd_slot_beam ==
-          omnicpp::render::SceneMeshTableBuilder::kInvalidSlot) {
+          warploom::render::SceneMeshTableBuilder::kInvalidSlot) {
     std::fprintf(stderr, "viewport: gd mesh table add failed\n");
     return false;
   }
@@ -3694,7 +3694,7 @@ bool setup_gpu_driven(ViewportApp& app) {
   // R3: binding 4 is the skin stream. The cull compute shader and the
   // static vertex shader never declare it (extra bindings in a bound set
   // are legal), so one layout serves all three pipelines.
-  const std::vector<omnicpp::render::ReflectedBinding> gd_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> gd_bindings = {
       {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT},
       {0U, 1U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -3778,7 +3778,7 @@ bool setup_gpu_driven(ViewportApp& app) {
   // near/far as packed floats matching the gd projection: 0.1 / 100).
   const auto& packed_hiz = app.renderer.hiz_packed_pyramid();
   if (packed_hiz.buffer.is_valid() && !packed_hiz.level_dims.empty()) {
-    const std::vector<omnicpp::render::ReflectedBinding> occl_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> occl_bindings = {
         {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
          VK_SHADER_STAGE_COMPUTE_BIT},  // header counters (NOT vertex-pull)
         {0U, 1U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -3926,8 +3926,8 @@ bool setup_gpu_driven(ViewportApp& app) {
   app.gd_beam_bone_buffer = app.gd_beam_bone_allocation.buffer;
   {
     auto* joints = static_cast<SceneMatrix*>(app.gd_beam_bone_allocation.mapped);
-    joints[0] = omnicpp::render::scene_identity_matrix();
-    joints[1] = omnicpp::render::scene_identity_matrix();
+    joints[0] = warploom::render::scene_identity_matrix();
+    joints[1] = warploom::render::scene_identity_matrix();
   }
   auto beam_bone_set = app.descriptors.allocate_set(app.bone_layout);
   if (!beam_bone_set.is_ok()) {
@@ -4007,7 +4007,7 @@ void write_gpu_driven_payload(ViewportApp& app, std::uint32_t frame_slot,
                      scale_matrix(8.0f, 0.1f, 8.0f)),
             2U, app.gd_slot_cube, {0.0f, -0.05f, 0.0f},
             0.8660254f * 8.0f);
-  // Objects 1..N: physics bodies (OMNICPP_PHYSICS=1) falling/rolling on the
+  // Objects 1..N: physics bodies (WARPLOOM_PHYSICS=1) falling/rolling on the
   // slab, or the static spinner + rough cube. Physics transforms come straight
   // from the stepped bodies; spheres render as scaled cubes at body positions.
   if (!app.physics_bodies.empty()) {
@@ -4064,7 +4064,7 @@ void write_gpu_driven_payload(ViewportApp& app, std::uint32_t frame_slot,
         multiply(rotation_z_matrix(a), translation_matrix(0.0f, -1.0f, 0.0f)));
     auto* joints =
         static_cast<SceneMatrix*>(app.gd_beam_bone_allocation.mapped);
-    joints[0] = omnicpp::render::scene_identity_matrix();
+    joints[0] = warploom::render::scene_identity_matrix();
     joints[1] = bend;
   }
 
@@ -4163,7 +4163,7 @@ std::uint64_t rt_device_address(const ViewportApp& app, VkBuffer buffer) {
 //! Extract bind-pose triangle positions (9 floats per triangle, BLAS build
 //! input layout) from an indexed glTF import (positions only, bind pose).
 std::vector<float> rt_import_triangles(
-    const omnicpp::asset::GltfMeshImport& import) {
+    const warploom::asset::GltfMeshImport& import) {
   std::vector<float> triangles;
   triangles.reserve(import.indices.size() * 3U);
   for (const std::uint32_t idx : import.indices) {
@@ -4190,13 +4190,13 @@ bool rt_build_blas(ViewportApp& app, const std::vector<float>& triangles,
   std::memcpy(geom.value().mapped, triangles.data(),
               triangles.size() * sizeof(float));
 
-  omnicpp::render::BlasBuildInput input{};
+  warploom::render::BlasBuildInput input{};
   input.vertex_buffer_address = rt_device_address(app, geom.value().buffer);
   input.triangle_count = triangles.size() / 9U;
   input.max_vertex = static_cast<std::uint32_t>(triangles.size() / 3U - 1U);
   if (input.vertex_buffer_address == 0U) return false;
 
-  const auto sizes = omnicpp::render::VulkanAccelerationStructureBuilder::
+  const auto sizes = warploom::render::VulkanAccelerationStructureBuilder::
       query_blas_sizes(app.context.device(), input);
   auto blas = app.rt_builder.create_blas(app.context.device(), app.allocator,
                                          input);
@@ -4220,7 +4220,7 @@ bool setup_rt_shadows(ViewportApp& app) {
 
   // --- 1. Composed RT pipelines (same 6-set layout shape as the PCF
   //        family; set 4 is the TLAS layout). ----------------------------
-  const std::vector<omnicpp::render::ReflectedBinding> rt_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> rt_bindings = {
       {4U, 0U, 1U, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
        VK_SHADER_STAGE_FRAGMENT_BIT}};
   auto rt_layout = app.descriptors.create_layout(rt_bindings, 1U);
@@ -4284,7 +4284,7 @@ bool setup_rt_shadows(ViewportApp& app) {
     return false;
   }
 
-  // --- 1b. Many-light RT variants (WARPLOOM_SCENE=city + OMNICPP_RT_MODE).
+  // --- 1b. Many-light RT variants (WARPLOOM_SCENE=city + WARPLOOM_RT_MODE).
   // Built here because app.rt_layout exists only after RT setup; same
   // 7-set shape as the PCF-ML family with set 4 = TLAS.
   if (app.city_scene) {
@@ -4427,7 +4427,7 @@ bool setup_rt_shadows(ViewportApp& app) {
     return false;
   }
   app.rt_tlas = tlas.value();
-  const auto tlas_sizes = omnicpp::render::VulkanAccelerationStructureBuilder::
+  const auto tlas_sizes = warploom::render::VulkanAccelerationStructureBuilder::
       query_tlas_sizes(dev, tlas_capacity);
   app.rt_tlas_scratch_bytes = tlas_sizes.buildScratchSize;
   app.rt_instances.resize(tlas_capacity);
@@ -4440,14 +4440,14 @@ bool setup_rt_shadows(ViewportApp& app) {
     std::fprintf(stderr, "viewport: RT: scratch acquire failed\n");
     return false;
   }
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       dev, static_cast<std::uint32_t>(
                app.context.queue_families().graphics_family));
   if (!pool.is_ok()) {
     std::fprintf(stderr, "viewport: RT: command pool failed\n");
     return false;
   }
-  auto cb = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cb = warploom::render::VulkanRenderer::allocate_command_buffer(
       dev, pool.value());
   if (!cb.is_ok()) {
     vkDestroyCommandPool(dev, pool.value(), nullptr);
@@ -4526,14 +4526,14 @@ bool setup_rt_shadows(ViewportApp& app) {
   //        structure (the first frame's pre-pass fills real instances;
   //        frame 0 shades fully lit, one-frame latency like the shadow
   //        map). ---------------------------------------------------------
-  auto pool0 = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool0 = warploom::render::VulkanRenderer::create_command_pool(
       dev, static_cast<std::uint32_t>(
                app.context.queue_families().graphics_family));
   if (!pool0.is_ok()) {
     std::fprintf(stderr, "viewport: RT: pool0 failed\n");
     return false;
   }
-  auto cb0 = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cb0 = warploom::render::VulkanRenderer::allocate_command_buffer(
       dev, pool0.value());
   if (!cb0.is_ok()) {
     vkDestroyCommandPool(dev, pool0.value(), nullptr);
@@ -4547,7 +4547,7 @@ bool setup_rt_shadows(ViewportApp& app) {
   // Seed the TLAS with the ground slab (static model) so frame 0 ray
   // queries traverse a valid structure; the first frame's pre-pass replaces
   // it with the real instance set (one-frame latency, like the shadow map).
-  omnicpp::render::TlasInstance seed{};
+  warploom::render::TlasInstance seed{};
   {
     const SceneMatrix ground_model =
         multiply(translation_matrix(0.0f, -0.05f, 0.0f),
@@ -4669,7 +4669,7 @@ void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
           if (object.mesh == &app.city_parts[c].buffers.mesh) {
             if (c < app.rt_blas_city.size()) {
               push_instance(app.rt_blas_city[c],
-                            omnicpp::render::scene_identity_matrix(),
+                            warploom::render::scene_identity_matrix(),
                             object.material_index);
             }
             matched = true;
@@ -4684,7 +4684,7 @@ void build_rt_frame_tlas(ViewportApp& app, VkCommandBuffer command_buffer) {
         // instance capacity (verified: instances truncated at 96).
         if (!sponza_pushed && !app.rt_blas_sponza.empty()) {
           push_instance(app.rt_blas_sponza[0],
-                        omnicpp::render::scene_identity_matrix(),
+                        warploom::render::scene_identity_matrix(),
                         object.material_index);
           sponza_pushed = true;
         }
@@ -4789,7 +4789,7 @@ bool setup_path_tracing(ViewportApp& app) {
     pt_soups.push_back(app.rt_sponza_triangles);
   }
 
-  std::vector<omnicpp::render::Allocation> geometry;
+  std::vector<warploom::render::Allocation> geometry;
   std::vector<std::uint64_t> addresses;
   std::vector<const std::vector<float>*> pt_soup_ptrs;
   pt_soup_ptrs.reserve(pt_soups.size());
@@ -4815,7 +4815,7 @@ bool setup_path_tracing(ViewportApp& app) {
   }
   app.pt_geometry.assign(geometry.begin(), geometry.end());
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = shader_dir;
   cfg.width = std::max(1U, app.pt_extent_width);
   cfg.height = std::max(1U, app.pt_extent_height);
@@ -4839,10 +4839,10 @@ bool setup_path_tracing(ViewportApp& app) {
   // One PT mesh per uploaded soup. triangle_count/max_vertex come from the
   // soup itself, so a mannequin import (thousands of tris) and the canonical
   // 12-tri cube share the same code with no per-category constants.
-  std::vector<omnicpp::render::PathTracerMesh> pt_meshes;
+  std::vector<warploom::render::PathTracerMesh> pt_meshes;
   pt_meshes.reserve(pt_soups.size());
   for (std::size_t m = 0; m < pt_soups.size(); ++m) {
-    omnicpp::render::PathTracerMesh mesh{};
+    warploom::render::PathTracerMesh mesh{};
     mesh.vertex_buffer_address = addresses[m];
     mesh.triangle_count = static_cast<std::uint32_t>(pt_soups[m].size() / 9U);
     mesh.max_vertex = static_cast<std::uint32_t>(pt_soups[m].size() / 3U - 1U);
@@ -4865,7 +4865,7 @@ bool setup_path_tracing(ViewportApp& app) {
     }
   };
   const auto pt_push = [&](std::size_t mesh, const SceneMatrix& model, float albedo) {
-    omnicpp::render::PathTracerInstance inst{};
+    warploom::render::PathTracerInstance inst{};
     pt_model_to_rows(model, inst.transform.data());
     inst.center = {model[12], model[13], model[14], 0.0F};
     inst.albedo = {albedo, albedo, albedo, 0.0F};
@@ -4903,7 +4903,7 @@ bool setup_path_tracing(ViewportApp& app) {
           if (pt_city_mesh[c] == kPtNoMesh) continue;
           if (object.mesh == &app.city_parts[c].buffers.mesh) {
             pt_push(pt_city_mesh[c],
-                    omnicpp::render::scene_identity_matrix(), 0.65F);
+                    warploom::render::scene_identity_matrix(), 0.65F);
             matched = true;
             break;
           }
@@ -4912,7 +4912,7 @@ bool setup_path_tracing(ViewportApp& app) {
       if (!matched && pt_sponza_mesh != kPtNoMesh && !pt_sponza_pushed) {
         pt_sponza_pushed = true;
         pt_push(pt_sponza_mesh,
-                omnicpp::render::scene_identity_matrix(), 0.65F);
+                warploom::render::scene_identity_matrix(), 0.65F);
       }
     }
   }
@@ -4923,8 +4923,8 @@ bool setup_path_tracing(ViewportApp& app) {
                  "viewport: PT: no drawable scene objects, tracing the "
                  "fallback cube pair\n");
     cfg.instances = {
-        omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F),
-        omnicpp::render::PathTracerInstance::translated({0.0F, -2.0F, 0.0F}, 0.75F)};
+        warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.55F),
+        warploom::render::PathTracerInstance::translated({0.0F, -2.0F, 0.0F}, 0.75F)};
   }
 
   // Kept so a window resize can rebuild the tracer: the config is assembled
@@ -4933,7 +4933,7 @@ bool setup_path_tracing(ViewportApp& app) {
   // changing geometry or bounces along with the resolution.
   app.pt_config = cfg;
 
-  app.pt_tracer = std::make_unique<omnicpp::render::VulkanPathTracer>();
+  app.pt_tracer = std::make_unique<warploom::render::VulkanPathTracer>();
   const auto created = app.pt_tracer->create(
       app.context.physical_device(), dev, app.context.graphics_queue(),
       static_cast<std::uint32_t>(app.context.queue_families().graphics_family),
@@ -5050,7 +5050,7 @@ bool record_pt_round_cb(VkCommandBuffer command_buffer, std::uint32_t,
                                       right[2] * forward[0] - right[0] * forward[2],
                                       right[0] * forward[1] - right[1] * forward[0]};
 
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = eye;
   cam.right = right;
   cam.up = true_up;
@@ -5138,7 +5138,7 @@ void destroy_rt_shadows(ViewportApp& app) {
 //! False is non-fatal: the background stays the pass's clear colour, which
 //! is exactly the pre-sky behaviour.
 bool setup_sky_pass(ViewportApp& app) {
-  omnicpp::render::SkyParams params;
+  warploom::render::SkyParams params;
   const float sun_len = std::sqrt(app.sun_direction[0] * app.sun_direction[0] +
                                   app.sun_direction[1] * app.sun_direction[1] +
                                   app.sun_direction[2] * app.sun_direction[2]);
@@ -5211,7 +5211,7 @@ bool setup_lighting(ViewportApp& app) {
                  bake_error.c_str());
     std::fprintf(stderr, "viewport: setup_lighting failed at line 925\n"); return false;
   }
-  omnicpp::render::IblBakeParams bake_params{};
+  warploom::render::IblBakeParams bake_params{};
   bake_params.sun_direction = app.sun_direction;
   if (!app.ibl_baker.bake(bake_params)) {
     std::fprintf(stderr, "viewport: IBL bake failed; legacy path\n");
@@ -5220,7 +5220,7 @@ bool setup_lighting(ViewportApp& app) {
 
   // Set 5 IBL layout (bindings at 5.x for pbr_full.frag) written from the
   // baker's baked images.
-  const std::vector<omnicpp::render::ReflectedBinding> ibl5_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> ibl5_bindings = {
       {5U, 0U, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
        VK_SHADER_STAGE_FRAGMENT_BIT},
       {5U, 1U, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -5361,7 +5361,7 @@ bool setup_lighting(ViewportApp& app) {
           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   if (!ubo.is_ok()) { std::fprintf(stderr, "viewport: setup_lighting failed at line 1073\n"); return false; }
   app.shadow_ubo_allocation = ubo.value();
-  const std::vector<omnicpp::render::ReflectedBinding> shadow_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> shadow_bindings = {
       {4U, 0U, 1U, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
        VK_SHADER_STAGE_FRAGMENT_BIT},
       {4U, 1U, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -5385,7 +5385,7 @@ bool setup_lighting(ViewportApp& app) {
     std::fprintf(stderr, "viewport: setup_lighting failed at line 1096\n"); return false;
   }
 
-  // --- 2b. Neutral shadow set (OMNICPP_NO_SHADOW). -----------------------
+  // --- 2b. Neutral shadow set (WARPLOOM_NO_SHADOW). -----------------------
   // pbr_full.frag statically uses set 4, so it must remain bound even when
   // shadows are disabled — an unbound-but-used set is undefined behaviour.
   // A 1x1 depth image cleared to 1.0 makes every PCF comparison pass.
@@ -5424,10 +5424,10 @@ bool setup_lighting(ViewportApp& app) {
     }
     // Clear the 1x1 map to depth 1.0 (fully far = fully lit) once, on the
     // graphics queue, then leave it in the sampled layout permanently.
-    auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+    auto pool = warploom::render::VulkanRenderer::create_command_pool(
         dev, queue_family);
     if (!pool.is_ok()) { std::fprintf(stderr, "viewport: setup_lighting failed at line 1140\n"); return false; }
-    auto cb = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cb = warploom::render::VulkanRenderer::allocate_command_buffer(
         dev, pool.value());
     if (!cb.is_ok()) {
       vkDestroyCommandPool(dev, pool.value(), nullptr);
@@ -5673,7 +5673,7 @@ constexpr std::uint32_t kSponzaTextureBase = 8U;
 bool setup_sponza(ViewportApp& app) {
   // Resolve assets/models/sponza/Sponza.gltf (+ .bin + 69 external images
   // relative to the document dir), mirroring the mannequin loader.
-  const char* asset_dir_env = warploom_env("WARPLOOM_ASSET_DIR", "OMNICPP_ASSET_DIR");
+  const char* asset_dir_env = warploom_env("WARPLOOM_ASSET_DIR", "WARPLOOM_ASSET_DIR");
   std::vector<std::string> candidates;
   if (asset_dir_env != nullptr) candidates.emplace_back(asset_dir_env);
   candidates.insert(candidates.end(), {"assets/models", "../assets/models",
@@ -5707,7 +5707,7 @@ bool setup_sponza(ViewportApp& app) {
   }
 
   // External image files resolve relative to the document dir.
-  const omnicpp::asset::ExternalFileLoader loader =
+  const warploom::asset::ExternalFileLoader loader =
       [&model_dir](const std::string& uri, std::string& load_error,
                    std::vector<std::uint8_t>& out_bytes) {
         std::vector<char> bytes;
@@ -5721,7 +5721,7 @@ bool setup_sponza(ViewportApp& app) {
       };
 
   std::string import_error;
-  auto imported = omnicpp::asset::import_gltf_scene(
+  auto imported = warploom::asset::import_gltf_scene(
       json_bytes.data(), json_bytes.size(),
       bin_bytes.empty()
           ? nullptr
@@ -5739,7 +5739,7 @@ bool setup_sponza(ViewportApp& app) {
   }
   const auto& mesh = scene_import.meshes[0];
 
-  auto* mats = static_cast<omnicpp::render::PbrMaterialData*>(
+  auto* mats = static_cast<warploom::render::PbrMaterialData*>(
       app.material_allocation.mapped);
 
   // ---- Bindless albedo textures (one sampler; glTF baseColor is sRGB) ----
@@ -5763,7 +5763,7 @@ bool setup_sponza(ViewportApp& app) {
 
   app.sponza_textures.resize(mesh.images.size());
   {
-    omnicpp::render::VulkanFrameUploadArena arena;
+    warploom::render::VulkanFrameUploadArena arena;
     if (!arena.initialize(dev, app.context.physical_device(), queue_family,
                           /*frame_count=*/1U,
                           /*bytes_per_frame=*/96U << 20U)
@@ -5927,7 +5927,7 @@ bool setup_sponza(ViewportApp& app) {
     if (prim.albedo.present &&
         prim.albedo.image_index < mesh.images.size()) {
       mat.flags = static_cast<std::uint32_t>(
-          omnicpp::render::PbrMaterialFlags::kHasAlbedo);
+          warploom::render::PbrMaterialFlags::kHasAlbedo);
       mat.albedo_index = app.sponza_textures[prim.albedo.image_index]
                              .scene.bindless_index;
     }
@@ -6033,7 +6033,7 @@ bool setup_city_scene(ViewportApp& app) {
 
   // Lights descriptor set (layout mirrors the engine's lights SSBO shape;
   // binding 0, storage buffer, fragment stage).
-  const std::vector<omnicpp::render::ReflectedBinding> lights_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> lights_bindings = {
       {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_FRAGMENT_BIT}};
   auto lights_layout =
@@ -6084,7 +6084,7 @@ bool setup_city_scene(ViewportApp& app) {
     return false;
   }
   auto* bones = static_cast<SceneMatrix*>(app.bone_allocation.mapped);
-  bones[0] = omnicpp::render::scene_identity_matrix();  // static slot
+  bones[0] = warploom::render::scene_identity_matrix();  // static slot
 
   // ------------------------------------------------------------------
   // Static geometry (identity skin payload: joints=0, weights=1,0,0,0,
@@ -6182,7 +6182,7 @@ bool setup_city_scene(ViewportApp& app) {
     }
   };
 
-  auto* mats = static_cast<omnicpp::render::PbrMaterialData*>(
+  auto* mats = static_cast<warploom::render::PbrMaterialData*>(
       app.material_allocation.mapped);
 
   // Ground: one 100x40 slab covering the full street grid.
@@ -6190,11 +6190,11 @@ bool setup_city_scene(ViewportApp& app) {
     auto g = ground_mesh(50.0f, 20.0f);
     ViewportApp::CityPart part{};
     if (!make_city_part(g.first, g.second, 2U,
-                        omnicpp::render::scene_identity_matrix(), part)) {
+                        warploom::render::scene_identity_matrix(), part)) {
       return false;
     }
     fill_rt_triangles(g.first, g.second,
-                      omnicpp::render::scene_identity_matrix(), part);
+                      warploom::render::scene_identity_matrix(), part);
     app.city_parts.push_back(std::move(part));
   }
 
@@ -6211,7 +6211,7 @@ bool setup_city_scene(ViewportApp& app) {
       ViewportApp::CityPart part{};
       const SceneMatrix model =
           multiply(translation_matrix(bx, h * 0.5f, bz),
-                   omnicpp::render::scene_identity_matrix());
+                   warploom::render::scene_identity_matrix());
       if (!make_city_part(b.first, b.second,
                           10U + static_cast<std::uint32_t>(row * 8 + i),
                           model, part)) {
@@ -6233,7 +6233,7 @@ bool setup_city_scene(ViewportApp& app) {
       const float pz = row == 0 ? -6.8f : 6.8f;
       const SceneMatrix pole_model =
           multiply(translation_matrix(px, 2.6f, pz),
-                   omnicpp::render::scene_identity_matrix());
+                   warploom::render::scene_identity_matrix());
       if (!make_city_part(pole.first, pole.second, 26U, pole_model,
                           pole_part)) {
         return false;
@@ -6244,7 +6244,7 @@ bool setup_city_scene(ViewportApp& app) {
       ViewportApp::CityPart head_part{};
       const SceneMatrix head_model =
           multiply(translation_matrix(px, 5.35f, pz),
-                   omnicpp::render::scene_identity_matrix());
+                   warploom::render::scene_identity_matrix());
       if (!make_city_part(head.first, head.second, 27U, head_model,
                           head_part)) {
         return false;
@@ -6303,7 +6303,7 @@ bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
     // Cull, LOD and command generation are the engine's. The payload is
     // still written here because it is per-frame application state, and the
     // buffer barrier to the indirect draw comes with the call.
-    omnicpp::render::VulkanRenderer::GpuDrivenFrame frame{};
+    warploom::render::VulkanRenderer::GpuDrivenFrame frame{};
     frame.object_count = app.gd_instance_count;
     frame.indirect_buffer = app.gd_indirect_buffer;
     if (app.gd_occl_pipeline.pipeline() != VK_NULL_HANDLE &&
@@ -6319,7 +6319,7 @@ bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
       // hidden geometry, so on/off is not a pixel equality test but a
       // this-frame-shrinks test.
       const char* occl_env =
-          warploom_env("WARPLOOM_OCCLUSION", "OMNICPP_OCCLUSION");
+          warploom_env("WARPLOOM_OCCLUSION", "WARPLOOM_OCCLUSION");
       pushu[32] = occl_env != nullptr && occl_env[0] == '0' ? 0U : 1U;
       if (!packed.level_dims.empty()) {
         pushu[33] = packed.level_dims[0].first;   // tile_count_x
@@ -6351,7 +6351,7 @@ bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
       frame.cull_push.data = app.gd_cull_push_staging.data();
       frame.cull_push.size = app.gd_cull_push_staging.size();
     }
-    if (!omnicpp::render::VulkanRenderer{}
+    if (!warploom::render::VulkanRenderer{}
              .record_gpu_driven_cull(command_buffer, frame)
              .is_ok()) {
       std::fprintf(stderr, "viewport: record_gpu_driven_cull failed\n");
@@ -6397,7 +6397,7 @@ bool shadow_pre_pass_cb(VkCommandBuffer command_buffer, std::uint32_t width,
   rpb.clearValueCount = 1;
   rpb.pClearValues = &shadow_clear;
   vkCmdBeginRenderPass(command_buffer, &rpb, VK_SUBPASS_CONTENTS_INLINE);
-  const auto shadow_r = omnicpp::render::VulkanRenderer{}.record_shadow_pre_pass(
+  const auto shadow_r = warploom::render::VulkanRenderer{}.record_shadow_pre_pass(
       command_buffer, app.scene, ViewportApp::kShadowRes,
       ViewportApp::kShadowRes);
   vkCmdEndRenderPass(command_buffer);
@@ -6433,7 +6433,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
                         orbit_radius * std::sin(orbit_angle)};
   const float target[3] = {0.0f, app.has_mannequin ? 0.9f : 0.8f, 0.0f};
   const float up[3] = {0.0f, 1.0f, 0.0f};
-  app.scene.camera.view_projection = omnicpp::render::scene_camera_view_projection(
+  app.scene.camera.view_projection = warploom::render::scene_camera_view_projection(
       eye, target, up, 1.05f,
       static_cast<float>(width) / static_cast<float>(height), 0.1f, 100.0f);
   // Camera position in view conventions: the look_at eye.
@@ -6458,7 +6458,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
   const float light_target[3] = {0.0f, 0.0f, 0.0f};
   app.scene.shadow_light_vp = multiply(
       make_ortho(-10.0f, 10.0f, -10.0f, 10.0f, -20.0f, 20.0f),
-      omnicpp::render::scene_camera_look_at(light_eye, light_target, up));
+      warploom::render::scene_camera_look_at(light_eye, light_target, up));
   if (app.shadow_ubo_allocation.mapped != nullptr) {
     std::memcpy(app.shadow_ubo_allocation.mapped,
                 app.scene.shadow_light_vp.data(), 64U);
@@ -6498,7 +6498,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     }
     const float city_up[3] = {0.0f, 1.0f, 0.0f};
     app.scene.camera.view_projection =
-        omnicpp::render::scene_camera_view_projection(
+        warploom::render::scene_camera_view_projection(
             city_eye, city_target, city_up, 1.05f,
             static_cast<float>(width) / static_cast<float>(height), 0.5f,
             300.0f);
@@ -6512,7 +6512,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
                                      app.sun_direction[2] * 30.0f};
     app.scene.shadow_light_vp = multiply(
         make_ortho(-55.0f, 55.0f, -55.0f, 55.0f, -60.0f, 60.0f),
-        omnicpp::render::scene_camera_look_at(city_light_eye, city_target,
+        warploom::render::scene_camera_look_at(city_light_eye, city_target,
                                                city_up));
     if (app.shadow_ubo_allocation.mapped != nullptr) {
       std::memcpy(app.shadow_ubo_allocation.mapped,
@@ -6532,7 +6532,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     // Static city parts: ground, buildings, poles, heads (identity payload,
     // joint_base 0).
     for (const auto& part : app.city_parts) {
-      omnicpp::render::ScenePbrObject obj;
+      warploom::render::ScenePbrObject obj;
       obj.mesh = &part.buffers.mesh;
       obj.model = part.model;
       obj.material_index = part.material_index;
@@ -6546,7 +6546,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
       for (std::size_t p = 0; p < app.sponza.parts.size(); ++p) {
         const auto& part = app.sponza.parts[p];
         if (!part.is_drawable()) continue;
-        omnicpp::render::ScenePbrObject obj;
+        warploom::render::ScenePbrObject obj;
         obj.mesh = &part;
         obj.model = app.sponza.part_models[p];
         obj.material_index = kSponzaMaterialBase + static_cast<std::uint32_t>(p);
@@ -6557,7 +6557,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     // Actors: shared per-part meshes, per-actor model + joint slice.
     for (std::uint32_t a = 0; a < app.city_actor_count; ++a) {
       for (std::size_t i = 0; i < app.mannequin_meshes.size(); ++i) {
-        omnicpp::render::ScenePbrObject part;
+        warploom::render::ScenePbrObject part;
         part.mesh = &app.mannequin_meshes[i].mesh;
         part.model = app.city_actors[a].model;
         part.material_index = 3U;
@@ -6600,13 +6600,13 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     // M11: document cubes mirror into the city branch too (it returns
     // below, so the shared tail append cannot serve it).
     mirror_document_objects(app);
-    return omnicpp::render::VulkanRenderer{}
+    return warploom::render::VulkanRenderer{}
         .record_pbr_scene(command_buffer, app.scene, width, height)
         .is_ok();
   }
 
   // Ground slab (shared backdrop for both scene variants).
-  omnicpp::render::ScenePbrObject ground;
+  warploom::render::ScenePbrObject ground;
   ground.mesh = &app.ground.mesh;
   ground.model = multiply(translation_matrix(0.0f, -0.05f, 0.0f),
                           scale_matrix(8.0f, 0.1f, 8.0f));
@@ -6627,8 +6627,8 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
       update_mannequin_pose(app, walk_t);
       if (idle_weight > 0.0f) {
         // Blend the idle clip over the walk pose by the machine's weight.
-        std::vector<omnicpp::asset::GltfSkinNode> pose = app.mannequin.nodes;
-        omnicpp::asset::sample_clip_blended(
+        std::vector<warploom::asset::GltfSkinNode> pose = app.mannequin.nodes;
+        warploom::asset::sample_clip_blended(
             app.mannequin, app.mannequin.animations[1], walk_t,
             idle_weight, pose);
         app.mannequin.nodes = pose;
@@ -6636,7 +6636,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
       if (idle_dominates) app.walk_time = prev_walk;  // pause walk clock
     }
     for (auto& buffers : app.mannequin_meshes) {
-      omnicpp::render::ScenePbrObject part;
+      warploom::render::ScenePbrObject part;
       part.mesh = &buffers.mesh;
       // Bind vertices are authored around the skeleton origin, feet at the
       // ground plane; shift so the figure stands on the slab.
@@ -6659,7 +6659,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     app.scene.bone_set = app.bone_set;
   } else {
     // Spinning metal cube at the origin.
-    omnicpp::render::ScenePbrObject spinner;
+    warploom::render::ScenePbrObject spinner;
     spinner.mesh = &app.cube.mesh;
     spinner.model = multiply(translation_matrix(0.0f, 1.4f, 0.0f),
                              rotation_y_matrix(t * 0.8f));
@@ -6667,7 +6667,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     app.scene.objects.push_back(spinner);
 
     // Rough blue cube, counter-rotating beside it.
-    omnicpp::render::ScenePbrObject rough_cube;
+    warploom::render::ScenePbrObject rough_cube;
     rough_cube.mesh = &app.cube.mesh;
     rough_cube.model =
         multiply(translation_matrix(-2.4f, 1.0f, 0.6f),
@@ -6690,7 +6690,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     app.scene.bone_set = VK_NULL_HANDLE;
   }
   // Shadow set shared by both branches (null keeps the legacy path).
-  // OMNICPP_NO_SHADOW keeps the composed pipelines (their shaders statically
+  // WARPLOOM_NO_SHADOW keeps the composed pipelines (their shaders statically
   // use set 4) but binds the neutral 1x1 cleared map: every PCF comparison
   // passes, so the image equals composed shading with no shadow term.
   // M11: document cubes mirror after the built-in scene lists.
@@ -6729,9 +6729,9 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     // RT mode without them is the historical path bit-for-bit.
     app.scene.rt_flags =
         (app.rt_reflections
-             ? omnicpp::render::VulkanPbrScene::kRtFlagReflections
+             ? warploom::render::VulkanPbrScene::kRtFlagReflections
              : 0U) |
-        (app.rt_ao ? omnicpp::render::VulkanPbrScene::kRtFlagAo : 0U);
+        (app.rt_ao ? warploom::render::VulkanPbrScene::kRtFlagAo : 0U);
     // No shadow-map pre-pass: the TLAS replaces the depth map.
     app.scene.shadow_pipeline = VK_NULL_HANDLE;
     app.scene.shadow_pipeline_layout = VK_NULL_HANDLE;
@@ -6763,7 +6763,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     const std::uint32_t beam_obj = app.gd_instance_count - 1U;
     GdPush push{app.scene.camera.view_projection,
                 {}, app.scene.camera_position, {}};
-    omnicpp::render::VulkanRenderer::GpuDrivenFrame frame{};
+    warploom::render::VulkanRenderer::GpuDrivenFrame frame{};
     frame.draw_push.data = &push;
     frame.draw_push.size = sizeof(push);
     frame.index_buffer = app.gd_shared_index_buffer;
@@ -6790,7 +6790,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     frame.draw_set_count = 5U;
     frame.draw_first_command = 0U;
     frame.draw_command_count = beam_obj;
-    if (const auto gd = omnicpp::render::VulkanRenderer{}.record_gpu_driven_draw(
+    if (const auto gd = warploom::render::VulkanRenderer{}.record_gpu_driven_draw(
             command_buffer, width, height, frame);
         !gd.is_ok()) {
       std::fprintf(stderr, "viewport: record_gpu_driven_draw failed (%d)\n",
@@ -6811,7 +6811,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     frame.draw_set_count = 6U;
     frame.draw_first_command = beam_obj;
     frame.draw_command_count = 1U;
-    if (const auto gd = omnicpp::render::VulkanRenderer{}.record_gpu_driven_draw(
+    if (const auto gd = warploom::render::VulkanRenderer{}.record_gpu_driven_draw(
             command_buffer, width, height, frame);
         !gd.is_ok()) {
       std::fprintf(stderr,
@@ -6822,7 +6822,7 @@ bool record_scene_into(VkCommandBuffer command_buffer, ViewportApp& app,
     return true;
   }
 
-  return omnicpp::render::VulkanRenderer{}
+  return warploom::render::VulkanRenderer{}
       .record_pbr_scene(command_buffer, app.scene, width, height)
       .is_ok();
 }
@@ -6865,9 +6865,9 @@ void mirror_document_objects(ViewportApp& app) {
 
   constexpr float kDegToRad = 3.14159265358979f / 180.0f;
   (void)app.projection.world().query_if<DocumentTransform, DocumentRef>(
-      [](const omnicpp::core::Entity&, const DocumentTransform&,
+      [](const warploom::core::Entity&, const DocumentTransform&,
          const DocumentRef& ref) { return ref.type_id == kDocumentCubeTypeId; },
-      [&](const omnicpp::core::Entity&, const DocumentTransform& t,
+      [&](const warploom::core::Entity&, const DocumentTransform& t,
           const DocumentRef&) {
         // Same composition the previous code used: translate * yaw * scale.
         // Kept bit-for-bit so a saved scene still looks identical.
@@ -6880,7 +6880,7 @@ void mirror_document_objects(ViewportApp& app) {
                      scale_matrix(static_cast<float>(t.scale[0]),
                                   static_cast<float>(t.scale[1]),
                                   static_cast<float>(t.scale[2]))));
-        omnicpp::render::ScenePbrObject render_obj;
+        warploom::render::ScenePbrObject render_obj;
         render_obj.mesh = &app.cube.mesh;
         render_obj.model = model;
         render_obj.material_index = 2U;
@@ -6892,7 +6892,7 @@ void mirror_document_objects(ViewportApp& app) {
 //! Renderer hook: advance the clock (the one sanctioned mutation) and record
 //! the window's scene for this frame.
 // ============================================================================
-// Node editor overlay (OMNICPP_NODE_EDITOR=1): a live graph canvas rendered
+// Node editor overlay (WARPLOOM_NODE_EDITOR=1): a live graph canvas rendered
 // over the scene through the engine UI paint path.
 // ============================================================================
 
@@ -6948,7 +6948,7 @@ void sync_scene_header(ViewportApp& app) {
   if (!app.browser_enabled || app.browser_root == ui::kInvalidWidget) {
     return;
   }
-  const std::string status = omnicpp::editor::scene_status_text(
+  const std::string status = warploom::editor::scene_status_text(
       app.editor.current_path(), app.editor.is_dirty());
   if (app.scene_status_handle == ui::kInvalidWidget) {
     ui::Widget label;
@@ -7006,9 +7006,9 @@ bool setup_node_editor(ViewportApp& app) {
   // The demo const -> add graph is authored through the SAME undoable
   // commands the protocol uses, so the first undo steps are the demo's
   // construction.
-  omnicpp::editor::SceneDocument& doc = app.session_document();
+  warploom::editor::SceneDocument& doc = app.session_document();
   {
-    auto add_cmd = std::make_unique<omnicpp::editor::AddNodeCommand>(
+    auto add_cmd = std::make_unique<warploom::editor::AddNodeCommand>(
         "const_number", 60.0, 60.0);
     std::string err;
     if (!add_cmd->apply(doc, err)) {
@@ -7016,8 +7016,8 @@ bool setup_node_editor(ViewportApp& app) {
     } else {
       const auto cn = add_cmd->node_id();
       (void)cn;
-      omnicpp::editor::SetNodeParamCommand param(cn, "value",
-                                                 omnicpp::editor::PropValue::make_number(2.0));
+      warploom::editor::SetNodeParamCommand param(cn, "value",
+                                                 warploom::editor::PropValue::make_number(2.0));
       if (!param.apply(doc, err)) {
         std::fprintf(stderr, "viewport: demo param failed: %s\n",
                      err.c_str());
@@ -7027,14 +7027,14 @@ bool setup_node_editor(ViewportApp& app) {
   }
   {
     auto add_cmd =
-        std::make_unique<omnicpp::editor::AddNodeCommand>("add", 320.0, 60.0);
+        std::make_unique<warploom::editor::AddNodeCommand>("add", 320.0, 60.0);
     std::string err;
     if (!add_cmd->apply(doc, err)) {
       std::fprintf(stderr, "viewport: demo node failed: %s\n", err.c_str());
     } else {
       const auto add_id = add_cmd->node_id();
       const auto cn_id = add_id - 1U;
-      omnicpp::editor::LinkNodesCommand link(cn_id, "value", add_id, "a");
+      warploom::editor::LinkNodesCommand link(cn_id, "value", add_id, "a");
       if (!link.apply(doc, err)) {
         std::fprintf(stderr, "viewport: node link failed: %s\n",
                      err.c_str());
@@ -7046,7 +7046,7 @@ bool setup_node_editor(ViewportApp& app) {
   // (session commands mutate it in place — no copy-back needed).
   app.node_graph = &doc.node_graph;
 
-  app.node_view = std::make_unique<omnicpp::editor::NodeEditorView>(
+  app.node_view = std::make_unique<warploom::editor::NodeEditorView>(
       *app.node_graph);
   const auto canvas = app.ui_tree.add(warploom::ui::Widget{},
                                       app.ui_tree.root());
@@ -7059,7 +7059,7 @@ bool setup_node_editor(ViewportApp& app) {
     const auto toolbar = app.ui_tree.add(warploom::ui::Widget{},
                                          app.ui_tree.root());
     app.node_toolbar = toolbar;
-    app.node_toolbar_buttons = omnicpp::editor::build_node_toolbar(
+    app.node_toolbar_buttons = warploom::editor::build_node_toolbar(
         app.ui_tree, toolbar, *app.node_graph);
   }
 
@@ -7067,7 +7067,7 @@ bool setup_node_editor(ViewportApp& app) {
   // right edge; buttons (re)built from the scan whenever it changes.
   // Opt-in: no env dir, no panel. A bad dir scans empty, not fatal.
   if (const char* scene_dir =
-          warploom_env("WARPLOOM_SCENE_DIR", "OMNICPP_SCENE_DIR")) {
+          warploom_env("WARPLOOM_SCENE_DIR", "WARPLOOM_SCENE_DIR")) {
     app.browser_enabled = true;
     app.browser_dir = scene_dir;
     warploom::ui::Widget panel;
@@ -7076,7 +7076,7 @@ bool setup_node_editor(ViewportApp& app) {
     panel.layout = warploom::ui::LayoutMode::Absolute;
     app.browser_root = app.ui_tree.add(panel, app.ui_tree.root());
     app.browser_files =
-        omnicpp::editor::list_scene_files(app.browser_dir);
+        warploom::editor::list_scene_files(app.browser_dir);
     rebuild_browser_buttons(app);
     std::printf("viewport: scene browser on %s (%zu files)\n",
                 app.browser_dir.c_str(), app.browser_files.size());
@@ -7085,16 +7085,16 @@ bool setup_node_editor(ViewportApp& app) {
   // M13 fusion: when enabled, seed a pulse node mapped to "graph_move" so
   // the mannequin's walk<->idle machine is graph-driven out of the box.
   if (app.graph_anim_enabled) {
-    auto add_cmd = std::make_unique<omnicpp::editor::AddNodeCommand>(
+    auto add_cmd = std::make_unique<warploom::editor::AddNodeCommand>(
         "pulse", 480.0, 60.0);
     std::string err;
     if (add_cmd->apply(doc, err)) {
       const auto pid = add_cmd->node_id();
       (void)add_cmd.release();
-      omnicpp::editor::SetNodeParamCommand freq(
-          pid, "frequency", omnicpp::editor::PropValue::make_number(0.25));
-      omnicpp::editor::SetNodeParamCommand thresh(
-          pid, "threshold", omnicpp::editor::PropValue::make_number(0.5));
+      warploom::editor::SetNodeParamCommand freq(
+          pid, "frequency", warploom::editor::PropValue::make_number(0.25));
+      warploom::editor::SetNodeParamCommand thresh(
+          pid, "threshold", warploom::editor::PropValue::make_number(0.5));
       (void)freq.apply(doc, err);
       (void)thresh.apply(doc, err);
     } else {
@@ -7102,7 +7102,7 @@ bool setup_node_editor(ViewportApp& app) {
       std::fprintf(stderr, "viewport: graph-anim pulse node failed: %s\n",
                    err.c_str());
     }
-    app.graph_anim = std::make_unique<omnicpp::editor::GraphSignalAdapter>();
+    app.graph_anim = std::make_unique<warploom::editor::GraphSignalAdapter>();
     // Bind to whatever id the pulse got (last added node).
     const auto pulse_id = doc.node_graph.nodes().back().id;
     app.graph_anim->set_signal({"graph_move", pulse_id, "on", 0.5});
@@ -7180,8 +7180,8 @@ void tick_node_editor(ViewportApp& app) {
   // Toolbar undo/redo: real stack operations (M8 placeholder removed).
   if (app.undo_requested) {
     app.undo_requested = false;
-    omnicpp::core::ControlCommand cmd;
-    cmd.kind = omnicpp::core::ControlCommand::Kind::Undo;
+    warploom::core::ControlCommand cmd;
+    cmd.kind = warploom::core::ControlCommand::Kind::Undo;
     const auto reply = app.editor.on_control(cmd);
     if (!reply.ok) {
       std::fprintf(stderr, "viewport: undo: %s\n", reply.error.c_str());
@@ -7189,8 +7189,8 @@ void tick_node_editor(ViewportApp& app) {
   }
   if (app.redo_requested) {
     app.redo_requested = false;
-    omnicpp::core::ControlCommand cmd;
-    cmd.kind = omnicpp::core::ControlCommand::Kind::Redo;
+    warploom::core::ControlCommand cmd;
+    cmd.kind = warploom::core::ControlCommand::Kind::Redo;
     const auto reply = app.editor.on_control(cmd);
     if (!reply.ok) {
       std::fprintf(stderr, "viewport: redo: %s\n", reply.error.c_str());
@@ -7219,7 +7219,7 @@ void tick_node_editor(ViewportApp& app) {
   // G5: rescan the scene dir; rebuild buttons only when the scan changes.
   if (app.browser_enabled) {
     const auto files =
-        omnicpp::editor::list_scene_files(app.browser_dir);
+        warploom::editor::list_scene_files(app.browser_dir);
     if (files != app.browser_files) {
       app.browser_files = files;
       rebuild_browser_buttons(app);
@@ -7234,7 +7234,7 @@ void tick_node_editor(ViewportApp& app) {
   std::string error;
   // M13: context-driven nodes (time/oscillators/noise) use the sim clock +
   // frame counter — deterministic, host-driven, never wall clocks.
-  omnicpp::editor::GraphContext ctx;
+  warploom::editor::GraphContext ctx;
   ctx.time = static_cast<double>(app.time);
   ctx.tick = static_cast<std::uint64_t>(app.frame_index);
   (void)app.node_graph->evaluate_with(ctx, error);
@@ -7255,9 +7255,9 @@ void tick_node_editor(ViewportApp& app) {
     const std::size_t nclips = app.session_document().clips.size();
     const float strip_h =
         nclips == 0U
-            ? omnicpp::editor::ClipTimelineView::kEmptyGapH + 8.0F
+            ? warploom::editor::ClipTimelineView::kEmptyGapH + 8.0F
             : 4.0F + static_cast<float>(nclips) *
-                         omnicpp::editor::ClipTimelineView::kRowH +
+                         warploom::editor::ClipTimelineView::kRowH +
                  8.0F;
     const float w1_y = static_cast<float>(kHeight) - TimelinePanel::kBarH -
                        TimelinePanel::kBottomGap;
@@ -7282,7 +7282,7 @@ void tick_node_editor(ViewportApp& app) {
   // recomputed every frame (cheap: layout rects are fresh) so wires track
   // the panel when rows move.
   {
-    std::vector<omnicpp::editor::NodeEditorView::BindingWire> wires;
+    std::vector<warploom::editor::NodeEditorView::BindingWire> wires;
     const auto& bindings = app.editor.bindings();
     wires.reserve(bindings.size());
     for (std::size_t i = 0; i < bindings.size(); ++i) {
@@ -7423,36 +7423,36 @@ bool record_scene_cb(VkCommandBuffer command_buffer, std::uint32_t width,
 bool ViewportApp::initialize() {
   run_config = viewport::RunConfig::from_environment();
   // M13 fusion: enable graph->animation signal projection.
-  graph_anim_enabled = warploom_env("WARPLOOM_GRAPH_ANIM", "OMNICPP_GRAPH_ANIM") != nullptr;
+  graph_anim_enabled = warploom_env("WARPLOOM_GRAPH_ANIM", "WARPLOOM_GRAPH_ANIM") != nullptr;
   // M11: resolve the document cube type id for the render mirror.
   if (const auto* cube_type =
-          omnicpp::editor::default_registry().find_by_name(
-              std::string(omnicpp::editor::kTypeCube));
+          warploom::editor::default_registry().find_by_name(
+              std::string(warploom::editor::kTypeCube));
       cube_type != nullptr) {
     kDocumentCubeTypeId = cube_type->id;
   }
   // A/B selection must be known BEFORE setup_lighting() picks the pipeline
   // family; the flag read later in this function only adds telemetry.
-  legacy_lighting = warploom_env("WARPLOOM_LEGACY_LIGHTING", "OMNICPP_LEGACY_LIGHTING") != nullptr;
-  no_shadow = warploom_env("WARPLOOM_NO_SHADOW", "OMNICPP_NO_SHADOW") != nullptr;
+  legacy_lighting = warploom_env("WARPLOOM_LEGACY_LIGHTING", "WARPLOOM_LEGACY_LIGHTING") != nullptr;
+  no_shadow = warploom_env("WARPLOOM_NO_SHADOW", "WARPLOOM_NO_SHADOW") != nullptr;
   // RT mode: hard ray-query shadows (requires composed lighting; setup
   // happens after setup_lighting builds the IBL stack it composes on).
-  rt_mode = warploom_env("WARPLOOM_RT_MODE", "OMNICPP_RT_MODE") != nullptr;
+  rt_mode = warploom_env("WARPLOOM_RT_MODE", "WARPLOOM_RT_MODE") != nullptr;
   // City scene selection (must precede setup_scene: setup_mannequin loads
   // the actor asset, setup_city_scene builds on it, and setup_lighting
   // needs to know which fragment family to build).
-  city_scene = warploom_env("WARPLOOM_SCENE", "OMNICPP_SCENE") != nullptr &&
-               std::string_view(warploom_env("WARPLOOM_SCENE", "OMNICPP_SCENE")) == "city";
+  city_scene = warploom_env("WARPLOOM_SCENE", "WARPLOOM_SCENE") != nullptr &&
+               std::string_view(warploom_env("WARPLOOM_SCENE", "WARPLOOM_SCENE")) == "city";
   // Sponza landmark inside the city scene (CC0 asset vendored under
   // assets/models/sponza).
-  sponza_enabled = warploom_env("WARPLOOM_SPONZA", "OMNICPP_SPONZA") != nullptr;
-  if (const char* ds = warploom_env("WARPLOOM_DUMP_SHADOW", "OMNICPP_DUMP_SHADOW")) {
+  sponza_enabled = warploom_env("WARPLOOM_SPONZA", "WARPLOOM_SPONZA") != nullptr;
+  if (const char* ds = warploom_env("WARPLOOM_DUMP_SHADOW", "WARPLOOM_DUMP_SHADOW")) {
     dump_shadow = true;
     dump_shadow_frame = static_cast<std::uint32_t>(std::atoi(ds));
   }
   // Sun direction override — scenario control for shadow proofs (two suns
   // must move the shadow region). Normalized on read; kept above the horizon.
-  if (const char* sun = warploom_env("WARPLOOM_SUN_DIRECTION", "OMNICPP_SUN_DIRECTION")) {
+  if (const char* sun = warploom_env("WARPLOOM_SUN_DIRECTION", "WARPLOOM_SUN_DIRECTION")) {
     float x = 0.0f, y = 0.0f, z = 0.0f;
     if (std::sscanf(sun, "%f,%f,%f", &x, &y, &z) == 3 && x > 0.0f &&
         y > 0.05f && z > 0.0f) {
@@ -7460,7 +7460,7 @@ bool ViewportApp::initialize() {
       sun_direction = {x / len, y / len, z / len};
     }
   }
-  use_wayland = warploom_env("WARPLOOM_WAYLAND", "OMNICPP_WAYLAND") != nullptr;
+  use_wayland = warploom_env("WARPLOOM_WAYLAND", "WARPLOOM_WAYLAND") != nullptr;
   if (use_wayland) {
     if (!setup_wayland_window(*this)) return false;
   } else {
@@ -7468,14 +7468,14 @@ bool ViewportApp::initialize() {
     setup_wm_delete_protocol(*this);
   }
 
-  if (!context.initialize("OmniCppViewport", false).is_ok()) {
+  if (!context.initialize("WarploomViewport", false).is_ok()) {
     std::fprintf(stderr, "viewport: Vulkan context initialization failed\n");
     return false;
   }
 
-  omnicpp::render::SurfaceCreateInfo surface_info;
+  warploom::render::SurfaceCreateInfo surface_info;
   if (use_wayland) {
-    surface_info.platform = omnicpp::render::SurfacePlatform::Wayland;
+    surface_info.platform = warploom::render::SurfacePlatform::Wayland;
     surface_info.display = wayland_display;
     surface_info.window = wayland_surface;
   } else {
@@ -7484,14 +7484,14 @@ bool ViewportApp::initialize() {
   }
   surface_info.width = kWidth;
   surface_info.height = kHeight;
-  if (!omnicpp::render::create_platform_surface(context.instance(),
+  if (!warploom::render::create_platform_surface(context.instance(),
                                                 surface_info, surface)
            .is_ok()) {
     std::fprintf(stderr, "viewport: Vulkan surface creation failed\n");
     return false;
   }
 
-  omnicpp::render::SwapchainConfig swap_config;
+  warploom::render::SwapchainConfig swap_config;
   swap_config.width = kWidth;
   swap_config.height = kHeight;
   swap_config.vsync = true;
@@ -7504,7 +7504,7 @@ bool ViewportApp::initialize() {
   }
 
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+      warploom::render::VulkanRenderPass::find_supported_depth_format(
           context.physical_device());
   if (!render_pass
            .create(context.device(), swapchain.image_format(), depth_format)
@@ -7531,7 +7531,7 @@ bool ViewportApp::initialize() {
   pt_extent_width = swapchain.extent_width();
   pt_extent_height = swapchain.extent_height();
 
-  omnicpp::render::RendererConfig renderer_config;
+  warploom::render::RendererConfig renderer_config;
   // GPU timestamp queries: per-frame device-side duration in telemetry.
   renderer_config.enable_gpu_timing = true;
   // H-Z pyramid: built every frame from the scene depth; the GPU-driven path
@@ -7545,16 +7545,16 @@ bool ViewportApp::initialize() {
   // anything above 1.0 clips, so the only response to a bright key light is
   // to dim the whole frame. Set WARPLOOM_NO_HDR=1 to render directly, which
   // is the A/B baseline.
-  if (warploom_env("WARPLOOM_NO_HDR", "OMNICPP_NO_HDR") == nullptr) {
+  if (warploom_env("WARPLOOM_NO_HDR", "WARPLOOM_NO_HDR") == nullptr) {
     renderer_config.enable_hdr_compose = true;
     renderer_config.compose_shader_dir = warploom_shader_dir();
     renderer_config.exposure = 1.0f;
     // R4: exposure as a runtime control. Read once at start-up for now --
     // making it a protocol command is roadmap item E1.
-    if (const char* ev = warploom_env("WARPLOOM_EXPOSURE", "OMNICPP_EXPOSURE")) {
+    if (const char* ev = warploom_env("WARPLOOM_EXPOSURE", "WARPLOOM_EXPOSURE")) {
       renderer_config.exposure = std::strtof(ev, nullptr);
     }
-    if (warploom_env("WARPLOOM_BLOOM", "OMNICPP_BLOOM") != nullptr) {
+    if (warploom_env("WARPLOOM_BLOOM", "WARPLOOM_BLOOM") != nullptr) {
       renderer_config.enable_bloom = true;
     }
   }
@@ -7591,7 +7591,7 @@ bool ViewportApp::initialize() {
   // pair). One build path, no duplication drift with the handler below; a
   // build failure still surfaces as "PT stack build failed" on frame 1,
   // distinct from a loop kill.
-  if (warploom_env("WARPLOOM_PT", "OMNICPP_PT") != nullptr) {
+  if (warploom_env("WARPLOOM_PT", "WARPLOOM_PT") != nullptr) {
     pt_request_.store(1);
     std::fprintf(stderr,
                  "viewport: PT requested at start-up; stack builds on the "
@@ -7614,7 +7614,7 @@ bool ViewportApp::initialize() {
     // GPU-driven draw path (cubes scene only): cull/LOD on the GPU, one
     // indirect draw per frame. Requires composed lighting (the driven
     // fragment shader statically uses the shadow + IBL sets).
-    const char* gd_env = warploom_env("WARPLOOM_GPU_DRIVEN", "OMNICPP_GPU_DRIVEN");
+    const char* gd_env = warploom_env("WARPLOOM_GPU_DRIVEN", "WARPLOOM_GPU_DRIVEN");
     if (gd_env != nullptr && gd_env[0] == '1' && !has_mannequin &&
         !rt_mode &&  // GPU-driven fragment is the PCF variant; exclusive
         setup_gpu_driven(*this)) {
@@ -7623,7 +7623,7 @@ bool ViewportApp::initialize() {
       // beam (benchmarks; requires WARPLOOM_GPU_DRIVEN=1). The count is the
       // TOTAL including the beam (always last), so the floor is 2
       // (ground + beam); below that the knob is ignored.
-      if (const char* count_env = warploom_env("WARPLOOM_INSTANCE_COUNT", "OMNICPP_INSTANCE_COUNT")) {
+      if (const char* count_env = warploom_env("WARPLOOM_INSTANCE_COUNT", "WARPLOOM_INSTANCE_COUNT")) {
         const long parsed = std::strtol(count_env, nullptr, 10);
         if (parsed >= 2L &&
             parsed <= static_cast<long>(kGdMaxInstances) - 1L) {
@@ -7633,7 +7633,7 @@ bool ViewportApp::initialize() {
       // Physics-driven scene: N falling/rolling cubes integrated on the CPU
       // (deterministic PhysicsWorld), streamed into the payload, drawn by
       // the same one-indirect-draw path. instanceCount = bodies + ground.
-      if (warploom_env("WARPLOOM_PHYSICS", "OMNICPP_PHYSICS") != nullptr) {
+      if (warploom_env("WARPLOOM_PHYSICS", "WARPLOOM_PHYSICS") != nullptr) {
         // D1: 8 positional-correction passes — the gd pile is deep-stacked
         // bodies, exactly where single-pass sink shows.
         physics_world.set_solver_iterations(8);
@@ -7643,7 +7643,7 @@ bool ViewportApp::initialize() {
             gd_instance_count >= 3U ? gd_instance_count - 2U : 0U;
         physics_bodies.reserve(body_count);
         for (std::uint32_t i = 0; i < body_count; ++i) {
-          omnicpp::physics::PhysicsBody b;
+          warploom::physics::PhysicsBody b;
           const float f = static_cast<float>(i);
           b.position[0] = -6.0f + std::fmod(f * 0.37f, 12.0f);
           b.position[1] = 2.0f + std::fmod(f * 0.11f, 8.0f);
@@ -7659,26 +7659,26 @@ bool ViewportApp::initialize() {
   }
   renderer.set_scene_record_callback(record_scene_cb, this);
 
-  // Node editor overlay (OMNICPP_NODE_EDITOR=1): purely additive — setup
+  // Node editor overlay (WARPLOOM_NODE_EDITOR=1): purely additive — setup
   // failure leaves the plain scene (logged, not fatal). The pre-pass hook
   // is REPLACED by the chained wrapper so the atlas barrier is recorded
   // before the main render pass (and the lighting pre-pass still runs).
-  if (warploom_env("WARPLOOM_NODE_EDITOR", "OMNICPP_NODE_EDITOR") != nullptr) {
-    // M8: OMNICPP_DOC=<path> loads a saved document BEFORE the demo graph
+  if (warploom_env("WARPLOOM_NODE_EDITOR", "WARPLOOM_NODE_EDITOR") != nullptr) {
+    // M8: WARPLOOM_DOC=<path> loads a saved document BEFORE the demo graph
     // is authored, so a persisted scene replaces the demo (missing file is
     // a warning, not fatal — the demo still comes up).
     doc_path = [] {
-      const char* p = warploom_env("WARPLOOM_DOC", "OMNICPP_DOC");
+      const char* p = warploom_env("WARPLOOM_DOC", "WARPLOOM_DOC");
       return p != nullptr ? std::string(p) : std::string();
     }();
     if (!doc_path.empty()) {
-      omnicpp::editor::SceneDocument loaded;
-      omnicpp::editor::register_builtin_node_types(loaded.node_graph);
+      warploom::editor::SceneDocument loaded;
+      warploom::editor::register_builtin_node_types(loaded.node_graph);
       // G4: the same script-type registration the session owns, so a
       // persisted script node parses here instead of failing as unknown.
-      omnicpp::editor::register_script_node_type(loaded.node_graph);
+      warploom::editor::register_script_node_type(loaded.node_graph);
       std::string err;
-      if (omnicpp::editor::SceneDocument::load_from_file(doc_path, loaded,
+      if (warploom::editor::SceneDocument::load_from_file(doc_path, loaded,
                                                          err)) {
         // D3: the load path is the current file — a bare save_document
         // writes back here instead of failing as untitled.
@@ -7688,7 +7688,7 @@ bool ViewportApp::initialize() {
         std::printf("viewport: loaded document %s (%zu nodes)\n",
                     doc_path.c_str(), editor.document().node_graph.node_count());
       } else {
-        std::fprintf(stderr, "viewport: OMNICPP_DOC load failed: %s\n",
+        std::fprintf(stderr, "viewport: WARPLOOM_DOC load failed: %s\n",
                      err.c_str());
       }
     }
@@ -7699,7 +7699,7 @@ bool ViewportApp::initialize() {
     // the overlay never goes down for a module. Counts are per-instance
     // pins 1..9 (same contract the dispatch "script" node enforces).
     if (const char* mods_env = warploom_env("WARPLOOM_SCRIPT_MODULES",
-                                            "OMNICPP_SCRIPT_MODULES")) {
+                                            "WARPLOOM_SCRIPT_MODULES")) {
       const std::string spec(mods_env);
       std::size_t pos = 0;
       while (pos <= spec.size()) {
@@ -7713,7 +7713,7 @@ bool ViewportApp::initialize() {
         std::string mod_path;
         std::uint32_t n_in = 1U;
         std::uint32_t n_out = 1U;
-        if (!omnicpp::core::ScriptModule::parse_module_spec(entry, mod_path,
+        if (!warploom::core::ScriptModule::parse_module_spec(entry, mod_path,
                                                            n_in, n_out)) {
           std::fprintf(stderr,
                        "viewport: bad script module spec \"%s\" "
@@ -7722,7 +7722,7 @@ bool ViewportApp::initialize() {
           continue;
         }
         std::string load_error;
-        auto module = omnicpp::core::ScriptModule::load_shared(mod_path,
+        auto module = warploom::core::ScriptModule::load_shared(mod_path,
                                                               load_error);
         if (module == nullptr) {
           std::fprintf(stderr, "viewport: script module load failed: %s\n",
@@ -7735,8 +7735,8 @@ bool ViewportApp::initialize() {
             node_graph->find_type(type_name) != nullptr) {
           continue;  // already registered (duplicate spec entry)
         }
-        std::shared_ptr<omnicpp::core::ScriptModule> shared(std::move(module));
-        omnicpp::editor::register_script_node_type(*node_graph, shared,
+        std::shared_ptr<warploom::core::ScriptModule> shared(std::move(module));
+        warploom::editor::register_script_node_type(*node_graph, shared,
                                                    n_in, n_out);
         std::printf("viewport: script module %s (%llu in, %llu out)\n",
                     type_name.c_str(),
@@ -7808,7 +7808,7 @@ bool ViewportApp::initialize() {
     constexpr int kJsIndex = 0;
     {
       auto pad =
-          std::make_unique<omnicpp::core::LinuxJoystickDriver>(kJsIndex);
+          std::make_unique<warploom::core::LinuxJoystickDriver>(kJsIndex);
       if (pad->is_open()) {
         if (telemetry_enabled) {
           telemetry.log_event("gamepad", "linux_joystick js0");
@@ -7855,7 +7855,7 @@ bool ViewportApp::initialize() {
   }
   if (legacy_lighting) {
     if (telemetry_enabled) {
-      telemetry.log_event("legacy_lighting", "forced via OMNICPP_LEGACY_LIGHTING");
+      telemetry.log_event("legacy_lighting", "forced via WARPLOOM_LEGACY_LIGHTING");
     }
   } else if (telemetry_enabled) {
     telemetry.log_event("lighting_mode",
@@ -7870,16 +7870,16 @@ bool ViewportApp::initialize() {
                   static_cast<double>(sun_direction[2]));
     telemetry.log_event("sun_direction", sun_buf);
     if (no_shadow) {
-      telemetry.log_event("shadow_mode", "disabled (OMNICPP_NO_SHADOW)");
+      telemetry.log_event("shadow_mode", "disabled (WARPLOOM_NO_SHADOW)");
     }
     if (rt_mode) {
       telemetry.log_event(
           "shadow_mode",
-          "ray_query_tlas (OMNICPP_RT_MODE; pbr_rt_full, hard shadows; "
+          "ray_query_tlas (WARPLOOM_RT_MODE; pbr_rt_full, hard shadows; "
           "animated TLAS: skinned parts follow bones_j(t))");
     }
   }
-  if (const char* script = warploom_env("WARPLOOM_INPUT_SCRIPT", "OMNICPP_INPUT_SCRIPT")) {
+  if (const char* script = warploom_env("WARPLOOM_INPUT_SCRIPT", "WARPLOOM_INPUT_SCRIPT")) {
     std::string script_error;
     if (virtual_input.load_script(script, script_error)) {
       input_scripted = true;
@@ -7896,7 +7896,7 @@ bool ViewportApp::initialize() {
   // channel will run (a capture command must be servable without cadence
   // config). The server starts later, in run(), so probe the env here.
   const bool control_requested =
-      warploom_env("WARPLOOM_CONTROL_SOCKET", "OMNICPP_CONTROL_SOCKET") != nullptr;
+      warploom_env("WARPLOOM_CONTROL_SOCKET", "WARPLOOM_CONTROL_SOCKET") != nullptr;
   // Frame capture re-records the scene into its own offscreen LDR target. With
   // HDR compose on, the scene pipelines are built for the renderer's float
   // intermediate, so that target no longer matches and the readback would be
@@ -7923,7 +7923,7 @@ bool ViewportApp::initialize() {
 
   if (run_config.capture_every != 0U || control_requested) {
     const VkFormat capture_depth_format =
-        omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+        warploom::render::VulkanRenderPass::find_supported_depth_format(
             context.physical_device());
     if (!capture.initialize(
             context.device(), allocator, render_pass.render_pass(),
@@ -7944,12 +7944,12 @@ void ViewportApp::run() {
       context.device_properties().name.c_str());
   time = run_config.start_time;
 
-  // M0 control channel: OMNICPP_CONTROL_SOCKET=<path> hosts the JSONL
+  // M0 control channel: WARPLOOM_CONTROL_SOCKET=<path> hosts the JSONL
   // control server (pause/step/camera/sun/cube/capture) polled once per
   // frame. Purely additive — unset leaves the loop unchanged.
-  if (const char* sock = warploom_env("WARPLOOM_CONTROL_SOCKET", "OMNICPP_CONTROL_SOCKET"); sock != nullptr && *sock != '\0') {
+  if (const char* sock = warploom_env("WARPLOOM_CONTROL_SOCKET", "WARPLOOM_CONTROL_SOCKET"); sock != nullptr && *sock != '\0') {
     control_host = std::make_unique<ViewportControlHost>(*this);
-    control_server = std::make_unique<omnicpp::core::ControlServer>();
+    control_server = std::make_unique<warploom::core::ControlServer>();
     std::string error;
     if (control_server->start(sock, error)) {
       std::fprintf(stderr, "viewport: control server on %s\n", sock);
@@ -8173,14 +8173,14 @@ void ViewportApp::run() {
     // demo cycle synthesizes the toggle action at each half-period boundary
     // so ONE machine configuration serves both modes.
     if (machine) {
-      // M13 fusion: graph signal actions (OMNICPP_GRAPH_ANIM=1) overlay the
+      // M13 fusion: graph signal actions (WARPLOOM_GRAPH_ANIM=1) overlay the
       // input snapshot — node outputs hold the same "fade_toggle" action
       // the demo cycle synthesizes, so graphs control the mannequin.
-      omnicpp::core::InputSnapshot snapshot = input.current();
+      warploom::core::InputSnapshot snapshot = input.current();
       if (graph_anim_enabled && graph_anim != nullptr &&
           node_graph != nullptr) {
         std::string gerr;
-        omnicpp::editor::GraphContext ctx;
+        warploom::editor::GraphContext ctx;
         ctx.time = static_cast<double>(time);
         ctx.tick = static_cast<std::uint64_t>(frame_index);
         (void)node_graph->evaluate_with(ctx, gerr);
@@ -8198,7 +8198,7 @@ void ViewportApp::run() {
       if (input_scripted) {
         machine->tick(input.current(), run_config.fixed_dt);
       } else if (run_config.crossfade_period > 0.0f) {
-        omnicpp::core::InputSnapshot demo = snapshot;
+        warploom::core::InputSnapshot demo = snapshot;
         const float period = run_config.crossfade_period;
         demo.actions["fade_toggle"] = std::fmod(time, 2.0f * period) <
                                        run_config.fixed_dt;
@@ -8361,12 +8361,12 @@ void ViewportApp::run() {
       if (dump_buf.is_ok()) {
         dump_shadow_allocation = dump_buf.value();
         dump_shadow_buffer = dump_shadow_allocation.buffer;
-        auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+        auto pool = warploom::render::VulkanRenderer::create_command_pool(
             context.device(),
             static_cast<std::uint32_t>(
                 context.queue_families().graphics_family));
         if (pool.is_ok()) {
-          auto cb = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+          auto cb = warploom::render::VulkanRenderer::allocate_command_buffer(
               context.device(), pool.value());
           if (cb.is_ok()) {
             VkCommandBufferBeginInfo bi{};
@@ -8500,7 +8500,7 @@ void ViewportApp::shutdown() {
   if (shadow_ubo_allocation.is_valid()) {
     allocator.destroy_allocation(shadow_ubo_allocation);
   }
-  // Neutral shadow resources (OMNICPP_NO_SHADOW diagnostic path).
+  // Neutral shadow resources (WARPLOOM_NO_SHADOW diagnostic path).
   if (neutral_shadow_sample_view != VK_NULL_HANDLE) {
     vkDestroyImageView(context.device(), neutral_shadow_sample_view, nullptr);
     neutral_shadow_sample_view = VK_NULL_HANDLE;
@@ -8579,7 +8579,7 @@ int main() {
   std::signal(SIGINT, handle_shutdown_signal);
   // Before anything else, so a failure during initialize already has a level
   // filter and a frame counter behind it.
-  omnicpp::core::Diagnostics::configure_from_environment();
+  warploom::core::Diagnostics::configure_from_environment();
   ViewportApp app;
   if (!app.initialize()) {
     WARPLOOM_ERROR("viewport", "initialize failed; shutting down");

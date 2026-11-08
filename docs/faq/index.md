@@ -27,10 +27,10 @@ Think of OmniCPP-template as a "starter kit" for C++ game development-like a pre
 
 ### How do I get started?
 
-**TL;DR:** Run `python OmniCppController.py build standalone "Clean Build Pipeline" default release` to build the project.
+**TL;DR:** Run `python WarploomController.py build standalone "Clean Build Pipeline" default release` to build the project.
 
 **The Deep Dive:**
-The project uses [`OmniCppController.py`](../../OmniCppController.py:1) as the main entry point for all build operations. The controller manages:
+The project uses [`WarploomController.py`](../../WarploomController.py:1) as the main entry point for all build operations. The controller manages:
 - Compiler detection and validation
 - Dependency installation via Conan/vcpkg
 - CMake configuration and building
@@ -39,13 +39,13 @@ The project uses [`OmniCppController.py`](../../OmniCppController.py:1) as the m
 **Quick Start Commands:**
 ```bash
 # Build standalone executable
-python OmniCppController.py build standalone "Clean Build Pipeline" default release
+python WarploomController.py build standalone "Clean Build Pipeline" default release
 
 # Build engine library
-python OmniCppController.py build engine "Clean Build Pipeline" default release
+python WarploomController.py build engine "Clean Build Pipeline" default release
 
 # Build everything
-python OmniCppController.py build all "Clean Build Pipeline" default release
+python WarploomController.py build all "Clean Build Pipeline" default release
 ```
 
 ### What are the system requirements?

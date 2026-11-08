@@ -473,7 +473,7 @@ quad; every one of the 64 texels is verified 1:1 (RGBA, alpha included) at its o
 location by readback.
 
 Packaging note: the repository's dependency manifests advertise an `stb` image feature
-(`vcpkg.json` "image", `OMNICPP_USE_STB`), but no build target links or uses stb; the
+(`vcpkg.json` "image", `WARPLOOM_USE_STB`), but no build target links or uses stb; the
 image pipeline above is the engine's own decoder and is what the tests exercise. Registry
 textures are already sampled by the lit scene material path (bindless set 1, verified on
 the GPU), glTF `images`/`textures`/samplers (`baseColorTexture`) are decoded and wired
@@ -502,7 +502,7 @@ recreates them at the new extent, and invalidates previous-frame visibility data
 
 Hardware tests run under the Khronos validation layer, forced via
 `VK_LOADER_LAYERS_ENABLE=VK_LAYER_KHRONOS_validation` when
-`OMNICPP_VULKAN_VALIDATION_TESTS=ON`. Any diagnostic fails the suite.
+`WARPLOOM_VULKAN_VALIDATION_TESTS=ON`. Any diagnostic fails the suite.
 
 Key hardware tests (`tests/unit/test_rendering.cpp`):
 

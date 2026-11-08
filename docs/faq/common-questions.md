@@ -35,7 +35,7 @@ OmniCPP-template/
 │   ├── engine/             # Engine public API
 │   └── game/              # Game public API
 ├── cmake/                  # CMake modules
-├── omni_scripts/          # Python build scripts
+├── warploom_scripts/          # Python build scripts
 ├── conan/                  # Conan configuration
 ├── docs/                   # Documentation
 ├── examples/                # Example projects
@@ -46,7 +46,7 @@ OmniCPP-template/
 **Key Directories:**
 - [`src/engine/`](../src/engine/) - Core engine implementation (audio, graphics, physics, etc.)
 - [`src/game/`](../src/game/) - Game-specific code using the engine
-- [`omni_scripts/`](../omni_scripts/) - Python build automation scripts
+- [`warploom_scripts/`](../warploom_scripts/) - Python build automation scripts
 - [`cmake/`](../cmake/) - Reusable CMake modules
 
 ### How do I add a new module to the engine?
@@ -59,7 +59,7 @@ OmniCPP-template/
 ```cpp
 // include/engine/my_module.hpp
 #pragma once
-namespace omnicpp {
+namespace warploom {
 namespace engine {
 class MyModule {
 public:
@@ -67,7 +67,7 @@ public:
     void shutdown();
 };
 } // namespace engine
-} // namespace omnicpp
+} // namespace warploom
 ```
 
 2. **Create implementation:**
@@ -75,7 +75,7 @@ public:
 // src/engine/my_module.cpp
 #include <engine/my_module.hpp>
 
-namespace omnicpp {
+namespace warploom {
 namespace engine {
 void MyModule::initialize() {
     // Implementation
@@ -85,13 +85,13 @@ void MyModule::shutdown() {
     // Cleanup
 }
 } // namespace engine
-} // namespace omnicpp
+} // namespace warploom
 ```
 
 3. **Update CMakeLists.txt:**
 ```cmake
 # In src/engine/CMakeLists.txt
-target_sources(omnicpp_engine PRIVATE
+target_sources(warploom_engine PRIVATE
     my_module.cpp
 )
 ```
@@ -115,11 +115,11 @@ target_sources(omnicpp_engine PRIVATE
 **Example - C++23 Modules:**
 ```cpp
 // engine/module.cppm
-export module omnicpp.engine;
+export module warploom.engine;
 
 import std;
 
-export namespace omnicpp {
+export namespace warploom {
 namespace engine {
 class Engine {
 public:
@@ -218,7 +218,7 @@ Think of ECS like a warehouse:
 #pragma once
 #include <engine/ecs/Component.hpp>
 
-namespace omnicpp {
+namespace warploom {
 namespace engine {
 namespace ecs {
 
@@ -245,7 +245,7 @@ public:
 
 } // namespace ecs
 } // namespace engine
-} // namespace omnicpp
+} // namespace warploom
 ```
 
 ## Cross-Platform Support
@@ -265,7 +265,7 @@ public:
 
 ### How do I build for WebAssembly?
 
-**TL;DR:** Use the Emscripten toolchain: `python OmniCppController.py build standalone "Build Project" emscripten release`.
+**TL;DR:** Use the Emscripten toolchain: `python WarploomController.py build standalone "Build Project" emscripten release`.
 
 **The Deep Dive:**
 
@@ -280,15 +280,15 @@ source ./emsdk_env.sh
 
 2. **Build for WASM:**
 ```bash
-python OmniCppController.py build standalone "Build Project" emscripten release
+python WarploomController.py build standalone "Build Project" emscripten release
 ```
 
 3. **Output Location:**
 ```
 build/emscripten/release/bin/
 ├── index.html      # Web page
-├── omnicpp.js      # JavaScript glue
-└── omnicpp.wasm    # WebAssembly binary
+├── warploom.js      # JavaScript glue
+└── warploom.wasm    # WebAssembly binary
 ```
 
 **Key File:** [`cmake/toolchains/emscripten.cmake`](../cmake/toolchains/emscripten.cmake:1)
@@ -309,9 +309,9 @@ build/emscripten/release/bin/
 
 **Configuration in [`CMakeLists.txt`](../../CMakeLists.txt:56-58):**
 ```cmake
-option(OMNICPP_USE_CONAN "Use Conan package manager" OFF)
-option(OMNICPP_USE_VCPKG "Use vcpkg package manager" OFF)
-option(OMNICPP_USE_CPM "Use CPM.cmake package manager" ON)
+option(WARPLOOM_USE_CONAN "Use Conan package manager" OFF)
+option(WARPLOOM_USE_VCPKG "Use vcpkg package manager" OFF)
+option(WARPLOOM_USE_CPM "Use CPM.cmake package manager" ON)
 ```
 
 ### How do I add a dependency via CPM?
@@ -343,7 +343,7 @@ CPMAddPackage(
 
 ### How do I format code?
 
-**TL;DR:** Run `python OmniCppController.py format` to format C++ and Python code.
+**TL;DR:** Run `python WarploomController.py format` to format C++ and Python code.
 
 **The Deep Dive:**
 
@@ -358,23 +358,23 @@ The controller uses:
 **Usage:**
 ```bash
 # Format all files
-python OmniCppController.py format
+python WarploomController.py format
 
 # Format specific directory
-python OmniCppController.py format --directories src/engine
+python WarploomController.py format --directories src/engine
 
 # Check formatting without modifying
-python OmniCppController.py format --check
+python WarploomController.py format --check
 
 # Format only C++ files
-python OmniCppController.py format --cpp-only
+python WarploomController.py format --cpp-only
 ```
 
-**Reference:** [`OmniCppController.py:556-624`](../../OmniCppController.py:556-624)
+**Reference:** [`WarploomController.py:556-624`](../../WarploomController.py:556-624)
 
 ### How do I run static analysis?
 
-**TL;DR:** Run `python OmniCppController.py lint` to run clang-tidy, pylint, and mypy.
+**TL;DR:** Run `python WarploomController.py lint` to run clang-tidy, pylint, and mypy.
 
 **The Deep Dive:**
 
@@ -387,20 +387,20 @@ python OmniCppController.py format --cpp-only
 **Usage:**
 ```bash
 # Lint all files
-python OmniCppController.py lint
+python WarploomController.py lint
 
 # Lint with auto-fix
-python OmniCppController.py lint --fix
+python WarploomController.py lint --fix
 
 # Lint specific directory
-python OmniCppController.py lint --directories src/engine
+python WarploomController.py lint --directories src/engine
 
 # Lint only C++ files
-python OmniCppController.py lint --cpp-only
+python WarploomController.py lint --cpp-only
 ```
 
 **Configuration Files:**
 - [`.clang-tidy`](../../.clang-tidy:1) - clang-tidy checks
 - pylint/mypy targets were removed along with the Python build controller
 
-**Reference:** [`OmniCppController.py:626-701`](../../OmniCppController.py:626-701)
+**Reference:** [`WarploomController.py:626-701`](../../WarploomController.py:626-701)

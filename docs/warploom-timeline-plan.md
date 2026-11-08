@@ -155,7 +155,7 @@ above the W1 scrub strip).
    auto-disarms at the end; the clip's own length is the bound.
 3. **Wire-parity test**: new kinds must appear in `kind_names()` AND have
    parse cases; the existing test fails otherwise (by design).
-4. **Headless proof**: `omnicpp_headless_host` must call
+4. **Headless proof**: `warploom_headless_host` must call
    `tick_timeline` per `step` (its only frame source) so the g3 live proof
    can record constant-per-step samples headlessly.
 

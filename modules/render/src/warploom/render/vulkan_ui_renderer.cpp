@@ -12,7 +12,7 @@
 #include <iterator>
 #include <utility>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -21,7 +21,7 @@
 namespace warploom::render {
 namespace ui = ::warploom::ui;  // S1
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 namespace {
 
@@ -530,6 +530,6 @@ void VulkanUiRenderer::cleanup(VkDevice device) noexcept {
   device_ = VK_NULL_HANDLE;
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN
 
 }  // namespace warploom::render

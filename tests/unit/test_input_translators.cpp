@@ -19,11 +19,11 @@
 
 namespace {
 
-using omnicpp::core::InputState;
-using omnicpp::core::JoystickTranslator;
-using omnicpp::core::JsEvent;
-using omnicpp::core::stick_deadzone;
-using omnicpp::core::XcbKeyMouseTranslator;
+using warploom::core::InputState;
+using warploom::core::JoystickTranslator;
+using warploom::core::JsEvent;
+using warploom::core::stick_deadzone;
+using warploom::core::XcbKeyMouseTranslator;
 
 // Evdev keycodes used by the translator.
 constexpr std::uint8_t kKeyW = 25;
@@ -338,7 +338,7 @@ TEST(InputJoystick, InitEventsFillCacheWithoutActionSpikes) {
 TEST(InputJoystickDevice, AbsentDeviceIsNotAnError) {
   // js63 does not exist on any realistic system; the driver must open-fail
   // gracefully and poll as a no-op.
-  omnicpp::core::LinuxJoystickDriver driver(63);
+  warploom::core::LinuxJoystickDriver driver(63);
   EXPECT_FALSE(driver.is_open());
   InputState in;
   driver.poll(in);  // must not crash or write anything

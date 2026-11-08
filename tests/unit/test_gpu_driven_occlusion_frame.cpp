@@ -41,7 +41,7 @@ constexpr std::uint32_t kVisibleWord = 5U * kObjectCount;
 
 //! 24-word object payload; layout mirrors pbr_gpu_driven.vert.
 struct Payload {
-  omnicpp::render::SceneMatrix model;
+  warploom::render::SceneMatrix model;
   std::uint32_t material_index;
   std::uint32_t mesh_slot;
   std::array<float, 4> sphere;  // center.xyz + radius
@@ -50,8 +50,8 @@ struct Payload {
 };
 static_assert(sizeof(Payload) == 96U, "24 words expected");
 
-omnicpp::render::SceneMatrix make_translation(float x, float y, float z) {
-  auto m = omnicpp::render::scene_identity_matrix();
+warploom::render::SceneMatrix make_translation(float x, float y, float z) {
+  auto m = warploom::render::scene_identity_matrix();
   m[12] = x;
   m[13] = y;
   m[14] = z;
@@ -61,12 +61,12 @@ omnicpp::render::SceneMatrix make_translation(float x, float y, float z) {
 //! Perspective projection, Vulkan clip space (y down, z into [0,1]).
 //! Also returns the packed NDC depth constants (C1 - C2/d) so the pyramid
 //! producer and the cull shader agree on the exact depth mapping.
-omnicpp::render::SceneMatrix make_perspective(float fov_y, float aspect,
+warploom::render::SceneMatrix make_perspective(float fov_y, float aspect,
                                               float znear, float zfar) {
   const float f =
       1.0f / std::tan(fov_y * 3.14159265f / 360.0f);
-  omnicpp::render::SceneMatrix m =
-      omnicpp::render::scene_identity_matrix();
+  warploom::render::SceneMatrix m =
+      warploom::render::scene_identity_matrix();
   m[0] = f / aspect;
   m[5] = -f;  // Vulkan NDC y points DOWN: +f renders the scene inverted
   m[10] = (zfar + znear) / (znear - zfar);
@@ -146,10 +146,10 @@ std::size_t count_red_run(const std::vector<std::uint32_t>& pixels,
 //! 1x1 opaque-white R8G8B8A8 texture (bindless element 0 fallback).
 bool make_white_texture(VkDevice device, VkPhysicalDevice /*physical_device*/,
                         VkQueue queue, std::uint32_t queue_family,
-                        omnicpp::render::VulkanMemoryAllocator& allocator,
+                        warploom::render::VulkanMemoryAllocator& allocator,
                         VkImage& out_image, VkImageView& out_view,
                         VkSampler& out_sampler,
-                        omnicpp::render::Allocation& out_alloc) {
+                        warploom::render::Allocation& out_alloc) {
   VkImage image = VK_NULL_HANDLE;
   VkImageCreateInfo ii{};
   ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -193,7 +193,7 @@ bool make_white_texture(VkDevice device, VkPhysicalDevice /*physical_device*/,
   }
 
   // Upload white via staging.
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       device, queue_family);
   if (!pool.is_ok()) return false;
   auto staging = allocator.create_buffer(
@@ -208,7 +208,7 @@ bool make_white_texture(VkDevice device, VkPhysicalDevice /*physical_device*/,
   VkCommandBufferBeginInfo bi{};
   bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
       device, pool.value());
   if (!cbr.is_ok() || vkBeginCommandBuffer(cbr.value(), &bi) != VK_SUCCESS) {
     vkDestroyCommandPool(device, pool.value(), nullptr);
@@ -259,13 +259,13 @@ bool make_white_texture(VkDevice device, VkPhysicalDevice /*physical_device*/,
 }  // namespace
 
 TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppGpuDrivenOcclFrame", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomGpuDrivenOcclFrame", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device())
           .is_ok());
@@ -277,12 +277,12 @@ TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
   std::vector<std::uint32_t> tall_i, short_i;
   build_bar(2.0f, tall_v, tall_i);
   build_bar(1.0f, short_v, short_i);
-  omnicpp::render::SceneMesh shell{};
-  omnicpp::render::SceneMeshTableBuilder builder;
+  warploom::render::SceneMesh shell{};
+  warploom::render::SceneMeshTableBuilder builder;
   const auto slot_tall = builder.add(shell, tall_v, tall_i);
   const auto slot_short = builder.add(shell, short_v, short_i);
-  ASSERT_NE(slot_tall, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
-  ASSERT_NE(slot_short, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
+  ASSERT_NE(slot_tall, warploom::render::SceneMeshTableBuilder::kInvalidSlot);
+  ASSERT_NE(slot_short, warploom::render::SceneMeshTableBuilder::kInvalidSlot);
   const auto& merged = builder.build();
 
   auto vb = allocator.create_buffer(
@@ -347,10 +347,10 @@ TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
   std::memset(draw_buf.value().mapped, 0, (kVisibleWord + 1U) * 4U);
 
   // ---- Shared descriptor set + material/texture sets ----
-  omnicpp::render::VulkanDescriptorManager descriptors;
+  warploom::render::VulkanDescriptorManager descriptors;
   ASSERT_TRUE(descriptors.initialize(context.device()).is_ok());
 
-  const std::vector<omnicpp::render::ReflectedBinding> driven_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> driven_bindings = {
       {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_VERTEX_BIT},
       {0U, 1U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -444,17 +444,17 @@ TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
                                 pyramid_buf.value().buffer, 0U, VK_WHOLE_SIZE)
                   .is_ok());
 
-  omnicpp::render::PbrMaterialData mat{};
+  warploom::render::PbrMaterialData mat{};
   mat.base_color_factor = {0.9f, 0.1f, 0.1f, 1.0f};
   mat.roughness_factor = 0.7f;
   auto mat_buf = allocator.create_buffer(
-      sizeof(omnicpp::render::PbrMaterialData),
+      sizeof(warploom::render::PbrMaterialData),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   ASSERT_TRUE(mat_buf.is_ok());
   std::memcpy(mat_buf.value().mapped, &mat, sizeof(mat));
-  const std::vector<omnicpp::render::ReflectedBinding> tex_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> tex_bindings = {
       {1U, 0U, 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
        VK_SHADER_STAGE_FRAGMENT_BIT}};
   auto tex_layout = descriptors.create_layout(tex_bindings, 1U, true);
@@ -464,7 +464,7 @@ TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
   VkImage white_image = VK_NULL_HANDLE;
   VkImageView white_view = VK_NULL_HANDLE;
   VkSampler white_sampler = VK_NULL_HANDLE;
-  omnicpp::render::Allocation white_alloc{};
+  warploom::render::Allocation white_alloc{};
   ASSERT_TRUE(make_white_texture(context.device(), context.physical_device(),
                                  context.graphics_queue(), qf, allocator,
                                  white_image, white_view, white_sampler,
@@ -475,7 +475,7 @@ TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
                                white_sampler, white_view,
                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0U)
                   .is_ok());
-  const std::vector<omnicpp::render::ReflectedBinding> mat_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> mat_bindings = {
       {2U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_FRAGMENT_BIT}};
   auto mat_layout = descriptors.create_layout(mat_bindings, 8U);
@@ -489,7 +489,7 @@ TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
                   .is_ok());
 
   // ---- Pipelines (identical to the proven harness path) ----
-  omnicpp::render::VulkanPipeline cull_pipe, gfx_pipe;
+  warploom::render::VulkanPipeline cull_pipe, gfx_pipe;
   const std::string sd = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(cull_pipe
                   .load_shader_stage_file(
@@ -530,7 +530,7 @@ TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
                                           &gfx_push)
                   .is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target
                   .create(context.device(), context.physical_device(),
                           VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator)
@@ -550,7 +550,7 @@ TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
                   .is_ok());
 
   // ---- ONE renderer call records the whole frame ----
-  const omnicpp::render::SceneMatrix vp =
+  const warploom::render::SceneMatrix vp =
       make_perspective(45.0f, 1.0f, 0.1f, 100.0f);
   struct CullPush {
     std::uint32_t object_count;
@@ -589,14 +589,14 @@ TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
   std::memcpy(cull_push_data.lod_thresholds, thresholds, sizeof(thresholds));
 
   struct GfxPush {
-    omnicpp::render::SceneMatrix view_projection;
-    omnicpp::render::SceneMatrix model_unused;
+    warploom::render::SceneMatrix view_projection;
+    warploom::render::SceneMatrix model_unused;
     std::array<float, 4> camera_position;
     std::uint32_t material_index_unused;
     std::array<std::uint32_t, 3> pad{};
   } gfx_push_data{vp, {}, {0.0f, 0.0f, 0.0f, 1.0f}, 0U, {}};
 
-  omnicpp::render::VulkanRenderer::GpuDrivenFrame frame{};
+  warploom::render::VulkanRenderer::GpuDrivenFrame frame{};
   frame.cull_pipeline = cull_pipe.pipeline();
   frame.cull_pipeline_layout = cull_pipe.pipeline_layout();
   frame.cull_set = driven_set.value();
@@ -621,13 +621,13 @@ TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
   frame.clear_values = clears;
   frame.clear_value_count = 2U;
 
-  omnicpp::render::VulkanRenderer renderer;
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  warploom::render::VulkanRenderer renderer;
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), qf);
   ASSERT_TRUE(pool.is_ok());
-  auto cbr1 = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cbr1 = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), pool.value());
-  auto cbr2 = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cbr2 = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), pool.value());
   ASSERT_TRUE(cbr1.is_ok() && cbr2.is_ok());
 
@@ -685,7 +685,7 @@ TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
   EXPECT_EQ(words[kVisibleWord], 2U);
 
   // Proof 2: pixels — near and far bars both present.
-  const auto pix1 = omnicpp_test::readback_swapchain_image(
+  const auto pix1 = warploom_test::readback_swapchain_image(
       context.physical_device(), context.device(), context.graphics_queue(),
       qf, target.image(), target.format(), kSize, kSize,
       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -713,7 +713,7 @@ TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
   EXPECT_EQ(words[kVisibleWord], 1U);
 
   // Proof 4: pixels — far bar gone, near bar unchanged.
-  const auto pix2 = omnicpp_test::readback_swapchain_image(
+  const auto pix2 = warploom_test::readback_swapchain_image(
       context.physical_device(), context.device(), context.graphics_queue(),
       qf, target.image(), target.format(), kSize, kSize,
       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -750,7 +750,7 @@ TEST(VulkanHardware, RendererGpuDrivenOcclusionFrameOneSubmission) {
     vkDestroyImage(context.device(), white_image, nullptr);
   }
   allocator.destroy_allocation(white_alloc);
-  omnicpp::render::Allocation pyramid_alloc = pyramid_buf.value();
+  warploom::render::Allocation pyramid_alloc = pyramid_buf.value();
   allocator.destroy_allocation(pyramid_alloc);
   gfx_pipe.cleanup(context.device());
   cull_pipe.cleanup(context.device());

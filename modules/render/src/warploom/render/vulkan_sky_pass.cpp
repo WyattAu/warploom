@@ -10,14 +10,14 @@
 #include <cstring>
 #include <vector>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
 namespace warploom::render {
 
 namespace {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 static_assert(sizeof(SkyParams) == 64U,
               "SkyParams must be exactly the 4-vec4 SkyParams UBO");
 static_assert(offsetof(SkyParams, sun_direction) == 0U, "UBO word order");
@@ -32,7 +32,7 @@ static_assert(offsetof(SkyParams, misc) == 48U, "UBO word order");
     VulkanDescriptorManager& descriptors, VkRenderPass render_pass,
     VkFormat color_format, const std::string& shader_dir,
     const SkyParams& params, std::string& error) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device == VK_NULL_HANDLE || render_pass == VK_NULL_HANDLE ||
       color_format == VK_FORMAT_UNDEFINED) {
     error = "sky pass: null device, render pass, or color format";
@@ -128,7 +128,7 @@ static_assert(offsetof(SkyParams, misc) == 48U, "UBO word order");
 }
 
 void VulkanSkyPass::set_params(const SkyParams& params) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (ubo_.mapped != nullptr) {
     std::memcpy(ubo_.mapped, &params, sizeof(params));
   }

@@ -34,7 +34,7 @@
 
 #ifdef WARPLOOM_HAS_VULKAN
 #include "vulkan_test_readback.hpp"
-using omnicpp_test::readback_swapchain_image;
+using warploom_test::readback_swapchain_image;
 #endif
 
 namespace {
@@ -147,25 +147,25 @@ void record_frame_compute(VkCommandBuffer cb, void* user) {
 
 TEST(VulkanHardware, DualQueuePipelinedGraph) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppDualQueueGraph", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomDualQueueGraph", true).is_ok());
   if (!context.has_timeline_semaphores()) {
     GTEST_SKIP() << "Timeline semaphores unavailable";
   }
   if (!context.has_dedicated_compute()) {
     GTEST_SKIP() << "No COMPUTE-only family: dual-queue overlap not testable here";
   }
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(),
                                    context.physical_device()).is_ok());
 
   // --- Per-frame rings. Ring A is compute-produced, graphics-consumed:
   // CONCURRENT sharing (both families) makes the timeline semaphore a full
   // memory dependency, no ownership ping-pong. ---
-  using omnicpp::render::Allocation;
+  using warploom::render::Allocation;
   std::vector<Allocation> ring_a;
   std::vector<Allocation> ring_b;
   std::vector<Allocation> ring_cmd;
@@ -222,10 +222,10 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
   }
 
   // --- Descriptors. ---
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
 
-  std::vector<omnicpp::render::ReflectedBinding> a_bindings(1);
+  std::vector<warploom::render::ReflectedBinding> a_bindings(1);
   a_bindings[0] = {0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                    VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT};
   auto a_layout = manager.create_layout(a_bindings, kFrames);
@@ -239,7 +239,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
     a_sets.push_back(s.value());
   }
 
-  std::vector<omnicpp::render::ReflectedBinding> cull_bindings(2);
+  std::vector<warploom::render::ReflectedBinding> cull_bindings(2);
   cull_bindings[0] = {0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT};
   cull_bindings[1] = {0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT};
   auto cull_layout = manager.create_layout(cull_bindings, kFrames);
@@ -259,7 +259,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
 
   const VkPushConstantRange gen_push_range{VK_SHADER_STAGE_COMPUTE_BIT, 0, 8U};
-  omnicpp::render::VulkanPipeline gen_pipe;
+  warploom::render::VulkanPipeline gen_pipe;
   ASSERT_TRUE(gen_pipe.load_shader_stage_file(
       context.device(), shader_dir + "/gen_cube_ring.comp.spv", "compute").is_ok());
   ASSERT_TRUE(gen_pipe.create_pipeline_layout(
@@ -268,7 +268,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
       context.device(), gen_pipe.pipeline_layout()).is_ok());
 
   const VkPushConstantRange cull_push_range{VK_SHADER_STAGE_COMPUTE_BIT, 0, 8U};
-  omnicpp::render::VulkanPipeline cull_pipe;
+  warploom::render::VulkanPipeline cull_pipe;
   ASSERT_TRUE(cull_pipe.load_shader_stage_file(
       context.device(), shader_dir + "/cull_and_draw.comp.spv", "compute").is_ok());
   ASSERT_TRUE(cull_pipe.create_pipeline_layout(
@@ -278,7 +278,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
 
   constexpr std::uint32_t kGfxPushBytes = 64U + 4U * sizeof(std::uint32_t);
   const VkPushConstantRange gfx_push{VK_SHADER_STAGE_VERTEX_BIT, 0, kGfxPushBytes};
-  omnicpp::render::VulkanPipeline gfx_pipe;
+  warploom::render::VulkanPipeline gfx_pipe;
   ASSERT_TRUE(gfx_pipe.load_shader_stage_file(
       context.device(), shader_dir + "/gpu_objects.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(gfx_pipe.load_shader_stage_file(
@@ -286,7 +286,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
   ASSERT_TRUE(gfx_pipe.create_pipeline_layout(
       context.device(), &a_layout.value(), 1, &gfx_push).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator).is_ok());
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
@@ -296,7 +296,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
       gfx_pipe.pipeline_layout(), false, false, false).is_ok());
 
   // --- Command infrastructure. ---
-  const auto gfx_pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto gfx_pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(gfx_pool_result.is_ok());
@@ -308,7 +308,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
   std::vector<VkCommandBuffer> gfx_cbs;
   std::vector<VkFence> gfx_fences;
   for (std::size_t i = 0; i < static_cast<std::size_t>(kFrames); ++i) {
-    auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
         context.device(), gfx_pool);
     ASSERT_TRUE(cb_result.is_ok());
     gfx_cbs.push_back(cb_result.value());
@@ -319,7 +319,7 @@ TEST(VulkanHardware, DualQueuePipelinedGraph) {
     gfx_fences.push_back(fence);
   }
 
-  omnicpp::render::AsyncComputeQueue async;
+  warploom::render::AsyncComputeQueue async;
   ASSERT_TRUE(async.initialize(context.device(), context.compute_queue(),
                                context.compute_family_index()).is_ok());
 

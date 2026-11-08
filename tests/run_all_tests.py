@@ -1,5 +1,5 @@
 """
-Comprehensive test runner for OmniCpp project.
+Comprehensive test runner for Warploom project.
 
 This script runs all test suites and generates a comprehensive test report.
 """
@@ -84,7 +84,7 @@ class TestRunner:
 
 def main():
     """Main entry point."""
-    print("OmniCpp Comprehensive Test Suite")
+    print("Warploom Comprehensive Test Suite")
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     runner = TestRunner()

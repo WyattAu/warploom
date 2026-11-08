@@ -45,12 +45,12 @@
 
 namespace {
 
-using omnicpp::render::PbrMaterialData;
-using omnicpp::render::SceneMatrix;
-using omnicpp::render::SceneMesh;
-using omnicpp::render::ScenePbrObject;
-using omnicpp::render::VulkanPbrScene;
-using omnicpp::render::scene_identity_matrix;
+using warploom::render::PbrMaterialData;
+using warploom::render::SceneMatrix;
+using warploom::render::SceneMesh;
+using warploom::render::ScenePbrObject;
+using warploom::render::VulkanPbrScene;
+using warploom::render::scene_identity_matrix;
 
 // ============================================================================
 // Matrix helpers (column-major, matching the scene path's SceneMatrix).
@@ -82,8 +82,8 @@ SceneMatrix make_translation(float x, float y, float z) {
 // ============================================================================
 
 struct CubeUpload {
-  omnicpp::render::Allocation vertex_allocation{};
-  omnicpp::render::Allocation index_allocation{};
+  warploom::render::Allocation vertex_allocation{};
+  warploom::render::Allocation index_allocation{};
   SceneMesh mesh{};
 };
 
@@ -149,18 +149,18 @@ struct SolidTexture {
   VkImage image{VK_NULL_HANDLE};
   VkImageView view{VK_NULL_HANDLE};
   VkSampler sampler{VK_NULL_HANDLE};
-  omnicpp::render::Allocation allocation{};
+  warploom::render::Allocation allocation{};
 };
 
 bool make_solid_texture(VkDevice device, VkPhysicalDevice physical_device,
                         VkQueue queue, std::uint32_t queue_family,
-                        omnicpp::render::VulkanMemoryAllocator& allocator,
+                        warploom::render::VulkanMemoryAllocator& allocator,
                         const std::array<std::uint8_t, 4>& rgba,
                         SolidTexture& out) {
   out = {};
   SolidTexture tex{};
   const auto fail = [&]() {
-    omnicpp::render::Allocation allocation = tex.allocation;
+    warploom::render::Allocation allocation = tex.allocation;
     if (allocation.is_valid()) allocator.destroy_allocation(allocation);
     if (tex.view != VK_NULL_HANDLE) vkDestroyImageView(device, tex.view, nullptr);
     if (tex.sampler != VK_NULL_HANDLE) vkDestroySampler(device, tex.sampler, nullptr);
@@ -188,7 +188,7 @@ bool make_solid_texture(VkDevice device, VkPhysicalDevice physical_device,
   if (!memory.is_ok()) return fail();
   tex.allocation = memory.value();
 
-  omnicpp::render::VulkanFrameUploadArena arena;
+  warploom::render::VulkanFrameUploadArena arena;
   if (!arena.initialize(device, physical_device, queue_family,
                         /*frame_count=*/1U, /*bytes_per_frame=*/1U << 20U)
            .is_ok()) {
@@ -227,7 +227,7 @@ bool make_solid_texture(VkDevice device, VkPhysicalDevice physical_device,
 }
 
 void destroy_solid_texture(VkDevice device,
-                           omnicpp::render::VulkanMemoryAllocator& allocator,
+                           warploom::render::VulkanMemoryAllocator& allocator,
                            SolidTexture& texture) {
   if (texture.allocation.is_valid()) {
     allocator.destroy_allocation(texture.allocation);
@@ -262,20 +262,20 @@ constexpr VkFormat kIblFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
 struct IblResources {
   VkDevice device{VK_NULL_HANDLE};
-  omnicpp::render::VulkanMemoryAllocator* allocator{nullptr};
-  omnicpp::render::VulkanDescriptorManager* descriptors{nullptr};
+  warploom::render::VulkanMemoryAllocator* allocator{nullptr};
+  warploom::render::VulkanDescriptorManager* descriptors{nullptr};
   VkQueue queue{VK_NULL_HANDLE};
   std::uint32_t queue_family{0};
 
   // Images + memory.
   VkImage sky_image{VK_NULL_HANDLE};
-  omnicpp::render::Allocation sky_memory{};
+  warploom::render::Allocation sky_memory{};
   VkImage prefiltered_image{VK_NULL_HANDLE};
-  omnicpp::render::Allocation prefiltered_memory{};
+  warploom::render::Allocation prefiltered_memory{};
   VkImage irradiance_image{VK_NULL_HANDLE};
-  omnicpp::render::Allocation irradiance_memory{};
+  warploom::render::Allocation irradiance_memory{};
   VkImage lut_image{VK_NULL_HANDLE};
-  omnicpp::render::Allocation lut_memory{};
+  warploom::render::Allocation lut_memory{};
 
   // Storage/bake views + final sampled views.
   VkImageView sky_view{VK_NULL_HANDLE};
@@ -302,16 +302,16 @@ struct IblResources {
   VkDescriptorSet ibl_set{VK_NULL_HANDLE};
 
   // Compute pipelines.
-  omnicpp::render::VulkanPipeline sky_pipeline;
-  omnicpp::render::VulkanPipeline prefilter_pipeline;
-  omnicpp::render::VulkanPipeline irradiance_pipeline;
-  omnicpp::render::VulkanPipeline lut_pipeline;
+  warploom::render::VulkanPipeline sky_pipeline;
+  warploom::render::VulkanPipeline prefilter_pipeline;
+  warploom::render::VulkanPipeline irradiance_pipeline;
+  warploom::render::VulkanPipeline lut_pipeline;
 
   // Command infrastructure (one bake submission).
   VkCommandPool pool{VK_NULL_HANDLE};
   VkFence fence{VK_NULL_HANDLE};
 
-  bool create_image(VkImage& image, omnicpp::render::Allocation& memory,
+  bool create_image(VkImage& image, warploom::render::Allocation& memory,
                     std::uint32_t width, std::uint32_t height,
                     std::uint32_t mips, std::uint32_t layers,
                     VkImageUsageFlags usage, VkImageCreateFlags flags) {
@@ -350,8 +350,8 @@ struct IblResources {
 
   bool initialize(VkDevice dev, VkPhysicalDevice, VkQueue graphics_queue,
                   std::uint32_t family,
-                  omnicpp::render::VulkanMemoryAllocator& memory_allocator,
-                  omnicpp::render::VulkanDescriptorManager& manager) {
+                  warploom::render::VulkanMemoryAllocator& memory_allocator,
+                  warploom::render::VulkanDescriptorManager& manager) {
     device = dev;
     allocator = &memory_allocator;
     descriptors = &manager;
@@ -449,11 +449,11 @@ struct IblResources {
 
     // --- Bake descriptor layouts + sets. -------------------------------
     // sky:  b0 = storage image (sky)
-    const std::vector<omnicpp::render::ReflectedBinding> sky_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> sky_bindings = {
         {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
          VK_SHADER_STAGE_COMPUTE_BIT}};
     // prefilter/irradiance: b0 = CIS (sky), b1 = storage image (cube mip)
-    const std::vector<omnicpp::render::ReflectedBinding> cube_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> cube_bindings = {
         {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
          VK_SHADER_STAGE_COMPUTE_BIT},
         {0U, 1U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
@@ -584,7 +584,7 @@ struct IblResources {
     }
 
     // --- Set-3 descriptor set for pbr_ibl.frag. ------------------------
-    const std::vector<omnicpp::render::ReflectedBinding> ibl_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> ibl_bindings = {
         {3U, 0U, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
          VK_SHADER_STAGE_FRAGMENT_BIT},
         {3U, 1U, 1U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -616,7 +616,7 @@ struct IblResources {
     }
 
     // --- One-shot command infrastructure. -------------------------------
-    auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+    auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
         device, queue_family);
     if (!pool_result.is_ok()) return false;
     pool = pool_result.value();
@@ -648,7 +648,7 @@ struct IblResources {
   //! Bake the environment described by `params` (one GPU submission).
   bool bake(const IblSkyParams& params) {
     if (device == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) return false;
-    auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
         device, pool);
     if (!cb_result.is_ok()) return false;
     const VkCommandBuffer cb = cb_result.value();
@@ -841,20 +841,20 @@ struct IblResources {
 // ============================================================================
 
 struct PbrIblHarness {
-  omnicpp::render::VulkanContext context;
-  omnicpp::render::VulkanMemoryAllocator allocator;
-  omnicpp::render::VulkanDescriptorManager descriptors;
+  warploom::render::VulkanContext context;
+  warploom::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanDescriptorManager descriptors;
   VkDescriptorSetLayout mesh_layout{VK_NULL_HANDLE};
   VkDescriptorSetLayout textures_layout{VK_NULL_HANDLE};
   VkDescriptorSetLayout material_layout{VK_NULL_HANDLE};
   VkDescriptorSet textures_set{VK_NULL_HANDLE};
   VkDescriptorSet material_set{VK_NULL_HANDLE};
-  omnicpp::render::Allocation material_allocation{};
+  warploom::render::Allocation material_allocation{};
   SolidTexture white_tex;
   CubeUpload cube;
-  omnicpp::render::VulkanOffscreenTarget target;
-  omnicpp::render::VulkanPipeline pipeline;       // 3-set PBR control
-  omnicpp::render::VulkanPipeline pipeline_ibl;   // 4-set IBL variant
+  warploom::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanPipeline pipeline;       // 3-set PBR control
+  warploom::render::VulkanPipeline pipeline_ibl;   // 4-set IBL variant
   IblResources ibl;
   std::uint32_t queue_family{0};
 
@@ -875,7 +875,7 @@ struct PbrIblHarness {
         static_cast<std::uint32_t>(context.queue_families().graphics_family);
 
     // Set 0: per-mesh vertex storage (SSBO), shared with the lit path.
-    const std::vector<omnicpp::render::ReflectedBinding> mesh_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> mesh_bindings = {
         {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
          VK_SHADER_STAGE_VERTEX_BIT}};
     auto mesh_layout_result = descriptors.create_layout(mesh_bindings, 8U);
@@ -883,7 +883,7 @@ struct PbrIblHarness {
     mesh_layout = mesh_layout_result.value();
 
     // Set 1: bindless sampler array (element 0 = opaque-white fallback).
-    const std::vector<omnicpp::render::ReflectedBinding> textures_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> textures_bindings = {
         {1U, 0U, 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
          VK_SHADER_STAGE_FRAGMENT_BIT}};
     auto textures_layout_result = descriptors.create_layout(
@@ -895,7 +895,7 @@ struct PbrIblHarness {
     textures_set = textures_set_result.value();
 
     // Set 2: material SSBO, three 64-byte slots.
-    const std::vector<omnicpp::render::ReflectedBinding> material_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> material_bindings = {
         {2U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
          VK_SHADER_STAGE_FRAGMENT_BIT}};
     auto material_layout_result = descriptors.create_layout(material_bindings, 8U);
@@ -1048,12 +1048,12 @@ struct PbrIblHarness {
   }
 
   //! Render one PBR scene snapshot and read the 256x256 image back.
-  omnicpp_test::ReadbackResult render(const VulkanPbrScene& scene) {
+  warploom_test::ReadbackResult render(const VulkanPbrScene& scene) {
     auto pool_result =
-        omnicpp::render::VulkanRenderer::create_command_pool(context.device(),
+        warploom::render::VulkanRenderer::create_command_pool(context.device(),
                                                              queue_family);
     if (!pool_result.is_ok()) return {};
-    auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
         context.device(), pool_result.value());
     if (!cb_result.is_ok()) {
       vkDestroyCommandPool(context.device(), pool_result.value(), nullptr);
@@ -1099,9 +1099,9 @@ struct PbrIblHarness {
             VK_SUCCESS &&
         vkWaitForFences(context.device(), 1U, &fence, VK_TRUE, UINT64_MAX) ==
             VK_SUCCESS;
-    omnicpp_test::ReadbackResult result{};
+    warploom_test::ReadbackResult result{};
     if (submitted) {
-      result = omnicpp_test::readback_swapchain_image(
+      result = warploom_test::readback_swapchain_image(
           context.physical_device(), context.device(), context.graphics_queue(),
           queue_family, target.image(), target.format(), 256U, 256U,
           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -1112,9 +1112,9 @@ struct PbrIblHarness {
     return result;
   }
 
-  omnicpp::core::Result<void> renderer_record(const VulkanPbrScene& scene,
+  warploom::core::Result<void> renderer_record(const VulkanPbrScene& scene,
                                               VkCommandBuffer cb) {
-    omnicpp::render::VulkanRenderer renderer;  // stateless record helper
+    warploom::render::VulkanRenderer renderer;  // stateless record helper
     return renderer.record_pbr_scene(cb, scene, 256U, 256U);
   }
 
@@ -1205,12 +1205,12 @@ TEST(VulkanHardware, PbrIblSunReflectsOnSmoothMetal) {
   object.material_index = 0U;
   scene.objects.clear();
   scene.objects.push_back(object);
-  const omnicpp_test::ReadbackResult smooth = h.render(scene);
+  const warploom_test::ReadbackResult smooth = h.render(scene);
 
   object.material_index = 1U;
   scene.objects.clear();
   scene.objects.push_back(object);
-  const omnicpp_test::ReadbackResult rough = h.render(scene);
+  const warploom_test::ReadbackResult rough = h.render(scene);
 
   // Control: identical smooth-metal cube without the IBL pipeline (and no
   // environment set bound). Direct lighting is unchanged.
@@ -1218,7 +1218,7 @@ TEST(VulkanHardware, PbrIblSunReflectsOnSmoothMetal) {
   object.material_index = 0U;
   control.objects.clear();
   control.objects.push_back(object);
-  const omnicpp_test::ReadbackResult no_ibl = h.render(control);
+  const warploom_test::ReadbackResult no_ibl = h.render(control);
 
   h.cleanup();
 
@@ -1286,12 +1286,12 @@ TEST(VulkanHardware, PbrIblRedSkyTintsWhiteDielectric) {
   object.material_index = 0U;
   scene.objects.clear();
   scene.objects.push_back(object);
-  const omnicpp_test::ReadbackResult ibl_result = h.render(scene);
+  const warploom_test::ReadbackResult ibl_result = h.render(scene);
 
   VulkanPbrScene control = make_scene(h, /*use_ibl=*/false);
   control.objects.clear();
   control.objects.push_back(object);
-  const omnicpp_test::ReadbackResult no_ibl = h.render(control);
+  const warploom_test::ReadbackResult no_ibl = h.render(control);
 
   h.cleanup();
 

@@ -103,13 +103,13 @@ Coverage reports are generated using pytest-cov:
 
 ```bash
 # Generate HTML coverage report
-pytest tests/ --cov=omni_scripts --cov-report=html
+pytest tests/ --cov=warploom_scripts --cov-report=html
 
 # Generate XML coverage report (for CI/CD)
-pytest tests/ --cov=omni_scripts --cov-report=xml
+pytest tests/ --cov=warploom_scripts --cov-report=xml
 
 # Generate terminal coverage report
-pytest tests/ --cov=omni_scripts --cov-report=term-missing
+pytest tests/ --cov=warploom_scripts --cov-report=term-missing
 ```
 
 ### 2.4 Coverage Thresholds
@@ -3387,7 +3387,7 @@ pytest tests/
 pytest tests/ -v
 
 # Run all tests with coverage
-pytest tests/ --cov=omni_scripts --cov-report=html
+pytest tests/ --cov=warploom_scripts --cov-report=html
 
 # Run all tests with HTML report
 pytest tests/ --html=report.html
@@ -3439,10 +3439,10 @@ pytest tests/ -v
 pytest tests/ -vv
 
 # Run tests with coverage report
-pytest tests/ --cov=omni_scripts --cov-report=html
+pytest tests/ --cov=warploom_scripts --cov-report=html
 
 # Run tests with coverage and fail if below threshold
-pytest tests/ --cov=omni_scripts --cov-fail-under=80
+pytest tests/ --cov=warploom_scripts --cov-fail-under=80
 
 # Run tests with HTML report
 pytest tests/ --html=report.html --self-contained-html
@@ -3481,7 +3481,7 @@ jobs:
           pip install pytest pytest-cov pytest-html
           pip install -r requirements.txt
       - name: Run tests
-        run: pytest tests/ --cov=omni_scripts --cov-report=xml
+        run: pytest tests/ --cov=warploom_scripts --cov-report=xml
       - name: Upload coverage
         uses: codecov/codecov-action@v2
 ```
@@ -3556,9 +3556,9 @@ Coverage reports provide the following information:
 ```
 Name                              Stmts   Miss  Cover   Missing
 ---------------------------------------------------------------
-omni_scripts/compiler_detection.py    150      30    80%     45-50, 60-65
-omni_scripts/terminal_detection.py    100      15    85%     20-25
-omni_scripts/environment_setup.py     80       10    87.5%   30-35
+warploom_scripts/compiler_detection.py    150      30    80%     45-50, 60-65
+warploom_scripts/terminal_detection.py    100      15    85%     20-25
+warploom_scripts/environment_setup.py     80       10    87.5%   30-35
 ---------------------------------------------------------------
 TOTAL                               330      55    83.3%
 ```
@@ -3639,8 +3639,8 @@ tests/performance/test_detection_speed.py::test_compiler_detection_speed PASSED 
 Coverage Report:
 Name                              Stmts   Miss  Cover
 ---------------------------------------------------------------
-omni_scripts/compiler_detection.py    150      30    80%
-omni_scripts/terminal_detection.py    100      15    85%
+warploom_scripts/compiler_detection.py    150      30    80%
+warploom_scripts/terminal_detection.py    100      15    85%
 ...
 TOTAL                               330      55    83.3%
 ```
@@ -3668,7 +3668,7 @@ TOTAL                               330      55    83.3%
 ```python
 # tests/unit/test_compiler_detection.py
 import pytest
-from omni_scripts.compiler_detection import MSVCDetector
+from warploom_scripts.compiler_detection import MSVCDetector
 
 def test_detect_msvc_2022():
     """Test that MSVC detector correctly detects VS 2022 installations."""
@@ -3709,7 +3709,7 @@ def test_detect_msvc_version():
 ```python
 # tests/integration/test_compiler_terminal_mapping.py
 import pytest
-from omni_scripts.compiler_detection import CompilerDetectionSystem
+from warploom_scripts.compiler_detection import CompilerDetectionSystem
 
 def test_map_msvc_to_terminal():
     """Test that MSVC is correctly mapped to MSVC terminal."""
@@ -3756,7 +3756,7 @@ def test_setup_msvc_environment():
 # tests/performance/test_detection_speed.py
 import pytest
 import time
-from omni_scripts.compiler_detection import CompilerDetectionSystem
+from warploom_scripts.compiler_detection import CompilerDetectionSystem
 
 def test_compiler_detection_speed():
     """Test that compiler detection completes within 2 seconds."""
@@ -3796,7 +3796,7 @@ def test_terminal_detection_speed():
 ```python
 # tests/edge_cases/test_missing_compilers.py
 import pytest
-from omni_scripts.compiler_detection import MSVCDetector, CompilerNotFoundError
+from warploom_scripts.compiler_detection import MSVCDetector, CompilerNotFoundError
 
 def test_handle_missing_msvc():
     """Test that system handles missing MSVC compiler gracefully."""
@@ -3813,7 +3813,7 @@ def test_handle_missing_msvc():
 
 def test_handle_invalid_compiler_path():
     """Test that system handles invalid compiler path gracefully."""
-    from omni_scripts.compiler_detection import CompilerFactory
+    from warploom_scripts.compiler_detection import CompilerFactory
 
     factory = CompilerFactory()
 
@@ -3830,9 +3830,9 @@ def test_handle_invalid_compiler_path():
 # tests/unit/test_compiler_detection.py
 import pytest
 from unittest.mock import patch, MagicMock
-from omni_scripts.compiler_detection import MSVCDetector
+from warploom_scripts.compiler_detection import MSVCDetector
 
-@patch('omni_scripts.compiler_detection.subprocess.run')
+@patch('warploom_scripts.compiler_detection.subprocess.run')
 def test_detect_msvc_with_mock(mock_run):
     """Test MSVC detection with mocked subprocess."""
     # Mock vswhere.exe output
@@ -3858,7 +3858,7 @@ def test_detect_msvc_with_mock(mock_run):
 ```python
 # tests/unit/test_compiler_detection.py
 import pytest
-from omni_scripts.compiler_detection import MSVCDetector
+from warploom_scripts.compiler_detection import MSVCDetector
 
 @pytest.mark.parametrize("architecture,expected_id", [
     ("x64", "x64_native"),
@@ -3883,7 +3883,7 @@ def test_msvc_terminal_mapping(architecture, expected_id):
 ```python
 # tests/conftest.py
 import pytest
-from omni_scripts.compiler_detection import CompilerDetectionSystem
+from warploom_scripts.compiler_detection import CompilerDetectionSystem
 
 @pytest.fixture
 def compiler_system():

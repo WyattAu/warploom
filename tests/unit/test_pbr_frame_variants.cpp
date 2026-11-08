@@ -42,12 +42,12 @@
 
 namespace {
 
-using omnicpp::render::PbrMaterialData;
-using omnicpp::render::SceneMatrix;
-using omnicpp::render::SceneMesh;
-using omnicpp::render::ScenePbrObject;
-using omnicpp::render::VulkanPbrScene;
-using omnicpp::render::scene_identity_matrix;
+using warploom::render::PbrMaterialData;
+using warploom::render::SceneMatrix;
+using warploom::render::SceneMesh;
+using warploom::render::ScenePbrObject;
+using warploom::render::VulkanPbrScene;
+using warploom::render::scene_identity_matrix;
 
 constexpr std::uint32_t kRes = 256;
 
@@ -132,14 +132,14 @@ void build_cube(std::vector<float>& verts, std::vector<std::uint32_t>& idx) {
 
 //! Vertex pull layout: positions then an optional skinning payload (8 floats
 //! per vertex: joints x4 + weights x4) appended to the same SSBO.
-bool build_mesh(omnicpp::render::VulkanMemoryAllocator& alloc,
-                omnicpp::render::VulkanDescriptorManager& desc,
+bool build_mesh(warploom::render::VulkanMemoryAllocator& alloc,
+                warploom::render::VulkanDescriptorManager& desc,
                 VkDescriptorSetLayout mesh_layout,
                 const std::vector<float>& verts,
                 const std::vector<std::uint32_t>& idx,
                 const std::vector<float>& skin, SceneMesh& out_mesh,
-                omnicpp::render::Allocation& out_va,
-                omnicpp::render::Allocation& out_ia) {
+                warploom::render::Allocation& out_va,
+                warploom::render::Allocation& out_ia) {
   std::vector<float> combined = verts;
   if (!skin.empty())
     combined.insert(combined.end(), skin.begin(), skin.end());
@@ -173,11 +173,11 @@ struct SolidTexture {
   VkImage img{VK_NULL_HANDLE};
   VkImageView view{VK_NULL_HANDLE};
   VkSampler sampler{VK_NULL_HANDLE};
-  omnicpp::render::Allocation alloc{};
+  warploom::render::Allocation alloc{};
 };
 
 bool make_white(VkDevice d, VkPhysicalDevice /*pd*/, VkQueue q, std::uint32_t fam,
-                omnicpp::render::VulkanMemoryAllocator& a, SolidTexture& out) {
+                warploom::render::VulkanMemoryAllocator& a, SolidTexture& out) {
   out = {};
   VkImageCreateInfo ii{};
   ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -214,9 +214,9 @@ bool make_white(VkDevice d, VkPhysicalDevice /*pd*/, VkQueue q, std::uint32_t fa
     return false;
   }
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(d, fam);
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(d, fam);
   if (!pool.is_ok()) return false;
-  auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(d, pool.value());
+  auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(d, pool.value());
   if (!cbr.is_ok()) { vkDestroyCommandPool(d, pool.value(), nullptr); return false; }
   VkCommandBuffer cb = cbr.value();
   VkFenceCreateInfo fi{};
@@ -270,7 +270,7 @@ bool make_white(VkDevice d, VkPhysicalDevice /*pd*/, VkQueue q, std::uint32_t fa
   return true;
 }
 
-void destroy_white(VkDevice d, omnicpp::render::VulkanMemoryAllocator& a,
+void destroy_white(VkDevice d, warploom::render::VulkanMemoryAllocator& a,
                    SolidTexture& t) {
   if (t.sampler) vkDestroySampler(d, t.sampler, nullptr);
   if (t.view) vkDestroyImageView(d, t.view, nullptr);
@@ -285,9 +285,9 @@ void destroy_white(VkDevice d, omnicpp::render::VulkanMemoryAllocator& a,
 //! pipeline without re-binding descriptor sets -- and it is the shape the
 //! viewport should adopt.
 struct VariantHarness {
-  omnicpp::render::VulkanContext ctx;
-  omnicpp::render::VulkanMemoryAllocator alloc;
-  omnicpp::render::VulkanDescriptorManager desc;
+  warploom::render::VulkanContext ctx;
+  warploom::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanDescriptorManager desc;
   VkDescriptorSetLayout mesh_layout{};
   VkDescriptorSetLayout tex_layout{};
   VkDescriptorSetLayout mat_layout{};
@@ -298,11 +298,11 @@ struct VariantHarness {
   SolidTexture white;
   SceneMesh bar_mesh{};
   SceneMesh cube_mesh{};
-  omnicpp::render::Allocation bar_va{}, bar_ia{}, cube_va{}, cube_ia{};
-  omnicpp::render::Allocation mat_buf{}, bone_buf{};
-  omnicpp::render::VulkanOffscreenTarget target;
-  omnicpp::render::VulkanPipeline static_pipe;
-  omnicpp::render::VulkanPipeline skinned_pipe;
+  warploom::render::Allocation bar_va{}, bar_ia{}, cube_va{}, cube_ia{};
+  warploom::render::Allocation mat_buf{}, bone_buf{};
+  warploom::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanPipeline static_pipe;
+  warploom::render::VulkanPipeline skinned_pipe;
   std::uint32_t qf{0};
 
   bool init(const char* name) {
@@ -403,11 +403,11 @@ struct VariantHarness {
 
   //! Render through record_pbr_frame -- the graph path the application will
   //! use, not a hand-written command buffer.
-  omnicpp_test::ReadbackResult render_frame(const VulkanPbrScene& scene) {
+  warploom_test::ReadbackResult render_frame(const VulkanPbrScene& scene) {
     const VkDevice dev = ctx.device();
-    auto pr = omnicpp::render::VulkanRenderer::create_command_pool(dev, qf);
+    auto pr = warploom::render::VulkanRenderer::create_command_pool(dev, qf);
     if (!pr.is_ok()) return {};
-    auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(dev, pr.value());
+    auto cr = warploom::render::VulkanRenderer::allocate_command_buffer(dev, pr.value());
     if (!cr.is_ok()) { vkDestroyCommandPool(dev, pr.value(), nullptr); return {}; }
     VkCommandBuffer cb = cr.value();
     VkFenceCreateInfo fi{};
@@ -423,8 +423,8 @@ struct VariantHarness {
       return {};
     }
 
-    omnicpp::render::VulkanRenderer renderer;
-    omnicpp::render::VulkanRenderer::PbrFrameTargets targets{};
+    warploom::render::VulkanRenderer renderer;
+    warploom::render::VulkanRenderer::PbrFrameTargets targets{};
     targets.render_pass = target.render_pass();
     targets.framebuffer = target.framebuffer();
     targets.width = kRes;
@@ -435,7 +435,7 @@ struct VariantHarness {
     targets.clear_values = clears;
     targets.clear_value_count = 2;
 
-    omnicpp_test::ReadbackResult out{};
+    warploom_test::ReadbackResult out{};
     if (renderer.record_pbr_frame(cb, scene, targets).is_ok() &&
         vkEndCommandBuffer(cb) == VK_SUCCESS) {
       vkResetFences(dev, 1, &fence);
@@ -445,7 +445,7 @@ struct VariantHarness {
       si.pCommandBuffers = &cb;
       vkQueueSubmit(ctx.graphics_queue(), 1, &si, fence);
       vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
-      out = omnicpp_test::readback_swapchain_image(
+      out = warploom_test::readback_swapchain_image(
           ctx.physical_device(), dev, ctx.graphics_queue(), qf, target.image(),
           target.format(), kRes, kRes, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*store_pixels=*/true);

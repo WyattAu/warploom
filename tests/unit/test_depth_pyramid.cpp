@@ -35,7 +35,7 @@
 #ifdef WARPLOOM_HAS_VULKAN
 #include "vulkan_test_readback.hpp"
 
-using omnicpp_test::readback_swapchain_image;
+using warploom_test::readback_swapchain_image;
 #endif
 
 namespace {
@@ -89,17 +89,17 @@ constexpr std::uint32_t kComp0Off = kLodOff + kInstances;
 
 TEST(VulkanHardware, RealDepthPyramidOcclusion) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppDepthPyramid", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomDepthPyramid", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(),
                                    context.physical_device()).is_ok());
 
   // --- Depth-capable target. ---
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator).is_ok());
   ASSERT_TRUE(target.create_depth(context.device(), context.physical_device(),
@@ -170,12 +170,12 @@ TEST(VulkanHardware, RealDepthPyramidOcclusion) {
   };
 
   // --- Pipelines. ---
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
 
   // Reduce layout: src depth words + dst pyramid (both in one descriptor set
   // backed by two buffers).
-  std::vector<omnicpp::render::ReflectedBinding> reduce_bindings(2);
+  std::vector<warploom::render::ReflectedBinding> reduce_bindings(2);
   reduce_bindings[0] = {0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT};
   reduce_bindings[1] = {0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT};
   auto reduce_layout = manager.create_layout(reduce_bindings, 1);
@@ -192,7 +192,7 @@ TEST(VulkanHardware, RealDepthPyramidOcclusion) {
 
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   const VkPushConstantRange reduce_push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 16U};
-  omnicpp::render::VulkanPipeline reduce_pipe;
+  warploom::render::VulkanPipeline reduce_pipe;
   ASSERT_TRUE(reduce_pipe.load_shader_stage_file(
       context.device(), shader_dir + "/depth_reduce.comp.spv", "compute").is_ok());
   ASSERT_TRUE(reduce_pipe.create_pipeline_layout(
@@ -203,7 +203,7 @@ TEST(VulkanHardware, RealDepthPyramidOcclusion) {
   // Cull layout: payload (binding 0). The shader's draw-command bindings 1..3
   // are unused in this test (counts read from stats), but the shader declares
   // them — bind the payload buffer as a stand-in.
-  std::vector<omnicpp::render::ReflectedBinding> cull_bindings(4);
+  std::vector<warploom::render::ReflectedBinding> cull_bindings(4);
   for (std::size_t i = 0; i < static_cast<std::size_t>(4); ++i) {
     cull_bindings[i] = {0, static_cast<std::uint32_t>(i), 1,
                         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT};
@@ -218,7 +218,7 @@ TEST(VulkanHardware, RealDepthPyramidOcclusion) {
   }
 
   const VkPushConstantRange cull_push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 56U};
-  omnicpp::render::VulkanPipeline cull_pipe;
+  warploom::render::VulkanPipeline cull_pipe;
   ASSERT_TRUE(cull_pipe.load_shader_stage_file(
       context.device(), shader_dir + "/cull_lod_occlude.comp.spv", "compute").is_ok());
   ASSERT_TRUE(cull_pipe.create_pipeline_layout(
@@ -227,7 +227,7 @@ TEST(VulkanHardware, RealDepthPyramidOcclusion) {
       context.device(), cull_pipe.pipeline_layout()).is_ok());
 
   // Scene raster pipeline (reuse cube.vert/frag: per-instance data pulling).
-  std::vector<omnicpp::render::ReflectedBinding> scene_bindings(1);
+  std::vector<warploom::render::ReflectedBinding> scene_bindings(1);
   scene_bindings[0] = {0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT};
   auto scene_layout = manager.create_layout(scene_bindings, 1);
   ASSERT_TRUE(scene_layout.is_ok());
@@ -238,7 +238,7 @@ TEST(VulkanHardware, RealDepthPyramidOcclusion) {
 
   constexpr std::uint32_t kScenePush = 64U + 4U * sizeof(std::uint32_t);
   const VkPushConstantRange scene_push_range{VK_SHADER_STAGE_VERTEX_BIT, 0, kScenePush};
-  omnicpp::render::VulkanPipeline scene_pipe;
+  warploom::render::VulkanPipeline scene_pipe;
   ASSERT_TRUE(scene_pipe.load_shader_stage_file(
       context.device(), shader_dir + "/gpu_objects.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(scene_pipe.load_shader_stage_file(
@@ -250,12 +250,12 @@ TEST(VulkanHardware, RealDepthPyramidOcclusion) {
       scene_pipe.pipeline_layout(), true, true, true).is_ok());
 
   // --- Command infrastructure. ---
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool pool = pool_result.value();
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer cb = cb_result.value();
@@ -480,9 +480,9 @@ TEST(VulkanHardware, RealDepthPyramidOcclusion) {
   cull_pipe.cleanup(context.device());
   reduce_pipe.cleanup(context.device());
   target.cleanup(context.device());
-  omnicpp::render::Allocation b1 = inst_buf.value();
-  omnicpp::render::Allocation b2 = cull_buf.value();
-  omnicpp::render::Allocation b3 = depth_buf.value();
+  warploom::render::Allocation b1 = inst_buf.value();
+  warploom::render::Allocation b2 = cull_buf.value();
+  warploom::render::Allocation b3 = depth_buf.value();
   allocator.destroy_allocation(b1);
   allocator.destroy_allocation(b2);
   allocator.destroy_allocation(b3);

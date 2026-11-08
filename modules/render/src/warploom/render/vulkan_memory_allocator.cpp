@@ -4,7 +4,7 @@
 #include <array>
 #include <cstring>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -25,7 +25,7 @@ VulkanMemoryAllocator::~VulkanMemoryAllocator() { cleanup(); }
 
 ::warploom::core::Result<void> VulkanMemoryAllocator::initialize(
     VkDevice device, VkPhysicalDevice physical_device) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || !physical_device) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -75,7 +75,7 @@ VulkanMemoryAllocator::~VulkanMemoryAllocator() { cleanup(); }
 }
 
 void VulkanMemoryAllocator::cleanup() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device_) {
     for (const VkBuffer buffer : live_buffers_) {
       vkDestroyBuffer(device_, buffer, nullptr);
@@ -97,7 +97,7 @@ void VulkanMemoryAllocator::cleanup() noexcept {
 
 std::uint32_t VulkanMemoryAllocator::find_memory_type(
     std::uint32_t type_bits, VkMemoryPropertyFlags properties) const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   VkPhysicalDeviceMemoryProperties memory_properties{};
   vkGetPhysicalDeviceMemoryProperties(physical_device_, &memory_properties);
   for (std::uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
@@ -114,7 +114,7 @@ std::uint32_t VulkanMemoryAllocator::find_memory_type(
 
 std::size_t VulkanMemoryAllocator::find_or_create_block(
     VkDeviceSize size, std::uint32_t type_bits, VkMemoryPropertyFlags properties) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   // Prefer an existing block that supports the resource's memory types AND
   // carries every requested property. A DEVICE_LOCAL-only block must never
   // serve a HOST_VISIBLE request: its range would be unmapped (mapped=null).
@@ -186,7 +186,7 @@ std::size_t VulkanMemoryAllocator::find_or_create_block(
 ::warploom::core::Result<Allocation> VulkanMemoryAllocator::allocate_sized(
     VkDeviceSize size, VkDeviceSize alignment, std::uint32_t type_bits,
     VkMemoryPropertyFlags properties) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device_ || size == 0) {
     return ::warploom::core::Result<Allocation>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -250,7 +250,7 @@ std::size_t VulkanMemoryAllocator::find_or_create_block(
 
 ::warploom::core::Result<Allocation> VulkanMemoryAllocator::create_buffer(
     VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device_ || size == 0) {
     return ::warploom::core::Result<Allocation>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -304,7 +304,7 @@ std::size_t VulkanMemoryAllocator::find_or_create_block(
 
 ::warploom::core::Result<Allocation> VulkanMemoryAllocator::bind_image(
     VkImage image, VkMemoryPropertyFlags properties) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device_ || !image) {
     return ::warploom::core::Result<Allocation>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -329,7 +329,7 @@ std::size_t VulkanMemoryAllocator::find_or_create_block(
 }
 
 void VulkanMemoryAllocator::destroy_allocation(Allocation& allocation) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device_ || !allocation.is_valid()) return;
   if (allocation.buffer) {
     vkDestroyBuffer(device_, allocation.buffer, nullptr);
@@ -398,7 +398,7 @@ VulkanUploadRing::~VulkanUploadRing() { cleanup(); }
 ::warploom::core::Result<void> VulkanUploadRing::initialize(
     VkDevice device, VkPhysicalDevice physical_device,
     std::uint32_t queue_family_index, VkDeviceSize total_size) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || !physical_device || total_size == 0) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -474,7 +474,7 @@ VulkanUploadRing::~VulkanUploadRing() { cleanup(); }
 }
 
 void VulkanUploadRing::retire_completed() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   for (auto it = in_flight_.begin(); it != in_flight_.end();) {
     if (it->fence == VK_NULL_HANDLE ||
         vkGetFenceStatus(device_, it->fence) != VK_SUCCESS) {
@@ -493,7 +493,7 @@ void VulkanUploadRing::retire_completed() noexcept {
 }
 
 void VulkanUploadRing::wait_region_free(VkDeviceSize start, VkDeviceSize size) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   const VkDeviceSize end = start + size;
   for (auto it = in_flight_.begin(); it != in_flight_.end();) {
     const VkDeviceSize f_start = it->start;
@@ -519,7 +519,7 @@ void VulkanUploadRing::wait_region_free(VkDeviceSize start, VkDeviceSize size) n
 
 ::warploom::core::Result<VulkanUploadRing::UploadSpan> VulkanUploadRing::acquire(
     VkDeviceSize size) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!is_initialized() || size == 0 || size > capacity_) {
     return ::warploom::core::Result<UploadSpan>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -547,7 +547,7 @@ void VulkanUploadRing::wait_region_free(VkDeviceSize start, VkDeviceSize size) n
 }
 
 ::warploom::core::Result<void> VulkanUploadRing::begin_commands() {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (recording_) return ::warploom::core::Result<void>::ok();
   VkCommandBufferBeginInfo begin{};
   begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -569,7 +569,7 @@ void VulkanUploadRing::record_copy(VkCommandBuffer command_buffer,
                                    const UploadSpan& span,
                                    VkBuffer dst_buffer,
                                    VkDeviceSize dst_offset) const noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   VkBufferCopy copy{};
   copy.srcOffset = span.byte_offset;
   copy.dstOffset = dst_offset;
@@ -581,7 +581,7 @@ void VulkanUploadRing::record_copy(VkCommandBuffer command_buffer,
 }
 
 ::warploom::core::Result<void> VulkanUploadRing::submit(VkQueue queue) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!is_initialized() || !queue) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -629,7 +629,7 @@ void VulkanUploadRing::record_copy(VkCommandBuffer command_buffer,
 }
 
 void VulkanUploadRing::wait_idle() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   for (auto& f : in_flight_) {
     if (f.fence) vkWaitForFences(device_, 1, &f.fence, VK_TRUE, UINT64_MAX);
   }
@@ -654,7 +654,7 @@ void VulkanUploadRing::wait_idle() noexcept {
 }
 
 void VulkanUploadRing::cleanup() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device_) {
     wait_idle();
     std::vector<VkFence> destroyed;

@@ -13,8 +13,8 @@
 namespace {
 
 //! Minimal drawable SceneMesh shell (buffer handles unused by the builder).
-omnicpp::render::SceneMesh shell_mesh() {
-  omnicpp::render::SceneMesh mesh{};
+warploom::render::SceneMesh shell_mesh() {
+  warploom::render::SceneMesh mesh{};
   mesh.index_count = 36U;
   return mesh;
 }
@@ -39,7 +39,7 @@ void make_variant(float first_x, std::vector<float>& vertices,
 }  // namespace
 
 TEST(MeshTable, RewritesIndicesIntoGlobalSpace) {
-  omnicpp::render::SceneMeshTableBuilder builder;
+  warploom::render::SceneMeshTableBuilder builder;
   std::vector<float> va, vb;
   std::vector<std::uint32_t> ia, ib;
   make_variant(-1.0f, va, ia);
@@ -47,8 +47,8 @@ TEST(MeshTable, RewritesIndicesIntoGlobalSpace) {
 
   const auto slot_a = builder.add(shell_mesh(), va, ia);
   const auto slot_b = builder.add(shell_mesh(), vb, ib);
-  ASSERT_NE(slot_a, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
-  ASSERT_NE(slot_b, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
+  ASSERT_NE(slot_a, warploom::render::SceneMeshTableBuilder::kInvalidSlot);
+  ASSERT_NE(slot_b, warploom::render::SceneMeshTableBuilder::kInvalidSlot);
 
   const auto& build = builder.build();
   ASSERT_EQ(build.entries.size(), 2U);
@@ -67,15 +67,15 @@ TEST(MeshTable, RewritesIndicesIntoGlobalSpace) {
 }
 
 TEST(MeshTable, DedupsByteIdenticalGeometry) {
-  omnicpp::render::SceneMeshTableBuilder builder;
+  warploom::render::SceneMeshTableBuilder builder;
   std::vector<float> v;
   std::vector<std::uint32_t> i;
   make_variant(-1.0f, v, i);
 
   const auto slot_a = builder.add(shell_mesh(), v, i);
   const auto slot_b = builder.add(shell_mesh(), v, i);
-  ASSERT_NE(slot_a, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
-  ASSERT_NE(slot_b, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
+  ASSERT_NE(slot_a, warploom::render::SceneMeshTableBuilder::kInvalidSlot);
+  ASSERT_NE(slot_b, warploom::render::SceneMeshTableBuilder::kInvalidSlot);
 
   const auto& build = builder.build();
   ASSERT_EQ(build.entries.size(), 2U);
@@ -90,23 +90,23 @@ TEST(MeshTable, DedupsByteIdenticalGeometry) {
 }
 
 TEST(MeshTable, RejectsInvalidGeometry) {
-  omnicpp::render::SceneMeshTableBuilder builder;
+  warploom::render::SceneMeshTableBuilder builder;
   const std::vector<float> bad(10U, 0.0f);  // not a multiple of 11 floats
   const std::vector<std::uint32_t> idx(3U, 0U);
   EXPECT_EQ(builder.add(shell_mesh(), bad, idx),
-            omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
+            warploom::render::SceneMeshTableBuilder::kInvalidSlot);
   EXPECT_EQ(builder.add(shell_mesh(), {}, {}),
-            omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
+            warploom::render::SceneMeshTableBuilder::kInvalidSlot);
   EXPECT_EQ(builder.mesh_count(), 0U);
 }
 
 TEST(MeshTable, SkinStreamParallelsVerticesWithIdentityDefault) {
-  omnicpp::render::SceneMeshTableBuilder builder;
+  warploom::render::SceneMeshTableBuilder builder;
   std::vector<float> v;
   std::vector<std::uint32_t> i;
   make_variant(-1.0f, v, i);
   const auto slot = builder.add(shell_mesh(), v, i);
-  ASSERT_NE(slot, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
+  ASSERT_NE(slot, warploom::render::SceneMeshTableBuilder::kInvalidSlot);
   const auto& build = builder.build();
   // One skin record (8 floats) per vertex, identity: joints 0, weights 1,0,0,0.
   ASSERT_EQ(build.skin_data.size(), 24U * 8U);
@@ -133,11 +133,11 @@ TEST(MeshTable, SkinParticipatesInDedup) {
     skin_b[vert * 8U + 0U] = 1.0f;  // different joint -> different skin
     skin_b[vert * 8U + 4U] = 1.0f;
   }
-  omnicpp::render::SceneMeshTableBuilder builder;
+  warploom::render::SceneMeshTableBuilder builder;
   const auto s0 = builder.add(shell_mesh(), v, i, skin_a);
   const auto s1 = builder.add(shell_mesh(), v, i, skin_b);
-  ASSERT_NE(s0, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
-  ASSERT_NE(s1, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
+  ASSERT_NE(s0, warploom::render::SceneMeshTableBuilder::kInvalidSlot);
+  ASSERT_NE(s1, warploom::render::SceneMeshTableBuilder::kInvalidSlot);
   // Same verts+indices but different skin: NOT a dedup — aliasing one
   // skin stream would shade the second mesh with the first mesh's joints.
   EXPECT_NE(s1, s0);
@@ -151,18 +151,18 @@ TEST(MeshTable, SkinParticipatesInDedup) {
 }
 
 TEST(MeshTable, RejectsMismatchedSkin) {
-  omnicpp::render::SceneMeshTableBuilder builder;
+  warploom::render::SceneMeshTableBuilder builder;
   std::vector<float> v;
   std::vector<std::uint32_t> i;
   make_variant(-1.0f, v, i);
   const std::vector<float> bad_skin(10U, 0.0f);  // not 24*8
   EXPECT_EQ(builder.add(shell_mesh(), v, i, bad_skin),
-            omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
+            warploom::render::SceneMeshTableBuilder::kInvalidSlot);
   EXPECT_EQ(builder.mesh_count(), 0U);
 }
 
 TEST(MeshTable, ClearResetsState) {
-  omnicpp::render::SceneMeshTableBuilder builder;
+  warploom::render::SceneMeshTableBuilder builder;
   std::vector<float> v;
   std::vector<std::uint32_t> i;
   make_variant(-1.0f, v, i);

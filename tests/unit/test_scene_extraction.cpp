@@ -11,13 +11,13 @@
 
 namespace {
 
-using omnicpp::core::World;
-using omnicpp::render::SceneCameraComponent;
-using omnicpp::render::SceneMesh;
-using omnicpp::render::SceneRenderableComponent;
-using omnicpp::render::SceneTransformComponent;
-using omnicpp::render::scene_identity_matrix;
-using omnicpp::render::extract_vulkan_scene;
+using warploom::core::World;
+using warploom::render::SceneCameraComponent;
+using warploom::render::SceneMesh;
+using warploom::render::SceneRenderableComponent;
+using warploom::render::SceneTransformComponent;
+using warploom::render::scene_identity_matrix;
+using warploom::render::extract_vulkan_scene;
 
 TEST(SceneExtraction, SelectsDeterministicActiveCamera) {
   World world;
@@ -104,12 +104,12 @@ TEST(SceneExtraction, MissingTransformUsesIdentity) {
 
 TEST(SceneExtraction, HandleResourcesAreCopiedIntoSnapshot) {
   World world;
-  omnicpp::render::VulkanSceneResourceRegistry resources;
+  warploom::render::VulkanSceneResourceRegistry resources;
   SceneMesh mesh;
   mesh.index_count = 36U;
   const auto mesh_handle = resources.create_mesh(mesh);
   const auto material_handle = resources.create_material(
-      omnicpp::render::SceneMaterial{{0.25f, 0.5f, 0.75f, 1.0f}});
+      warploom::render::SceneMaterial{{0.25f, 0.5f, 0.75f, 1.0f}});
   const auto object = world.create_entity();
   world.add_component<SceneRenderableComponent>(object,
       SceneRenderableComponent{nullptr, true, mesh_handle, material_handle, nullptr});
@@ -152,8 +152,8 @@ void make_test_camera(SceneCameraComponent& out) {
   m[14] = 0.1f * 100.0f * zn;
 }
 
-omnicpp::render::SceneBounds unit_box() {
-  omnicpp::render::SceneBounds bounds;
+warploom::render::SceneBounds unit_box() {
+  warploom::render::SceneBounds bounds;
   bounds.valid = true;
   bounds.min = {-1.0f, -1.0f, -1.0f};
   bounds.max = {1.0f, 1.0f, 1.0f};
@@ -168,11 +168,11 @@ TEST(FrustumCulling, ExtractsPlanesAndClassifiesPoints) {
   SceneCameraComponent camera;
   make_test_camera(camera);
   const auto frustum =
-      omnicpp::render::Frustum::from_view_projection(camera.view_projection.data());
+      warploom::render::Frustum::from_view_projection(camera.view_projection.data());
   const auto tiny = [&frustum](float x, float y, float z) {
     const float center[3] = {x, y, z};
     const float extent[3] = {0.001f, 0.001f, 0.001f};
-    return omnicpp::render::Frustum::box_outside(frustum, center, extent);
+    return warploom::render::Frustum::box_outside(frustum, center, extent);
   };
 
   EXPECT_FALSE(tiny(0.0f, 0.0f, -3.0f));    // straight ahead, inside
@@ -216,7 +216,7 @@ TEST(FrustumCulling, ExtractionCullsOnlyObjectsOutsideFrustum) {
   world.add_component<SceneTransformComponent>(behind, {behind_model});
   world.add_component<SceneTransformComponent>(side, {side_model});
 
-  omnicpp::render::SceneExtractionStats stats;
+  warploom::render::SceneExtractionStats stats;
   const auto scene = extract_vulkan_scene(world, &stats);
   ASSERT_EQ(scene.objects.size(), 2U);  // inside + unbounded survive
   EXPECT_TRUE(stats.camera_present);
@@ -235,7 +235,7 @@ TEST(FrustumCulling, NoCameraMeansNoCulling) {
       behind, {&mesh, true, {}, {}, nullptr, unit_box()});
   world.add_component<SceneTransformComponent>(behind, {behind_model});
 
-  omnicpp::render::SceneExtractionStats stats;
+  warploom::render::SceneExtractionStats stats;
   const auto scene = extract_vulkan_scene(world, &stats);
   ASSERT_EQ(scene.objects.size(), 1U);
   EXPECT_FALSE(stats.camera_present);

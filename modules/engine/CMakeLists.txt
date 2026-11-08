@@ -14,7 +14,7 @@ cmake_minimum_required(VERSION 3.28...4.0)
 #
 # S5-A deliberately changes no identifiers, no forwarder spellings, and
 # no module surfaces — it deletes the last monolith target
-# (omnicpp_runtime) and flips the in-tree consumers to the aggregate.
+# (warploom_runtime) and flips the in-tree consumers to the aggregate.
 # Identity migration (namespaces, flags, binaries, ABI shim, repo name)
 # is S5-B (docs/warploom-engine-plan.md §6).
 # ============================================================================

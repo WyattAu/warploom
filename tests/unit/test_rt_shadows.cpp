@@ -53,22 +53,22 @@
 
 namespace {
 
-using omnicpp::render::Allocation;
-using omnicpp::render::BlasBuildInput;
-using omnicpp::render::PbrMaterialData;
-using omnicpp::render::SceneMatrix;
-using omnicpp::render::SceneMesh;
-using omnicpp::render::ScenePbrObject;
-using omnicpp::render::TlasInstance;
-using omnicpp::render::VulkanAccelerationStructureBuilder;
-using omnicpp::render::VulkanContext;
-using omnicpp::render::VulkanDescriptorManager;
-using omnicpp::render::VulkanMemoryAllocator;
-using omnicpp::render::VulkanOffscreenTarget;
-using omnicpp::render::VulkanPbrScene;
-using omnicpp::render::VulkanPipeline;
-using omnicpp::render::VulkanScratchPool;
-using omnicpp::render::scene_identity_matrix;
+using warploom::render::Allocation;
+using warploom::render::BlasBuildInput;
+using warploom::render::PbrMaterialData;
+using warploom::render::SceneMatrix;
+using warploom::render::SceneMesh;
+using warploom::render::ScenePbrObject;
+using warploom::render::TlasInstance;
+using warploom::render::VulkanAccelerationStructureBuilder;
+using warploom::render::VulkanContext;
+using warploom::render::VulkanDescriptorManager;
+using warploom::render::VulkanMemoryAllocator;
+using warploom::render::VulkanOffscreenTarget;
+using warploom::render::VulkanPbrScene;
+using warploom::render::VulkanPipeline;
+using warploom::render::VulkanScratchPool;
+using warploom::render::scene_identity_matrix;
 
 constexpr std::uint32_t kShadowRes = 1024;
 constexpr std::uint32_t kImg = 256;       // offscreen render resolution
@@ -267,7 +267,7 @@ bool make_solid_texture(VkDevice dev, VkPhysicalDevice pd, VkQueue q,
   auto mem = alloc.bind_image(t.image, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   if (!mem.is_ok()) return fail();
   t.allocation = mem.value();
-  omnicpp::render::VulkanFrameUploadArena arena;
+  warploom::render::VulkanFrameUploadArena arena;
   if (!arena.initialize(dev, pd, family, 1U, 1U << 20).is_ok()) return fail();
   if (!arena.begin_frame(0).is_ok()) return fail();
   auto span = arena.acquire(4);
@@ -800,12 +800,12 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
       tlas.value().handle, 0).is_ok());
 
   // ---- Command buffers + submissions ---------------------------------------
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       h.ctx.device(), h.qf);
   ASSERT_TRUE(pool.is_ok());
-  auto cb_build = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cb_build = warploom::render::VulkanRenderer::allocate_command_buffer(
       h.ctx.device(), pool.value());
-  auto cb_trace = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cb_trace = warploom::render::VulkanRenderer::allocate_command_buffer(
       h.ctx.device(), pool.value());
   ASSERT_TRUE(cb_build.is_ok() && cb_trace.is_ok());
   VkCommandBufferBeginInfo bi{};
@@ -960,7 +960,7 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
   // ---- Render both lit paths through record_pbr_frame ----------------------
   auto render_path = [&](VulkanPipeline& pipe, VkDescriptorSet shadow_desc,
                          bool with_shadow_prepass)
-      -> omnicpp_test::ReadbackResult {
+      -> warploom_test::ReadbackResult {
     VulkanPbrScene scene{};
     scene.pipeline = pipe.pipeline();
     scene.pipeline_layout = pipe.pipeline_layout();
@@ -987,10 +987,10 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
     b.material_index = 0;
     scene.objects = {a, b};
 
-    auto pr = omnicpp::render::VulkanRenderer::create_command_pool(
+    auto pr = warploom::render::VulkanRenderer::create_command_pool(
         h.ctx.device(), h.qf);
     if (!pr.is_ok()) return {};
-    auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cr = warploom::render::VulkanRenderer::allocate_command_buffer(
         h.ctx.device(), pr.value());
     if (!cr.is_ok()) {
       vkDestroyCommandPool(h.ctx.device(), pr.value(), nullptr);
@@ -1002,8 +1002,8 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
     rbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(rcb, &rbi);
 
-    omnicpp::render::VulkanRenderer renderer;
-    omnicpp::render::VulkanRenderer::PbrFrameTargets targets{};
+    warploom::render::VulkanRenderer renderer;
+    warploom::render::VulkanRenderer::PbrFrameTargets targets{};
     if (with_shadow_prepass) {
       targets.shadow_render_pass = h.shadow_rp;
       targets.shadow_framebuffer = h.shadow_fb;
@@ -1030,16 +1030,16 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
     vkEndCommandBuffer(rcb);
     submit_and_wait(h.ctx.device(), h.ctx.graphics_queue(), rcb);
     vkDestroyCommandPool(h.ctx.device(), pr.value(), nullptr);
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         h.ctx.physical_device(), h.ctx.device(), h.ctx.graphics_queue(), h.qf,
         h.target.image(), h.target.format(), kImg, kImg,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*store_pixels=*/true);
   };
 
-  const omnicpp_test::ReadbackResult ra =
+  const warploom_test::ReadbackResult ra =
       render_path(pipe_a, h.shadow_set, true);
-  const omnicpp_test::ReadbackResult rb =
+  const warploom_test::ReadbackResult rb =
       render_path(pipe_b, as_set.value(), false);
   ASSERT_TRUE(ra.submitted) << "PCF path failed to render";
   ASSERT_TRUE(rb.submitted) << "RT path failed to render";
@@ -1065,7 +1065,7 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
     const int py = static_cast<int>((1.0f - (y * 0.5f + 0.5f)) * float(kImg));
     return {px, py};
   };
-  auto luminance = [&](const omnicpp_test::ReadbackResult& r, int px, int py) -> float {
+  auto luminance = [&](const warploom_test::ReadbackResult& r, int px, int py) -> float {
     if (px < 0 || px >= static_cast<int>(kImg) || py < 0 ||
         py >= static_cast<int>(kImg)) {
       ADD_FAILURE() << "probe projected off-image: (" << px << ", " << py << ")";
@@ -1127,9 +1127,9 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
 
     // Shadow-map dump: linear -> staging -> host, sample a grid of depths.
     {
-      auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
+      auto pool_r = warploom::render::VulkanRenderer::create_command_pool(
           h.ctx.device(), h.qf);
-      auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cb_r = warploom::render::VulkanRenderer::allocate_command_buffer(
           h.ctx.device(), pool_r.value());
       auto stage = h.alloc.create_buffer(
           kShadowRes * kShadowRes * 4,
@@ -1267,9 +1267,9 @@ TEST(rt_shadows, ray_query_hard_shadow_matches_pcf) {
   EXPECT_GT(far_a, 0.10f) << "PCF path: far cube below ambient floor";
   EXPECT_GT(far_b, 0.10f) << "RT path: far cube below ambient floor";
 
-  omnicpp::render::BottomLevelAS out_near = blas_near.value();
-  omnicpp::render::BottomLevelAS out_far = blas_far.value();
-  omnicpp::render::TopLevelAS out_t = tlas.value();
+  warploom::render::BottomLevelAS out_near = blas_near.value();
+  warploom::render::BottomLevelAS out_far = blas_far.value();
+  warploom::render::TopLevelAS out_t = tlas.value();
   Allocation out_gn = geom_near.value();
   Allocation out_gf = geom_far.value();
   builder.destroy_blas(h.ctx.device(), h.alloc, out_near);

@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from omni_scripts.controller.configure_controller import configure
+from warploom_scripts.controller.configure_controller import configure
 
 
 def main() -> int:
@@ -21,7 +21,7 @@ def main() -> int:
         Exit code (0 for success, non-zero for failure).
     """
     parser = argparse.ArgumentParser(
-        description="Configure OmniCpp build system with CMake",
+        description="Configure Warploom build system with CMake",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

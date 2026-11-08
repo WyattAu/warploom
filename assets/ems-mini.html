@@ -111,7 +111,7 @@
   </head>
   <body>
     <div id="logo-container" style="position:absolute;top:0;left:0;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:10;opacity:0;">
-      <img id="logo-img" alt="omnicpp Logo" style="max-width:30vw;max-height:30vh;transition:opacity 0.5s ease-in-out;" />
+      <img id="logo-img" alt="warploom Logo" style="max-width:30vw;max-height:30vh;transition:opacity 0.5s ease-in-out;" />
     </div>
     <canvas id="canvas" tabindex="-1"></canvas>
     <div id="console"></div>
@@ -178,7 +178,7 @@
         onRuntimeInitialized: function() {
           // Load SVG from Emscripten virtual filesystem
           try {
-            const svgData = FS.readFile('share/TestApp/assets/OmniCppLogo.svg', { encoding: 'utf8' });
+            const svgData = FS.readFile('share/TestApp/assets/WarploomLogo.svg', { encoding: 'utf8' });
             const dataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
             const logoImg = document.getElementById('logo-img');
             const logoContainer = document.getElementById('logo-container');

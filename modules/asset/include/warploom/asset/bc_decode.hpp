@@ -56,15 +56,3 @@ inline constexpr std::uint32_t kVkBc3Srgb = 138U;
     std::string* error_detail = nullptr);
 
 }  // namespace warploom::asset
-
-// S5-B compat footer: legacy `omnicpp::asset` spellings keep resolving during the
-// transition (docs/warploom-identity-plan.md, phase 1a). A using-directive
-// in a namespace extension (NOT a type alias - ill-formed for namespaces)
-// makes the old spellings name the SAME types. Guarded per namespace (a
-// shared guard would suppress later headers' distinct directives).
-#ifndef WARPLOOM_COMPAT_ASSET_NS
-#define WARPLOOM_COMPAT_ASSET_NS
-namespace omnicpp::asset {
-    using namespace ::warploom::asset;
-}
-#endif  // WARPLOOM_COMPAT_ASSET_NS

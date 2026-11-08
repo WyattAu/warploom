@@ -12,7 +12,7 @@
 
 #include <warploom/render/vulkan_memory_allocator.hpp>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -20,7 +20,7 @@ namespace warploom::render {
 
 namespace {
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 [[nodiscard]] bool image_descs_equal(const TransientImageDesc& a,
                                      const TransientImageDesc& b) noexcept {
   return a.format == b.format && a.width == b.width &&
@@ -54,7 +54,7 @@ VulkanTransientStore::~VulkanTransientStore() { destroy(); }
     const std::vector<FrameResource>& resources,
     const std::vector<ResourceAllocationPlan>& plan,
     const std::vector<TransientImageDesc>& descs) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   destroy();
   if (!device || !physical_device || allocator == nullptr ||
       !allocator->is_initialized()) {
@@ -283,7 +283,7 @@ VulkanTransientStore::~VulkanTransientStore() { destroy(); }
 }
 
 void VulkanTransientStore::destroy() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device_ != VK_NULL_HANDLE) {
     for (TransientImage& entry : images_) {
       if (entry.view != VK_NULL_HANDLE) {

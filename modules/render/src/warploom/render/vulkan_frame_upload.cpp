@@ -1,6 +1,6 @@
 #include "warploom/render/vulkan_frame_upload.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -81,7 +81,7 @@ void VulkanFrameUploadArena::record_copy(
 void VulkanFrameUploadArena::record_copy_image_rgba8(
     const VulkanUploadRing::UploadSpan& span, VkImage image,
     std::uint32_t width, std::uint32_t height) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (active_frame_ >= rings_.size() || image == VK_NULL_HANDLE ||
       width == 0U || height == 0U || span.host_data == nullptr) {
     return;

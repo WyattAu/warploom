@@ -17,11 +17,11 @@
 
 namespace {
 
-namespace ed = omnicpp::editor;
+namespace ed = warploom::editor;
 
-using omnicpp::core::ControlCommand;
-using omnicpp::core::ControlReply;
-using omnicpp::editor::EditorSession;
+using warploom::core::ControlCommand;
+using warploom::core::ControlReply;
+using warploom::editor::EditorSession;
 
 using CK = ControlCommand::Kind;
 

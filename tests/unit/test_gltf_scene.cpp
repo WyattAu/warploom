@@ -32,16 +32,16 @@
 
 namespace {
 
-using omnicpp::asset::ExternalFileLoader;
-using omnicpp::asset::GltfMeshImport;
-using omnicpp::asset::GltfSceneImport;
-using omnicpp::asset::import_gltf_mesh;
-using omnicpp::asset::import_gltf_scene;
-using omnicpp::render::SceneCameraComponent;
-using omnicpp::render::SceneMatrix;
-using omnicpp::render::SceneMesh;
-using omnicpp::render::SceneTransformComponent;
-using omnicpp::render::scene_identity_matrix;
+using warploom::asset::ExternalFileLoader;
+using warploom::asset::GltfMeshImport;
+using warploom::asset::GltfSceneImport;
+using warploom::asset::import_gltf_mesh;
+using warploom::asset::import_gltf_scene;
+using warploom::render::SceneCameraComponent;
+using warploom::render::SceneMatrix;
+using warploom::render::SceneMesh;
+using warploom::render::SceneTransformComponent;
+using warploom::render::scene_identity_matrix;
 
 // ============================================================================
 // In-memory glTF fixture builders
@@ -261,7 +261,7 @@ struct SolidTexture {
   VkImage image{VK_NULL_HANDLE};
   VkImageView view{VK_NULL_HANDLE};
   VkSampler sampler{VK_NULL_HANDLE};
-  omnicpp::render::Allocation allocation{};
+  warploom::render::Allocation allocation{};
 };
 
 //! Create an RGBA8 texture uploaded through a private upload arena
@@ -273,14 +273,14 @@ struct SolidTexture {
 //! `out` is left empty.
 bool make_texture_rgba(VkDevice device, VkPhysicalDevice physical_device,
                        VkQueue queue, std::uint32_t queue_family,
-                       omnicpp::render::VulkanMemoryAllocator& allocator,
+                       warploom::render::VulkanMemoryAllocator& allocator,
                        std::uint32_t width, std::uint32_t height,
                        const std::uint8_t* rgba, std::size_t byte_count,
                        SolidTexture& out, bool srgb_format = false) {
   out = {};
   SolidTexture tex{};
   const auto fail = [&]() {
-    omnicpp::render::Allocation allocation = tex.allocation;
+    warploom::render::Allocation allocation = tex.allocation;
     if (allocation.is_valid()) allocator.destroy_allocation(allocation);
     if (tex.view != VK_NULL_HANDLE) vkDestroyImageView(device, tex.view, nullptr);
     if (tex.sampler != VK_NULL_HANDLE) vkDestroySampler(device, tex.sampler, nullptr);
@@ -310,7 +310,7 @@ bool make_texture_rgba(VkDevice device, VkPhysicalDevice physical_device,
   if (!memory.is_ok()) return fail();
   tex.allocation = memory.value();
 
-  omnicpp::render::VulkanFrameUploadArena arena;
+  warploom::render::VulkanFrameUploadArena arena;
   if (!arena.initialize(device, physical_device, queue_family,
                         /*frame_count=*/1U, /*bytes_per_frame=*/1U << 20U)
            .is_ok()) {
@@ -351,7 +351,7 @@ bool make_texture_rgba(VkDevice device, VkPhysicalDevice physical_device,
 //! 1x1 solid-colour convenience wrapper over make_texture_rgba.
 bool make_solid_texture(VkDevice device, VkPhysicalDevice physical_device,
                         VkQueue queue, std::uint32_t queue_family,
-                        omnicpp::render::VulkanMemoryAllocator& allocator,
+                        warploom::render::VulkanMemoryAllocator& allocator,
                         const std::array<std::uint8_t, 4>& rgba,
                         SolidTexture& out) {
   return make_texture_rgba(device, physical_device, queue, queue_family,
@@ -359,7 +359,7 @@ bool make_solid_texture(VkDevice device, VkPhysicalDevice physical_device,
 }
 
 void destroy_solid_texture(VkDevice device,
-                           omnicpp::render::VulkanMemoryAllocator& allocator,
+                           warploom::render::VulkanMemoryAllocator& allocator,
                            SolidTexture& texture) {
   if (texture.allocation.is_valid()) {
     allocator.destroy_allocation(texture.allocation);
@@ -502,16 +502,16 @@ TwoCubeFixture make_two_cube_multimaterial_gltf(const std::string& red_uri,
 // ============================================================================
 
 struct GpuSceneHarness {
-  omnicpp::render::VulkanContext context;
-  omnicpp::render::VulkanMemoryAllocator allocator;
-  omnicpp::render::VulkanDescriptorManager descriptors;
+  warploom::render::VulkanContext context;
+  warploom::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanDescriptorManager descriptors;
   VkDescriptorSetLayout mesh_layout{VK_NULL_HANDLE};
   VkDescriptorSetLayout albedo_layout{VK_NULL_HANDLE};
   VkDescriptorSet albedo_set{VK_NULL_HANDLE};
   SolidTexture white_tex;
-  omnicpp::render::VulkanOffscreenTarget target;
-  omnicpp::render::VulkanPipeline pipeline;
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanPipeline pipeline;
+  warploom::render::VulkanRenderer renderer;
   std::uint32_t queue_family{0};
 
   bool initialized() const noexcept { return context.is_initialized(); }
@@ -533,14 +533,14 @@ struct GpuSceneHarness {
     queue_family =
         static_cast<std::uint32_t>(context.queue_families().graphics_family);
 
-    const std::vector<omnicpp::render::ReflectedBinding> bindings = {
+    const std::vector<warploom::render::ReflectedBinding> bindings = {
         {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
          VK_SHADER_STAGE_VERTEX_BIT}};
     auto layout = descriptors.create_layout(bindings, 8U);
     if (!layout.is_ok()) return false;
     mesh_layout = layout.value();
 
-    const std::vector<omnicpp::render::ReflectedBinding> albedo_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> albedo_bindings = {
         {1U, 0U, 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
          VK_SHADER_STAGE_FRAGMENT_BIT}};
     auto albedo = descriptors.create_layout(albedo_bindings, 1U,
@@ -631,12 +631,12 @@ struct GpuSceneHarness {
   }
 
   //! Render one snapshot and read the 256x256 offscreen image back.
-  omnicpp_test::ReadbackResult render(const omnicpp::render::VulkanScene& snapshot) {
+  warploom_test::ReadbackResult render(const warploom::render::VulkanScene& snapshot) {
     auto pool_result =
-        omnicpp::render::VulkanRenderer::create_command_pool(context.device(),
+        warploom::render::VulkanRenderer::create_command_pool(context.device(),
                                                              queue_family);
     if (!pool_result.is_ok()) return {};
-    auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
         context.device(), pool_result.value());
     if (!cb_result.is_ok()) {
       vkDestroyCommandPool(context.device(), pool_result.value(), nullptr);
@@ -681,9 +681,9 @@ struct GpuSceneHarness {
         vkQueueSubmit(context.graphics_queue(), 1U, &submit, fence) == VK_SUCCESS &&
         vkWaitForFences(context.device(), 1U, &fence, VK_TRUE, UINT64_MAX) ==
             VK_SUCCESS;
-    omnicpp_test::ReadbackResult result{};
+    warploom_test::ReadbackResult result{};
     if (submitted) {
-      result = omnicpp_test::readback_swapchain_image(
+      result = warploom_test::readback_swapchain_image(
           context.physical_device(), context.device(), context.graphics_queue(),
           queue_family, target.image(), target.format(), 256U, 256U,
           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -709,9 +709,9 @@ struct GpuSceneHarness {
 //! Build a SceneMesh backed by host-visible vertex/index storage buffers and a
 //! per-mesh descriptor set from one GPU-format mesh import.
 struct GpuMeshUpload {
-  omnicpp::render::Allocation vertex_allocation{};
-  omnicpp::render::Allocation index_allocation{};
-  omnicpp::render::SceneMesh mesh{};
+  warploom::render::Allocation vertex_allocation{};
+  warploom::render::Allocation index_allocation{};
+  warploom::render::SceneMesh mesh{};
 
   //! Create the upload from a whole GltfMeshImport (all primitives merged).
   bool create(GpuSceneHarness& h, const GltfMeshImport& import) {
@@ -737,7 +737,7 @@ struct GpuMeshUpload {
     return mesh.is_drawable();
   }
 
-  void destroy(omnicpp::render::VulkanMemoryAllocator& allocator) {
+  void destroy(warploom::render::VulkanMemoryAllocator& allocator) {
     if (vertex_allocation.is_valid()) allocator.destroy_allocation(vertex_allocation);
     if (index_allocation.is_valid()) allocator.destroy_allocation(index_allocation);
   }
@@ -758,7 +758,7 @@ struct GpuMeshUpload {
 //! show red where the plain white material showed neutral gray.
 TEST(VulkanHardware, GltfBaseColorTextureEndToEnd) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
@@ -791,7 +791,7 @@ TEST(VulkanHardware, GltfBaseColorTextureEndToEnd) {
   EXPECT_EQ(gltf_import.images[0].rgba[3], 255U);
 
   GpuSceneHarness h;
-  if (!h.initialize("OmniCppGltfBaseColorTexture")) {
+  if (!h.initialize("WarploomGltfBaseColorTexture")) {
     GTEST_SKIP() << "Device does not support descriptor indexing (bindless)";
   }
   GpuMeshUpload upload;
@@ -804,7 +804,7 @@ TEST(VulkanHardware, GltfBaseColorTextureEndToEnd) {
       gltf_import.images[0].rgba.size(), gltf_tex));
   ASSERT_TRUE(h.bind_albedo(gltf_tex, 1U));
 
-  omnicpp::render::VulkanSceneResourceRegistry registry;
+  warploom::render::VulkanSceneResourceRegistry registry;
   const auto mesh_handle = registry.create_mesh(upload.mesh);
   const std::array<float, 4> opaque_white{1.0f, 1.0f, 1.0f, 1.0f};
   const auto plain_material = registry.create_material({opaque_white});
@@ -816,33 +816,33 @@ TEST(VulkanHardware, GltfBaseColorTextureEndToEnd) {
   ASSERT_TRUE(textured_material.valid());
   ASSERT_TRUE(gltf_texture.valid());
 
-  omnicpp::core::World world;
+  warploom::core::World world;
   const auto camera_entity = world.create_entity();
   const auto cube_entity = world.create_entity();
-  omnicpp::render::SceneCameraComponent camera_component;
+  warploom::render::SceneCameraComponent camera_component;
   make_perspective(1.05f, 1.0f, 0.1f, 100.0f, camera_component.view_projection);
-  world.add_component<omnicpp::render::SceneCameraComponent>(camera_entity,
+  world.add_component<warploom::render::SceneCameraComponent>(camera_entity,
                                                              camera_component);
-  omnicpp::render::SceneBounds cube_bounds{};
+  warploom::render::SceneBounds cube_bounds{};
   cube_bounds.valid = gltf_import.bounds.valid;
   cube_bounds.min = {gltf_import.bounds.min[0], gltf_import.bounds.min[1],
                      gltf_import.bounds.min[2]};
   cube_bounds.max = {gltf_import.bounds.max[0], gltf_import.bounds.max[1],
                      gltf_import.bounds.max[2]};
   ASSERT_TRUE(cube_bounds.valid);
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       cube_entity,
       {nullptr, true, mesh_handle, plain_material, nullptr, cube_bounds});
-  omnicpp::render::SceneTransformComponent cube_transform;
+  warploom::render::SceneTransformComponent cube_transform;
   make_translation(0.0f, 0.0f, -4.0f, cube_transform.model);
-  world.add_component<omnicpp::render::SceneTransformComponent>(cube_entity,
+  world.add_component<warploom::render::SceneTransformComponent>(cube_entity,
                                                                 cube_transform);
 
-  const auto render = [&](const omnicpp::render::VulkanScene& scene) {
+  const auto render = [&](const warploom::render::VulkanScene& scene) {
     return h.render(scene);
   };
   auto snapshot = [&]() {
-    auto scene = omnicpp::render::extract_vulkan_scene(
+    auto scene = warploom::render::extract_vulkan_scene(
         world, registry, h.pipeline.pipeline(), h.pipeline.pipeline_layout());
     scene.texture_set = h.albedo_set;
     return scene;
@@ -852,7 +852,7 @@ TEST(VulkanHardware, GltfBaseColorTextureEndToEnd) {
   const auto untextured = render(snapshot());
   ASSERT_TRUE(untextured.submitted);
   // Frame B: switch to the material whose albedo came from the glTF PNG.
-  world.get_component<omnicpp::render::SceneRenderableComponent>(cube_entity)
+  world.get_component<warploom::render::SceneRenderableComponent>(cube_entity)
       .material_handle = textured_material;
   const auto textured = render(snapshot());
   ASSERT_TRUE(textured.submitted);
@@ -887,7 +887,7 @@ TEST(VulkanHardware, GltfBaseColorTextureEndToEnd) {
 //! albedo array — the same proof the PNG sibling runs, but for JPEG payloads.
 TEST(VulkanHardware, GltfJpegBaseColorTextureEndToEnd) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
@@ -929,7 +929,7 @@ TEST(VulkanHardware, GltfJpegBaseColorTextureEndToEnd) {
   }
 
   GpuSceneHarness h;
-  if (!h.initialize("OmniCppGltfJpegBaseColorTexture")) {
+  if (!h.initialize("WarploomGltfJpegBaseColorTexture")) {
     GTEST_SKIP() << "Device does not support descriptor indexing (bindless)";
   }
   GpuMeshUpload upload;
@@ -942,7 +942,7 @@ TEST(VulkanHardware, GltfJpegBaseColorTextureEndToEnd) {
       gltf_import.images[0].rgba.size(), gltf_tex));
   ASSERT_TRUE(h.bind_albedo(gltf_tex, 1U));
 
-  omnicpp::render::VulkanSceneResourceRegistry registry;
+  warploom::render::VulkanSceneResourceRegistry registry;
   const auto mesh_handle = registry.create_mesh(upload.mesh);
   const std::array<float, 4> opaque_white{1.0f, 1.0f, 1.0f, 1.0f};
   const auto plain_material = registry.create_material({opaque_white});
@@ -953,30 +953,30 @@ TEST(VulkanHardware, GltfJpegBaseColorTextureEndToEnd) {
   ASSERT_TRUE(textured_material.valid());
   ASSERT_TRUE(gltf_texture.valid());
 
-  omnicpp::core::World world;
+  warploom::core::World world;
   const auto camera_entity = world.create_entity();
   const auto cube_entity = world.create_entity();
-  omnicpp::render::SceneCameraComponent camera_component;
+  warploom::render::SceneCameraComponent camera_component;
   make_perspective(1.05f, 1.0f, 0.1f, 100.0f, camera_component.view_projection);
-  world.add_component<omnicpp::render::SceneCameraComponent>(camera_entity,
+  world.add_component<warploom::render::SceneCameraComponent>(camera_entity,
                                                              camera_component);
-  omnicpp::render::SceneBounds cube_bounds{};
+  warploom::render::SceneBounds cube_bounds{};
   cube_bounds.valid = gltf_import.bounds.valid;
   cube_bounds.min = {gltf_import.bounds.min[0], gltf_import.bounds.min[1],
                       gltf_import.bounds.min[2]};
   cube_bounds.max = {gltf_import.bounds.max[0], gltf_import.bounds.max[1],
                       gltf_import.bounds.max[2]};
   ASSERT_TRUE(cube_bounds.valid);
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       cube_entity,
       {nullptr, true, mesh_handle, plain_material, nullptr, cube_bounds});
-  omnicpp::render::SceneTransformComponent cube_transform;
+  warploom::render::SceneTransformComponent cube_transform;
   make_translation(0.0f, 0.0f, -4.0f, cube_transform.model);
-  world.add_component<omnicpp::render::SceneTransformComponent>(cube_entity,
+  world.add_component<warploom::render::SceneTransformComponent>(cube_entity,
                                                                 cube_transform);
 
   const auto snapshot = [&]() {
-    auto scene = omnicpp::render::extract_vulkan_scene(
+    auto scene = warploom::render::extract_vulkan_scene(
         world, registry, h.pipeline.pipeline(), h.pipeline.pipeline_layout());
     scene.texture_set = h.albedo_set;
     return scene;
@@ -984,7 +984,7 @@ TEST(VulkanHardware, GltfJpegBaseColorTextureEndToEnd) {
 
   const auto untextured = h.render(snapshot());
   ASSERT_TRUE(untextured.submitted);
-  world.get_component<omnicpp::render::SceneRenderableComponent>(cube_entity)
+  world.get_component<warploom::render::SceneRenderableComponent>(cube_entity)
       .material_handle = textured_material;
   const auto textured = h.render(snapshot());
   ASSERT_TRUE(textured.submitted);
@@ -1023,7 +1023,7 @@ TEST(VulkanHardware, GltfJpegBaseColorTextureEndToEnd) {
 //! the same linear value meet, and the analytic window proves the value.
 TEST(VulkanHardware, SrgbBaseColorTextureLinearisesAtSample) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
@@ -1053,7 +1053,7 @@ TEST(VulkanHardware, SrgbBaseColorTextureLinearisesAtSample) {
   EXPECT_EQ(gltf_import.images[0].rgba[3], 255U);
 
   GpuSceneHarness h;
-  if (!h.initialize("OmniCppSrgbBaseColor")) {
+  if (!h.initialize("WarploomSrgbBaseColor")) {
     GTEST_SKIP() << "Device does not support descriptor indexing (bindless)";
   }
   GpuMeshUpload upload;
@@ -1068,7 +1068,7 @@ TEST(VulkanHardware, SrgbBaseColorTextureLinearisesAtSample) {
       gltf_import.images[0].rgba.size(), grey_tex, /*srgb_format=*/true));
   ASSERT_TRUE(h.bind_albedo(grey_tex, 1U));
 
-  omnicpp::render::VulkanSceneResourceRegistry registry;
+  warploom::render::VulkanSceneResourceRegistry registry;
   const auto mesh_handle = registry.create_mesh(upload.mesh);
   const auto factor_material = registry.create_material(
       {{kLinearGrey, kLinearGrey, kLinearGrey, 1.0f}, {}});
@@ -1080,30 +1080,30 @@ TEST(VulkanHardware, SrgbBaseColorTextureLinearisesAtSample) {
   ASSERT_TRUE(textured_material.valid());
   ASSERT_TRUE(grey_texture.valid());
 
-  omnicpp::core::World world;
+  warploom::core::World world;
   const auto camera_entity = world.create_entity();
   const auto cube_entity = world.create_entity();
-  omnicpp::render::SceneCameraComponent camera_component;
+  warploom::render::SceneCameraComponent camera_component;
   make_perspective(1.05f, 1.0f, 0.1f, 100.0f, camera_component.view_projection);
-  world.add_component<omnicpp::render::SceneCameraComponent>(camera_entity,
+  world.add_component<warploom::render::SceneCameraComponent>(camera_entity,
                                                              camera_component);
-  omnicpp::render::SceneBounds cube_bounds{};
+  warploom::render::SceneBounds cube_bounds{};
   cube_bounds.valid = gltf_import.bounds.valid;
   cube_bounds.min = {gltf_import.bounds.min[0], gltf_import.bounds.min[1],
                       gltf_import.bounds.min[2]};
   cube_bounds.max = {gltf_import.bounds.max[0], gltf_import.bounds.max[1],
                       gltf_import.bounds.max[2]};
   ASSERT_TRUE(cube_bounds.valid);
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       cube_entity,
       {nullptr, true, mesh_handle, factor_material, nullptr, cube_bounds});
-  omnicpp::render::SceneTransformComponent cube_transform;
+  warploom::render::SceneTransformComponent cube_transform;
   make_translation(0.0f, 0.0f, -4.0f, cube_transform.model);
-  world.add_component<omnicpp::render::SceneTransformComponent>(cube_entity,
+  world.add_component<warploom::render::SceneTransformComponent>(cube_entity,
                                                                 cube_transform);
 
   const auto snapshot = [&]() {
-    auto scene = omnicpp::render::extract_vulkan_scene(
+    auto scene = warploom::render::extract_vulkan_scene(
         world, registry, h.pipeline.pipeline(), h.pipeline.pipeline_layout());
     scene.texture_set = h.albedo_set;
     return scene;
@@ -1115,7 +1115,7 @@ TEST(VulkanHardware, SrgbBaseColorTextureLinearisesAtSample) {
   ASSERT_TRUE(factor_frame.submitted);
   const auto factor_centre = grey_of(factor_frame.center_pixel);
   // Frame B: the grey as an sRGB-format texture (encoded 186 on disk).
-  world.get_component<omnicpp::render::SceneRenderableComponent>(cube_entity)
+  world.get_component<warploom::render::SceneRenderableComponent>(cube_entity)
       .material_handle = textured_material;
   const auto texture_frame = h.render(snapshot());
   ASSERT_TRUE(texture_frame.submitted);
@@ -1154,7 +1154,7 @@ TEST(VulkanHardware, SrgbBaseColorTextureLinearisesAtSample) {
 //! frames is the engine's animation hook.
 TEST(VulkanHardware, GltfImportedSceneWithRegistryMaterials) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
@@ -1180,7 +1180,7 @@ TEST(VulkanHardware, GltfImportedSceneWithRegistryMaterials) {
   ASSERT_TRUE(green_import.bounds.valid);
 
   GpuSceneHarness h;
-  if (!h.initialize("OmniCppRegistryMaterials")) {
+  if (!h.initialize("WarploomRegistryMaterials")) {
     GTEST_SKIP() << "Device does not support descriptor indexing (bindless)";
   }
   GpuMeshUpload red_upload;
@@ -1188,7 +1188,7 @@ TEST(VulkanHardware, GltfImportedSceneWithRegistryMaterials) {
   ASSERT_TRUE(red_upload.create(h, red_import));
   ASSERT_TRUE(green_upload.create(h, green_import));
 
-  omnicpp::render::VulkanSceneResourceRegistry registry;
+  warploom::render::VulkanSceneResourceRegistry registry;
   const auto mesh_red = registry.create_mesh(red_upload.mesh);
   const auto mesh_green = registry.create_mesh(green_upload.mesh);
   const std::array<float, 4> opaque_white{1.0f, 1.0f, 1.0f, 1.0f};
@@ -1200,33 +1200,33 @@ TEST(VulkanHardware, GltfImportedSceneWithRegistryMaterials) {
   ASSERT_TRUE(material_red.valid());
   ASSERT_TRUE(material_green.valid());
 
-  omnicpp::core::World world;
+  warploom::core::World world;
   const auto camera_entity = world.create_entity();
   const auto red_entity = world.create_entity();
   const auto green_entity = world.create_entity();
-  omnicpp::render::SceneCameraComponent camera_component;
+  warploom::render::SceneCameraComponent camera_component;
   make_perspective(1.05f, 1.0f, 0.1f, 100.0f, camera_component.view_projection);
-  world.add_component<omnicpp::render::SceneCameraComponent>(camera_entity,
+  world.add_component<warploom::render::SceneCameraComponent>(camera_entity,
                                                              camera_component);
-  omnicpp::render::SceneBounds bounds{};
+  warploom::render::SceneBounds bounds{};
   bounds.valid = true;
   bounds.min = {-1.0f, -1.0f, -1.0f};
   bounds.max = {1.0f, 1.0f, 1.0f};
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       red_entity, {nullptr, true, mesh_red, material_red, nullptr, bounds});
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       green_entity, {nullptr, true, mesh_green, material_green, nullptr, bounds});
-  omnicpp::render::SceneTransformComponent red_transform;
-  omnicpp::render::SceneTransformComponent green_transform;
+  warploom::render::SceneTransformComponent red_transform;
+  warploom::render::SceneTransformComponent green_transform;
   make_translation(0.0f, 0.0f, -3.0f, red_transform.model);    // near: occludes
   make_translation(0.0f, 0.0f, -5.0f, green_transform.model);  // far
-  world.add_component<omnicpp::render::SceneTransformComponent>(red_entity,
+  world.add_component<warploom::render::SceneTransformComponent>(red_entity,
                                                                 red_transform);
-  world.add_component<omnicpp::render::SceneTransformComponent>(green_entity,
+  world.add_component<warploom::render::SceneTransformComponent>(green_entity,
                                                                 green_transform);
 
   const auto snapshot = [&]() {
-    auto scene = omnicpp::render::extract_vulkan_scene(
+    auto scene = warploom::render::extract_vulkan_scene(
         world, registry, h.pipeline.pipeline(), h.pipeline.pipeline_layout());
     scene.texture_set = h.albedo_set;
     return scene;
@@ -1240,9 +1240,9 @@ TEST(VulkanHardware, GltfImportedSceneWithRegistryMaterials) {
 
   // Frame 2 (animation): the red cube moves behind the green one; occlusion
   // flips, so no red remains visible and green dominates.
-  omnicpp::render::SceneTransformComponent behind;
+  warploom::render::SceneTransformComponent behind;
   make_translation(0.0f, 0.0f, -7.0f, behind.model);
-  world.get_component<omnicpp::render::SceneTransformComponent>(red_entity)
+  world.get_component<warploom::render::SceneTransformComponent>(red_entity)
       .model = behind.model;
   const auto second = h.render(snapshot());
   ASSERT_TRUE(second.submitted);
@@ -1270,7 +1270,7 @@ TEST(VulkanHardware, GltfImportedSceneWithRegistryMaterials) {
 //! lambert while its untextured neighbour stays neutral gray.
 TEST(VulkanHardware, AlbedoTextureTintsLitMaterialScene) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
@@ -1284,7 +1284,7 @@ TEST(VulkanHardware, AlbedoTextureTintsLitMaterialScene) {
   const auto& gltf_import = imported.value();
 
   GpuSceneHarness h;
-  if (!h.initialize("OmniCppAlbedoTint")) {
+  if (!h.initialize("WarploomAlbedoTint")) {
     GTEST_SKIP() << "Device does not support descriptor indexing (bindless)";
   }
   GpuMeshUpload upload;
@@ -1296,7 +1296,7 @@ TEST(VulkanHardware, AlbedoTextureTintsLitMaterialScene) {
       std::array<std::uint8_t, 4>{255U, 0U, 0U, 255U}, red_tex));
   ASSERT_TRUE(h.bind_albedo(red_tex, 1U));
 
-  omnicpp::render::VulkanSceneResourceRegistry registry;
+  warploom::render::VulkanSceneResourceRegistry registry;
   const auto mesh_handle = registry.create_mesh(upload.mesh);
   const std::array<float, 4> opaque_white{1.0f, 1.0f, 1.0f, 1.0f};
   const auto plain_material = registry.create_material({opaque_white});
@@ -1307,29 +1307,29 @@ TEST(VulkanHardware, AlbedoTextureTintsLitMaterialScene) {
   ASSERT_TRUE(textured_material.valid());
   ASSERT_TRUE(red_texture.valid());
 
-  omnicpp::core::World world;
+  warploom::core::World world;
   const auto camera_entity = world.create_entity();
   const auto left_entity = world.create_entity();
   const auto right_entity = world.create_entity();
-  omnicpp::render::SceneCameraComponent camera_component;
+  warploom::render::SceneCameraComponent camera_component;
   make_perspective(1.05f, 1.0f, 0.1f, 100.0f, camera_component.view_projection);
-  world.add_component<omnicpp::render::SceneCameraComponent>(camera_entity,
+  world.add_component<warploom::render::SceneCameraComponent>(camera_entity,
                                                              camera_component);
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       left_entity, {nullptr, true, mesh_handle, plain_material, nullptr});
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       right_entity, {nullptr, true, mesh_handle, plain_material, nullptr});
-  omnicpp::render::SceneTransformComponent left_transform;
-  omnicpp::render::SceneTransformComponent right_transform;
+  warploom::render::SceneTransformComponent left_transform;
+  warploom::render::SceneTransformComponent right_transform;
   make_translation(-1.7f, 0.0f, -7.0f, left_transform.model);
   make_translation(1.7f, 0.0f, -7.0f, right_transform.model);
-  world.add_component<omnicpp::render::SceneTransformComponent>(left_entity,
+  world.add_component<warploom::render::SceneTransformComponent>(left_entity,
                                                                 left_transform);
-  world.add_component<omnicpp::render::SceneTransformComponent>(right_entity,
+  world.add_component<warploom::render::SceneTransformComponent>(right_entity,
                                                                 right_transform);
 
   const auto snapshot = [&]() {
-    auto scene = omnicpp::render::extract_vulkan_scene(
+    auto scene = warploom::render::extract_vulkan_scene(
         world, registry, h.pipeline.pipeline(), h.pipeline.pipeline_layout());
     scene.texture_set = h.albedo_set;
     return scene;
@@ -1340,7 +1340,7 @@ TEST(VulkanHardware, AlbedoTextureTintsLitMaterialScene) {
   const auto untextured = h.render(snapshot());
   ASSERT_TRUE(untextured.submitted);
   // Frame B: switch only the right cube to the red-albedo material.
-  world.get_component<omnicpp::render::SceneRenderableComponent>(right_entity)
+  world.get_component<warploom::render::SceneRenderableComponent>(right_entity)
       .material_handle = textured_material;
   const auto textured = h.render(snapshot());
   ASSERT_TRUE(textured.submitted);
@@ -1375,7 +1375,7 @@ TEST(VulkanHardware, AlbedoTextureTintsLitMaterialScene) {
 //! feeds the registry scene path.
 TEST(VulkanHardware, GltfSceneGraphRendersInstances) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
@@ -1393,7 +1393,7 @@ TEST(VulkanHardware, GltfSceneGraphRendersInstances) {
       doc.substr(doc.find(R"("buffers")"));
 
   std::string detail;
-  auto imported = omnicpp::asset::import_gltf_scene(
+  auto imported = warploom::asset::import_gltf_scene(
       json.data(), json.size(), cube.bin.data(), cube.bin.size(), 0U, &detail);
   ASSERT_TRUE(imported.is_ok()) << detail;
   const auto& scene = imported.value();
@@ -1409,13 +1409,13 @@ TEST(VulkanHardware, GltfSceneGraphRendersInstances) {
   EXPECT_NEAR(scene.nodes[1].model[14], -7.0f, 0.001f);
 
   GpuSceneHarness h;
-  if (!h.initialize("OmniCppSceneGraph")) {
+  if (!h.initialize("WarploomSceneGraph")) {
     GTEST_SKIP() << "Device does not support descriptor indexing (bindless)";
   }
   GpuMeshUpload upload;
   ASSERT_TRUE(upload.create(h, scene.meshes[0]));
 
-  omnicpp::render::VulkanSceneResourceRegistry registry;
+  warploom::render::VulkanSceneResourceRegistry registry;
   const auto mesh_handle = registry.create_mesh(upload.mesh);
   const std::array<float, 4> green{0.0f, 1.0f, 0.0f, 1.0f};
   const std::array<float, 4> red{1.0f, 0.0f, 0.0f, 1.0f};
@@ -1425,31 +1425,31 @@ TEST(VulkanHardware, GltfSceneGraphRendersInstances) {
   ASSERT_TRUE(material_green.valid());
   ASSERT_TRUE(material_red.valid());
 
-  omnicpp::core::World world;
+  warploom::core::World world;
   const auto camera_entity = world.create_entity();
   const auto left_entity = world.create_entity();
   const auto right_entity = world.create_entity();
-  omnicpp::render::SceneCameraComponent camera_component;
+  warploom::render::SceneCameraComponent camera_component;
   make_perspective(1.05f, 1.0f, 0.1f, 100.0f, camera_component.view_projection);
-  world.add_component<omnicpp::render::SceneCameraComponent>(camera_entity,
+  world.add_component<warploom::render::SceneCameraComponent>(camera_entity,
                                                              camera_component);
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       left_entity, {nullptr, true, mesh_handle, material_green, nullptr});
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       right_entity, {nullptr, true, mesh_handle, material_red, nullptr});
-  omnicpp::render::SceneTransformComponent left_transform;
-  omnicpp::render::SceneTransformComponent right_transform;
+  warploom::render::SceneTransformComponent left_transform;
+  warploom::render::SceneTransformComponent right_transform;
   std::copy(scene.nodes[0].model.begin(), scene.nodes[0].model.end(),
             left_transform.model.begin());
   std::copy(scene.nodes[1].model.begin(), scene.nodes[1].model.end(),
             right_transform.model.begin());
-  world.add_component<omnicpp::render::SceneTransformComponent>(left_entity,
+  world.add_component<warploom::render::SceneTransformComponent>(left_entity,
                                                                 left_transform);
-  world.add_component<omnicpp::render::SceneTransformComponent>(right_entity,
+  world.add_component<warploom::render::SceneTransformComponent>(right_entity,
                                                                 right_transform);
 
   auto snapshot = [&]() {
-    auto scene_snapshot = omnicpp::render::extract_vulkan_scene(
+    auto scene_snapshot = warploom::render::extract_vulkan_scene(
         world, registry, h.pipeline.pipeline(), h.pipeline.pipeline_layout());
     scene_snapshot.texture_set = h.albedo_set;
     return scene_snapshot;
@@ -1479,7 +1479,7 @@ TEST(VulkanHardware, GltfSceneGraphRendersInstances) {
 //! framebuffer in one frame.
 TEST(VulkanHardware, MultiMaterialGltfMeshRendersBothPrimitiveTextures) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
@@ -1521,25 +1521,25 @@ TEST(VulkanHardware, MultiMaterialGltfMeshRendersBothPrimitiveTextures) {
   EXPECT_EQ(mesh.images[1].rgba[1], 255U);
 
   GpuSceneHarness h;
-  if (!h.initialize("OmniCppMultiMaterial")) {
+  if (!h.initialize("WarploomMultiMaterial")) {
     GTEST_SKIP() << "Device does not support descriptor indexing (bindless)";
   }
 
   // Upload each primitive's vertex/index slice as its own mesh (CPU slice).
   struct GpuSlice {
-    omnicpp::render::Allocation vertex_allocation{};
-    omnicpp::render::Allocation index_allocation{};
-    omnicpp::render::SceneMesh mesh{};
+    warploom::render::Allocation vertex_allocation{};
+    warploom::render::Allocation index_allocation{};
+    warploom::render::SceneMesh mesh{};
   };
   GpuSlice slices[2];
   for (std::size_t p = 0; p < 2U; ++p) {
     const auto& prim = mesh.primitives[p];
     const std::size_t vertex_floats =
-        prim.vertex_count * omnicpp::asset::kSceneVertexFloats;
+        prim.vertex_count * warploom::asset::kSceneVertexFloats;
     std::vector<float> slice_vertices(vertex_floats);
     std::memcpy(slice_vertices.data(),
                 mesh.vertices.data() +
-                    prim.vertex_offset * omnicpp::asset::kSceneVertexFloats,
+                    prim.vertex_offset * warploom::asset::kSceneVertexFloats,
                 vertex_floats * sizeof(float));
     std::vector<std::uint32_t> slice_indices(prim.index_count);
     for (std::size_t i = 0; i < prim.index_count; ++i) {
@@ -1583,7 +1583,7 @@ TEST(VulkanHardware, MultiMaterialGltfMeshRendersBothPrimitiveTextures) {
   ASSERT_TRUE(h.bind_albedo(red_tex, 1U));
   ASSERT_TRUE(h.bind_albedo(green_tex, 2U));
 
-  omnicpp::render::VulkanSceneResourceRegistry registry;
+  warploom::render::VulkanSceneResourceRegistry registry;
   const auto mesh_a = registry.create_mesh(slices[0].mesh);
   const auto mesh_b = registry.create_mesh(slices[1].mesh);
   const auto texture_red = registry.create_texture({red_tex.view, red_tex.sampler, 1U});
@@ -1596,31 +1596,31 @@ TEST(VulkanHardware, MultiMaterialGltfMeshRendersBothPrimitiveTextures) {
   ASSERT_TRUE(material_red.valid());
   ASSERT_TRUE(material_green.valid());
 
-  omnicpp::core::World world;
+  warploom::core::World world;
   const auto camera_entity = world.create_entity();
   const auto left_entity = world.create_entity();
   const auto right_entity = world.create_entity();
-  omnicpp::render::SceneCameraComponent camera_component;
+  warploom::render::SceneCameraComponent camera_component;
   make_perspective(1.05f, 1.0f, 0.1f, 100.0f, camera_component.view_projection);
-  world.add_component<omnicpp::render::SceneCameraComponent>(camera_entity,
+  world.add_component<warploom::render::SceneCameraComponent>(camera_entity,
                                                              camera_component);
   // Geometry places the red cube at x=0 and the green cube at x=+2.5; both are
   // pushed 7 units in front of the camera.
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       left_entity, {nullptr, true, mesh_a, material_red, nullptr});
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       right_entity, {nullptr, true, mesh_b, material_green, nullptr});
-  omnicpp::render::SceneTransformComponent left_transform;
-  omnicpp::render::SceneTransformComponent right_transform;
+  warploom::render::SceneTransformComponent left_transform;
+  warploom::render::SceneTransformComponent right_transform;
   make_translation(0.0f, 0.0f, -7.0f, left_transform.model);
   make_translation(0.0f, 0.0f, -7.0f, right_transform.model);
-  world.add_component<omnicpp::render::SceneTransformComponent>(left_entity,
+  world.add_component<warploom::render::SceneTransformComponent>(left_entity,
                                                                 left_transform);
-  world.add_component<omnicpp::render::SceneTransformComponent>(right_entity,
+  world.add_component<warploom::render::SceneTransformComponent>(right_entity,
                                                                 right_transform);
 
   auto snapshot = [&]() {
-    auto scene_snapshot = omnicpp::render::extract_vulkan_scene(
+    auto scene_snapshot = warploom::render::extract_vulkan_scene(
         world, registry, h.pipeline.pipeline(), h.pipeline.pipeline_layout());
     scene_snapshot.texture_set = h.albedo_set;
     return scene_snapshot;
@@ -1685,14 +1685,14 @@ TEST(VulkanHardware, MultiMaterialGltfMeshRendersBothPrimitiveTextures) {
 //! renders as N scene draws without CPU-side geometry copies.
 TEST(VulkanHardware, MultiMaterialMeshSplitsIntoSharedBufferDraws) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
   const TwoCubeFixture doc = make_two_cube_multimaterial_gltf(
       "textures/red.png", "textures/green.png");
   std::size_t loader_calls = 0;
-  omnicpp::asset::ExternalFileLoader loader =
+  warploom::asset::ExternalFileLoader loader =
       [&](const std::string& uri, std::string& error,
           std::vector<std::uint8_t>& bytes) -> bool {
         ++loader_calls;
@@ -1726,7 +1726,7 @@ TEST(VulkanHardware, MultiMaterialMeshSplitsIntoSharedBufferDraws) {
   EXPECT_EQ(loader_calls, 2U);
 
   GpuSceneHarness h;
-  if (!h.initialize("OmniCppSplitDraws")) {
+  if (!h.initialize("WarploomSplitDraws")) {
     GTEST_SKIP() << "Device does not support descriptor indexing (bindless)";
   }
 
@@ -1742,14 +1742,14 @@ TEST(VulkanHardware, MultiMaterialMeshSplitsIntoSharedBufferDraws) {
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   ASSERT_TRUE(vertex_buffer.is_ok());
   ASSERT_TRUE(index_buffer.is_ok());
-  omnicpp::render::Allocation vertex_allocation = vertex_buffer.value();
-  omnicpp::render::Allocation index_allocation = index_buffer.value();
+  warploom::render::Allocation vertex_allocation = vertex_buffer.value();
+  warploom::render::Allocation index_allocation = index_buffer.value();
   std::memcpy(vertex_allocation.mapped, mesh.vertices.data(), vertex_bytes);
   std::memcpy(index_allocation.mapped, mesh.indices.data(), index_bytes);
   const VkDescriptorSet shared_set = h.make_mesh_set(vertex_allocation.buffer);
   ASSERT_NE(shared_set, VK_NULL_HANDLE);
 
-  omnicpp::render::SceneMesh red_submesh;
+  warploom::render::SceneMesh red_submesh;
   red_submesh.vertex_buffer = vertex_allocation.buffer;
   red_submesh.index_buffer = index_allocation.buffer;
   red_submesh.descriptor_set = shared_set;
@@ -1757,7 +1757,7 @@ TEST(VulkanHardware, MultiMaterialMeshSplitsIntoSharedBufferDraws) {
       mesh.primitives[0].index_offset * sizeof(std::uint32_t);
   red_submesh.index_count =
       static_cast<std::uint32_t>(mesh.primitives[0].index_count);
-  omnicpp::render::SceneMesh green_submesh = red_submesh;
+  warploom::render::SceneMesh green_submesh = red_submesh;
   green_submesh.index_offset =
       mesh.primitives[1].index_offset * sizeof(std::uint32_t);
   green_submesh.index_count =
@@ -1781,7 +1781,7 @@ TEST(VulkanHardware, MultiMaterialMeshSplitsIntoSharedBufferDraws) {
   ASSERT_TRUE(h.bind_albedo(red_tex, 1U));
   ASSERT_TRUE(h.bind_albedo(green_tex, 2U));
 
-  omnicpp::render::VulkanSceneResourceRegistry registry;
+  warploom::render::VulkanSceneResourceRegistry registry;
   const auto mesh_a = registry.create_mesh(red_submesh);
   const auto mesh_b = registry.create_mesh(green_submesh);
   const auto texture_red = registry.create_texture({red_tex.view, red_tex.sampler, 1U});
@@ -1794,31 +1794,31 @@ TEST(VulkanHardware, MultiMaterialMeshSplitsIntoSharedBufferDraws) {
   ASSERT_TRUE(material_red.valid());
   ASSERT_TRUE(material_green.valid());
 
-  omnicpp::core::World world;
+  warploom::core::World world;
   const auto camera_entity = world.create_entity();
   const auto left_entity = world.create_entity();
   const auto right_entity = world.create_entity();
-  omnicpp::render::SceneCameraComponent camera_component;
+  warploom::render::SceneCameraComponent camera_component;
   make_perspective(1.05f, 1.0f, 0.1f, 100.0f, camera_component.view_projection);
-  world.add_component<omnicpp::render::SceneCameraComponent>(camera_entity,
+  world.add_component<warploom::render::SceneCameraComponent>(camera_entity,
                                                              camera_component);
   // One mesh instance split into two draws: same transform for both (the
   // geometry already carries the per-cube X offsets).
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       left_entity, {nullptr, true, mesh_a, material_red, nullptr});
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       right_entity, {nullptr, true, mesh_b, material_green, nullptr});
-  omnicpp::render::SceneTransformComponent left_transform;
-  omnicpp::render::SceneTransformComponent right_transform;
+  warploom::render::SceneTransformComponent left_transform;
+  warploom::render::SceneTransformComponent right_transform;
   make_translation(0.0f, 0.0f, -7.0f, left_transform.model);
   make_translation(0.0f, 0.0f, -7.0f, right_transform.model);
-  world.add_component<omnicpp::render::SceneTransformComponent>(left_entity,
+  world.add_component<warploom::render::SceneTransformComponent>(left_entity,
                                                                 left_transform);
-  world.add_component<omnicpp::render::SceneTransformComponent>(right_entity,
+  world.add_component<warploom::render::SceneTransformComponent>(right_entity,
                                                                 right_transform);
 
   auto snapshot = [&]() {
-    auto scene_snapshot = omnicpp::render::extract_vulkan_scene(
+    auto scene_snapshot = warploom::render::extract_vulkan_scene(
         world, registry, h.pipeline.pipeline(), h.pipeline.pipeline_layout());
     scene_snapshot.texture_set = h.albedo_set;
     return scene_snapshot;

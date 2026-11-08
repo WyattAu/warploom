@@ -9,10 +9,10 @@ rm -rf "$DIR"; mkdir -p "$DIR"
 SPVDIR=$(find "$(pwd)/build/vulkan-validation" -name '*.spv' | head -1 | xargs dirname)
 
 VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation \
-OMNICPP_SHADER_DIR="$SPVDIR" \
+WARPLOOM_SHADER_DIR="$SPVDIR" \
 WARPLOOM_MAX_FRAMES=4000 \
-OMNICPP_FIXED_DT=0.01666667 \
-OMNICPP_TELEMETRY_DIR="$DIR" \
+WARPLOOM_FIXED_DT=0.01666667 \
+WARPLOOM_TELEMETRY_DIR="$DIR" \
   ./build/vulkan-validation/bin/warploom_viewport > "$DIR/run.log" 2>&1 &
 VP_PID=$!
 echo "$VP_PID" > "$DIR/pid"
@@ -31,7 +31,7 @@ fi
 # Locate and focus the window (poll, no blocking sync).
 WID=""
 for i in $(seq 1 25); do
-  WID=$(xdotool search --name 'OmniCpp Viewport' 2>/dev/null | head -1)
+  WID=$(xdotool search --name 'Warploom Viewport' 2>/dev/null | head -1)
   [ -n "$WID" ] && break
   sleep 0.2
 done

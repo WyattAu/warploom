@@ -4,7 +4,7 @@
 
 #include <warploom/render/vulkan_fullscreen.hpp>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -13,7 +13,7 @@ namespace warploom::render {
 ::warploom::core::Result<void> record_fullscreen_draw(
     VkCommandBuffer command_buffer, const FullscreenPass& pass,
     VkDescriptorSet set0) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!command_buffer || pass.pipeline == VK_NULL_HANDLE ||
       pass.pipeline_layout == VK_NULL_HANDLE) {
     return ::warploom::core::Result<void>::error(
@@ -56,7 +56,7 @@ namespace warploom::render {
 ::warploom::core::Result<void> record_fullscreen_pass(
     VkCommandBuffer command_buffer, const FullscreenPass& pass,
     VkDescriptorSet set0) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!command_buffer || pass.render_pass == VK_NULL_HANDLE ||
       pass.framebuffer == VK_NULL_HANDLE || pass.width == 0U ||
       pass.height == 0U) {
@@ -88,7 +88,7 @@ namespace warploom::render {
 ::warploom::core::Result<void> record_fullscreen_dynamic_pass(
     VkCommandBuffer command_buffer, const DynamicFullscreenPass& pass,
     VkDescriptorSet set0) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!command_buffer || pass.view == VK_NULL_HANDLE ||
       pass.draw.width == 0U || pass.draw.height == 0U) {
     return ::warploom::core::Result<void>::error(

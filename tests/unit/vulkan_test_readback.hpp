@@ -9,10 +9,10 @@
 #include <cstring>
 #include <vector>
 
-#if defined(WARPLOOM_HAS_VULKAN) || defined(OMNICPP_HAS_VULKAN)
+#if defined(WARPLOOM_HAS_VULKAN) || defined(WARPLOOM_HAS_VULKAN)
 #include <vulkan/vulkan.h>
 
-namespace omnicpp_test {
+namespace warploom_test {
 
 inline bool find_host_memory_type(VkPhysicalDevice physical_device, std::uint32_t type_bits,
                            VkMemoryPropertyFlags required, std::uint32_t& index) {
@@ -352,5 +352,5 @@ inline ReadbackResult readback_swapchain_image(VkPhysicalDevice physical_device,
 
 
 
-}  // namespace omnicpp_test
+}  // namespace warploom_test
 #endif

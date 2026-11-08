@@ -46,17 +46,17 @@
 
 namespace {
 
-using omnicpp::asset::GltfAnimationDocument;
-using omnicpp::asset::GltfChannel;
-using omnicpp::asset::GltfSampler;
-using omnicpp::asset::GltfSamplerInterpolation;
-using omnicpp::render::Allocation;
-using omnicpp::render::PbrMaterialData;
-using omnicpp::render::SceneMatrix;
-using omnicpp::render::SceneMesh;
-using omnicpp::render::ScenePbrObject;
-using omnicpp::render::VulkanPbrScene;
-using omnicpp::render::scene_identity_matrix;
+using warploom::asset::GltfAnimationDocument;
+using warploom::asset::GltfChannel;
+using warploom::asset::GltfSampler;
+using warploom::asset::GltfSamplerInterpolation;
+using warploom::render::Allocation;
+using warploom::render::PbrMaterialData;
+using warploom::render::SceneMatrix;
+using warploom::render::SceneMesh;
+using warploom::render::ScenePbrObject;
+using warploom::render::VulkanPbrScene;
+using warploom::render::scene_identity_matrix;
 
 SceneMatrix make_perspective(float fov, float aspect, float zn, float zf) {
   SceneMatrix m = scene_identity_matrix();
@@ -104,11 +104,11 @@ MannequinAsset load_asset() {
 
 //! Sample every channel of the clip into the node TRS components.
 void apply_pose(GltfAnimationDocument& doc,
-                const omnicpp::asset::GltfAnimationImport& anim,
+                const warploom::asset::GltfAnimationImport& anim,
                 float time) {
   for (const auto& channel : anim.channels) {
     float out[4];
-    omnicpp::asset::sample_gltf_channel(anim.samplers[channel.sampler], time,
+    warploom::asset::sample_gltf_channel(anim.samplers[channel.sampler], time,
                                         out);
     auto& node = doc.nodes[channel.target_node];
     switch (channel.path) {
@@ -177,7 +177,7 @@ void compute_globals(const GltfAnimationDocument& doc,
   std::vector<std::uint8_t> done(doc.nodes.size(), 0);
   std::vector<std::size_t> stack;
   for (std::size_t root = 0; root < doc.nodes.size(); ++root) {
-    if (doc.nodes[root].parent != omnicpp::asset::kGltfNoParent) continue;
+    if (doc.nodes[root].parent != warploom::asset::kGltfNoParent) continue;
     stack.push_back(root);
     while (!stack.empty()) {
       const std::size_t cur = stack.back();
@@ -185,7 +185,7 @@ void compute_globals(const GltfAnimationDocument& doc,
       if (done[cur] != 0) continue;
       SceneMatrix local = compose(locals[cur]);
       const std::size_t parent = doc.nodes[cur].parent;
-      globals[cur] = parent == omnicpp::asset::kGltfNoParent
+      globals[cur] = parent == warploom::asset::kGltfNoParent
                          ? local
                          : mul(globals[parent], local);
       done[cur] = 1;
@@ -204,7 +204,7 @@ struct SolidTexture {
 };
 
 bool make_white(VkDevice d, VkPhysicalDevice pd, VkQueue q, uint32_t f,
-                omnicpp::render::VulkanMemoryAllocator& a,
+                warploom::render::VulkanMemoryAllocator& a,
                 SolidTexture& out) {
   out = {};
   VkImageCreateInfo ii{};
@@ -220,7 +220,7 @@ bool make_white(VkDevice d, VkPhysicalDevice pd, VkQueue q, uint32_t f,
   auto m = a.bind_image(out.img, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   if (!m.is_ok()) return false;
   out.alloc = m.value();
-  omnicpp::render::VulkanFrameUploadArena arena;
+  warploom::render::VulkanFrameUploadArena arena;
   if (!arena.initialize(d, pd, f, 1, 1 << 20).is_ok()) return false;
   if (!arena.begin_frame(0).is_ok()) return false;
   auto s = arena.acquire(4);
@@ -246,7 +246,7 @@ bool make_white(VkDevice d, VkPhysicalDevice pd, VkQueue q, uint32_t f,
   return true;
 }
 
-void destroy_solid(VkDevice d, omnicpp::render::VulkanMemoryAllocator& a,
+void destroy_solid(VkDevice d, warploom::render::VulkanMemoryAllocator& a,
                    SolidTexture& t) {
   if (t.sampler) vkDestroySampler(d, t.sampler, nullptr);
   if (t.view) vkDestroyImageView(d, t.view, nullptr);
@@ -257,15 +257,15 @@ void destroy_solid(VkDevice d, omnicpp::render::VulkanMemoryAllocator& a,
 
 //! One skinned mesh of the mannequin, GPU-ready.
 struct SkinnedMeshGpu {
-  omnicpp::render::Allocation va{};
-  omnicpp::render::Allocation ia{};
+  warploom::render::Allocation va{};
+  warploom::render::Allocation ia{};
   SceneMesh mesh{};
 };
 
 struct MannequinHarness {
-  omnicpp::render::VulkanContext ctx;
-  omnicpp::render::VulkanMemoryAllocator alloc;
-  omnicpp::render::VulkanDescriptorManager desc;
+  warploom::render::VulkanContext ctx;
+  warploom::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanDescriptorManager desc;
   VkDescriptorSetLayout mesh_layout{};
   VkDescriptorSetLayout tex_layout{};
   VkDescriptorSetLayout mat_layout{};
@@ -277,8 +277,8 @@ struct MannequinHarness {
   std::vector<SkinnedMeshGpu> meshes;
   Allocation mat_buf{};
   Allocation bone_buf{};
-  omnicpp::render::VulkanOffscreenTarget target;
-  omnicpp::render::VulkanPipeline pipe;
+  warploom::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanPipeline pipe;
   uint32_t qf{0};
 
   bool init(const char* name) {
@@ -386,8 +386,8 @@ struct MannequinHarness {
   }
 
   //! Import + upload one mannequin mesh; returns false on any failure.
-  bool upload_mesh(const omnicpp::asset::GltfMeshImport& import,
-                   const omnicpp::asset::GltfSkinBinding& binding,
+  bool upload_mesh(const warploom::asset::GltfMeshImport& import,
+                   const warploom::asset::GltfSkinBinding& binding,
                    const PbrMaterialData& material) {
     // Combined SSBO: [static verts][joints as float x4][weights x4].
     std::vector<float> combined = import.vertices;
@@ -442,11 +442,11 @@ struct MannequinHarness {
     std::memcpy(bone_buf.mapped, bones, count * 64);
   }
 
-  omnicpp_test::ReadbackResult render(const VulkanPbrScene& scene) {
+  warploom_test::ReadbackResult render(const VulkanPbrScene& scene) {
     VkDevice dev = ctx.device();
-    auto pr = omnicpp::render::VulkanRenderer::create_command_pool(dev, qf);
+    auto pr = warploom::render::VulkanRenderer::create_command_pool(dev, qf);
     if (!pr.is_ok()) return {};
-    auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cr = warploom::render::VulkanRenderer::allocate_command_buffer(
         dev, pr.value());
     if (!cr.is_ok()) {
       vkDestroyCommandPool(dev, pr.value(), nullptr);
@@ -525,7 +525,7 @@ struct MannequinHarness {
     vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
     vkDestroyFence(dev, fence, nullptr);
     vkDestroyCommandPool(dev, pr.value(), nullptr);
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         ctx.physical_device(), dev, ctx.graphics_queue(), qf, target.image(),
         target.format(), 256, 256, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -559,7 +559,7 @@ TEST(VulkanHardware, GpuMannequinWalkCycle) {
   if (!asset.loaded) GTEST_SKIP() << "mannequin asset not found";
 
   std::string error;
-  auto imported = omnicpp::asset::import_gltf_animation_document(
+  auto imported = warploom::asset::import_gltf_animation_document(
       asset.json.data(), asset.json.size(),
       reinterpret_cast<const std::uint8_t*>(asset.bin.data()), asset.bin.size(),
       &error);
@@ -681,7 +681,7 @@ TEST(VulkanHardware, GpuMannequinThroughRecordPbrScene) {
   if (!asset.loaded) GTEST_SKIP() << "mannequin asset not found";
 
   std::string error;
-  auto imported = omnicpp::asset::import_gltf_animation_document(
+  auto imported = warploom::asset::import_gltf_animation_document(
       asset.json.data(), asset.json.size(),
       reinterpret_cast<const std::uint8_t*>(asset.bin.data()), asset.bin.size(),
       &error);
@@ -749,13 +749,13 @@ TEST(VulkanHardware, GpuMannequinThroughRecordPbrScene) {
   // wrap the call. Record a minimal pass around it.
   auto render_through_record = [&]() {
     VkDevice dev = h.ctx.device();
-    auto pr = omnicpp::render::VulkanRenderer::create_command_pool(dev, h.qf);
-    if (!pr.is_ok()) return omnicpp_test::ReadbackResult{};
-    auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto pr = warploom::render::VulkanRenderer::create_command_pool(dev, h.qf);
+    if (!pr.is_ok()) return warploom_test::ReadbackResult{};
+    auto cr = warploom::render::VulkanRenderer::allocate_command_buffer(
         dev, pr.value());
     if (!cr.is_ok()) {
       vkDestroyCommandPool(dev, pr.value(), nullptr);
-      return omnicpp_test::ReadbackResult{};
+      return warploom_test::ReadbackResult{};
     }
     VkCommandBuffer cb = cr.value();
     VkFenceCreateInfo fi{};
@@ -778,14 +778,14 @@ TEST(VulkanHardware, GpuMannequinThroughRecordPbrScene) {
     rpb.pClearValues = clears;
     vkCmdBeginRenderPass(cb, &rpb, VK_SUBPASS_CONTENTS_INLINE);
     const auto recorded =
-        omnicpp::render::VulkanRenderer{}.record_pbr_scene(cb, scene, 256, 256);
+        warploom::render::VulkanRenderer{}.record_pbr_scene(cb, scene, 256, 256);
     vkCmdEndRenderPass(cb);
     vkEndCommandBuffer(cb);
     if (!recorded.is_ok()) {
       vkDestroyFence(dev, fence, nullptr);
       vkDestroyCommandPool(dev, pr.value(), nullptr);
       ADD_FAILURE() << "record_pbr_scene failed";
-      return omnicpp_test::ReadbackResult{};
+      return warploom_test::ReadbackResult{};
     }
     vkResetFences(dev, 1, &fence);
     VkSubmitInfo si{};
@@ -796,7 +796,7 @@ TEST(VulkanHardware, GpuMannequinThroughRecordPbrScene) {
     vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
     vkDestroyFence(dev, fence, nullptr);
     vkDestroyCommandPool(dev, pr.value(), nullptr);
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         h.ctx.physical_device(), dev, h.ctx.graphics_queue(), h.qf,
         h.target.image(), h.target.format(), 256, 256,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,

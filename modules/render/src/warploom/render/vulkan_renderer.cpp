@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <cstring>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -58,7 +58,7 @@ std::string GpuTiming::summary() const {
 }
 
 void FrameResources::cleanup(VkDevice device) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device) {
     if (in_flight_fence) vkDestroyFence(device, in_flight_fence, nullptr);
     if (image_available_semaphore) vkDestroySemaphore(device, image_available_semaphore, nullptr);
@@ -117,7 +117,7 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
     [[maybe_unused]] std::uint32_t target_width,
     [[maybe_unused]] std::uint32_t target_height,
     [[maybe_unused]] VkFormat headless_present_format) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!context.is_initialized() || !context.device()) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
@@ -345,7 +345,7 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
 ::warploom::core::Result<void> VulkanRenderer::record_scene(
     VkCommandBuffer command_buffer, const VulkanScene& scene,
     std::uint32_t width, std::uint32_t height) const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!command_buffer || !scene.pipeline || !scene.pipeline_layout ||
       width == 0U || height == 0U) {
     return ::warploom::core::Result<void>::error(
@@ -430,7 +430,7 @@ VulkanRenderer::~VulkanRenderer() { cleanup(nullptr); }
 ::warploom::core::Result<void> VulkanRenderer::record_pbr_scene(
     VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
     std::uint32_t width, std::uint32_t height) const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!command_buffer || !scene.pipeline || !scene.pipeline_layout ||
       width == 0U || height == 0U) {
     return ::warploom::core::Result<void>::error(
@@ -645,7 +645,7 @@ struct PbrFrameRecordCtx {
 };
 
 // Maybe unused: the only reference is the execute_graph call inside
-// #ifdef OMNICPP_HAS_VULKAN, and the sanitizer presets build with Vulkan off.
+// #ifdef WARPLOOM_HAS_VULKAN, and the sanitizer presets build with Vulkan off.
 [[maybe_unused]] void pbr_frame_render_cb(VkCommandBuffer cb,
                                          const GraphPass& pass,
                                          void* user_data) {
@@ -663,7 +663,7 @@ struct PbrFrameRecordCtx {
 ::warploom::core::Result<void> VulkanRenderer::record_shadow_pre_pass(
     VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
     std::uint32_t width, std::uint32_t height) const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!command_buffer || scene.shadow_pipeline == VK_NULL_HANDLE ||
       scene.shadow_pipeline_layout == VK_NULL_HANDLE || width == 0U ||
       height == 0U) {
@@ -795,7 +795,7 @@ struct PbrFrameRecordCtx {
 ::warploom::core::Result<void> VulkanRenderer::record_pbr_frame(
     VkCommandBuffer command_buffer, const VulkanPbrScene& scene,
     const PbrFrameTargets& targets) const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!command_buffer || targets.render_pass == VK_NULL_HANDLE ||
       targets.framebuffer == VK_NULL_HANDLE || targets.width == 0U ||
       targets.height == 0U) {
@@ -872,7 +872,7 @@ struct PbrFrameRecordCtx {
 #endif
 }
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 namespace {
 
 //! Record shims for the one-submission GPU-driven frame: user_data carries
@@ -949,11 +949,11 @@ void gpu_driven_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 }
 
 }  // namespace
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN
 
 ::warploom::core::Result<void> VulkanRenderer::record_gpu_driven_cull(
     VkCommandBuffer command_buffer, const GpuDrivenFrame& frame) const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!command_buffer || frame.cull_pipeline == VK_NULL_HANDLE ||
       frame.cull_pipeline_layout == VK_NULL_HANDLE ||
       frame.cull_set == VK_NULL_HANDLE || frame.object_count == 0U ||
@@ -999,7 +999,7 @@ void gpu_driven_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 ::warploom::core::Result<void> VulkanRenderer::record_gpu_driven_draw(
     VkCommandBuffer command_buffer, std::uint32_t width, std::uint32_t height,
     const GpuDrivenFrame& frame) const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!command_buffer || frame.draw_pipeline == VK_NULL_HANDLE ||
       frame.draw_pipeline_layout == VK_NULL_HANDLE ||
       frame.draw_set_count == 0U ||
@@ -1041,7 +1041,7 @@ void gpu_driven_render_cb(VkCommandBuffer cb, const GraphPass& pass,
 
 ::warploom::core::Result<void> VulkanRenderer::record_pbr_frame_gpu_driven(
     VkCommandBuffer command_buffer, const GpuDrivenFrame& frame) const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!command_buffer || frame.cull_pipeline == VK_NULL_HANDLE ||
       frame.cull_pipeline_layout == VK_NULL_HANDLE ||
       frame.cull_set == VK_NULL_HANDLE || frame.object_count == 0U ||
@@ -1127,7 +1127,7 @@ void VulkanRenderer::record_unified_frame_dynamic_node(
     // one (viewport/scissor, scene draw, boundary stamp) inside the
     // executor-owned rendering scope. record_scene_node_contents is
     // framing-agnostic by construction -- it never begins/ends anything.
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
     if (!node->renderer->record_scene_node_contents(command_buffer,
                                                      node->width,
                                                      node->height) &&
@@ -1155,7 +1155,7 @@ void VulkanRenderer::record_unified_frame_node(
                          const_cast<ComposeStage*>(node->stage));
     return;
   }
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!node->renderer->record_scene_node_contents(command_buffer, node->width,
                                                   node->height) &&
       node->failed != nullptr) {
@@ -1171,7 +1171,7 @@ void VulkanRenderer::record_unified_frame_node(
 #endif
 }
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 bool VulkanRenderer::record_scene_node_contents(
     VkCommandBuffer command_buffer, std::uint32_t width,
     std::uint32_t height) const {
@@ -1233,7 +1233,7 @@ VulkanRenderer::HiZDepthSource VulkanRenderer::select_hiz_depth_source(
 
 ::warploom::core::Result<void> VulkanRenderer::record_sky_pre_draw(
     VkCommandBuffer command_buffer, const VulkanPbrScene& scene) const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!command_buffer) {
     return ::warploom::core::Result<void>::error(
         ::warploom::core::RuntimeError::invalid_config);
@@ -1290,7 +1290,7 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
 }
 
 ::warploom::core::Result<std::uint32_t> VulkanRenderer::begin_frame() {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!initialized_) {
     WARPLOOM_ERROR("render", "begin_frame before initialize()");
     return ::warploom::core::Result<std::uint32_t>::error(
@@ -1399,7 +1399,7 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
 ::warploom::core::Result<void> VulkanRenderer::record_commands(
     std::uint32_t image_index, VkFramebuffer framebuffer,
     std::uint32_t width, std::uint32_t height) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   const std::size_t image_count =
       headless_ ? 1U : (swapchain_ != nullptr ? swapchain_->image_count() : 0U);
   if (!initialized_ || image_index >= image_count) {
@@ -1769,7 +1769,7 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
 
 
 ::warploom::core::Result<void> VulkanRenderer::submit_frame() {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!initialized_ || !frame_acquired_ ||
       acquired_image_index_ >= render_finished_semaphores_.size()) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
@@ -1981,7 +1981,7 @@ void VulkanRenderer::remove_frame_pre_pass_callback(std::size_t index) noexcept 
 }
 
 ::warploom::core::Result<void> VulkanRenderer::present_frame() {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!initialized_ || !frame_acquired_) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
@@ -2045,7 +2045,7 @@ HiZGraphPlan VulkanRenderer::make_hiz_graph_plan(
     return plan;
   }
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   constexpr std::uint32_t kShaderRead = VK_ACCESS_SHADER_READ_BIT;
   constexpr std::uint32_t kShaderWrite = VK_ACCESS_SHADER_WRITE_BIT;
   constexpr std::uint32_t kCompute = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
@@ -2137,7 +2137,7 @@ VulkanHiZPyramid* VulkanRenderer::hiz_pyramid(std::uint32_t index) noexcept {
 }
 
 void VulkanRenderer::destroy_hiz_depth_snapshots() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   // Device is idle at every call site (recreate waits, cleanup waits).
   // Snapshots are bound through hiz_allocator_: release the allocation back
   // BEFORE the allocator itself is torn down (callers order this first).
@@ -2176,7 +2176,7 @@ void VulkanRenderer::destroy_hiz_depth_snapshots() noexcept {
 #endif
 }
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 bool VulkanRenderer::repoint_hiz_compute_sets(std::uint32_t slot) noexcept {
   if (slot >= 2U || hiz_descriptor_manager_ == nullptr ||
       hiz_pyramids_[slot] == nullptr ||
@@ -2216,7 +2216,7 @@ bool VulkanRenderer::repoint_hiz_compute_sets(std::uint32_t slot) noexcept {
 }
 #endif
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 bool VulkanRenderer::ensure_hiz_depth_snapshot(std::uint32_t slot,
                                                 std::uint32_t width,
                                                 std::uint32_t height,
@@ -2427,7 +2427,7 @@ void VulkanRenderer::copy_hiz_depth_to_snapshot(
 #endif
 
 void VulkanRenderer::cleanup_hiz_pipeline_resources() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   // Descriptor sets/layouts must be released before the image views they
   // reference. The device is idle whenever this helper is called.
   destroy_hiz_depth_snapshots();
@@ -2470,7 +2470,7 @@ void VulkanRenderer::cleanup_hiz_pipeline_resources() noexcept {
 void VulkanRenderer::pack_hiz_pyramid_levels(
     VkCommandBuffer command_buffer, const VulkanHiZPyramid* pyramid,
     std::uint32_t levels, PackedPyramid& pack) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (command_buffer == VK_NULL_HANDLE || pyramid == nullptr || levels == 0U ||
       !pack.buffer.is_valid() || pack.level_offsets.size() < levels) {
     return;
@@ -2527,7 +2527,7 @@ void VulkanRenderer::record_hiz_graph_pass(
 
 void VulkanRenderer::record_hiz_dispatch(
     VkCommandBuffer command_buffer, const GraphComputePass& pass) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!command_buffer || active_hiz_record_ == nullptr ||
       !hiz_reduction_pipeline_) return;
   const auto& record = *active_hiz_record_;
@@ -2564,7 +2564,7 @@ void VulkanRenderer::record_hiz_dispatch(
   (void)pass;
 #endif
 }
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 bool VulkanRenderer::record_hiz_reduction(
     VkCommandBuffer command_buffer, const HiZFrameRecord& record) {
   if (!command_buffer || !hiz_direct_enabled_ || !hiz_reduction_pipeline_ ||
@@ -2667,7 +2667,7 @@ struct HizComputeWork {
 
 void VulkanRenderer::record_hiz_compute_work(VkCommandBuffer command_buffer,
                                               void* user_data) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   auto* work = static_cast<HizComputeWork*>(user_data);
   if (work == nullptr || work->renderer == nullptr || command_buffer == VK_NULL_HANDLE) {
     return;
@@ -2723,7 +2723,7 @@ void VulkanRenderer::record_hiz_compute_work(VkCommandBuffer command_buffer,
 
 VkFormat VulkanRenderer::hiz_snapshot_format_for_record(
     const HiZFrameRecord& record) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (compose_ != nullptr &&
       record.depth_image == compose_->scene_depth_image()) {
     return compose_->scene_depth_format();
@@ -2740,7 +2740,7 @@ VkFormat VulkanRenderer::hiz_snapshot_format_for_record(
 
 bool VulkanRenderer::make_hiz_compute_record(std::uint32_t slot,
                                              HiZFrameRecord& record) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!hiz_compute_queue_.is_initialized() || slot >= 2U ||
       hiz_pyramids_[slot] == nullptr ||
       hiz_depth_snapshot_[slot] == VK_NULL_HANDLE ||
@@ -2782,7 +2782,7 @@ bool VulkanRenderer::make_hiz_compute_record(std::uint32_t slot,
 
 ::warploom::core::Result<std::uint64_t>
 VulkanRenderer::compute_reduce_hiz_snapshot(std::uint32_t slot) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!hiz_compute_enabled_) {
     return ::warploom::core::Result<std::uint64_t>::error(
         ::warploom::core::RuntimeError::invalid_config);
@@ -2819,7 +2819,7 @@ VulkanRenderer::compute_reduce_hiz_snapshot(std::uint32_t slot) {
 
 void VulkanRenderer::record_hiz_snapshot_only(
     VkCommandBuffer command_buffer, const HiZFrameRecord& record) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   // Loop28 step 4: the compute leg owns the pyramid now; graphics only
   // persists the depth it just rendered. Same format derivation and same
   // best-effort discipline as the inline path (unknown owner skips).
@@ -2840,7 +2840,7 @@ void VulkanRenderer::record_hiz_snapshot_only(
 
 void VulkanRenderer::pack_hiz_pyramid_for_cull(
     VkCommandBuffer command_buffer) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   // Loop28 step 4, pre-scene half: the cull reads the pack this frame, so
   // the compute pyramid from two frames ago must be packed before the
   // scene records. The slot is this frame's write index: the compute kick
@@ -2865,7 +2865,7 @@ void VulkanRenderer::pack_hiz_pyramid_for_cull(
 }
 
 void VulkanRenderer::kick_hiz_compute_reduce(std::uint32_t slot) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   // Loop28 step 4, submit half: reduce the just-written snapshot on the
   // compute queue and return immediately — no CPU wait. Ordering: the
   // compute submit waits the per-slot gfx_done binary (signalled by the
@@ -2902,7 +2902,7 @@ void VulkanRenderer::kick_hiz_compute_reduce(std::uint32_t slot) noexcept {
 
 ::warploom::core::Result<void> VulkanRenderer::recreate_hiz_resources(
     std::uint32_t render_width, std::uint32_t render_height) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device_ || !physical_device_ || render_width == 0U || render_height == 0U ||
       config_.hiz_tile_size == 0U) {
     return ::warploom::core::Result<void>::error(
@@ -3114,7 +3114,7 @@ void VulkanRenderer::kick_hiz_compute_reduce(std::uint32_t slot) noexcept {
 
 ::warploom::core::Result<void> VulkanRenderer::resync_for_swapchain(
     const VulkanSwapchain& swapchain, VkRenderPass render_pass) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!initialized_ || !device_ || !swapchain.is_valid() || swapchain.image_count() == 0 ||
       !render_pass) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
@@ -3166,13 +3166,13 @@ void VulkanRenderer::kick_hiz_compute_reduce(std::uint32_t slot) noexcept {
 }
 
 void VulkanRenderer::wait_idle() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device_) vkDeviceWaitIdle(device_);
 #endif
 }
 
 void VulkanRenderer::cleanup(VkDevice device) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   VkDevice dev = device ? device : device_;
   if (dev) {
     vkDeviceWaitIdle(dev);
@@ -3237,7 +3237,7 @@ void VulkanRenderer::cleanup(VkDevice device) noexcept {
 }
 
 void VulkanRenderer::resolve_gpu_timestamps(std::uint32_t slot) noexcept {
-#if !defined(OMNICPP_HAS_VULKAN)
+#if !defined(WARPLOOM_HAS_VULKAN)
   (void)slot;  // no query pools without a device: GPU timing stays disabled
 #else
   if (!gpu_timing_enabled_ || !gpu_timing_.available ||

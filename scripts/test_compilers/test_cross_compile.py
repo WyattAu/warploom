@@ -12,8 +12,8 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
-from omni_scripts.build_system.cmake import CMakeWrapper
-from omni_scripts.logging.logger import get_logger, setup_logging
+from warploom_scripts.build_system.cmake import CMakeWrapper
+from warploom_scripts.logging.logger import get_logger, setup_logging
 
 logger = get_logger(__name__)
 

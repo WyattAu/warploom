@@ -25,11 +25,11 @@ run_one() {
   local env_extra=()
   if [ -n "$mode" ]; then env_extra=(WARPLOOM_GPU_DRIVEN="$mode"); fi
   env VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation \
-      OMNICPP_SHADER_DIR="$SPVDIR" \
+      WARPLOOM_SHADER_DIR="$SPVDIR" \
       WARPLOOM_MAX_FRAMES="$FRAMES" \
-      OMNICPP_FIXED_DT=0.01666667 \
-      OMNICPP_TELEMETRY_DIR="$dir" \
-      OMNICPP_MODEL=/nonexistent/cubes_only \
+      WARPLOOM_FIXED_DT=0.01666667 \
+      WARPLOOM_TELEMETRY_DIR="$dir" \
+      WARPLOOM_MODEL=/nonexistent/cubes_only \
       "${env_extra[@]}" \
       "$BIN" > "$dir/run.log" 2>&1
   local status=$?

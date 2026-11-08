@@ -48,16 +48,16 @@ struct LodPush {
 //! the GPU-visible count is exactly 3.
 TEST(VulkanHardware, LodSelectByDistance) {
 #ifdef WARPLOOM_TEST_SHADER_DIR
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppLodTest", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomLodTest", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device()).is_ok());
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
 
   // Words: [0..1] header, [2..25] frustum, spheres, results.
@@ -116,7 +116,7 @@ TEST(VulkanHardware, LodSelectByDistance) {
     words[kResultOffset + i] = 0xDEADBEEFU;  // poison: shader must overwrite
 
   // --- Layout + pipeline. ---
-  std::vector<omnicpp::render::ReflectedBinding> bindings(1);
+  std::vector<warploom::render::ReflectedBinding> bindings(1);
   bindings[0].binding = 0;
   bindings[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   bindings[0].count = 1;
@@ -131,7 +131,7 @@ TEST(VulkanHardware, LodSelectByDistance) {
                                 lod_buf.value().buffer, 0, VK_WHOLE_SIZE)
                   .is_ok());
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   ASSERT_TRUE(pipeline
                   .load_shader_stage_file(context.device(),
                                           WARPLOOM_TEST_SHADER_DIR
@@ -248,16 +248,16 @@ TEST(VulkanHardware, LodSelectByDistance) {
 //! a bogus LOD 8. Clamped, the sentinel survives and the sphere is culled.
 TEST(VulkanHardware, LodSelectClampsThresholdCountToArrayBound) {
 #ifdef WARPLOOM_TEST_SHADER_DIR
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppLodClampTest", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomLodClampTest", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device()).is_ok());
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
 
   constexpr std::uint32_t kN = 1;
@@ -300,7 +300,7 @@ TEST(VulkanHardware, LodSelectClampsThresholdCountToArrayBound) {
   words[kResOff + 0] = 0xDEADBEEFU;
   words[kResOff + 1] = 0xDEADBEEFU;
 
-  std::vector<omnicpp::render::ReflectedBinding> bindings(1);
+  std::vector<warploom::render::ReflectedBinding> bindings(1);
   bindings[0].binding = 0;
   bindings[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   bindings[0].count = 1;
@@ -315,7 +315,7 @@ TEST(VulkanHardware, LodSelectClampsThresholdCountToArrayBound) {
                                 lod_buf.value().buffer, 0, VK_WHOLE_SIZE)
                   .is_ok());
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   ASSERT_TRUE(pipeline
                   .load_shader_stage_file(context.device(),
                                           WARPLOOM_TEST_SHADER_DIR

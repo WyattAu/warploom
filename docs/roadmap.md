@@ -184,8 +184,8 @@ declares a slot 3.
            initialize; the chain captures every resource it creates.
         4. Then a second instance is instantiable and B3b follows.
 
-      Note for whoever does it: the project defines `OMNICPP_HAS_VULKAN` with
-      no value, so `#if OMNICPP_HAS_VULKAN` silently evaluates false. Use
+      Note for whoever does it: the project defines `WARPLOOM_HAS_VULKAN` with
+      no value, so `#if WARPLOOM_HAS_VULKAN` silently evaluates false. Use
       `#ifdef`.
 - [x] **B5 H-Z depth source** — the reduction read
       `render_pass_resource_->depth_image()` unconditionally. Under compose
@@ -809,7 +809,7 @@ leg (224/224) stays VRAM-gated like all wire proofs, stated not hidden.
       viewport renders the panel (opt-in via WARPLOOM_SCENE_DIR): one
       load-button per file, rescanned each frame with buttons rebuilt only
       when the scan changes, click enqueues the session's LoadDocument
-      command through the same undoable path OMNICPP_DOC uses. The click
+      command through the same undoable path WARPLOOM_DOC uses. The click
       handler itself is XCB-gated like all viewport input (stated limit);
       everything else on the path is session- and engine-tested.
       Remaining in D3: scene management — SPEC (loop74, not started, not
@@ -1869,7 +1869,7 @@ more than another brightness argument:
 So the wedge is the scene's ground plane -- the shared unit cube scaled
 (8, 0.1, 8) -- rendered black, and the raster path has no sky at all. The PT
 path draws its own sky and lights the same geometry; the raster path does
-neither. Disabling the shadow pass (`OMNICPP_NO_SHADOW=1`) changes nothing, so
+neither. Disabling the shadow pass (`WARPLOOM_NO_SHADOW=1`) changes nothing, so
 it is not the shadow map.
 
 **That is the actual defect, and it is bigger than the path-tracing capture.**

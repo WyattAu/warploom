@@ -10,7 +10,7 @@
 namespace {
 
 TEST(BoundedQueue, PreservesOrderAndRejectsOverflow) {
-  omnicpp::core::BoundedQueue<int, 2> queue;
+  warploom::core::BoundedQueue<int, 2> queue;
   EXPECT_TRUE(queue.try_push(1));
   EXPECT_TRUE(queue.try_push(2));
   EXPECT_FALSE(queue.try_push(3));
@@ -24,7 +24,7 @@ TEST(BoundedQueue, PreservesOrderAndRejectsOverflow) {
 }
 
 TEST(SpscChannel, TransfersOrderedValuesBetweenThreads) {
-  omnicpp::core::SpscChannel<int, 1024> channel;
+  warploom::core::SpscChannel<int, 1024> channel;
   constexpr int count = 10000;
   std::thread producer([&] {
     for (int value = 0; value < count; ++value) {
@@ -40,7 +40,7 @@ TEST(SpscChannel, TransfersOrderedValuesBetweenThreads) {
 }
 
 TEST(DeterministicRuntime, LifecycleIsExplicit) {
-  omnicpp::core::DeterministicRuntime runtime;
+  warploom::core::DeterministicRuntime runtime;
   EXPECT_FALSE(runtime.is_running());
   EXPECT_TRUE(runtime.start().is_ok());
   EXPECT_FALSE(runtime.start().is_ok());
@@ -49,7 +49,7 @@ TEST(DeterministicRuntime, LifecycleIsExplicit) {
 }
 
 TEST(DeterministicRuntime, ExecutesFixedTicksAndRetainsRemainder) {
-  omnicpp::core::DeterministicRuntime runtime(0.1);
+  warploom::core::DeterministicRuntime runtime(0.1);
   ASSERT_TRUE(runtime.start().is_ok());
   int callbacks = 0;
   runtime.advance(0.25, [&](std::uint64_t tick) {
@@ -63,9 +63,9 @@ TEST(DeterministicRuntime, ExecutesFixedTicksAndRetainsRemainder) {
 }
 
 TEST(DeterministicRuntime, BoundedCatchUpDropsExcessTime) {
-  omnicpp::core::DeterministicRuntime runtime(0.1);
+  warploom::core::DeterministicRuntime runtime(0.1);
   ASSERT_TRUE(runtime.start().is_ok());
-  runtime.set_catch_up_policy(omnicpp::core::CatchUpPolicy::cap_and_drop_time, 2);
+  runtime.set_catch_up_policy(warploom::core::CatchUpPolicy::cap_and_drop_time, 2);
   int ticks = 0;
   runtime.advance(0.55, [](std::uint64_t) {}, [&](std::uint64_t) { ++ticks; });
   EXPECT_EQ(ticks, 2);
@@ -76,9 +76,9 @@ TEST(DeterministicRuntime, BoundedCatchUpDropsExcessTime) {
 }
 
 TEST(DeterministicRuntime, BoundedCatchUpReportsWithoutDroppingTime) {
-  omnicpp::core::DeterministicRuntime runtime(0.1);
+  warploom::core::DeterministicRuntime runtime(0.1);
   ASSERT_TRUE(runtime.start().is_ok());
-  runtime.set_catch_up_policy(omnicpp::core::CatchUpPolicy::cap_and_report_overrun, 2);
+  runtime.set_catch_up_policy(warploom::core::CatchUpPolicy::cap_and_report_overrun, 2);
   runtime.advance(0.55, [](std::uint64_t) {}, [](std::uint64_t) {});
   EXPECT_EQ(runtime.tick_count(), 2U);
   EXPECT_EQ(runtime.overrun_count(), 1U);
@@ -87,7 +87,7 @@ TEST(DeterministicRuntime, BoundedCatchUpReportsWithoutDroppingTime) {
 }
 
 TEST(DeterministicRuntime, EventsAreProcessedBeforeTicks) {
-  omnicpp::core::DeterministicRuntime runtime(0.1);
+  warploom::core::DeterministicRuntime runtime(0.1);
   ASSERT_TRUE(runtime.start().is_ok());
   ASSERT_TRUE(runtime.post_event(7));
   ASSERT_TRUE(runtime.post_event(9));
@@ -104,8 +104,8 @@ TEST(DeterministicRuntime, EventsAreProcessedBeforeTicks) {
 }
 
 TEST(DeterministicRuntime, HashIsReproducible) {
-  omnicpp::core::DeterministicRuntime first(0.1);
-  omnicpp::core::DeterministicRuntime second(0.1);
+  warploom::core::DeterministicRuntime first(0.1);
+  warploom::core::DeterministicRuntime second(0.1);
   ASSERT_TRUE(first.start().is_ok());
   ASSERT_TRUE(second.start().is_ok());
   ASSERT_TRUE(first.post_event(42));
@@ -121,8 +121,8 @@ TEST(DeterministicRuntime, IntegerModeSplitsComposeExactly) {
   // state hash as the single advance. The floating-point path documents
   // drift and deliberately offers no such guarantee.
   auto run = [](const std::vector<double>& pieces) {
-    omnicpp::core::DeterministicRuntime runtime(1.0 / 60.0);
-    runtime.set_time_mode(omnicpp::core::TimeMode::integer_nanoseconds);
+    warploom::core::DeterministicRuntime runtime(1.0 / 60.0);
+    runtime.set_time_mode(warploom::core::TimeMode::integer_nanoseconds);
     EXPECT_TRUE(runtime.start().is_ok());
     for (double piece : pieces) {
       runtime.advance(piece, [](std::uint64_t) {}, [](std::uint64_t) {});
@@ -140,7 +140,7 @@ TEST(DeterministicRuntime, IntegerModeSplitsComposeExactly) {
 }
 
 TEST(DeterministicRuntime, ReportsEventOverflow) {
-  omnicpp::core::DeterministicRuntime runtime;
+  warploom::core::DeterministicRuntime runtime;
   ASSERT_TRUE(runtime.start().is_ok());
   for (std::size_t i = 0; i < 256; ++i) EXPECT_TRUE(runtime.post_event(i));
   EXPECT_FALSE(runtime.post_event(256));
@@ -148,7 +148,7 @@ TEST(DeterministicRuntime, ReportsEventOverflow) {
 }
 
 TEST(Replay, RecordsOrderAndComputesStableChecksum) {
-  omnicpp::core::Replay<3> replay;
+  warploom::core::Replay<3> replay;
   EXPECT_TRUE(replay.record(1, 10));
   EXPECT_TRUE(replay.record(2, 20));
   EXPECT_TRUE(replay.record(4, 30));
@@ -161,32 +161,32 @@ TEST(Replay, RecordsOrderAndComputesStableChecksum) {
 }
 
 TEST(Replay, BinaryRoundTripAndCorruptionDetection) {
-  omnicpp::core::Replay<4> source;
+  warploom::core::Replay<4> source;
   ASSERT_TRUE(source.record(1, 7));
   ASSERT_TRUE(source.record(3, 9));
   std::array<std::uint8_t, 256> buffer{};
   std::size_t written = 0;
-  EXPECT_EQ(source.encode(0.1, buffer.data(), buffer.size(), written), omnicpp::core::ReplayDecodeError::none);
-  omnicpp::core::Replay<4> decoded;
+  EXPECT_EQ(source.encode(0.1, buffer.data(), buffer.size(), written), warploom::core::ReplayDecodeError::none);
+  warploom::core::Replay<4> decoded;
   double step = 0.0;
-  EXPECT_EQ(decoded.decode(buffer.data(), written, step), omnicpp::core::ReplayDecodeError::none);
+  EXPECT_EQ(decoded.decode(buffer.data(), written, step), warploom::core::ReplayDecodeError::none);
   EXPECT_DOUBLE_EQ(step, 0.1);
   EXPECT_EQ(decoded.size(), 2U);
   EXPECT_EQ(decoded.at(1).event, 9U);
-  buffer[omnicpp::core::Replay<4>::serialized_header_size] ^= 1U;
-  EXPECT_EQ(decoded.decode(buffer.data(), written, step), omnicpp::core::ReplayDecodeError::checksum_mismatch);
+  buffer[warploom::core::Replay<4>::serialized_header_size] ^= 1U;
+  EXPECT_EQ(decoded.decode(buffer.data(), written, step), warploom::core::ReplayDecodeError::checksum_mismatch);
 }
 
 TEST(Replay, FileRoundTripAndMalformedFiles) {
-  constexpr const char* path = "omnicpp-replay-test.bin";
-  omnicpp::core::Replay<4> source;
+  constexpr const char* path = "warploom-replay-test.bin";
+  warploom::core::Replay<4> source;
   ASSERT_TRUE(source.record(2, 11));
   ASSERT_TRUE(source.record(5, 13));
-  ASSERT_EQ(source.save(path, 0.125), omnicpp::core::ReplayDecodeError::none);
+  ASSERT_EQ(source.save(path, 0.125), warploom::core::ReplayDecodeError::none);
 
-  omnicpp::core::Replay<4> loaded;
+  warploom::core::Replay<4> loaded;
   double step = 0.0;
-  EXPECT_EQ(loaded.load(path, step), omnicpp::core::ReplayDecodeError::none);
+  EXPECT_EQ(loaded.load(path, step), warploom::core::ReplayDecodeError::none);
   EXPECT_DOUBLE_EQ(step, 0.125);
   EXPECT_EQ(loaded.size(), 2U);
   EXPECT_EQ(loaded.at(0).tick, 2U);
@@ -197,25 +197,25 @@ TEST(Replay, FileRoundTripAndMalformedFiles) {
     const std::uint8_t bytes[] = {0x4c, 0x50, 0x52, 0x4f};
     corrupt.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
   }
-  EXPECT_EQ(loaded.load(path, step), omnicpp::core::ReplayDecodeError::too_small);
+  EXPECT_EQ(loaded.load(path, step), warploom::core::ReplayDecodeError::too_small);
   std::remove(path);
 
-  EXPECT_EQ(loaded.load("omnicpp-replay-does-not-exist.bin", step),
-            omnicpp::core::ReplayDecodeError::io_error);
+  EXPECT_EQ(loaded.load("warploom-replay-does-not-exist.bin", step),
+            warploom::core::ReplayDecodeError::io_error);
 }
 
 TEST(Replay, RejectsUnorderedRecords) {
-  omnicpp::core::Replay<2> replay;
+  warploom::core::Replay<2> replay;
   EXPECT_TRUE(replay.record(4, 1));
   EXPECT_FALSE(replay.record(3, 2));
 }
 
 TEST(Replay, VerifiesDeterministicRuntimeHash) {
-  omnicpp::core::Replay<2> replay;
+  warploom::core::Replay<2> replay;
   ASSERT_TRUE(replay.record(1, 7));
   ASSERT_TRUE(replay.record(3, 9));
 
-  omnicpp::core::DeterministicRuntime runtime(0.1);
+  warploom::core::DeterministicRuntime runtime(0.1);
   ASSERT_TRUE(runtime.start().is_ok());
   replay.playback([&](const auto& record) {
     while (runtime.tick_count() < record.tick) {
@@ -226,12 +226,12 @@ TEST(Replay, VerifiesDeterministicRuntimeHash) {
   });
   runtime.advance(0.1, [](auto) {}, [](auto) {});
   runtime.advance(0.1, [](auto) {}, [](auto) {});
-  EXPECT_FALSE(omnicpp::core::verify_replay(replay, 0.1, runtime.state_hash()));
-  EXPECT_FALSE(omnicpp::core::verify_replay(replay, 0.1, runtime.state_hash() + 1));
+  EXPECT_FALSE(warploom::core::verify_replay(replay, 0.1, runtime.state_hash()));
+  EXPECT_FALSE(warploom::core::verify_replay(replay, 0.1, runtime.state_hash() + 1));
 }
 
 TEST(DeterministicRuntime, DoesNotAdvanceWhenStopped) {
-  omnicpp::core::DeterministicRuntime runtime(0.1);
+  warploom::core::DeterministicRuntime runtime(0.1);
   runtime.advance(10.0, [](std::uint64_t) noexcept {});
   EXPECT_EQ(runtime.tick_count(), 0U);
 }

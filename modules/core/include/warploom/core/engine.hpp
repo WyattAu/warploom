@@ -9,7 +9,7 @@
 #include <memory>
 #include "warploom/core/deterministic_runtime.hpp"
 
-namespace OmniCpp::Engine::Core {
+namespace Warploom::Engine::Core {
 
 /** Configuration for the canonical deterministic runtime. */
 struct EngineConfig {
@@ -62,13 +62,13 @@ private:
   std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace OmniCpp::Engine::Core
-// S2-B compat footer: legacy `omnicpp::*` spellings keep resolving
+} // namespace Warploom::Engine::Core
+// S2-B compat footer: legacy `warploom::*` spellings keep resolving
 // during the transition (removed with the S5 identity pass -
 // docs/warploom-core-plan.md, phase B). A using-directive in a
 // namespace extension (NOT a type alias - ill-formed for namespaces)
 // makes the old spellings name the SAME types, and legally coexists
-// with real `omnicpp::core` extension blocks elsewhere (extension
+// with real `warploom::core` extension blocks elsewhere (extension
 // blocks merge). One directive per namespace THIS header declares,
 // each under its OWN guard (a shared guard would suppress later
 // headers' distinct directives).

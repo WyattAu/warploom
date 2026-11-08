@@ -15,8 +15,8 @@ void register_script_node_type(NodeGraph& graph,
                                std::shared_ptr<::warploom::core::ScriptModule> module,
                                std::uint32_t input_count,
                                std::uint32_t output_count) {
-  OMNICPP_CONTRACT(module != nullptr);
-  OMNICPP_CONTRACT(input_count > 0U || output_count > 0U);
+  WARPLOOM_CONTRACT(module != nullptr);
+  WARPLOOM_CONTRACT(input_count > 0U || output_count > 0U);
 
   NodeType t;
   t.name = "script:" + std::string(module->module_name());

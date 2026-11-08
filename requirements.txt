@@ -1,4 +1,4 @@
-# OmniCpp Build System - Python Dependencies
+# Warploom Build System - Python Dependencies
 
 # Core Dependencies
 pyyaml>=6.0

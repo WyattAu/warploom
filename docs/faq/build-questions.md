@@ -22,7 +22,7 @@ Questions and solutions related to the build system, compilation, and dependenci
 
 ### How does the build system work?
 
-**TL;DR:** The build system uses [`OmniCppController.py`](../../OmniCppController.py:1) to orchestrate CMake, Conan, and build operations.
+**TL;DR:** The build system uses [`WarploomController.py`](../../WarploomController.py:1) to orchestrate CMake, Conan, and build operations.
 
 **The Deep Dive:**
 
@@ -59,10 +59,10 @@ Think of the build system like a construction project manager:
 - **ConanManager** = Materials supplier (delivers dependencies)
 
 **Key Classes:**
-- [`OmniCppController`](../../OmniCppController.py:131) - Main entry point
-- [`BuildManager`](../omni_scripts/build.py:179) - Build orchestration
-- [`CMakeManager`](../omni_scripts/cmake.py:109) - CMake operations
-- [`ConanManager`](../omni_scripts/conan.py:101) - Dependency management
+- [`WarploomController`](../../WarploomController.py:131) - Main entry point
+- [`BuildManager`](../warploom_scripts/build.py:179) - Build orchestration
+- [`CMakeManager`](../warploom_scripts/cmake.py:109) - CMake operations
+- [`ConanManager`](../warploom_scripts/conan.py:101) - Dependency management
 
 ### What are the available build targets?
 
@@ -72,27 +72,27 @@ Think of the build system like a construction project manager:
 
 | Target | Description | Output |
 |--------|-------------|---------|
-| **engine** | Game engine library | `libomnicpp_engine.dll/.so` |
-| **game** | Game executable | `omnicpp_game.exe/omnicpp_game` |
-| **standalone** | Combined engine+game | `omnicpp.exe/omnicpp` |
+| **engine** | Game engine library | `libwarploom_engine.dll/.so` |
+| **game** | Game executable | `warploom_game.exe/warploom_game` |
+| **standalone** | Combined engine+game | `warploom.exe/warploom` |
 | **all** | Build all targets | All of the above |
 
 **Usage:**
 ```bash
 # Build engine library only
-python OmniCppController.py build engine "Clean Build Pipeline" default release
+python WarploomController.py build engine "Clean Build Pipeline" default release
 
 # Build game executable
-python OmniCppController.py build game "Clean Build Pipeline" default release
+python WarploomController.py build game "Clean Build Pipeline" default release
 
 # Build standalone (engine + game)
-python OmniCppController.py build standalone "Clean Build Pipeline" default release
+python WarploomController.py build standalone "Clean Build Pipeline" default release
 
 # Build everything
-python OmniCppController.py build all "Clean Build Pipeline" default release
+python WarploomController.py build all "Clean Build Pipeline" default release
 ```
 
-**Reference:** [`omni_scripts/build.py:561-643`](../omni_scripts/build.py:561-643)
+**Reference:** [`warploom_scripts/build.py:561-643`](../warploom_scripts/build.py:561-643)
 
 ## Compiler Issues
 
@@ -102,7 +102,7 @@ python OmniCppController.py build all "Clean Build Pipeline" default release
 
 **The Deep Dive:**
 
-The build system uses [`detect_compiler()`](../omni_scripts/compilers/detector.py:1) to find available compilers. If detection fails:
+The build system uses [`detect_compiler()`](../warploom_scripts/compilers/detector.py:1) to find available compilers. If detection fails:
 
 1. **Verify compiler installation:**
 ```bash
@@ -129,7 +129,7 @@ echo $PATH
 
 3. **Specify compiler explicitly:**
 ```bash
-python OmniCppController.py build standalone "Build Project" default release --compiler msvc
+python WarploomController.py build standalone "Build Project" default release --compiler msvc
 ```
 
 **Supported Compilers:**
@@ -140,7 +140,7 @@ python OmniCppController.py build standalone "Build Project" default release --c
 - `gcc` - GCC (Linux)
 - `clang` - Clang (Linux)
 
-**Reference:** [`omni_scripts/compilers/detector.py`](../omni_scripts/compilers/detector.py:1)
+**Reference:** [`warploom_scripts/compilers/detector.py`](../warploom_scripts/compilers/detector.py:1)
 
 ### How do I switch between MSVC and MinGW?
 
@@ -151,13 +151,13 @@ python OmniCppController.py build standalone "Build Project" default release --c
 **MSVC (Visual Studio):**
 ```bash
 # Requires Visual Studio 2019+ with C++ workload
-python OmniCppController.py build standalone "Build Project" default release --compiler msvc
+python WarploomController.py build standalone "Build Project" default release --compiler msvc
 ```
 
 **MinGW (MSYS2):**
 ```bash
 # Requires MSYS2 with UCRT64 environment
-python OmniCppController.py build standalone "Build Project" default release --compiler mingw-gcc
+python WarploomController.py build standalone "Build Project" default release --compiler mingw-gcc
 ```
 
 **Key Differences:**
@@ -171,7 +171,7 @@ python OmniCppController.py build standalone "Build Project" default release --c
 
 **Note:** The build system automatically detects the best available compiler if `--compiler` is not specified.
 
-**Reference:** [`OmniCppController.py:247-258`](../../OmniCppController.py:247-258)
+**Reference:** [`WarploomController.py:247-258`](../../WarploomController.py:247-258)
 
 ## CMake Configuration
 
@@ -197,7 +197,7 @@ cmake --version  # Should be 3.20+
 2. **Missing Dependencies:**
 ```bash
 # Clean and rebuild
-python OmniCppController.py build standalone "Clean Build Pipeline" default release
+python WarploomController.py build standalone "Clean Build Pipeline" default release
 ```
 
 3. **Invalid Toolchain:**
@@ -206,7 +206,7 @@ python OmniCppController.py build standalone "Clean Build Pipeline" default rele
 ls cmake/toolchains/
 
 # Use default toolchain
-python OmniCppController.py build standalone "Build Project" default release
+python WarploomController.py build standalone "Build Project" default release
 ```
 
 **Debug CMake Configuration:**
@@ -218,7 +218,7 @@ cmake -S . -B build/debug -DCMAKE_BUILD_TYPE=Debug --trace-expand
 cat build/debug/CMakeCache.txt | grep -i error
 ```
 
-**Reference:** [`omni_scripts/cmake.py:141-286`](../omni_scripts/cmake.py:141-286)
+**Reference:** [`warploom_scripts/cmake.py:141-286`](../warploom_scripts/cmake.py:141-286)
 
 ### How do I change the CMake generator?
 
@@ -252,7 +252,7 @@ Edit [`CMakePresets.json`](../../CMakePresets.json:1):
 }
 ```
 
-**Reference:** [`omni_scripts/cmake.py:502-528`](../omni_scripts/cmake.py:502-528)
+**Reference:** [`warploom_scripts/cmake.py:502-528`](../warploom_scripts/cmake.py:502-528)
 
 ## Dependency Issues
 
@@ -289,7 +289,7 @@ conan remove "*" -c
 conan cache clean
 
 # Reinstall
-python OmniCppController.py build standalone "Clean Build Pipeline" default release
+python WarploomController.py build standalone "Clean Build Pipeline" default release
 ```
 
 **Debug Conan Install:**
@@ -301,7 +301,7 @@ conan install . --build=missing -v
 cat ~/.conan/logs/conan.log
 ```
 
-**Reference:** [`omni_scripts/conan.py:130-271`](../omni_scripts/conan.py:130-271)
+**Reference:** [`warploom_scripts/conan.py:130-271`](../warploom_scripts/conan.py:130-271)
 
 ### How do I add a new Conan dependency?
 
@@ -316,8 +316,8 @@ below is kept as a record of the previous packaging story.
 # conan/conanfile.py
 from conan import ConanFile
 
-class OmniCppConan(ConanFile):
-    name = "omnicpp"
+class WarploomConan(ConanFile):
+    name = "warploom"
     version = "1.0.0"
     settings = "os", "compiler", "build_type", "arch"
     
@@ -344,7 +344,7 @@ CMakeDeps
 CMakeToolchain
 ```
 
-**Reference:** [`omni_scripts/conan.py:172-194`](../omni_scripts/conan.py:172-194)
+**Reference:** [`warploom_scripts/conan.py:172-194`](../warploom_scripts/conan.py:172-194)
 
 ## Build Performance
 
@@ -357,7 +357,7 @@ CMakeToolchain
 **1. Parallel Builds:**
 ```bash
 # Use all available cores
-python OmniCppController.py build standalone "Build Project" default release --parallel 8
+python WarploomController.py build standalone "Build Project" default release --parallel 8
 ```
 
 **2. Use ccache (Linux/macOS):**
@@ -373,17 +373,17 @@ cmake -S . -B build/release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 **3. Incremental Builds:**
 ```bash
 # Don't use "Clean Build Pipeline" for development
-python OmniCppController.py build standalone "Build Project" default release
+python WarploomController.py build standalone "Build Project" default release
 
 # Only clean when necessary
-python OmniCppController.py clean
+python WarploomController.py clean
 ```
 
 **4. Use Ninja Generator:**
 ```bash
 # Ninja is faster than Makefiles
 # Automatically used with MinGW compilers
-python OmniCppController.py build standalone "Build Project" default release --compiler mingw-gcc
+python WarploomController.py build standalone "Build Project" default release --compiler mingw-gcc
 ```
 
 **Build Time Comparison:**
@@ -416,7 +416,7 @@ python OmniCppController.py build standalone "Build Project" default release --c
 **Monitoring Build Performance:**
 ```bash
 # Check build time
-time python OmniCppController.py build standalone "Build Project" default release
+time python WarploomController.py build standalone "Build Project" default release
 
 # View CMake build graph
 cmake --build build/release --graphviz=graph.dot
@@ -427,7 +427,7 @@ dot -Tpng graph.dot -o graph.png
 
 ### How do I cross-compile for ARM64 Linux?
 
-**TL;DR:** Use the ARM64 toolchain: `python OmniCppController.py build standalone "Build Project" arm64-linux-gnu release`.
+**TL;DR:** Use the ARM64 toolchain: `python WarploomController.py build standalone "Build Project" arm64-linux-gnu release`.
 
 **The Deep Dive:**
 
@@ -442,12 +442,12 @@ sudo dnf install gcc-aarch64-linux-gnu gcc-c++-aarch64-linux-gnu
 
 **2. Build for ARM64:**
 ```bash
-python OmniCppController.py build standalone "Build Project" arm64-linux-gnu release
+python WarploomController.py build standalone "Build Project" arm64-linux-gnu release
 ```
 
 **3. Verify Output:**
 ```bash
-file build/arm64-linux-gnu/release/bin/omnicpp
+file build/arm64-linux-gnu/release/bin/warploom
 # Should show: ELF 64-bit LSB executable, ARM aarch64
 ```
 
@@ -455,7 +455,7 @@ file build/arm64-linux-gnu/release/bin/omnicpp
 
 ### How do I cross-compile for Windows from Linux?
 
-**TL;DR:** Use MinGW-w64 cross-compiler: `python OmniCppController.py build standalone "Build Project" x86_64-w64-mingw32 release`.
+**TL;DR:** Use MinGW-w64 cross-compiler: `python WarploomController.py build standalone "Build Project" x86_64-w64-mingw32 release`.
 
 **The Deep Dive:**
 
@@ -470,7 +470,7 @@ sudo dnf install mingw64-gcc mingw64-c++
 
 **2. Build for Windows:**
 ```bash
-python OmniCppController.py build standalone "Build Project" x86_64-w64-mingw32 release
+python WarploomController.py build standalone "Build Project" x86_64-w64-mingw32 release
 ```
 
 **3. Test on Windows:**

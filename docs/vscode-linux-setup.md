@@ -481,35 +481,35 @@ The project includes [`.vscode/tasks.json`](../.vscode/tasks.json:1) with compre
 
 | Task | Description | Command |
 |-------|-------------|----------|
-| Configure Build (Linux GCC - Debug) | Configure GCC debug build | `python OmniCppController.py configure --compiler gcc --build-type Debug` |
-| Configure Build (Linux GCC - Release) | Configure GCC release build | `python OmniCppController.py configure --compiler gcc --build-type Release` |
-| Configure Build (Linux Clang - Debug) | Configure Clang debug build | `python OmniCppController.py configure --compiler clang --build-type Debug` |
-| Configure Build (Linux Clang - Release) | Configure Clang release build | `python OmniCppController.py configure --compiler clang --build-type Release` |
+| Configure Build (Linux GCC - Debug) | Configure GCC debug build | `python WarploomController.py configure --compiler gcc --build-type Debug` |
+| Configure Build (Linux GCC - Release) | Configure GCC release build | `python WarploomController.py configure --compiler gcc --build-type Release` |
+| Configure Build (Linux Clang - Debug) | Configure Clang debug build | `python WarploomController.py configure --compiler clang --build-type Debug` |
+| Configure Build (Linux Clang - Release) | Configure Clang release build | `python WarploomController.py configure --compiler clang --build-type Release` |
 
 #### Build Tasks
 
 | Task | Description | Command |
 |-------|-------------|----------|
-| Build Engine (Linux GCC - Debug) | Build engine with GCC debug | `python OmniCppController.py build engine default linux-gcc-debug debug` |
-| Build Engine (Linux GCC - Release) | Build engine with GCC release | `python OmniCppController.py build engine default linux-gcc-release release` |
-| Build Engine (Linux Clang - Debug) | Build engine with Clang debug | `python OmniCppController.py build engine default linux-clang-debug debug` |
-| Build Engine (Linux Clang - Release) | Build engine with Clang release | `python OmniCppController.py build engine default linux-clang-release release` |
-| Build Game (Linux GCC - Debug) | Build game with GCC debug | `python OmniCppController.py build game default linux-gcc-debug debug` |
-| Build Game (Linux GCC - Release) | Build game with GCC release | `python OmniCppController.py build game default linux-gcc-release release` |
-| Build Game (Linux Clang - Debug) | Build game with Clang debug | `python OmniCppController.py build game default linux-clang-debug debug` |
-| Build Game (Linux Clang - Release) | Build game with Clang release | `python OmniCppController.py build game default linux-clang-release release` |
+| Build Engine (Linux GCC - Debug) | Build engine with GCC debug | `python WarploomController.py build engine default linux-gcc-debug debug` |
+| Build Engine (Linux GCC - Release) | Build engine with GCC release | `python WarploomController.py build engine default linux-gcc-release release` |
+| Build Engine (Linux Clang - Debug) | Build engine with Clang debug | `python WarploomController.py build engine default linux-clang-debug debug` |
+| Build Engine (Linux Clang - Release) | Build engine with Clang release | `python WarploomController.py build engine default linux-clang-release release` |
+| Build Game (Linux GCC - Debug) | Build game with GCC debug | `python WarploomController.py build game default linux-gcc-debug debug` |
+| Build Game (Linux GCC - Release) | Build game with GCC release | `python WarploomController.py build game default linux-gcc-release release` |
+| Build Game (Linux Clang - Debug) | Build game with Clang debug | `python WarploomController.py build game default linux-clang-debug debug` |
+| Build Game (Linux Clang - Release) | Build game with Clang release | `python WarploomController.py build game default linux-clang-release release` |
 
 #### Utility Tasks
 
 | Task | Description | Command |
 |-------|-------------|----------|
-| Clean Build | Clean build artifacts | `python OmniCppController.py clean` |
-| Clean All | Clean all artifacts including dependencies | `python OmniCppController.py clean --all` |
-| Format Code | Format code with clang-format | `python OmniCppController.py format --fix` |
-| Format Check | Check code formatting | `python OmniCppController.py format --check` |
-| Lint Code | Run linters | `python OmniCppController.py lint` |
-| Lint Fix | Lint and fix issues | `python OmniCppController.py lint --fix` |
-| Run Tests | Execute unit tests | `python OmniCppController.py test` |
+| Clean Build | Clean build artifacts | `python WarploomController.py clean` |
+| Clean All | Clean all artifacts including dependencies | `python WarploomController.py clean --all` |
+| Format Code | Format code with clang-format | `python WarploomController.py format --fix` |
+| Format Check | Check code formatting | `python WarploomController.py format --check` |
+| Lint Code | Run linters | `python WarploomController.py lint` |
+| Lint Fix | Lint and fix issues | `python WarploomController.py lint --fix` |
+| Run Tests | Execute unit tests | `python WarploomController.py test` |
 
 ### Running Build Tasks
 
@@ -542,7 +542,7 @@ Create custom build tasks in `.vscode/tasks.json`:
   "type": "shell",
   "command": "python",
   "args": [
-    "OmniCppController.py",
+    "WarploomController.py",
     "build",
     "engine",
     "default",
@@ -575,23 +575,23 @@ The project includes [`.vscode/launch.json`](../.vscode/launch.json:1) with debu
 
 | Configuration | Type | Debugger | Program |
 |--------------|--------|-----------|----------|
-| Debug Engine (Linux GCC - Debug) | cppdbg | GDB | `${workspaceFolder}/build/bin/Debug/OmniCppEngine` |
-| Debug Engine (Linux GCC - Release) | cppdbg | GDB | `${workspaceFolder}/build/bin/Release/OmniCppEngine` |
-| Debug Game (Linux GCC - Debug) | cppdbg | GDB | `${workspaceFolder}/build/bin/Debug/OmniCppGame` |
-| Debug Game (Linux GCC - Release) | cppdbg | GDB | `${workspaceFolder}/build/bin/Release/OmniCppGame` |
-| Debug Standalone (Linux GCC - Debug) | cppdbg | GDB | `${workspaceFolder}/build/bin/Debug/OmniCppStandalone` |
-| Debug Standalone (Linux GCC - Release) | cppdbg | GDB | `${workspaceFolder}/build/bin/Release/OmniCppStandalone` |
+| Debug Engine (Linux GCC - Debug) | cppdbg | GDB | `${workspaceFolder}/build/bin/Debug/WarploomEngine` |
+| Debug Engine (Linux GCC - Release) | cppdbg | GDB | `${workspaceFolder}/build/bin/Release/WarploomEngine` |
+| Debug Game (Linux GCC - Debug) | cppdbg | GDB | `${workspaceFolder}/build/bin/Debug/WarploomGame` |
+| Debug Game (Linux GCC - Release) | cppdbg | GDB | `${workspaceFolder}/build/bin/Release/WarploomGame` |
+| Debug Standalone (Linux GCC - Debug) | cppdbg | GDB | `${workspaceFolder}/build/bin/Debug/WarploomStandalone` |
+| Debug Standalone (Linux GCC - Release) | cppdbg | GDB | `${workspaceFolder}/build/bin/Release/WarploomStandalone` |
 
 #### LLDB Configurations
 
 | Configuration | Type | Debugger | Program |
 |--------------|--------|-----------|----------|
-| Debug Engine (Linux Clang - Debug) | cppdbg | LLDB | `${workspaceFolder}/build/bin/Debug/OmniCppEngine` |
-| Debug Engine (Linux Clang - Release) | cppdbg | LLDB | `${workspaceFolder}/build/bin/Release/OmniCppEngine` |
-| Debug Game (Linux Clang - Debug) | cppdbg | LLDB | `${workspaceFolder}/build/bin/Debug/OmniCppGame` |
-| Debug Game (Linux Clang - Release) | cppdbg | LLDB | `${workspaceFolder}/build/bin/Release/OmniCppGame` |
-| Debug Standalone (Linux Clang - Debug) | cppdbg | LLDB | `${workspaceFolder}/build/bin/Debug/OmniCppStandalone` |
-| Debug Standalone (Linux Clang - Release) | cppdbg | LLDB | `${workspaceFolder}/build/bin/Release/OmniCppStandalone` |
+| Debug Engine (Linux Clang - Debug) | cppdbg | LLDB | `${workspaceFolder}/build/bin/Debug/WarploomEngine` |
+| Debug Engine (Linux Clang - Release) | cppdbg | LLDB | `${workspaceFolder}/build/bin/Release/WarploomEngine` |
+| Debug Game (Linux Clang - Debug) | cppdbg | LLDB | `${workspaceFolder}/build/bin/Debug/WarploomGame` |
+| Debug Game (Linux Clang - Release) | cppdbg | LLDB | `${workspaceFolder}/build/bin/Release/WarploomGame` |
+| Debug Standalone (Linux Clang - Debug) | cppdbg | LLDB | `${workspaceFolder}/build/bin/Debug/WarploomStandalone` |
+| Debug Standalone (Linux Clang - Release) | cppdbg | LLDB | `${workspaceFolder}/build/bin/Release/WarploomStandalone` |
 
 ### Starting Debug Session
 
@@ -817,10 +817,10 @@ The project includes CachyOS-optimized build tasks:
 
 | Task | Description | Command |
 |-------|-------------|----------|
-| Configure Build (CachyOS GCC - Debug) | Configure CachyOS GCC debug | `python OmniCppController.py configure --compiler gcc --build-type Debug --cachyos` |
-| Configure Build (CachyOS GCC - Release) | Configure CachyOS GCC release | `python OmniCppController.py configure --compiler gcc --build-type Release --cachyos` |
-| Configure Build (CachyOS Clang - Debug) | Configure CachyOS Clang debug | `python OmniCppController.py configure --compiler clang --build-type Debug --cachyos` |
-| Configure Build (CachyOS Clang - Release) | Configure CachyOS Clang release | `python OmniCppController.py configure --compiler clang --build-type Release --cachyos` |
+| Configure Build (CachyOS GCC - Debug) | Configure CachyOS GCC debug | `python WarploomController.py configure --compiler gcc --build-type Debug --cachyos` |
+| Configure Build (CachyOS GCC - Release) | Configure CachyOS GCC release | `python WarploomController.py configure --compiler gcc --build-type Release --cachyos` |
+| Configure Build (CachyOS Clang - Debug) | Configure CachyOS Clang debug | `python WarploomController.py configure --compiler clang --build-type Debug --cachyos` |
+| Configure Build (CachyOS Clang - Release) | Configure CachyOS Clang release | `python WarploomController.py configure --compiler clang --build-type Release --cachyos` |
 
 ### CachyOS Compiler Flags
 
@@ -848,7 +848,7 @@ The project includes CachyOS-specific debug configurations:
   "name": "Debug Engine (CachyOS GCC - Debug)",
   "type": "cppdbg",
   "request": "launch",
-  "program": "${workspaceFolder}/build/bin/Debug/OmniCppEngine",
+  "program": "${workspaceFolder}/build/bin/Debug/WarploomEngine",
   "args": [],
   "stopAtEntry": false,
   "cwd": "${workspaceFolder}",
@@ -894,7 +894,7 @@ CachyOS builds support performance profiling with `perf`:
   "args": [
     "record",
     "--call-graph=dwarf",
-    "${workspaceFolder}/build/bin/Release/OmniCppEngine"
+    "${workspaceFolder}/build/bin/Release/WarploomEngine"
   ],
   "cwd": "${workspaceFolder}",
   "externalConsole": false,
@@ -912,7 +912,7 @@ The project includes a CachyOS validation task:
   "type": "shell",
   "command": "python",
   "args": [
-    "OmniCppController.py",
+    "WarploomController.py",
     "validate",
     "--platform",
     "linux"
@@ -1010,7 +1010,7 @@ Run this task to verify CachyOS environment setup:
 
 3. **Check program path:**
    ```json
-   "program": "${workspaceFolder}/build/bin/Debug/OmniCppEngine"  // Ensure executable exists
+   "program": "${workspaceFolder}/build/bin/Debug/WarploomEngine"  // Ensure executable exists
    ```
 
 4. **Build debug target first:**
@@ -1312,10 +1312,10 @@ The project uses clang-tidy for static analysis:
 
 ```bash
 # Run clang-tidy
-python OmniCppController.py lint
+python WarploomController.py lint
 
 # Fix issues automatically
-python OmniCppController.py lint --fix
+python WarploomController.py lint --fix
 ```
 
 #### Formatting
@@ -1324,10 +1324,10 @@ The project uses clang-format for code formatting:
 
 ```bash
 # Format all files
-python OmniCppController.py format --fix
+python WarploomController.py format --fix
 
 # Check formatting
-python OmniCppController.py format --check
+python WarploomController.py format --check
 ```
 
 #### Pre-commit Hooks
@@ -1390,7 +1390,7 @@ Validate task configurations to prevent injection attacks (addresses TM-LX-005):
       "type": "shell",
       "command": "python",
       "args": [
-        "OmniCppController.py",
+        "WarploomController.py",
         "build"
       ],
       "options": {

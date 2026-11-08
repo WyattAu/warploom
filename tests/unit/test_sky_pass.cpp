@@ -32,14 +32,14 @@
 
 namespace {
 
-using omnicpp::render::Allocation;
-using omnicpp::render::SkyParams;
-using omnicpp::render::VulkanContext;
-using omnicpp::render::VulkanDescriptorManager;
-using omnicpp::render::VulkanMemoryAllocator;
-using omnicpp::render::VulkanOffscreenTarget;
-using omnicpp::render::VulkanPbrScene;
-using omnicpp::render::VulkanSkyPass;
+using warploom::render::Allocation;
+using warploom::render::SkyParams;
+using warploom::render::VulkanContext;
+using warploom::render::VulkanDescriptorManager;
+using warploom::render::VulkanMemoryAllocator;
+using warploom::render::VulkanOffscreenTarget;
+using warploom::render::VulkanPbrScene;
+using warploom::render::VulkanSkyPass;
 
 struct SkyPassHarness {
   VulkanContext context;

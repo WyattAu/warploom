@@ -497,7 +497,7 @@ void seed_fresh_document(SceneDocument& doc) {
   // Seed the singleton environment object so camera/sun edits work on a
   // fresh session (matches the bridge's expectations).
   const auto* env_type = default_registry().find_by_name(kTypeEnvironment);
-  OMNICPP_CONTRACT(env_type != nullptr);
+  WARPLOOM_CONTRACT(env_type != nullptr);
   SceneObject env;
   env.id = kEnvironmentObjectId;
   env.type_id = env_type->id;

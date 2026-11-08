@@ -1,4 +1,4 @@
-# OmniCpp Build System - User Guide
+# Warploom Build System - User Guide
 
 ## Table of Contents
 - [Introduction](#introduction)
@@ -13,7 +13,7 @@
 
 ## Introduction
 
-The OmniCpp Build System is a comprehensive build automation tool designed for C++ projects with support for multiple compilers, platforms, and build configurations. It provides a unified interface for building, testing, and packaging C++ applications.
+The Warploom Build System is a comprehensive build automation tool designed for C++ projects with support for multiple compilers, platforms, and build configurations. It provides a unified interface for building, testing, and packaging C++ applications.
 
 ### Key Features
 
@@ -48,7 +48,7 @@ pip install -r requirements-docs.txt
 
 3. Verify installation:
 ```bash
-python OmniCppController.py --help
+python WarploomController.py --help
 ```
 
 ## Quick Start
@@ -57,21 +57,21 @@ python OmniCppController.py --help
 
 Build the project with default settings:
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug
+python WarploomController.py build standalone "Build Project" default debug
 ```
 
 ### Clean Build
 
 Perform a clean build from scratch:
 ```bash
-python OmniCppController.py build standalone "Clean Build Pipeline" default release
+python WarploomController.py build standalone "Clean Build Pipeline" default release
 ```
 
 ### Specify Compiler
 
 Build with a specific compiler:
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug --compiler msvc
+python WarploomController.py build standalone "Build Project" default debug --compiler msvc
 ```
 
 ## Build Commands
@@ -79,7 +79,7 @@ python OmniCppController.py build standalone "Build Project" default debug --com
 ### Build Command
 
 ```bash
-python OmniCppController.py build <target> <task> <preset> <build_type> [options]
+python WarploomController.py build <target> <task> <preset> <build_type> [options]
 ```
 
 #### Parameters
@@ -100,17 +100,17 @@ python OmniCppController.py build <target> <task> <preset> <build_type> [options
 
 Build standalone executable with MSVC:
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug --compiler msvc
+python WarploomController.py build standalone "Build Project" default debug --compiler msvc
 ```
 
 Build Qt-Vulkan library with MinGW-GCC:
 ```bash
-python OmniCppController.py build targets/qt-vulkan/library "Build Project" default release --compiler mingw-gcc
+python WarploomController.py build targets/qt-vulkan/library "Build Project" default release --compiler mingw-gcc
 ```
 
 Clean build with verbose output:
 ```bash
-python OmniCppController.py build standalone "Clean Build Pipeline" default release --compiler msvc --verbose
+python WarploomController.py build standalone "Clean Build Pipeline" default release --compiler msvc --verbose
 ```
 
 ## Compiler Support
@@ -125,7 +125,7 @@ python OmniCppController.py build standalone "Clean Build Pipeline" default rele
 
 **Usage**:
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug --compiler msvc
+python WarploomController.py build standalone "Build Project" default debug --compiler msvc
 ```
 
 ### MSVC-Clang
@@ -138,7 +138,7 @@ python OmniCppController.py build standalone "Build Project" default debug --com
 
 **Usage**:
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug --compiler msvc-clang
+python WarploomController.py build standalone "Build Project" default debug --compiler msvc-clang
 ```
 
 ### MinGW-GCC
@@ -151,7 +151,7 @@ python OmniCppController.py build standalone "Build Project" default debug --com
 
 **Usage**:
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug --compiler mingw-gcc
+python WarploomController.py build standalone "Build Project" default debug --compiler mingw-gcc
 ```
 
 ### MinGW-Clang
@@ -164,7 +164,7 @@ python OmniCppController.py build standalone "Build Project" default debug --com
 
 **Usage**:
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug --compiler mingw-clang
+python WarploomController.py build standalone "Build Project" default debug --compiler mingw-clang
 ```
 
 ## Build Types
@@ -177,7 +177,7 @@ python OmniCppController.py build standalone "Build Project" default debug --com
 - **Assertions**: Enabled
 - **Usage**:
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug
+python WarploomController.py build standalone "Build Project" default debug
 ```
 
 ### Release
@@ -188,7 +188,7 @@ python OmniCppController.py build standalone "Build Project" default debug
 - **Assertions**: Disabled
 - **Usage**:
 ```bash
-python OmniCppController.py build standalone "Build Project" default release
+python WarploomController.py build standalone "Build Project" default release
 ```
 
 ### RelWithDebInfo
@@ -199,7 +199,7 @@ python OmniCppController.py build standalone "Build Project" default release
 - **Assertions**: Disabled
 - **Usage**:
 ```bash
-python OmniCppController.py build standalone "Build Project" default relwithdebinfo
+python WarploomController.py build standalone "Build Project" default relwithdebinfo
 ```
 
 ### MinSizeRel
@@ -210,7 +210,7 @@ python OmniCppController.py build standalone "Build Project" default relwithdebi
 - **Assertions**: Disabled
 - **Usage**:
 ```bash
-python OmniCppController.py build standalone "Build Project" default minsizerel
+python WarploomController.py build standalone "Build Project" default minsizerel
 ```
 
 ## Build Targets
@@ -219,19 +219,19 @@ python OmniCppController.py build standalone "Build Project" default minsizerel
 
 Builds a standalone executable:
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug
+python WarploomController.py build standalone "Build Project" default debug
 ```
 
-**Output**: `build/debug/omnicpp.exe` (Windows) or `build/debug/omnicpp` (Linux/macOS)
+**Output**: `build/debug/warploom.exe` (Windows) or `build/debug/warploom` (Linux/macOS)
 
 ### Qt-Vulkan Library
 
 Builds the Qt-Vulkan integration library:
 ```bash
-python OmniCppController.py build targets/qt-vulkan/library "Build Project" default debug
+python WarploomController.py build targets/qt-vulkan/library "Build Project" default debug
 ```
 
-**Output**: `build/debug/libomnicpp_qt_vulkan.dll` (Windows) or `build/debug/libomnicpp_qt_vulkan.so` (Linux)
+**Output**: `build/debug/libwarploom_qt_vulkan.dll` (Windows) or `build/debug/libwarploom_qt_vulkan.so` (Linux)
 
 ## Configuration
 
@@ -249,16 +249,16 @@ CMake presets are defined in `CMakePresets.json` and provide pre-configured buil
 
 Configure build behavior using environment variables:
 
-- `OMNICPP_COMPILER`: Default compiler
-- `OMNICPP_BUILD_TYPE`: Default build type
-- `OMNICPP_JOBS`: Number of parallel jobs
-- `OMNICPP_VERBOSE`: Enable verbose output
+- `WARPLOOM_COMPILER`: Default compiler
+- `WARPLOOM_BUILD_TYPE`: Default build type
+- `WARPLOOM_JOBS`: Number of parallel jobs
+- `WARPLOOM_VERBOSE`: Enable verbose output
 
 **Example**:
 ```bash
-export OMNICPP_COMPILER=msvc
-export OMNICPP_BUILD_TYPE=release
-python OmniCppController.py build standalone "Build Project" default release
+export WARPLOOM_COMPILER=msvc
+export WARPLOOM_BUILD_TYPE=release
+python WarploomController.py build standalone "Build Project" default release
 ```
 
 ### Configuration Files
@@ -305,7 +305,7 @@ vcpkg install <packages>
 
 3. Clean build directory:
 ```bash
-python OmniCppController.py build standalone "Clean Build Pipeline" default debug
+python WarploomController.py build standalone "Clean Build Pipeline" default debug
 ```
 
 #### Linker Errors
@@ -333,12 +333,12 @@ cmake --build build/debug --verbose
 **Solution**:
 1. Adjust parallel jobs:
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug --parallel 4
+python WarploomController.py build standalone "Build Project" default debug --parallel 4
 ```
 
 2. Use release build for faster compilation:
 ```bash
-python OmniCppController.py build standalone "Build Project" default release
+python WarploomController.py build standalone "Build Project" default release
 ```
 
 ### Getting Help
@@ -366,7 +366,7 @@ python -m json.tool build_performance_*.json
 
 ### Custom Build Tasks
 
-Define custom build tasks in `omni_scripts/build.py`:
+Define custom build tasks in `warploom_scripts/build.py`:
 
 ```python
 @task

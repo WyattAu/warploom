@@ -42,8 +42,8 @@ Thread N "llvmpipe-N" received signal SIGSEGV
 | `GALLIUM_DRIVER=softpipe` (softpipe is GL-only; Vulkan still llvmpipe) | segfault |
 | `DISPLAY=:0` (Xwayland) vs `DISPLAY=:99` (Xvfb, no GPU compositor) | segfault; display server irrelevant |
 | `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` on/off | segfault; validation not involved |
-| `OMNICPP_LEGACY_LIGHTING=1 OMNICPP_NO_SHADOW=1` (minimal shader stack) | segfault |
-| `OMNICPP_NODE_EDITOR=0` (UI overlay off) | segfault |
+| `WARPLOOM_LEGACY_LIGHTING=1 WARPLOOM_NO_SHADOW=1` (minimal shader stack) | segfault |
+| `WARPLOOM_NODE_EDITOR=0` (UI overlay off) | segfault |
 | lavapipe compute/cull/IBL/RT path tests (46/46 VulkanHardware compute-side) | **pass** |
 
 ## Conclusion

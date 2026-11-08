@@ -12,7 +12,7 @@
 #include <set>
 #include <vector>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -22,7 +22,7 @@ VulkanContext::~VulkanContext() { cleanup(); }
 
 ::warploom::core::Result<void> VulkanContext::initialize(
     const std::string& app_name, bool enable_validation) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (initialized_) return ::warploom::core::Result<void>::ok();
   if (!is_available()) return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
 
@@ -39,7 +39,7 @@ VulkanContext::~VulkanContext() { cleanup(); }
   app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   app_info.pApplicationName = app_name.c_str();
   app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-  app_info.pEngineName = "OmniCpp Engine";
+  app_info.pEngineName = "Warploom Engine";
   app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
   const std::uint32_t instance_api_version = get_highest_api_version();
   app_info.apiVersion = instance_api_version;
@@ -405,7 +405,7 @@ VulkanContext::~VulkanContext() { cleanup(); }
 }
 
 ::warploom::core::Result<void> VulkanContext::create_surface(VkSurfaceKHR& surface) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!initialized_ || !instance_ || !headless_surface_enabled_) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
@@ -427,7 +427,7 @@ VulkanContext::~VulkanContext() { cleanup(); }
 }
 
 void VulkanContext::destroy_surface(VkSurfaceKHR& surface) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (surface && instance_) {
     vkDestroySurfaceKHR(instance_, surface, nullptr);
   }
@@ -436,7 +436,7 @@ void VulkanContext::destroy_surface(VkSurfaceKHR& surface) noexcept {
 }
 
 void VulkanContext::cleanup() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device_) { vkDestroyDevice(device_, nullptr); device_ = nullptr; }
   if (debug_messenger_ && instance_) {
     auto func = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
@@ -454,10 +454,10 @@ void VulkanContext::cleanup() noexcept {
 }
 
 bool VulkanContext::is_available() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   VkApplicationInfo app_info{};
   app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-  app_info.pApplicationName = "OmniCpp Probe";
+  app_info.pApplicationName = "Warploom Probe";
   app_info.apiVersion = VK_API_VERSION_1_0;
 
   VkInstanceCreateInfo create_info{};
@@ -474,7 +474,7 @@ bool VulkanContext::is_available() noexcept {
 }
 
 bool VulkanContext::check_validation_layer_support() {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   std::uint32_t layer_count;
   vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
   std::vector<VkLayerProperties> available_layers(layer_count);
@@ -494,7 +494,7 @@ bool VulkanContext::check_validation_layer_support() {
 
 std::vector<const char*> VulkanContext::get_required_extensions(bool validation) {
   std::vector<const char*> extensions;
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   std::uint32_t extension_count = 0;
   vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, nullptr);
   std::vector<VkExtensionProperties> available(extension_count);
@@ -528,14 +528,14 @@ std::vector<const char*> VulkanContext::get_required_extensions(bool validation)
     extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
   }
 #endif
-#ifndef OMNICPP_HAS_VULKAN
+#ifndef WARPLOOM_HAS_VULKAN
   (void)validation;
 #endif
   return extensions;
 }
 
 bool VulkanContext::check_device_extension_support(VkPhysicalDevice device) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device) return false;
   std::uint32_t extension_count = 0;
   if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, nullptr) != VK_SUCCESS) {
@@ -551,14 +551,14 @@ bool VulkanContext::check_device_extension_support(VkPhysicalDevice device) {
     }
   }
 #endif
-#ifndef OMNICPP_HAS_VULKAN
+#ifndef WARPLOOM_HAS_VULKAN
   (void)device;
 #endif
   return false;
 }
 
 std::uint32_t VulkanContext::rate_device_suitability(VkPhysicalDevice device) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || !check_device_extension_support(device)) return 0;
   const auto queue_families = find_queue_families(device, nullptr);
   if (!queue_families.is_complete()) return 0;
@@ -575,7 +575,7 @@ std::uint32_t VulkanContext::rate_device_suitability(VkPhysicalDevice device) {
 }
 
 QueueFamilyIndices VulkanContext::find_queue_families(VkPhysicalDevice device, VkSurfaceKHR surface) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   QueueFamilyIndices indices;
   std::uint32_t count = 0;
   vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
@@ -612,7 +612,7 @@ QueueFamilyIndices VulkanContext::find_queue_families(VkPhysicalDevice device, V
 }
 
 std::uint32_t VulkanContext::get_highest_api_version() {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   auto enumerate_version = reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
       vkGetInstanceProcAddr(nullptr, "vkEnumerateInstanceVersion"));
   if (enumerate_version) {
@@ -634,7 +634,7 @@ std::uint32_t VulkanContext::get_highest_api_version() {
 void VulkanContext::record_validation_message(std::uint32_t severity,
                                                std::uint32_t type,
                                                const char* message) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   // The loader reports its explicit-layer notice through the debug callback;
   // exclude only those known informational notices, never an entire category.
   const bool forced_layer_notice = message && (std::strstr(message, "forced enabled due to env var") != nullptr ||
@@ -656,7 +656,7 @@ void VulkanContext::record_validation_message(std::uint32_t severity,
 }
 
 bool VulkanContext::device_supports_ray_tracing(VkPhysicalDevice device) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device) return false;
   std::uint32_t extension_count = 0;
   if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count,
@@ -690,7 +690,7 @@ bool VulkanContext::device_supports_ray_tracing(VkPhysicalDevice device) {
 }
 
 bool VulkanContext::device_supports_rt_pipeline_extension(VkPhysicalDevice device) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device) return false;
   std::uint32_t extension_count = 0;
   if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count,
@@ -716,7 +716,7 @@ bool VulkanContext::device_supports_rt_pipeline_extension(VkPhysicalDevice devic
 }
 
 bool VulkanContext::device_supports_position_fetch_extension(VkPhysicalDevice device) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device) return false;
   std::uint32_t extension_count = 0;
   if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count,

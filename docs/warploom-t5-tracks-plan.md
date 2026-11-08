@@ -207,7 +207,7 @@ Rules that keep it deterministic:
   Build note found while proving it (worth keeping): the headless proof
   first SEGFAULTED on `scrub_to`, and the stack was a `PhysicsWorld`
   destructor freeing a garbage pointer. The cause was not that code: the
-  `warploom_headless_host` build target is named `omnicpp_headless_host`,
+  `warploom_headless_host` build target is named `warploom_headless_host`,
   so the rebuild silently failed ("No rule to make target") and the proof
   ran a Nov 3 binary against a Nov 4 `libwarploom_core.so` — two different
   `PhysicsWorld` layouts in one process, i.e. an ODR violation manufactured

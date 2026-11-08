@@ -19,7 +19,7 @@ from unittest.mock import patch, MagicMock, mock_open
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from omni_scripts.platform.linux import (
+from warploom_scripts.platform.linux import (
     LinuxDistribution,
     PackageManager,
     detect_linux_distribution,
@@ -75,7 +75,7 @@ class TestLinuxDistributionDetection(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         # Clear cache before each test
-        import omni_scripts.platform.linux as linux_module
+        import warploom_scripts.platform.linux as linux_module
         linux_module._distribution_cache = None
         linux_module._package_manager_cache = None
 
@@ -254,7 +254,7 @@ ID_LIKE=arch
             mock_exists.return_value = True
 
             # Clear cache
-            import omni_scripts.platform.linux as linux_module
+            import warploom_scripts.platform.linux as linux_module
             linux_module._distribution_cache = None
 
             with patch("builtins.open", side_effect=_mock_open_os_release(arch_content)):
@@ -282,7 +282,7 @@ ID_LIKE=arch
             mock_exists.return_value = True
 
             # Test CachyOS
-            import omni_scripts.platform.linux as linux_module
+            import warploom_scripts.platform.linux as linux_module
             linux_module._distribution_cache = None
 
             cachyos_content = """ID=cachyos
@@ -306,10 +306,10 @@ class TestPackageManagerDetection(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         # Clear cache before each test
-        import omni_scripts.platform.linux as linux_module
+        import warploom_scripts.platform.linux as linux_module
         linux_module._package_manager_cache = None
 
-    @patch("omni_scripts.platform.linux._find_executable")
+    @patch("warploom_scripts.platform.linux._find_executable")
     def test_pacman_detection(self, mock_find):
         """Test pacman detection."""
         mock_find.side_effect = lambda name: Path("/usr/bin/pacman") if name == "pacman" else None
@@ -320,7 +320,7 @@ class TestPackageManagerDetection(unittest.TestCase):
         self.assertEqual(pm.command, "pacman")
         self.assertEqual(pm.family, "arch")
 
-    @patch("omni_scripts.platform.linux._find_executable")
+    @patch("warploom_scripts.platform.linux._find_executable")
     def test_apt_detection(self, mock_find):
         """Test apt detection."""
         mock_find.side_effect = lambda name: Path("/usr/bin/apt") if name == "apt" else None
@@ -331,7 +331,7 @@ class TestPackageManagerDetection(unittest.TestCase):
         self.assertEqual(pm.command, "apt")
         self.assertEqual(pm.family, "debian")
 
-    @patch("omni_scripts.platform.linux._find_executable")
+    @patch("warploom_scripts.platform.linux._find_executable")
     def test_apt_get_detection(self, mock_find):
         """Test apt-get detection."""
         mock_find.side_effect = lambda name: Path("/usr/bin/apt-get") if name == "apt-get" else None
@@ -342,7 +342,7 @@ class TestPackageManagerDetection(unittest.TestCase):
         self.assertEqual(pm.command, "apt-get")
         self.assertEqual(pm.family, "debian")
 
-    @patch("omni_scripts.platform.linux._find_executable")
+    @patch("warploom_scripts.platform.linux._find_executable")
     def test_dnf_detection(self, mock_find):
         """Test dnf detection."""
         mock_find.side_effect = lambda name: Path("/usr/bin/dnf") if name == "dnf" else None
@@ -353,7 +353,7 @@ class TestPackageManagerDetection(unittest.TestCase):
         self.assertEqual(pm.command, "dnf")
         self.assertEqual(pm.family, "fedora")
 
-    @patch("omni_scripts.platform.linux._find_executable")
+    @patch("warploom_scripts.platform.linux._find_executable")
     def test_yum_detection(self, mock_find):
         """Test yum detection."""
         mock_find.side_effect = lambda name: Path("/usr/bin/yum") if name == "yum" else None
@@ -364,7 +364,7 @@ class TestPackageManagerDetection(unittest.TestCase):
         self.assertEqual(pm.command, "yum")
         self.assertEqual(pm.family, "fedora")
 
-    @patch("omni_scripts.platform.linux._find_executable")
+    @patch("warploom_scripts.platform.linux._find_executable")
     def test_zypper_detection(self, mock_find):
         """Test zypper detection."""
         mock_find.side_effect = lambda name: Path("/usr/bin/zypper") if name == "zypper" else None
@@ -375,7 +375,7 @@ class TestPackageManagerDetection(unittest.TestCase):
         self.assertEqual(pm.command, "zypper")
         self.assertEqual(pm.family, "suse")
 
-    @patch("omni_scripts.platform.linux._find_executable")
+    @patch("warploom_scripts.platform.linux._find_executable")
     def test_no_package_manager(self, mock_find):
         """Test no package manager detection."""
         mock_find.return_value = None

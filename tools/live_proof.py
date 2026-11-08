@@ -30,10 +30,10 @@ Proofs (run against hardware per docs/roadmap.md verification discipline):
          the tail half of the T5a contract is wire-observable here.
 
 Usage:
-  tools/live_proof.py w1 --sock /tmp/omnicpp_hw.sock
-  tools/live_proof.py g1 --sock /tmp/omnicpp_hw.sock
-  tools/live_proof.py w2 --sock-a /tmp/omnicpp_w2a.sock --sock-b /tmp/omnicpp_w2b.sock
-  tools/live_proof.py g3 --sock /tmp/omnicpp_hw.sock  # any host state:
+  tools/live_proof.py w1 --sock /tmp/warploom_hw.sock
+  tools/live_proof.py g1 --sock /tmp/warploom_hw.sock
+  tools/live_proof.py w2 --sock-a /tmp/warploom_w2a.sock --sock-b /tmp/warploom_w2b.sock
+  tools/live_proof.py g3 --sock /tmp/warploom_hw.sock  # any host state:
                         # g3 pauses first and places every clip relatively
 """
 
@@ -1206,9 +1206,9 @@ def main():
     parser.add_argument(
         "proof", choices=["w1", "g1", "w2", "g3", "e1", "t5c", "cnc",
                             "phys", "all"])
-    parser.add_argument("--sock", default="/tmp/omnicpp_hw.sock")
-    parser.add_argument("--sock-a", default="/tmp/omnicpp_w2a.sock")
-    parser.add_argument("--sock-b", default="/tmp/omnicpp_w2b.sock")
+    parser.add_argument("--sock", default="/tmp/warploom_hw.sock")
+    parser.add_argument("--sock-a", default="/tmp/warploom_w2a.sock")
+    parser.add_argument("--sock-b", default="/tmp/warploom_w2b.sock")
     args = parser.parse_args()
 
     if args.proof in ("w1", "g1", "e1", "t5c", "cnc", "phys", "all"):

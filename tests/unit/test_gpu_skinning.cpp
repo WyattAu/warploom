@@ -36,12 +36,12 @@
 
 namespace {
 
-using omnicpp::render::PbrMaterialData;
-using omnicpp::render::SceneMatrix;
-using omnicpp::render::SceneMesh;
-using omnicpp::render::ScenePbrObject;
-using omnicpp::render::VulkanPbrScene;
-using omnicpp::render::scene_identity_matrix;
+using warploom::render::PbrMaterialData;
+using warploom::render::SceneMatrix;
+using warploom::render::SceneMesh;
+using warploom::render::ScenePbrObject;
+using warploom::render::VulkanPbrScene;
+using warploom::render::scene_identity_matrix;
 
 SceneMatrix make_perspective(float fov, float aspect, float zn, float zf) {
   SceneMatrix m = scene_identity_matrix();
@@ -72,8 +72,8 @@ SceneMatrix make_rotation_x(float radians) {
 // Lower quad: y in [-1, 0], upper quad: y in [0, 1]. Width 0.4.
 // Lower vertices bind bone 0 (weight 1), upper bind bone 1 (weight 1).
 struct BarMesh {
-  omnicpp::render::Allocation va{};
-  omnicpp::render::Allocation ia{};
+  warploom::render::Allocation va{};
+  warploom::render::Allocation ia{};
   SceneMesh mesh{};
 };
 
@@ -110,9 +110,9 @@ void build_bar(std::vector<float>& verts, std::vector<uint32_t>& idx,
   }
 }
 
-struct SolidTexture { VkImage img{}; VkImageView view{}; VkSampler sampler{}; omnicpp::render::Allocation alloc{}; };
+struct SolidTexture { VkImage img{}; VkImageView view{}; VkSampler sampler{}; warploom::render::Allocation alloc{}; };
 bool make_white(VkDevice d, VkPhysicalDevice pd, VkQueue q, uint32_t f,
-    omnicpp::render::VulkanMemoryAllocator& a, SolidTexture& out) {
+    warploom::render::VulkanMemoryAllocator& a, SolidTexture& out) {
   out = {};
   VkImageCreateInfo ii{};
   ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO; ii.imageType = VK_IMAGE_TYPE_2D;
@@ -123,7 +123,7 @@ bool make_white(VkDevice d, VkPhysicalDevice pd, VkQueue q, uint32_t f,
   auto m = a.bind_image(out.img, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   if (!m.is_ok()) return false;
   out.alloc = m.value();
-  omnicpp::render::VulkanFrameUploadArena arena;
+  warploom::render::VulkanFrameUploadArena arena;
   if (!arena.initialize(d, pd, f, 1, 1<<20).is_ok()) return false;
   if (!arena.begin_frame(0).is_ok()) return false;
   auto s = arena.acquire(4);
@@ -145,7 +145,7 @@ bool make_white(VkDevice d, VkPhysicalDevice pd, VkQueue q, uint32_t f,
   vkCreateSampler(d, &si, nullptr, &out.sampler);
   return true;
 }
-void destroy_solid(VkDevice d, omnicpp::render::VulkanMemoryAllocator& a, SolidTexture& t) {
+void destroy_solid(VkDevice d, warploom::render::VulkanMemoryAllocator& a, SolidTexture& t) {
   if (t.sampler) vkDestroySampler(d, t.sampler, nullptr);
   if (t.view) vkDestroyImageView(d, t.view, nullptr);
   if (t.alloc.is_valid()) a.destroy_allocation(t.alloc);
@@ -154,9 +154,9 @@ void destroy_solid(VkDevice d, omnicpp::render::VulkanMemoryAllocator& a, SolidT
 }
 
 struct SkinningHarness {
-  omnicpp::render::VulkanContext ctx;
-  omnicpp::render::VulkanMemoryAllocator alloc;
-  omnicpp::render::VulkanDescriptorManager desc;
+  warploom::render::VulkanContext ctx;
+  warploom::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanDescriptorManager desc;
   VkDescriptorSetLayout mesh_layout{};
   VkDescriptorSetLayout tex_layout{};
   VkDescriptorSetLayout mat_layout{};
@@ -166,10 +166,10 @@ struct SkinningHarness {
   VkDescriptorSet bone_set{};
   SolidTexture white;
   BarMesh bar;
-  omnicpp::render::Allocation mat_buf{};
-  omnicpp::render::Allocation bone_buf{};
-  omnicpp::render::VulkanOffscreenTarget target;
-  omnicpp::render::VulkanPipeline pipe;
+  warploom::render::Allocation mat_buf{};
+  warploom::render::Allocation bone_buf{};
+  warploom::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanPipeline pipe;
   uint32_t qf{0};
 
   bool init(const char* name) {
@@ -264,11 +264,11 @@ struct SkinningHarness {
     std::memcpy(mat_buf.mapped, &m, sizeof(m));
   }
 
-  omnicpp_test::ReadbackResult render(const VulkanPbrScene& scene) {
+  warploom_test::ReadbackResult render(const VulkanPbrScene& scene) {
     VkDevice dev = ctx.device();
-    auto pr = omnicpp::render::VulkanRenderer::create_command_pool(dev, qf);
+    auto pr = warploom::render::VulkanRenderer::create_command_pool(dev, qf);
     if (!pr.is_ok()) return {};
-    auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(dev, pr.value());
+    auto cr = warploom::render::VulkanRenderer::allocate_command_buffer(dev, pr.value());
     if (!cr.is_ok()) { vkDestroyCommandPool(dev, pr.value(), nullptr); return {}; }
     VkCommandBuffer cb = cr.value();
     VkFenceCreateInfo fi{}; fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -320,7 +320,7 @@ struct SkinningHarness {
     vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
     vkDestroyFence(dev, fence, nullptr);
     vkDestroyCommandPool(dev, pr.value(), nullptr);
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         ctx.physical_device(), dev, ctx.graphics_queue(), qf,
         target.image(), target.format(), 256, 256,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,

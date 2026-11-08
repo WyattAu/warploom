@@ -27,11 +27,11 @@
 
 namespace {
 
-using omnicpp::render::Allocation;
-using omnicpp::render::SceneMatrix;
-using omnicpp::render::ScenePbrObject;
-using omnicpp::render::VulkanPbrScene;
-using omnicpp::render::scene_identity_matrix;
+using warploom::render::Allocation;
+using warploom::render::SceneMatrix;
+using warploom::render::ScenePbrObject;
+using warploom::render::VulkanPbrScene;
+using warploom::render::scene_identity_matrix;
 
 SceneMatrix make_perspective(float fov_y_degrees, float aspect, float znear,
                              float zfar) {
@@ -62,13 +62,13 @@ struct SkyParamsUbo {
 };
 
 struct SkyIntegrationHarness {
-  omnicpp::render::VulkanContext context;
-  omnicpp::render::VulkanMemoryAllocator allocator;
-  omnicpp::render::VulkanDescriptorManager descriptors;
-  omnicpp::render::VulkanOffscreenTarget target;
-  omnicpp::render::VulkanPipeline pipeline;      // lit cube path
-  omnicpp::render::VulkanPipeline sky_pipeline;  // analytic sky
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanContext context;
+  warploom::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanDescriptorManager descriptors;
+  warploom::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanPipeline pipeline;      // lit cube path
+  warploom::render::VulkanPipeline sky_pipeline;  // analytic sky
+  warploom::render::VulkanRenderer renderer;
 
   // Cube mesh (SSBO vertex pull, same layout as the lit tests).
   VkDescriptorSetLayout mesh_layout{VK_NULL_HANDLE};
@@ -79,7 +79,7 @@ struct SkyIntegrationHarness {
   Allocation material_allocation{};
   Allocation vertex_allocation{};
   Allocation index_allocation{};
-  omnicpp::render::SceneMesh mesh{};
+  warploom::render::SceneMesh mesh{};
 
   // Sky resources: set 0 UBO + params.
   VkDescriptorSetLayout sky_layout{VK_NULL_HANDLE};
@@ -100,14 +100,14 @@ struct SkyIntegrationHarness {
         static_cast<std::uint32_t>(context.queue_families().graphics_family);
 
     // --- Lit-cube resources (mirrors test_pbr_scene) -----------------------
-    const std::vector<omnicpp::render::ReflectedBinding> mesh_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> mesh_bindings = {
         {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
          VK_SHADER_STAGE_VERTEX_BIT}};
     auto mesh_layout_result = descriptors.create_layout(mesh_bindings, 8U);
     if (!mesh_layout_result.is_ok()) return false;
     mesh_layout = mesh_layout_result.value();
 
-    const std::vector<omnicpp::render::ReflectedBinding> textures_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> textures_bindings = {
         {1U, 0U, 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
          VK_SHADER_STAGE_FRAGMENT_BIT}};
     auto textures_layout_result = descriptors.create_layout(
@@ -118,7 +118,7 @@ struct SkyIntegrationHarness {
     if (!textures_set_result.is_ok()) return false;
     textures_set = textures_set_result.value();
 
-    const std::vector<omnicpp::render::ReflectedBinding> material_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> material_bindings = {
         {2U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
          VK_SHADER_STAGE_FRAGMENT_BIT}};
     auto material_layout_result =
@@ -173,7 +173,7 @@ struct SkyIntegrationHarness {
     mesh.descriptor_set = mesh_set_result.value();
 
     // --- Sky resources ------------------------------------------------------
-    const std::vector<omnicpp::render::ReflectedBinding> sky_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> sky_bindings = {
         {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
          VK_SHADER_STAGE_FRAGMENT_BIT}};
     auto sky_layout_result = descriptors.create_layout(sky_bindings, 4U);
@@ -330,11 +330,11 @@ struct SkyIntegrationHarness {
     std::memcpy(material_allocation.mapped, data, bytes);
   }
 
-  [[nodiscard]] omnicpp_test::ReadbackResult render(const VulkanPbrScene& scene) {
-    auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  [[nodiscard]] warploom_test::ReadbackResult render(const VulkanPbrScene& scene) {
+    auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
         context.device(), queue_family);
     if (!pool_result.is_ok()) return {};
-    auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
         context.device(), pool_result.value());
     if (!cb_result.is_ok()) {
       vkDestroyCommandPool(context.device(), pool_result.value(), nullptr);
@@ -377,7 +377,7 @@ struct SkyIntegrationHarness {
     vkDestroyFence(context.device(), fence, nullptr);
     vkDestroyCommandPool(context.device(), pool_result.value(), nullptr);
     if (!submitted) return {};
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         context.physical_device(), context.device(), context.graphics_queue(),
         queue_family, target.image(), target.format(), 256U, 256U,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,

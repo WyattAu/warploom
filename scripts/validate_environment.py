@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-OmniCpp Environment Validation Script
+Warploom Environment Validation Script
 
-This script validates the development environment for OmniCpp builds,
+This script validates the development environment for Warploom builds,
 checking for required tools, compilers, and dependencies.
 """
 
@@ -14,10 +14,10 @@ import platform
 from pathlib import Path
 from typing import List, Tuple, Optional
 
-# Add parent directory to path to import omni_scripts
+# Add parent directory to path to import warploom_scripts
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from omni_scripts.validators import ConfigValidator, BuildValidator, DependencyValidator
+from warploom_scripts.validators import ConfigValidator, BuildValidator, DependencyValidator
 
 
 class ToolchainValidator:
@@ -138,7 +138,7 @@ class ToolchainValidator:
 
 
 class EnvironmentValidator:
-    """Validates the OmniCpp development environment."""
+    """Validates the Warploom development environment."""
 
     def __init__(self):
         self.system = platform.system().lower()
@@ -152,7 +152,7 @@ class EnvironmentValidator:
             "warnings": []
         }
 
-        # Initialize validators from omni_scripts
+        # Initialize validators from warploom_scripts
         self.config_validator = ConfigValidator()
         self.build_validator = BuildValidator()
         self.dependency_validator = DependencyValidator()
@@ -377,7 +377,7 @@ class EnvironmentValidator:
             self.check_command(cmd, desc)
 
     def validate_project_configuration(self) -> None:
-        """Validate project configuration files using omni_scripts validators."""
+        """Validate project configuration files using warploom_scripts validators."""
         print("📋 Validating Project Configuration...")
 
         project_root = Path.cwd()
@@ -396,7 +396,7 @@ class EnvironmentValidator:
                 self.results["warnings"].append(f"⚠️  {result.file_path.name}: {warning}")  # type: ignore[arg-type]
 
     def validate_dependencies(self) -> None:
-        """Validate project dependencies using omni_scripts validators."""
+        """Validate project dependencies using warploom_scripts validators."""
         print("📦 Validating Dependencies...")
 
         project_root = Path.cwd()
@@ -456,7 +456,7 @@ class EnvironmentValidator:
             print("Qt/Vulkan builds may require additional setup.")
             return True
         else:
-            print("\n✅ Environment validation passed! Ready for OmniCpp development.")
+            print("\n✅ Environment validation passed! Ready for Warploom development.")
             return True
 
     def _get_installation_commands(self, arch: str, missing_tools: List[str]) -> str:
@@ -505,7 +505,7 @@ class EnvironmentValidator:
 
 def main():
     """Main validation function."""
-    print("🚀 OmniCpp Environment Validator")
+    print("🚀 Warploom Environment Validator")
     print("="*40)
 
     validator = EnvironmentValidator()

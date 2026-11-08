@@ -50,7 +50,7 @@
 
 namespace {
 
-using omnicpp::render::SceneMatrix;
+using warploom::render::SceneMatrix;
 
 constexpr std::uint32_t kSize = 256U;
 
@@ -145,9 +145,9 @@ void build_unit_cube(std::vector<float>& vertices,
   }
 }
 
-omnicpp::render::SceneMatrix make_perspective(float fov_y_degrees, float aspect,
+warploom::render::SceneMatrix make_perspective(float fov_y_degrees, float aspect,
                                               float znear, float zfar) {
-  SceneMatrix m = omnicpp::render::scene_identity_matrix();
+  SceneMatrix m = warploom::render::scene_identity_matrix();
   const float f = 1.0f / std::tan(fov_y_degrees * 3.14159265f / 360.0f);
   m[0] = f / aspect;
   m[5] = -f;
@@ -158,8 +158,8 @@ omnicpp::render::SceneMatrix make_perspective(float fov_y_degrees, float aspect,
   return m;
 }
 
-omnicpp::render::SceneMatrix make_translation(float x, float y, float z) {
-  SceneMatrix m = omnicpp::render::scene_identity_matrix();
+warploom::render::SceneMatrix make_translation(float x, float y, float z) {
+  SceneMatrix m = warploom::render::scene_identity_matrix();
   m[12] = x;
   m[13] = y;
   m[14] = z;
@@ -170,12 +170,12 @@ struct SolidTexture {
   VkImage image{VK_NULL_HANDLE};
   VkImageView view{VK_NULL_HANDLE};
   VkSampler sampler{VK_NULL_HANDLE};
-  omnicpp::render::Allocation allocation{};
+  warploom::render::Allocation allocation{};
 };
 
 bool make_solid_texture(VkDevice device, VkQueue queue,
                         std::uint32_t queue_family,
-                        omnicpp::render::VulkanMemoryAllocator& allocator,
+                        warploom::render::VulkanMemoryAllocator& allocator,
                         const std::uint8_t (&rgba)[4], SolidTexture& out) {
   out = {};
   VkImage image = VK_NULL_HANDLE;
@@ -196,7 +196,7 @@ bool make_solid_texture(VkDevice device, VkQueue queue,
     vkDestroyImage(device, image, nullptr);
     return false;
   }
-  omnicpp::render::Allocation image_mem = mem.value();
+  warploom::render::Allocation image_mem = mem.value();
   out.allocation = image_mem;
   VkImageViewCreateInfo vi{};
   vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -222,10 +222,10 @@ bool make_solid_texture(VkDevice device, VkQueue queue,
     return false;
   }
   out.image = image;
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(device,
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(device,
                                                                    queue_family);
   if (!pool.is_ok()) return false;
-  auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
       device, pool.value());
   if (!cbr.is_ok()) {
     vkDestroyCommandPool(device, pool.value(), nullptr);
@@ -282,7 +282,7 @@ bool make_solid_texture(VkDevice device, VkQueue queue,
 }
 
 void destroy_solid_texture(VkDevice device,
-                           omnicpp::render::VulkanMemoryAllocator& allocator,
+                           warploom::render::VulkanMemoryAllocator& allocator,
                            SolidTexture& t) {
   if (t.sampler != VK_NULL_HANDLE) vkDestroySampler(device, t.sampler, nullptr);
   if (t.view != VK_NULL_HANDLE) vkDestroyImageView(device, t.view, nullptr);
@@ -294,7 +294,7 @@ void destroy_solid_texture(VkDevice device,
 //! 24-word payload, mirroring pbr_gpu_driven.vert. Word 23 is the R3
 //! joint_base (0 for both objects here: one actor at palette slot 0).
 struct Payload {
-  omnicpp::render::SceneMatrix model;
+  warploom::render::SceneMatrix model;
   std::uint32_t material_index;
   std::uint32_t mesh_slot;
   std::array<float, 4> sphere;
@@ -306,16 +306,16 @@ static_assert(sizeof(Payload) == 96U, "24 words expected");
 }  // namespace
 
 TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppGpuDrivenSkinned", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomGpuDrivenSkinned", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device()).is_ok());
-  omnicpp::render::VulkanDescriptorManager descriptors;
+  warploom::render::VulkanDescriptorManager descriptors;
   ASSERT_TRUE(descriptors.initialize(context.device()).is_ok());
   const std::uint32_t qf =
       static_cast<std::uint32_t>(context.queue_families().graphics_family);
@@ -328,14 +328,14 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
   build_beam_skin(beam_skin);
 
   // Path B shared streams through the table builder (R3 skin stream).
-  omnicpp::render::SceneMeshTableBuilder table_builder;
-  omnicpp::render::SceneMesh shell{};
+  warploom::render::SceneMeshTableBuilder table_builder;
+  warploom::render::SceneMesh shell{};
   const auto slot_cube =
       table_builder.add(shell, cube_verts, cube_idx, std::vector<float>{});
   const auto slot_beam = table_builder.add(shell, beam_verts, beam_idx,
                                            beam_skin);
-  ASSERT_NE(slot_cube, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
-  ASSERT_NE(slot_beam, omnicpp::render::SceneMeshTableBuilder::kInvalidSlot);
+  ASSERT_NE(slot_cube, warploom::render::SceneMeshTableBuilder::kInvalidSlot);
+  ASSERT_NE(slot_beam, warploom::render::SceneMeshTableBuilder::kInvalidSlot);
   // Different geometry: no dedup between the slots.
   EXPECT_EQ(table_builder.build().dedup_count, 0U);
   const auto& merged = table_builder.build();
@@ -439,7 +439,7 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
       // Beam sphere covers the displaced top half (x +0..1 local): center
       // (1.85, 0.5), radius 1.25 — the conservative-sphere contract.
       {model_beam, 1U, slot_beam, {1.85f, 0.5f, -4.5f, 1.25f}, 1U, 0U},
-      {omnicpp::render::scene_identity_matrix(), 0U, slot_cube,
+      {warploom::render::scene_identity_matrix(), 0U, slot_cube,
        {0.0f, 0.0f, 0.0f, 0.8660254f}, 1U, 0U},
   };
   {
@@ -457,11 +457,11 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
   }
 
   // ---- Materials: gray cube, RED beam (the displaced signal) ---------------
-  omnicpp::render::PbrMaterialData mats[2]{};
+  warploom::render::PbrMaterialData mats[2]{};
   mats[0].base_color_factor = {0.75f, 0.75f, 0.75f, 1.0f};
   mats[0].roughness_factor = 0.5f;
   auto mat_buf = allocator.create_buffer(
-      2U * sizeof(omnicpp::render::PbrMaterialData),
+      2U * sizeof(warploom::render::PbrMaterialData),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -471,7 +471,7 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
   std::memcpy(mat_buf.value().mapped, mats, sizeof(mats));
 
   // ---- Descriptors ----------------------------------------------------------
-  const std::vector<omnicpp::render::ReflectedBinding> mesh_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> mesh_bindings = {
       {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_VERTEX_BIT}};
   auto mesh_layout = descriptors.create_layout(mesh_bindings, 8U);
@@ -479,7 +479,7 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
   // Driven set 0: verts (0), payload (1), skin stream (4). Binding 4 is
   // unused by the static vertex shader — legal, and one set serves both
   // driven pipelines.
-  const std::vector<omnicpp::render::ReflectedBinding> driven_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> driven_bindings = {
       {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_VERTEX_BIT},
       {0U, 1U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -488,17 +488,17 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
        VK_SHADER_STAGE_VERTEX_BIT}};
   auto driven_layout = descriptors.create_layout(driven_bindings, 8U);
   ASSERT_TRUE(driven_layout.is_ok());
-  const std::vector<omnicpp::render::ReflectedBinding> tex_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> tex_bindings = {
       {1U, 0U, 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
        VK_SHADER_STAGE_FRAGMENT_BIT}};
   auto tex_layout = descriptors.create_layout(tex_bindings, 1U, true);
   ASSERT_TRUE(tex_layout.is_ok());
-  const std::vector<omnicpp::render::ReflectedBinding> mat_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> mat_bindings = {
       {2U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_FRAGMENT_BIT}};
   auto mat_layout = descriptors.create_layout(mat_bindings, 8U);
   ASSERT_TRUE(mat_layout.is_ok());
-  const std::vector<omnicpp::render::ReflectedBinding> bone_bindings = {
+  const std::vector<warploom::render::ReflectedBinding> bone_bindings = {
       {3U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
        VK_SHADER_STAGE_VERTEX_BIT}};
   auto bone_layout = descriptors.create_layout(bone_bindings, 8U);
@@ -561,8 +561,8 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
                   .is_ok());
 
   // ---- Targets ---------------------------------------------------------------
-  omnicpp::render::VulkanOffscreenTarget target_a, target_b;
-  for (omnicpp::render::VulkanOffscreenTarget* t : {&target_a, &target_b}) {
+  warploom::render::VulkanOffscreenTarget target_a, target_b;
+  for (warploom::render::VulkanOffscreenTarget* t : {&target_a, &target_b}) {
     ASSERT_TRUE(t
                     ->create(context.device(), context.physical_device(),
                              VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize,
@@ -577,7 +577,7 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
   }
 
   // ---- Pipelines ---------------------------------------------------------------
-  omnicpp::render::VulkanPipeline pipe_a, pipe_a_skinned, pipe_b_static,
+  warploom::render::VulkanPipeline pipe_a, pipe_a_skinned, pipe_b_static,
       pipe_b_skinned;
   const std::string sd = WARPLOOM_TEST_SHADER_DIR;
   const VkPushConstantRange push_all{
@@ -685,7 +685,7 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
 
   // ---- Path A scene ---------------------------------------------------------------
   const SceneMatrix vp = make_perspective(45.0f, 1.0f, 0.1f, 100.0f);
-  omnicpp::render::SceneMesh cube_mesh_a, beam_mesh_a;
+  warploom::render::SceneMesh cube_mesh_a, beam_mesh_a;
   cube_mesh_a.vertex_buffer = cube_a_vb.value().buffer;
   cube_mesh_a.index_buffer = cube_a_ib.value().buffer;
   cube_mesh_a.index_count = static_cast<std::uint32_t>(cube_idx.size());
@@ -694,7 +694,7 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
   beam_mesh_a.index_buffer = beam_a_ib.value().buffer;
   beam_mesh_a.index_count = static_cast<std::uint32_t>(beam_idx.size());
   beam_mesh_a.descriptor_set = beam_mesh_set.value();
-  omnicpp::render::VulkanPbrScene scene{};
+  warploom::render::VulkanPbrScene scene{};
   scene.pipeline = pipe_a.pipeline();
   scene.pipeline_layout = pipe_a.pipeline_layout();
   scene.skinned_pipeline = pipe_a_skinned.pipeline();
@@ -705,12 +705,12 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
   scene.material_set = mat_set.value();
   scene.bone_set = bone_set.value();
   {
-    omnicpp::render::ScenePbrObject cube_obj;
+    warploom::render::ScenePbrObject cube_obj;
     cube_obj.mesh = &cube_mesh_a;
     cube_obj.model = model_cube;
     cube_obj.material_index = 0U;
     scene.objects.push_back(cube_obj);
-    omnicpp::render::ScenePbrObject beam_obj;
+    warploom::render::ScenePbrObject beam_obj;
     beam_obj.mesh = &beam_mesh_a;
     beam_obj.model = model_beam;
     beam_obj.material_index = 1U;
@@ -720,20 +720,20 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
   }
 
   struct PushB {
-    omnicpp::render::SceneMatrix view_projection;
-    omnicpp::render::SceneMatrix model_unused;
+    warploom::render::SceneMatrix view_projection;
+    warploom::render::SceneMatrix model_unused;
     std::array<float, 4> camera_position;
     std::uint32_t material_index_unused;
     std::array<std::uint32_t, 3> pad{};
   };
 
   // ---- Record + submit + readback ----------------------------------------------
-  const auto run = [&](omnicpp::render::VulkanOffscreenTarget& target,
-                       bool driven) -> omnicpp_test::ReadbackResult {
-    auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto run = [&](warploom::render::VulkanOffscreenTarget& target,
+                       bool driven) -> warploom_test::ReadbackResult {
+    auto pool = warploom::render::VulkanRenderer::create_command_pool(
         context.device(), qf);
     if (!pool.is_ok()) return {};
-    auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
         context.device(), pool.value());
     if (!cbr.is_ok()) {
       vkDestroyCommandPool(context.device(), pool.value(), nullptr);
@@ -766,7 +766,7 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
     vkCmdSetScissor(cb, 0, 1, &scissor);
 
     if (!driven) {
-      omnicpp::render::VulkanRenderer renderer;
+      warploom::render::VulkanRenderer renderer;
       const auto recorded = renderer.record_pbr_scene(cb, scene, kSize, kSize);
       if (!recorded.is_ok()) {
         EXPECT_TRUE(false) << "record_pbr_scene failed";
@@ -779,8 +779,8 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
       // payload addressing is unchanged; the degenerate tail command is
       // never drawn.
       const PushB push{vp, {}, {0.0f, 0.0f, 0.0f, 1.0f}, 0U, {}};
-      omnicpp::render::VulkanRenderer renderer;
-      omnicpp::render::VulkanRenderer::GpuDrivenFrame frame{};
+      warploom::render::VulkanRenderer renderer;
+      warploom::render::VulkanRenderer::GpuDrivenFrame frame{};
       frame.object_count = kObjectCount;
       frame.indirect_buffer = draw_buf.value().buffer;
       frame.index_buffer = ib.value().buffer;
@@ -827,7 +827,7 @@ TEST(VulkanHardware, GpuDrivenSkinnedMatchesCpuSkinnedPixels) {
     vkWaitForFences(context.device(), 1U, &fence, VK_TRUE, UINT64_MAX);
     vkDestroyFence(context.device(), fence, nullptr);
     vkDestroyCommandPool(context.device(), pool.value(), nullptr);
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         context.physical_device(), context.device(), context.graphics_queue(),
         qf, target.image(), target.format(), kSize, kSize,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,

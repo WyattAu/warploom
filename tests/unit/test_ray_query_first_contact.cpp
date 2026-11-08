@@ -33,8 +33,8 @@
 
 namespace {
 
-using omnicpp::render::BlasBuildInput;
-using omnicpp::render::TlasInstance;
+using warploom::render::BlasBuildInput;
+using warploom::render::TlasInstance;
 
 constexpr std::uint32_t kGrid = 8U;
 
@@ -82,26 +82,26 @@ std::array<float, 12> translated_instance(float tx, float ty, float tz) {
 }  // namespace
 
 TEST(ray_query_first_contact, blas_tlas_build_and_ray_query) {
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppRayQueryFirst", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomRayQueryFirst", true).is_ok());
   if (!context.has_ray_tracing()) {
     GTEST_SKIP() << "device lacks ray tracing";
   }
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device()).is_ok());
-  omnicpp::render::VulkanDescriptorManager descriptors;
+  warploom::render::VulkanDescriptorManager descriptors;
   ASSERT_TRUE(descriptors.initialize(context.device()).is_ok());
   const std::uint32_t qf =
       static_cast<std::uint32_t>(context.queue_families().graphics_family);
 
   // ---- SBT sizing rules (E3 groundwork sanity) ---------------------------
-  omnicpp::render::RtSbtProperties sbt{};
-  omnicpp::render::VulkanRtQuery::get_properties(context.physical_device(),
+  warploom::render::RtSbtProperties sbt{};
+  warploom::render::VulkanRtQuery::get_properties(context.physical_device(),
                                                  sbt);
   EXPECT_GE(sbt.handle_size, 16U);
   EXPECT_EQ(sbt.raygen_stride % 32U, 0U);
@@ -153,7 +153,7 @@ TEST(ray_query_first_contact, blas_tlas_build_and_ray_query) {
   ASSERT_NE(in_a.vertex_buffer_address, 0U);
   ASSERT_NE(in_b.vertex_buffer_address, 0U);
 
-  omnicpp::render::VulkanAccelerationStructureBuilder builder;
+  warploom::render::VulkanAccelerationStructureBuilder builder;
   auto blas_a = builder.create_blas(context.device(), allocator, in_a);
   auto blas_b = builder.create_blas(context.device(), allocator, in_b);
   ASSERT_TRUE(blas_a.is_ok());
@@ -189,7 +189,7 @@ TEST(ray_query_first_contact, blas_tlas_build_and_ray_query) {
   std::memset(results.value().mapped, 0xEE, kGrid * kGrid * 16U);
 
   // ---- Descriptor set: AS + results -----------------------------------------
-  const std::vector<omnicpp::render::ReflectedBinding> bindings = {
+  const std::vector<warploom::render::ReflectedBinding> bindings = {
       {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
        VK_SHADER_STAGE_COMPUTE_BIT},
       {0U, 1U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -220,7 +220,7 @@ TEST(ray_query_first_contact, blas_tlas_build_and_ray_query) {
                   .is_ok());
 
   // ---- Compute pipeline -------------------------------------------------------
-  omnicpp::render::VulkanPipeline pipe;
+  warploom::render::VulkanPipeline pipe;
   const std::string sd = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipe
                   .load_shader_stage_file(context.device(),
@@ -239,10 +239,10 @@ TEST(ray_query_first_contact, blas_tlas_build_and_ray_query) {
                   .is_ok());
 
   // ---- Command buffer: BLAS builds -> TLAS build -> barrier -> dispatch ----
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), qf);
   ASSERT_TRUE(pool.is_ok());
-  auto cbr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cbr = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), pool.value());
   ASSERT_TRUE(cbr.is_ok());
   VkCommandBuffer cb = cbr.value();
@@ -257,19 +257,19 @@ TEST(ray_query_first_contact, blas_tlas_build_and_ray_query) {
 
   // Scratch: sized to the largest single build; reuse requires barriers.
   const auto sizes_a =
-      omnicpp::render::VulkanAccelerationStructureBuilder::query_blas_sizes(
+      warploom::render::VulkanAccelerationStructureBuilder::query_blas_sizes(
           context.device(), in_a);
   const auto sizes_b =
-      omnicpp::render::VulkanAccelerationStructureBuilder::query_blas_sizes(
+      warploom::render::VulkanAccelerationStructureBuilder::query_blas_sizes(
           context.device(), in_b);
   const std::uint64_t blas_scratch =
       std::max(sizes_a.buildScratchSize, sizes_b.buildScratchSize);
   const auto tlas_sizes =
-      omnicpp::render::VulkanAccelerationStructureBuilder::query_tlas_sizes(
+      warploom::render::VulkanAccelerationStructureBuilder::query_tlas_sizes(
           context.device(), 2U);
   const std::uint64_t scratch_bytes =
       std::max(blas_scratch, tlas_sizes.buildScratchSize);
-  omnicpp::render::VulkanScratchPool scratch;
+  warploom::render::VulkanScratchPool scratch;
   auto scratch_addr =
       scratch.acquire(allocator, context.device(), scratch_bytes);
   ASSERT_TRUE(scratch_addr.is_ok());
@@ -380,9 +380,9 @@ TEST(ray_query_first_contact, blas_tlas_build_and_ray_query) {
   vkDestroyFence(context.device(), fence, nullptr);
   pipe.cleanup(context.device());
   vkDestroyCommandPool(context.device(), pool.value(), nullptr);
-  omnicpp::render::BottomLevelAS out_a = blas_a.value();
-  omnicpp::render::BottomLevelAS out_b = blas_b.value();
-  omnicpp::render::TopLevelAS out_t = tlas.value();
+  warploom::render::BottomLevelAS out_a = blas_a.value();
+  warploom::render::BottomLevelAS out_b = blas_b.value();
+  warploom::render::TopLevelAS out_t = tlas.value();
   scratch.cleanup(allocator);
   builder.destroy_blas(context.device(), allocator, out_a);
   builder.destroy_blas(context.device(), allocator, out_b);

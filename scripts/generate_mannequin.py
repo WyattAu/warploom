@@ -431,7 +431,7 @@ nodes.extend(mesh_nodes)
 
 document = {
     "asset": {"version": "2.0",
-              "generator": "omnicpp mannequin generator"},
+              "generator": "warploom mannequin generator"},
     "scene": 0,
     "scenes": [{"nodes": [0] + list(range(15, 15 + len(mesh_nodes)))}],
     "nodes": nodes,

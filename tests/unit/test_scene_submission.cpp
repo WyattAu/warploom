@@ -22,7 +22,7 @@
 
 namespace {
 
-using omnicpp::render::SceneMatrix;
+using warploom::render::SceneMatrix;
 
 [[maybe_unused]] void make_perspective(float fov_y, float aspect, float znear, float zfar,
                       SceneMatrix& m) {
@@ -101,13 +101,13 @@ using omnicpp::render::SceneMatrix;
 
 TEST(VulkanHardware, RendererIndexedSceneSubmission) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppSceneSubmission", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomSceneSubmission", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   constexpr VkDeviceSize kVertexBytes = 8U * 11U * sizeof(float);
@@ -128,9 +128,9 @@ TEST(VulkanHardware, RendererIndexedSceneSubmission) {
   write_cube(static_cast<float*>(green_vertices.value().mapped), 0.05f, 1.0f, 0.05f);
   std::memcpy(indices.value().mapped, kCubeIndices, kIndexBytes);
 
-  omnicpp::render::VulkanDescriptorManager descriptors;
+  warploom::render::VulkanDescriptorManager descriptors;
   ASSERT_TRUE(descriptors.initialize(context.device()).is_ok());
-  const std::vector<omnicpp::render::ReflectedBinding> bindings = {
+  const std::vector<warploom::render::ReflectedBinding> bindings = {
       {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT}};
   auto layout = descriptors.create_layout(bindings, 2U);
   ASSERT_TRUE(layout.is_ok());
@@ -145,7 +145,7 @@ TEST(VulkanHardware, RendererIndexedSceneSubmission) {
       green_set.value(), 0U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
       green_vertices.value().buffer, 0U, VK_WHOLE_SIZE).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, 256U, 256U, &allocator).is_ok());
   ASSERT_TRUE(target.create_depth(context.device(), context.physical_device(),
@@ -153,7 +153,7 @@ TEST(VulkanHardware, RendererIndexedSceneSubmission) {
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_stage_file(
       context.device(), shader_dir + "/indexed_scene.vert.spv", "vertex").is_ok());
@@ -167,10 +167,10 @@ TEST(VulkanHardware, RendererIndexedSceneSubmission) {
       context.device(), target.render_pass(), target.format(),
       pipeline.pipeline_layout(), true, true, false).is_ok());
 
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), pool_result.value());
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer cb = cb_result.value();
@@ -179,37 +179,37 @@ TEST(VulkanHardware, RendererIndexedSceneSubmission) {
   VkFence fence = VK_NULL_HANDLE;
   ASSERT_EQ(vkCreateFence(context.device(), &fence_info, nullptr, &fence), VK_SUCCESS);
 
-  omnicpp::render::SceneMesh red_mesh{
+  warploom::render::SceneMesh red_mesh{
       red_vertices.value().buffer, indices.value().buffer, red_set.value(), 0U, 36U};
-  omnicpp::render::SceneMesh green_mesh{
+  warploom::render::SceneMesh green_mesh{
       green_vertices.value().buffer, indices.value().buffer, green_set.value(), 0U, 36U};
-  omnicpp::render::VulkanRenderer renderer;
-  omnicpp::core::World world;
+  warploom::render::VulkanRenderer renderer;
+  warploom::core::World world;
   const auto camera_entity = world.create_entity();
   const auto red_entity = world.create_entity();
   const auto green_entity = world.create_entity();
-  omnicpp::render::SceneCameraComponent camera_component;
+  warploom::render::SceneCameraComponent camera_component;
   make_perspective(1.05f, 1.0f, 0.1f, 100.0f,
                    camera_component.view_projection);
-  world.add_component<omnicpp::render::SceneCameraComponent>(
+  world.add_component<warploom::render::SceneCameraComponent>(
       camera_entity, camera_component);
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       red_entity, {&red_mesh, true});
-  world.add_component<omnicpp::render::SceneRenderableComponent>(
+  world.add_component<warploom::render::SceneRenderableComponent>(
       green_entity, {&green_mesh, true});
-  omnicpp::render::SceneTransformComponent red_transform;
-  omnicpp::render::SceneTransformComponent green_transform;
+  warploom::render::SceneTransformComponent red_transform;
+  warploom::render::SceneTransformComponent green_transform;
   make_translation(0.0f, 0.0f, -4.0f, red_transform.model);
   make_translation(0.0f, 0.0f, -8.0f, green_transform.model);
-  world.add_component<omnicpp::render::SceneTransformComponent>(
+  world.add_component<warploom::render::SceneTransformComponent>(
       red_entity, red_transform);
-  world.add_component<omnicpp::render::SceneTransformComponent>(
+  world.add_component<warploom::render::SceneTransformComponent>(
       green_entity, green_transform);
-  auto scene = omnicpp::render::extract_vulkan_scene(
+  auto scene = warploom::render::extract_vulkan_scene(
       world, pipeline.pipeline(), pipeline.pipeline_layout());
 
-  const auto render = [&](const omnicpp::render::VulkanScene& snapshot)
-      -> omnicpp_test::ReadbackResult {
+  const auto render = [&](const warploom::render::VulkanScene& snapshot)
+      -> warploom_test::ReadbackResult {
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -235,7 +235,7 @@ TEST(VulkanHardware, RendererIndexedSceneSubmission) {
     submit.pCommandBuffers = &cb;
     EXPECT_EQ(vkQueueSubmit(context.graphics_queue(), 1U, &submit, fence), VK_SUCCESS);
     EXPECT_EQ(vkWaitForFences(context.device(), 1U, &fence, VK_TRUE, UINT64_MAX), VK_SUCCESS);
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         context.physical_device(), context.device(), context.graphics_queue(),
         static_cast<std::uint32_t>(context.queue_families().graphics_family),
         target.image(), target.format(), 256U, 256U,
@@ -248,11 +248,11 @@ TEST(VulkanHardware, RendererIndexedSceneSubmission) {
   EXPECT_EQ(first.green_dominant_pixels, 0U);
 
   make_translation(0.0f, 0.0f, -8.0f,
-                   world.get_component<omnicpp::render::SceneTransformComponent>(red_entity).model);
+                   world.get_component<warploom::render::SceneTransformComponent>(red_entity).model);
   make_scale_rotation_y_translation(
       0.55f, 0.0f, 0.0f, -4.0f,
-      world.get_component<omnicpp::render::SceneTransformComponent>(green_entity).model);
-  scene = omnicpp::render::extract_vulkan_scene(
+      world.get_component<warploom::render::SceneTransformComponent>(green_entity).model);
+  scene = warploom::render::extract_vulkan_scene(
       world, pipeline.pipeline(), pipeline.pipeline_layout());
   const auto second = render(scene);
   ASSERT_TRUE(second.submitted);
@@ -267,9 +267,9 @@ TEST(VulkanHardware, RendererIndexedSceneSubmission) {
   vkDestroyCommandPool(context.device(), pool_result.value(), nullptr);
   pipeline.cleanup(context.device());
   target.cleanup(context.device());
-  omnicpp::render::Allocation rv = red_vertices.value();
-  omnicpp::render::Allocation gv = green_vertices.value();
-  omnicpp::render::Allocation ib = indices.value();
+  warploom::render::Allocation rv = red_vertices.value();
+  warploom::render::Allocation gv = green_vertices.value();
+  warploom::render::Allocation ib = indices.value();
   allocator.destroy_allocation(rv);
   allocator.destroy_allocation(gv);
   allocator.destroy_allocation(ib);

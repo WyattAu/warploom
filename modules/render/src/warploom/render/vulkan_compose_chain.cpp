@@ -24,7 +24,7 @@
 #include "warploom/render/vulkan_render_graph.hpp"
 #include "warploom/render/vulkan_fullscreen.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -39,7 +39,7 @@ namespace warploom::render {
     [[maybe_unused]] VkFormat present_format,
     [[maybe_unused]] std::uint32_t width,
     [[maybe_unused]] std::uint32_t height) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   // Note: no enable_hdr_compose check. The renderer only constructs a chain
   // when compose is enabled, so "not enabled" is "no chain exists".
   // The original bodies read these straight off the renderer; as a standalone
@@ -765,7 +765,7 @@ namespace warploom::render {
 
 void record_compose_stage(VkCommandBuffer command_buffer,
                           const GraphPass& pass, void* user) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   const auto* stage = static_cast<const ComposeStage*>(user);
   if (stage == nullptr || stage->pipeline == nullptr) return;
   FullscreenPass draw{};
@@ -790,7 +790,7 @@ void record_compose_stage(VkCommandBuffer command_buffer,
 
 void record_compose_dynamic_stage(VkCommandBuffer command_buffer,
                                   const GraphDynamicPass& pass, void* user) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   const auto* stage = static_cast<const ComposeStage*>(user);
   if (stage == nullptr || stage->pipeline == nullptr) return;
   // The executor owns begin/endRendering; the callback owns bind + draw --
@@ -867,7 +867,7 @@ void VulkanComposeChain::build_graph_passes(
     std::uint32_t height, std::vector<GraphPass>& passes,
     std::vector<GraphDynamicPass>& dyn_passes,
     std::vector<ComposeStage>& stages, VkClearValue* clear_storage) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   passes.clear();
   dyn_passes.clear();
   stages.clear();
@@ -1156,7 +1156,7 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
                                 VkFramebuffer target_framebuffer,
                                 VkImage present_image, VkImageView present_view,
                                 std::uint32_t width, std::uint32_t height) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   std::vector<GraphPass> passes;
   std::vector<GraphDynamicPass> dyn_passes;
   std::vector<ComposeStage> stages;
@@ -1195,7 +1195,7 @@ void VulkanComposeChain::record(VkCommandBuffer command_buffer,
 }
 
 VkImage VulkanComposeChain::skeleton_image_of(int kind) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   return reinterpret_cast<VkImage>(static_cast<std::uintptr_t>(kind));
 #else
   return reinterpret_cast<VkImage>(static_cast<std::uintptr_t>(kind));
@@ -1714,7 +1714,7 @@ bool VulkanComposeChain::verify_frame_nodes(
 }
 
 void VulkanComposeChain::destroy() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   compose_ready_ = false;
   compose_width_ = 0U;
   compose_height_ = 0U;

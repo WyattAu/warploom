@@ -13,9 +13,9 @@
 
 namespace {
 
-using omnicpp::core::LatencyTracker;
-using omnicpp::core::LatencyStats;
-using omnicpp::core::nearest_rank_percentile;
+using warploom::core::LatencyTracker;
+using warploom::core::LatencyStats;
+using warploom::core::nearest_rank_percentile;
 
 //! Reference implementation: sort and index directly.
 std::uint64_t reference_percentile(std::vector<std::uint64_t> values, double q) {

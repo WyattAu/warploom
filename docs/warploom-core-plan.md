@@ -10,34 +10,34 @@ repository audit (counts below are measured, not estimated).
 - `src/engine/core/`: 11 translation units, ~5.1k LOC; `include/engine/core/`:
   22 public headers.
 - **84 files** across the repo include an `engine/core/*` header;
-  **23 distinct include paths**; **72 files** use `omnicpp::core` or
-  `omnicpp::editor`.
+  **23 distinct include paths**; **72 files** use `warploom::core` or
+  `warploom::editor`.
 - Zero `engine/render` / `engine/asset` references inside core sources or
   headers; zero Vulkan references. Core is already UI-free (S1 consequence:
   nothing under `include/engine/core` includes `warploom/ui`).
 - Direction of dependency is correct and one-way: 3 render files include
   `engine/core`; nothing in core reaches back.
-- Consumers of the runtime target: `omnicpp_viewport`, `omnicpp_pong_example`,
+- Consumers of the runtime target: `warploom_viewport`, `warploom_pong_example`,
   `simple_game`, the test suite (8 CMake references), the new
-  `omnicpp_headless_host`, and the standalone warploom-ui consumer proof.
+  `warploom_headless_host`, and the standalone warploom-ui consumer proof.
 
 ## Namespace audit (the hard part)
 
-`omnicpp::core` (engine substrate) and `omnicpp::editor` (document/session/
+`warploom::core` (engine substrate) and `warploom::editor` (document/session/
 protocol/scrubber/recorder) are declared in **18 core headers**, and the
-`omnicpp::editor` namespace ALSO covers engine-side editor code that is NOT
+`warploom::editor` namespace ALSO covers engine-side editor code that is NOT
 part of warploom-core:
 
 - `include/engine/editor/node_editor.hpp`, `inspector.hpp` and their sources
   (the widget-layer node editor, S1-aliased to `warploom::ui` inside);
 - `include/engine/render/vulkan_parallel_recorder.hpp` (one render header
-  declares `namespace omnicpp::editor`).
+  declares `namespace warploom::editor`).
   *Correction (S4 re-audit, docs/warploom-editor-plan.md):* this header
-  declares `omnicpp::core` then `omnicpp::render`; never `omnicpp::editor`.
+  declares `warploom::core` then `warploom::render`; never `warploom::editor`.
   The conservative S2 claim was wrong in the safe direction; the truthful
   split is 7 core headers vs 3 widget headers, nothing else.
 
-Therefore: `omnicpp::editor` is NOT a pure core namespace. A repo-wide
+Therefore: `warploom::editor` is NOT a pure core namespace. A repo-wide
 namespace sed would silently re-badge editor widgets and a render header as
 "core". The migration must be file-scoped, not blind.
 
@@ -56,8 +56,8 @@ warploom-ui-free):
   `control_server.hpp/.cpp` (protocol types + transport),
   `editor_session.hpp/.cpp`, `input_state`, `input_translators`,
   `script_module`.
-- Namespace ownership moves with the files: `omnicpp::core` and the
-  document/session parts of `omnicpp::editor` become `warploom::core` /
+- Namespace ownership moves with the files: `warploom::core` and the
+  document/session parts of `warploom::editor` become `warploom::core` /
   `warploom::editor` as defined by warploom-core's headers. The engine-side
   editor widgets and the render recorder keep their current home; they will
   alias/consume core under S4/S3.
@@ -84,17 +84,17 @@ renaming identifiers:
    header (`#include <warploom/core/xxx.hpp>` + deprecation note). All 84
    existing include sites keep compiling UNCHANGED. `engine/` include root
    stays the superproject's integration root (S1 precedent).
-3. **Namespace stays `omnicpp::core` / `omnicpp::editor` in phase A.**
+3. **Namespace stays `warploom::core` / `warploom::editor` in phase A.**
    Rationale: the editor-widget collision means a namespace move is not a
    sed; it is a design act that belongs with S4 (when the widget layer
-   moves and the `omnicpp::editor` namespace can finally be split
+   moves and the `warploom::editor` namespace can finally be split
    truthfully). Renaming now would either break 72 files or mis-badge
    non-core code.
-4. **Consumers**: `omnicpp_runtime` links `PUBLIC Warploom::core` (same
+4. **Consumers**: `warploom_runtime` links `PUBLIC Warploom::core` (same
    pattern as `Warploom::ui`). Runtime source list loses the core/*.cpp
    entries; editor/render entries stay. The alias targets
-   (`omnicpp_core` → alias of `Warploom::core`) update accordingly.
-   Tests keep linking `omnicpp_runtime` (they get core transitively) and
+   (`warploom_core` → alias of `Warploom::core`) update accordingly.
+   Tests keep linking `warploom_runtime` (they get core transitively) and
    the runtime-only suite keeps proving headless linkability.
 5. **Verification gate (phase A exit)**:
    - 4/4 suites on all four CI legs;
@@ -109,8 +109,8 @@ renaming identifiers:
 Mechanical, gated by phase A's green matrix: `warploom::core` /
 `warploom::editor` namespace adoption in core headers + compat
 `namespace` aliases for the transition, wired to the S-decision pass
-(`OMNICPP_*` → `WARPLOOM_*`, repo rename) so external adopters see one
-coherent identity change, not two. The `omnicpp::editor` split (document
+(`WARPLOOM_*` → `WARPLOOM_*`, repo rename) so external adopters see one
+coherent identity change, not two. The `warploom::editor` split (document
 types vs widget types) is explicitly an S4 prerequisite and is called out
 there.
 
@@ -130,7 +130,7 @@ there.
    is the canary for "extraction changed behavior"; it must stay green and
    byte-stable.
 5. **Library ordering**: `warploom_core` must not link `Warploom::ui`
-   (verified: no ui includes in core). `omnicpp_runtime` links both.
+   (verified: no ui includes in core). `warploom_runtime` links both.
 
 ## Sequencing within this session
 
@@ -148,38 +148,38 @@ there.
 Status: **DONE** (verified per the gate below); the contract is the
 acceptance authority that was
 authority for S2-B, appended per the design-first discipline. The phase-A
-blocker (an `omnicpp::editor` collision across not-yet-split widget code)
-dissolved with S4: every `omnicpp::editor` declaration now lives in a
+blocker (an `warploom::editor` collision across not-yet-split widget code)
+dissolved with S4: every `warploom::editor` declaration now lives in a
 module header, so the namespace move is mechanical.
 
 ## Contract
 
 1. **Module core headers adopt the warploom namespace.** All 21 public
    headers and 10 TUs under `modules/core` re-badge their namespace
-   blocks: `omnicpp::core` → `warploom::core`, `omnicpp::editor` →
-   `warploom::editor`, `omnicpp::anim` → `warploom::anim`,
-   `omnicpp::physics` → `warploom::physics`, `omnicpp::contract` →
+   blocks: `warploom::core` → `warploom::core`, `warploom::editor` →
+   `warploom::editor`, `warploom::anim` → `warploom::anim`,
+   `warploom::physics` → `warploom::physics`, `warploom::contract` →
    `warploom::contract`. File-scoped, mechanical openers + closers -
    exactly the S1 ui move, now for core.
 2. **Compat footers in every public header.** The legacy spellings must
    name the SAME types, so the footer uses a using-directive in a
-   namespace extension: `namespace omnicpp::core { using namespace
+   namespace extension: `namespace warploom::core { using namespace
    ::warploom::core; }` (all five re-badged namespaces, every public
    header). *Correction during implementation (compile-model probe):*
-   the type-alias syntax (`namespace omnicpp { using core =
+   the type-alias syntax (`namespace warploom { using core =
    warploom::core; }`) is ill-formed for namespaces; `using X = ...`
    names types only. The using-directive form is the legal mechanism and
-   additionally coexists with real `omnicpp::core` extension blocks (the
+   additionally coexists with real `warploom::core` extension blocks (the
    render recorder header): extension blocks merge, and a struct tag in
    one extension never conflicts with directive-injected names. Old
    spellings resolve to the SAME types (no wrappers, no ODR surface,
    no ABI effect). Remove with the S5 identity pass.
 3. **Consumers compile unchanged.** The ~1,050 qualified spellings
-   outside modules/core (`omnicpp::core::X`, `omnicpp::editor::X`,
-   `omnicpp::anim::X`) resolve through the aliases: 113 files across
+   outside modules/core (`warploom::core::X`, `warploom::editor::X`,
+   `warploom::anim::X`) resolve through the aliases: 113 files across
    `modules/editor`, `src/`, `include/`, `tools/`, `examples/`, `tests/`.
    Include roots do NOT change; only namespace spelling moves.
-4. **S-decision split.** Repo-wide external identity (`OMNICPP_*` flags,
+4. **S-decision split.** Repo-wide external identity (`WARPLOOM_*` flags,
    repo rename, binary names) stays OUT; it rides with S5 so adopters
    see one coherent identity change. This phase changes namespaces only.
 5. **Verification gate (S2-B exit)**:
@@ -189,7 +189,7 @@ module header, so the namespace move is mechanical.
    - standalone consumers re-proofed against a fresh install
      (`CORE_CONSUMER_OK`, `UI_CONSUMER_OK`, `EDITOR_CONSUMER_OK` +
      `G3B_CONSUMER_OK`; the last two now exercise the alias path, since
-     their sources still spell `omnicpp::editor`);
+     their sources still spell `warploom::editor`);
    - 64/64 live proofs on hardware (the headless host + proof harness
      are alias consumers);
    - the deterministic-runtime benchmark suite stays green and

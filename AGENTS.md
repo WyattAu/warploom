@@ -82,7 +82,7 @@ involved, say so and skip the research section rather than padding it.
 - **core does not depend on render, and neither depends on the application's
   headers.** A type in the wrong layer is a design error, not a convenience.
 - **Public headers must compile without Vulkan present.** Use `#ifdef`, never
-  `#if OMNICPP_HAS_VULKAN`; that macro is defined with no value, so `#if`
+  `#if WARPLOOM_HAS_VULKAN`; that macro is defined with no value, so `#if`
   silently evaluates false and the Vulkan include vanishes. This has cost real
   build cycles.
 - **Floating-point determinism contract.** `-ffp-contract=off` is set on every
@@ -98,7 +98,7 @@ depends on the op sequence being a pure function of source + flags.
   regression even when every test passes.
 - **Deleting is a feature.** Dead compatibility shims, superseded plans and
   draft documents are removed, not maintained. Check before assuming something
-  is dead: `omni_scripts` looked like scaffolding and turned out to be the live
+  is dead: `warploom_scripts` looked like scaffolding and turned out to be the live
   implementation behind 17 imports.
 
 ## Dogfooding repositories
@@ -154,7 +154,7 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
   DIFFERENT tree -- Debug, `WARPLOOM_USE_VULKAN=OFF` -- which compiles code
   the default configuration never reaches. That configuration started at 124
   GCC warnings. Paying them was mostly mechanical (`[[maybe_unused]]` on
-  `#ifdef OMNICPP_HAS_VULKAN` parameters and on Vulkan-only test helpers, int
+  `#ifdef WARPLOOM_HAS_VULKAN` parameters and on Vulkan-only test helpers, int
   loop counters that fed an int accumulator) and surfaced one more real bug:
   12 document parsers reused the cast-before-range-check with the bound
   `v > static_cast<double>(UINT64_MAX)`. `(double)UINT64_MAX` rounds UP to
@@ -175,7 +175,7 @@ All four presets build warning-free on both compilers. `-Wunused-result` is
 
   That re-run paid for itself: the Vulkan-off tree, which nothing builds on
   a normal development cycle, **did not compile**. Three `VulkanRenderer`
-  members were declared inside `#ifdef OMNICPP_HAS_VULKAN` while their
+  members were declared inside `#ifdef WARPLOOM_HAS_VULKAN` while their
   definitions were unguarded, and two public-header default arguments named
   `VK_ACCESS_SHADER_WRITE_BIT` / `VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR`,
   which only exist with Vulkan present -- the rule at the top of this file,

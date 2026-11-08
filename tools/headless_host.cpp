@@ -5,7 +5,7 @@
 //!        so tools/live_proof.py runs identically on a CI runner and on
 //!        hardware.
 //!
-//! Usage: omnicpp_headless_host <socket-path>
+//! Usage: warploom_headless_host <socket-path>
 //!
 //! Deterministic and drive-by-wire: the sim only advances via `step`.
 
@@ -31,17 +31,17 @@ void on_signal(int) { g_stop = 1; }
 //! shape, that the viewport's frame loop makes. Neither host sequences the
 //! stages itself any more, so the two cannot drift.
 //! The logical frame model matches the W2 recorder exactly.
-class HeadlessHost final : public omnicpp::core::ControlHost {
+class HeadlessHost final : public warploom::core::ControlHost {
  public:
   //! Fixed timestep handed to every tick. Physics is not in the tick yet
   //! (roadmap C3), so today this only decides whether the physics stage is
   //! skipped; declared here so C3 does not have to touch the host.
   static constexpr double kFixedDt = 1.0 / 60.0;
 
-  [[nodiscard]] omnicpp::core::ControlReply on_control(
-      const omnicpp::core::ControlCommand& command) override {
+  [[nodiscard]] warploom::core::ControlReply on_control(
+      const warploom::core::ControlCommand& command) override {
     if (command.kind ==
-        omnicpp::core::ControlCommand::Kind::Step) {
+        warploom::core::ControlCommand::Kind::Step) {
       const std::uint64_t ticks =
           command.number_count > 0U
               ? static_cast<std::uint64_t>(command.numbers[0])
@@ -65,14 +65,14 @@ class HeadlessHost final : public omnicpp::core::ControlHost {
   [[nodiscard]] std::string snapshot_json() const override {
     return editor_.snapshot_json();
   }
-  omnicpp::editor::EditorSession editor_{};
+  warploom::editor::EditorSession editor_{};
   std::uint64_t frame_{0};  //!< logical sim frame (advanced by step)
 };
 
 }  // namespace
 
 int main(int argc, char** argv) {
-  omnicpp::core::Diagnostics::configure_from_environment();
+  warploom::core::Diagnostics::configure_from_environment();
   if (argc < 2) {
     std::fprintf(stderr, "usage: %s <socket-path>\n", argv[0]);
     return 2;
@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
   std::signal(SIGINT, on_signal);
   std::signal(SIGTERM, on_signal);
 
-  omnicpp::core::ControlServer server;
+  warploom::core::ControlServer server;
   std::string error;
   if (!server.start(socket_path, error)) {
     std::fprintf(stderr, "headless_host: %s\n", error.c_str());

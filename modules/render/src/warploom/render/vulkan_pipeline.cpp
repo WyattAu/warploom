@@ -9,7 +9,7 @@
 #include <fstream>
 #include <utility>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -29,7 +29,7 @@ VulkanPipeline::~VulkanPipeline() = default;
 ::warploom::core::Result<void> VulkanPipeline::load_shader_file(
     VkDevice device, const std::string& path) {
   device_ = device;
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   std::ifstream file(path, std::ios::ate | std::ios::binary);
   if (!file.is_open()) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
@@ -57,7 +57,7 @@ VulkanPipeline::~VulkanPipeline() = default;
 ::warploom::core::Result<void> VulkanPipeline::load_shader(
     VkDevice device, const std::uint32_t* code, std::size_t code_size_bytes) {
   device_ = device;
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || !code || code_size_bytes < 4 || code_size_bytes % 4 != 0) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
@@ -108,7 +108,7 @@ VulkanPipeline::~VulkanPipeline() = default;
 ::warploom::core::Result<void> VulkanPipeline::load_shader_stage_file(
     VkDevice device, const std::string& path, const std::string& stage) {
   device_ = device;
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -185,7 +185,7 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
 ::warploom::core::Result<void> VulkanPipeline::create_compute_pipeline(
     VkDevice device, VkPipelineLayout pipeline_layout) {
   device_ = device;
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || !compute_shader_) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
@@ -243,7 +243,7 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
     VkPipelineLayout pipeline_layout,
     bool enable_backface_cull, VkFormat depth_format,
     bool enable_depth_test, bool enable_depth_write) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   VkPipelineRenderingCreateInfo rendering_info{};
   rendering_info.sType =
       VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
@@ -279,7 +279,7 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
     bool enable_backface_cull,
     [[maybe_unused]] float depth_bias_slope,
     [[maybe_unused]] bool dynamic_depth_bias) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   device_ = device;
   // Exactly one framing: a baked render pass, or a dynamic rendering struct.
   if (!device || !vertex_shader_ || !fragment_shader_ ||
@@ -456,7 +456,7 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
 ::warploom::core::Result<void> VulkanPipeline::create_pipeline_layout(
     VkDevice device, const VkDescriptorSetLayout* set_layouts,
     std::uint32_t set_layout_count, const void* push_constant_range) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   device_ = device;
   if (!device) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
@@ -488,7 +488,7 @@ bool VulkanPipeline::has_stage(const std::string& stage) const noexcept {
 }
 
 void VulkanPipeline::cleanup(VkDevice device) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device == VK_NULL_HANDLE) device = device_;
   if (device) {
     if (pipeline_) vkDestroyPipeline(device, pipeline_, nullptr);

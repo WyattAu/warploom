@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-This guide provides solutions to common issues encountered when building and developing with the OmniCpp template.
+This guide provides solutions to common issues encountered when building and developing with the Warploom template.
 
 ## Table of Contents
 
@@ -27,13 +27,13 @@ This guide provides solutions to common issues encountered when building and dev
    # Remove build artifacts
    rm -rf build/
    # Or use controller
-   python OmniCppController.py build standalone "Clean Build Directory" default Debug
+   python WarploomController.py build standalone "Clean Build Directory" default Debug
    ```
 
 2. **Regenerate Build Files:**
    ```bash
    # Full clean and rebuild
-   python OmniCppController.py build standalone "Zero to Build" default Debug
+   python WarploomController.py build standalone "Zero to Build" default Debug
    ```
 
 3. **Check CMake Version:**
@@ -129,10 +129,10 @@ This guide provides solutions to common issues encountered when building and dev
 1. **Automated Installation (Linux):**
    ```bash
    # ARM64
-   python OmniCppController.py toolchain install arm64-linux-gnu
+   python WarploomController.py toolchain install arm64-linux-gnu
 
    # x86 Linux
-   python OmniCppController.py toolchain install x86-linux-gnu
+   python WarploomController.py toolchain install x86-linux-gnu
    ```
 
 2. **Manual Installation:**
@@ -166,7 +166,7 @@ This guide provides solutions to common issues encountered when building and dev
 1. **Check Target Architecture:**
    ```bash
    # Verify you're building for the correct target
-   python OmniCppController.py build standalone "Build" arm64-linux-gnu Debug
+   python WarploomController.py build standalone "Build" arm64-linux-gnu Debug
    ```
 
 2. **Validate Toolchain Paths:**
@@ -196,7 +196,7 @@ This guide provides solutions to common issues encountered when building and dev
 3. **Environment Setup:**
    ```bash
    # Ensure setup_clang.bat runs correctly
-   python OmniCppController.py build standalone "Conan install" clang-msvc Debug
+   python WarploomController.py build standalone "Conan install" clang-msvc Debug
    ```
 
 ### GCC MinGW Issues
@@ -371,7 +371,7 @@ This guide provides solutions to common issues encountered when building and dev
 
 3. **Use Development Server:**
    ```bash
-   python OmniCppController.py build standalone "Launch WebAssembly Server" emscripten Debug
+   python WarploomController.py build standalone "Launch WebAssembly Server" emscripten Debug
    ```
 
 ## General Debugging Tips
@@ -392,7 +392,7 @@ This guide provides solutions to common issues encountered when building and dev
 
 1. **Controller Logs:**
    ```bash
-   cat OmniCppController.log
+   cat WarploomController.log
    ```
 
 2. **CMake Logs:**
@@ -429,19 +429,19 @@ If these solutions don't resolve your issue:
 
 ```bash
 # Clean everything and start fresh
-python OmniCppController.py build standalone "Zero to Build" default Debug
+python WarploomController.py build standalone "Zero to Build" default Debug
 
 # Check toolchain availability
-python OmniCppController.py toolchain check
+python WarploomController.py toolchain check
 
 # Install missing toolchains (Linux)
-python OmniCppController.py toolchain install arm64-linux-gnu
+python WarploomController.py toolchain install arm64-linux-gnu
 
 # Format code
-python OmniCppController.py build standalone "Format Code" noNeedArch
+python WarploomController.py build standalone "Format Code" noNeedArch
 
 # Generate documentation
-python OmniCppController.py build standalone "Generate Documentation" noNeedArch
+python WarploomController.py build standalone "Generate Documentation" noNeedArch
 ```
 
 ### Environment Variables

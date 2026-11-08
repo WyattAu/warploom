@@ -24,7 +24,7 @@
 
 #ifdef WARPLOOM_HAS_VULKAN
 #include "vulkan_test_readback.hpp"
-using omnicpp_test::readback_swapchain_image;
+using warploom_test::readback_swapchain_image;
 #endif
 
 namespace {
@@ -49,7 +49,7 @@ struct GraphCtx {
 };
 
 void record_compute_cb(VkCommandBuffer cb,
-                       const omnicpp::render::GraphComputePass& pass,
+                       const warploom::render::GraphComputePass& pass,
                        void* user) {
   (void)pass;
   auto* c = static_cast<GraphCtx*>(user);
@@ -64,7 +64,7 @@ void record_compute_cb(VkCommandBuffer cb,
   vkCmdDispatch(cb, 1, 1, 1);
 }
 
-void record_draw_cb(VkCommandBuffer cb, const omnicpp::render::GraphPass& pass,
+void record_draw_cb(VkCommandBuffer cb, const warploom::render::GraphPass& pass,
                     void* user) {
   (void)pass;
   auto* c = static_cast<GraphCtx*>(user);
@@ -83,13 +83,13 @@ void record_draw_cb(VkCommandBuffer cb, const omnicpp::render::GraphPass& pass,
 
 TEST(VulkanHardware, RenderGraphComputeThenDraw) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppRenderGraphTest", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomRenderGraphTest", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(),
                                    context.physical_device()).is_ok());
 
@@ -102,9 +102,9 @@ TEST(VulkanHardware, RenderGraphComputeThenDraw) {
   ASSERT_TRUE(vbuf.is_ok());
 
   // --- Descriptors + pipelines. ---
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> bindings(1);
+  std::vector<warploom::render::ReflectedBinding> bindings(1);
   bindings[0] = {0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT};
   auto layout = manager.create_layout(bindings, 1);
@@ -116,7 +116,7 @@ TEST(VulkanHardware, RenderGraphComputeThenDraw) {
 
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   const VkPushConstantRange comp_push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 8};
-  omnicpp::render::VulkanPipeline comp_pipe;
+  warploom::render::VulkanPipeline comp_pipe;
   ASSERT_TRUE(comp_pipe.load_shader_stage_file(
       context.device(), shader_dir + "/gen_triangle.comp.spv", "compute").is_ok());
   ASSERT_TRUE(comp_pipe.create_pipeline_layout(
@@ -125,7 +125,7 @@ TEST(VulkanHardware, RenderGraphComputeThenDraw) {
       context.device(), comp_pipe.pipeline_layout()).is_ok());
 
   const VkPushConstantRange gfx_push{VK_SHADER_STAGE_VERTEX_BIT, 0, 4U};
-  omnicpp::render::VulkanPipeline gfx_pipe;
+  warploom::render::VulkanPipeline gfx_pipe;
   ASSERT_TRUE(gfx_pipe.load_shader_stage_file(
       context.device(), shader_dir + "/vertexpull_triangle.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(gfx_pipe.load_shader_stage_file(
@@ -133,7 +133,7 @@ TEST(VulkanHardware, RenderGraphComputeThenDraw) {
   ASSERT_TRUE(gfx_pipe.create_pipeline_layout(
       context.device(), &layout.value(), 1, &gfx_push).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize,
                             &allocator).is_ok());
@@ -154,20 +154,20 @@ TEST(VulkanHardware, RenderGraphComputeThenDraw) {
   VkClearValue clear{};
   clear.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
 
-  omnicpp::render::GraphComputePass compute_pass{};
+  warploom::render::GraphComputePass compute_pass{};
   compute_pass.name = "generate_triangle";
   compute_pass.group_count_x = 1;
   compute_pass.user_data = &ctx;
 
-  omnicpp::render::GraphPass draw_pass{};
+  warploom::render::GraphPass draw_pass{};
   draw_pass.name = "draw_triangle";
   draw_pass.render_pass = target.render_pass();
   draw_pass.framebuffer = target.framebuffer();
-  draw_pass.attachments = {omnicpp::render::color_attachment(
+  draw_pass.attachments = {warploom::render::color_attachment(
       target.image(), target.image_view(), target.format(),
       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)};
   // Consumer-declared buffer edge: compute writes -> vertex-stage reads.
-  omnicpp::render::GraphBufferEdge edge{};
+  warploom::render::GraphBufferEdge edge{};
   edge.buffer = vbuf.value().buffer;
   edge.producer_stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
   edge.consumer_stage = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
@@ -179,19 +179,19 @@ TEST(VulkanHardware, RenderGraphComputeThenDraw) {
   draw_pass.height = kSize;
   draw_pass.user_data = &ctx;
 
-  const std::vector<omnicpp::render::GraphNode> nodes = {
-      omnicpp::render::GraphNode::from_compute(compute_pass),
-      omnicpp::render::GraphNode::from_render(draw_pass),
+  const std::vector<warploom::render::GraphNode> nodes = {
+      warploom::render::GraphNode::from_compute(compute_pass),
+      warploom::render::GraphNode::from_render(draw_pass),
   };
-  const auto compiled = omnicpp::render::compile_graph(nodes);
+  const auto compiled = warploom::render::compile_graph(nodes);
 
   // --- Command infrastructure. ---
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool pool = pool_result.value();
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer cb = cb_result.value();
@@ -202,7 +202,7 @@ TEST(VulkanHardware, RenderGraphComputeThenDraw) {
 
   //! Records + submits one graph frame; returns the readback (submitted=false
   //! signals a recording failure; EXPECTs already fired).
-  const auto run_frame = [&](float phase) -> omnicpp_test::ReadbackResult {
+  const auto run_frame = [&](float phase) -> warploom_test::ReadbackResult {
     ctx.phase = phase;
     if (vkResetCommandBuffer(cb, 0) != VK_SUCCESS) {
       EXPECT_TRUE(false);
@@ -212,7 +212,7 @@ TEST(VulkanHardware, RenderGraphComputeThenDraw) {
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     EXPECT_EQ(vkBeginCommandBuffer(cb, &begin), VK_SUCCESS);
-    omnicpp::render::execute_graph(cb, nodes, compiled, &record_draw_cb,
+    warploom::render::execute_graph(cb, nodes, compiled, &record_draw_cb,
                            &record_compute_cb);
     EXPECT_EQ(vkEndCommandBuffer(cb), VK_SUCCESS);
     EXPECT_EQ(vkResetFences(context.device(), 1, &fence), VK_SUCCESS);
@@ -262,7 +262,7 @@ TEST(VulkanHardware, RenderGraphComputeThenDraw) {
   gfx_pipe.cleanup(context.device());
   comp_pipe.cleanup(context.device());
   target.cleanup(context.device());
-  omnicpp::render::Allocation v = vbuf.value();
+  warploom::render::Allocation v = vbuf.value();
   allocator.destroy_allocation(v);
   manager.cleanup();
   allocator.cleanup();
@@ -286,22 +286,22 @@ TEST(RenderGraph, SampledFirstUseHonoursExternalProducerLayout) {
   const VkImageLayout kSceneFinal = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
   // --- Baseline: no initial_layout means the caller guarantees readiness. ---
-  omnicpp::render::GraphPass ready{};
+  warploom::render::GraphPass ready{};
   ready.name = "tonemap";
-  omnicpp::render::GraphSampledImage prearranged{};
+  warploom::render::GraphSampledImage prearranged{};
   prearranged.image = image;
   prearranged.used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   ready.sampled_images = {prearranged};
 
-  const auto ready_compiled = omnicpp::render::compile_graph(
-      {omnicpp::render::GraphNode::from_render(ready)});
+  const auto ready_compiled = warploom::render::compile_graph(
+      {warploom::render::GraphNode::from_render(ready)});
   ASSERT_EQ(ready_compiled.barriers_per_node.at(0).size(), 0U)
       << "a prearranged first use must not emit a barrier";
 
   // --- With initial_layout the transition is emitted from the real state. ---
-  omnicpp::render::GraphPass external{};
+  warploom::render::GraphPass external{};
   external.name = "tonemap";
-  omnicpp::render::GraphSampledImage from_scene{};
+  warploom::render::GraphSampledImage from_scene{};
   from_scene.image = image;
   from_scene.used_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   from_scene.initial_layout = kSceneFinal;
@@ -309,8 +309,8 @@ TEST(RenderGraph, SampledFirstUseHonoursExternalProducerLayout) {
   from_scene.initial_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
   external.sampled_images = {from_scene};
 
-  const auto external_compiled = omnicpp::render::compile_graph(
-      {omnicpp::render::GraphNode::from_render(external)});
+  const auto external_compiled = warploom::render::compile_graph(
+      {warploom::render::GraphNode::from_render(external)});
   ASSERT_EQ(external_compiled.barriers_per_node.at(0).size(), 1U)
       << "an externally produced image must transition into its sampled layout";
   const auto& barrier = external_compiled.barriers_per_node.at(0).front();

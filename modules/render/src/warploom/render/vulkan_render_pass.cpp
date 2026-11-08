@@ -6,7 +6,7 @@
 #include "warploom/render/vulkan_render_pass.hpp"
 #include <cstring>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -17,7 +17,7 @@ VulkanRenderPass::~VulkanRenderPass() { cleanup(device_); }
 ::warploom::core::Result<void> VulkanRenderPass::create(
     VkDevice device, VkFormat color_format, VkFormat depth_format,
     VkImageLayout final_layout) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
@@ -103,7 +103,7 @@ VulkanRenderPass::~VulkanRenderPass() { cleanup(device_); }
 ::warploom::core::Result<void> VulkanRenderPass::create_framebuffers(
     VkDevice device, const std::vector<VkImageView>& swapchain_views,
     std::uint32_t width, std::uint32_t height) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || swapchain_views.empty() || !render_pass_) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
@@ -146,7 +146,7 @@ VulkanRenderPass::~VulkanRenderPass() { cleanup(device_); }
     VkDevice device, VkPhysicalDevice physical_device,
     VkFormat format, std::uint32_t width, std::uint32_t height,
     const ImageSharing& sharing) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device || !physical_device) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }
@@ -304,7 +304,7 @@ VulkanRenderPass::~VulkanRenderPass() { cleanup(device_); }
 }
 
 void VulkanRenderPass::cleanup([[maybe_unused]] VkDevice device) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device) {
     for (auto fb : framebuffers_) {
       if (fb) vkDestroyFramebuffer(device, fb, nullptr);
@@ -326,7 +326,7 @@ void VulkanRenderPass::cleanup([[maybe_unused]] VkDevice device) noexcept {
 }
 
 VkFormat VulkanRenderPass::find_supported_depth_format([[maybe_unused]] VkPhysicalDevice device) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device) return VK_FORMAT_UNDEFINED;
 
   VkFormat candidates[] = {

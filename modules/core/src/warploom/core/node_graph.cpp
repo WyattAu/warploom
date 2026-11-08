@@ -81,11 +81,11 @@ const NodePinDesc* find_pin(const std::vector<NodePinDesc>& pins,
 // ============================================================================
 
 void NodeGraph::register_type(NodeType type) {
-  OMNICPP_CONTRACT(!type.name.empty());
-  OMNICPP_CONTRACT((type.evaluate != nullptr || type.context_evaluate != nullptr) &&
+  WARPLOOM_CONTRACT(!type.name.empty());
+  WARPLOOM_CONTRACT((type.evaluate != nullptr || type.context_evaluate != nullptr) &&
                    "node type needs evaluate or context_evaluate");
   for (const auto& existing : types_) {
-    OMNICPP_CONTRACT(existing.name != type.name && "duplicate node type");
+    WARPLOOM_CONTRACT(existing.name != type.name && "duplicate node type");
   }
   types_.push_back(std::move(type));
 }
@@ -105,7 +105,7 @@ const NodeType* NodeGraph::find_type(std::string_view name) const {
 
 std::uint64_t NodeGraph::add_node(std::string type,
                                   std::map<std::string, NodeValue> params) {
-  OMNICPP_CONTRACT(find_type(type) != nullptr && "unknown node type");
+  WARPLOOM_CONTRACT(find_type(type) != nullptr && "unknown node type");
   GraphNode node;
   node.id = next_node_id_++;
   node.type = std::move(type);

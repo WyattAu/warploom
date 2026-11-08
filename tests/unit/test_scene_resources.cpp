@@ -7,10 +7,10 @@
 
 namespace {
 
-using omnicpp::render::MeshHandle;
-using omnicpp::render::SceneMaterial;
-using omnicpp::render::SceneMesh;
-using omnicpp::render::VulkanSceneResourceRegistry;
+using warploom::render::MeshHandle;
+using warploom::render::SceneMaterial;
+using warploom::render::SceneMesh;
+using warploom::render::VulkanSceneResourceRegistry;
 
 TEST(SceneResources, GenerationCheckedMeshHandlesRetireBeforeReuse) {
   VulkanSceneResourceRegistry resources;

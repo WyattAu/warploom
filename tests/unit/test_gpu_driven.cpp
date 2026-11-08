@@ -26,7 +26,7 @@
 #include "warploom/render/vulkan_renderer.hpp"
 #ifdef WARPLOOM_HAS_VULKAN
 #include "vulkan_test_readback.hpp"
-using omnicpp_test::readback_swapchain_image;
+using warploom_test::readback_swapchain_image;
 #endif
 
 namespace {
@@ -81,14 +81,14 @@ struct DrawCmd {
 
 TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppGpuDrivenTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomGpuDrivenTest", true).is_ok());
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   constexpr float kFovY = 1.05f;
@@ -169,10 +169,10 @@ TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
   }
 
   // --- Descriptor sets. ---
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
 
-  std::vector<omnicpp::render::ReflectedBinding> comp_bindings(2);
+  std::vector<warploom::render::ReflectedBinding> comp_bindings(2);
   comp_bindings[0] = {0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT};
   comp_bindings[1] = {0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT};
   auto comp_layout = manager.create_layout(comp_bindings, 1);
@@ -184,7 +184,7 @@ TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
   ASSERT_TRUE(manager.write_buffer(comp_set.value(), 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                    draw_buf.value().buffer, 0, VK_WHOLE_SIZE).is_ok());
 
-  std::vector<omnicpp::render::ReflectedBinding> gfx_bindings(1);
+  std::vector<warploom::render::ReflectedBinding> gfx_bindings(1);
   gfx_bindings[0] = {0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT};
   auto gfx_layout = manager.create_layout(gfx_bindings, 1);
   ASSERT_TRUE(gfx_layout.is_ok());
@@ -196,7 +196,7 @@ TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
   // --- Pipelines. ---
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   const VkPushConstantRange comp_push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 8};
-  omnicpp::render::VulkanPipeline comp_pipe;
+  warploom::render::VulkanPipeline comp_pipe;
   ASSERT_TRUE(comp_pipe.load_shader_stage_file(
       context.device(), shader_dir + "/cull_and_draw.comp.spv", "compute").is_ok());
   ASSERT_TRUE(comp_pipe.create_pipeline_layout(
@@ -204,7 +204,7 @@ TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
   ASSERT_TRUE(comp_pipe.create_compute_pipeline(
       context.device(), comp_pipe.pipeline_layout()).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, 256, 256, &allocator).is_ok());
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
@@ -212,7 +212,7 @@ TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
 
   constexpr std::uint32_t kGfxPushBytes = 64U + 4U * sizeof(std::uint32_t);
   const VkPushConstantRange gfx_push{VK_SHADER_STAGE_VERTEX_BIT, 0, kGfxPushBytes};
-  omnicpp::render::VulkanPipeline gfx_pipe;
+  warploom::render::VulkanPipeline gfx_pipe;
   ASSERT_TRUE(gfx_pipe.load_shader_stage_file(
       context.device(), shader_dir + "/gpu_objects.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(gfx_pipe.load_shader_stage_file(
@@ -224,12 +224,12 @@ TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
       gfx_pipe.pipeline_layout(), false, false, false).is_ok());
 
   // --- Command infrastructure. ---
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool pool = pool_result.value();
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer cb = cb_result.value();
@@ -403,9 +403,9 @@ TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
   gfx_pipe.cleanup(context.device());
   comp_pipe.cleanup(context.device());
   target.cleanup(context.device());
-  omnicpp::render::Allocation b1 = cull_buf.value();
-  omnicpp::render::Allocation b2 = inst_buf.value();
-  omnicpp::render::Allocation b3 = draw_buf.value();
+  warploom::render::Allocation b1 = cull_buf.value();
+  warploom::render::Allocation b2 = inst_buf.value();
+  warploom::render::Allocation b3 = draw_buf.value();
   allocator.destroy_allocation(b1);
   allocator.destroy_allocation(b2);
   allocator.destroy_allocation(b3);
@@ -424,22 +424,22 @@ TEST(VulkanHardware, GpuDrivenCullIndirectDraw) {
 //! percentiles (p50/p90/p99/p99.9/max) from LatencyTracker.
 TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppGpuDrivenBench", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomGpuDrivenBench", true).is_ok());
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
 
-  omnicpp::render::VulkanPipeline comp_pipe;
+  warploom::render::VulkanPipeline comp_pipe;
   ASSERT_TRUE(comp_pipe.load_shader_stage_file(
       context.device(), shader_dir + "/cull_and_draw.comp.spv", "compute").is_ok());
-  omnicpp::render::VulkanPipeline gfx_pipe;
+  warploom::render::VulkanPipeline gfx_pipe;
   ASSERT_TRUE(gfx_pipe.load_shader_stage_file(
       context.device(), shader_dir + "/gpu_objects.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(gfx_pipe.load_shader_stage_file(
@@ -484,9 +484,9 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
     }
   }
 
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> comp_bindings(2);
+  std::vector<warploom::render::ReflectedBinding> comp_bindings(2);
   comp_bindings[0] = {0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT};
   comp_bindings[1] = {0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT};
   auto comp_layout = manager.create_layout(comp_bindings, 1);
@@ -497,7 +497,7 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
                                    cull_buf.value().buffer, 0, VK_WHOLE_SIZE).is_ok());
   ASSERT_TRUE(manager.write_buffer(comp_set.value(), 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                    draw_buf.value().buffer, 0, VK_WHOLE_SIZE).is_ok());
-  std::vector<omnicpp::render::ReflectedBinding> gfx_bindings(1);
+  std::vector<warploom::render::ReflectedBinding> gfx_bindings(1);
   gfx_bindings[0] = {0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT};
   auto gfx_layout = manager.create_layout(gfx_bindings, 1);
   ASSERT_TRUE(gfx_layout.is_ok());
@@ -512,7 +512,7 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
   ASSERT_TRUE(comp_pipe.create_compute_pipeline(
       context.device(), comp_pipe.pipeline_layout()).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, 256, 256, &allocator).is_ok());
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
@@ -526,12 +526,12 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
       context.device(), target.render_pass(), target.format(),
       gfx_pipe.pipeline_layout(), false, false, false).is_ok());
 
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool pool = pool_result.value();
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer cb = cb_result.value();
@@ -541,7 +541,7 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
   VkFence fence = VK_NULL_HANDLE;
   ASSERT_EQ(vkCreateFence(context.device(), &fence_info, nullptr, &fence), VK_SUCCESS);
 
-  omnicpp::core::LatencyTracker<> latency;
+  warploom::core::LatencyTracker<> latency;
   std::uint64_t accepted_total = 0;
 
   for (std::uint32_t frame = 0; frame < kFrames; ++frame) {
@@ -711,9 +711,9 @@ TEST(VulkanHardware, SustainedGpuDrivenFrameBenchmark) {
   gfx_pipe.cleanup(context.device());
   comp_pipe.cleanup(context.device());
   target.cleanup(context.device());
-  omnicpp::render::Allocation b1 = cull_buf.value();
-  omnicpp::render::Allocation b2 = inst_buf.value();
-  omnicpp::render::Allocation b3 = draw_buf.value();
+  warploom::render::Allocation b1 = cull_buf.value();
+  warploom::render::Allocation b2 = inst_buf.value();
+  warploom::render::Allocation b3 = draw_buf.value();
   allocator.destroy_allocation(b1);
   allocator.destroy_allocation(b2);
   allocator.destroy_allocation(b3);

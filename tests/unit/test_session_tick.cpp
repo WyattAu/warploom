@@ -21,14 +21,14 @@
 
 namespace {
 
-using namespace omnicpp::editor;
+using namespace warploom::editor;
 
 constexpr double kDt = 1.0 / 60.0;
 
 //! Give a session one cube carrying a full transform, so the projection has
 //! something to make an entity from. Sessions are non-copyable, so this fills
 //! one in place rather than returning it.
-void seed_cube(::omnicpp::editor::EditorSession& session) {
+void seed_cube(::warploom::editor::EditorSession& session) {
   SceneObject cube{};
   cube.id = 1U;
   cube.type_id = 1U;
@@ -124,8 +124,8 @@ TEST(SessionTick, TimelineIsDrivenByTheTickNotByTheHost) {
 
   // The clip has to be armed for playback; drive it through the protocol so
   // this test exercises the same path a host would.
-  omnicpp::core::ControlCommand play{};
-  play.kind = omnicpp::core::ControlCommand::Kind::ClipPlay;
+  warploom::core::ControlCommand play{};
+  play.kind = warploom::core::ControlCommand::Kind::ClipPlay;
   play.id = 1U;
   play.numbers[0] = static_cast<double>(clip.id);
   play.number_count = 1U;
@@ -182,8 +182,8 @@ TEST(SessionTick, FrameComesFromTheInputNotAnInternalCounter) {
 namespace {
 
 //! A body resting above the ground, so a tick actually moves it.
-::omnicpp::physics::PhysicsBody falling_body() {
-  ::omnicpp::physics::PhysicsBody body{};
+::warploom::physics::PhysicsBody falling_body() {
+  ::warploom::physics::PhysicsBody body{};
   body.position[0] = 0.0F;
   body.position[1] = 10.0F;
   body.position[2] = 0.0F;
@@ -328,7 +328,7 @@ TEST(SessionTick, SnapshotFloatsRoundTripExactly) {
   EditorSession session{};
   seed_cube(session);
   (void)session.tick({0U, kDt, 0.0, false});
-  ::omnicpp::physics::PhysicsBody awkward = falling_body();
+  ::warploom::physics::PhysicsBody awkward = falling_body();
   awkward.position[1] = 0.123456789012345F;
   awkward.velocity[1] = -3.0517578125e-05F;
   ASSERT_TRUE(session.spawn_physics_body(1U, awkward));
@@ -394,8 +394,8 @@ void seed_clip(EditorSession& session) {
   document.clips.push_back(clip);
   session.reset_from(std::move(document));
 
-  omnicpp::core::ControlCommand play{};
-  play.kind = omnicpp::core::ControlCommand::Kind::ClipPlay;
+  warploom::core::ControlCommand play{};
+  play.kind = warploom::core::ControlCommand::Kind::ClipPlay;
   play.id = 1U;
   play.numbers[0] = static_cast<double>(clip.id);
   play.number_count = 1U;
@@ -487,7 +487,7 @@ TEST(SessionTick, PhysicsFloatsSerialiseShortAndExactly) {
   seed_cube(session);
   (void)session.tick({0U, kDt, 0.0, false});
 
-  ::omnicpp::physics::PhysicsBody body{};
+  ::warploom::physics::PhysicsBody body{};
   // Component 0 is the first array element, which is what the token extractor
   // below reads; component 1 would need different indexing and proves nothing
   // extra about the formatter.
@@ -535,9 +535,9 @@ namespace {
 //! A dispatch-level command: the parser is covered by the table invariant
 //! (test_control_server) and the live leg; here the numbers layout the
 //! parser guarantees is built by hand.
-::omnicpp::core::ControlCommand phys_cmd(
-    ::omnicpp::core::ControlCommand::Kind kind, std::uint64_t oid) {
-  ::omnicpp::core::ControlCommand cmd{};
+::warploom::core::ControlCommand phys_cmd(
+    ::warploom::core::ControlCommand::Kind kind, std::uint64_t oid) {
+  ::warploom::core::ControlCommand cmd{};
   cmd.kind = kind;
   cmd.numbers[0] = static_cast<double>(oid);
   cmd.numbers[1] = 0.5;   // radius
@@ -553,7 +553,7 @@ namespace {
 }  // namespace
 
 TEST(SessionPhysicsWire, SpawnFallsQuerySeesItLoadClears) {
-  using Kind = ::omnicpp::core::ControlCommand::Kind;
+  using Kind = ::warploom::core::ControlCommand::Kind;
   EditorSession session{};
   seed_cube(session);  // object 1 at (1, 2, 3)
   (void)session.tick({0U, kDt, 0.0, false});  // project before attaching
@@ -602,12 +602,12 @@ TEST(SessionPhysicsWire, SpawnFallsQuerySeesItLoadClears) {
   // A document load is a wholesale replace: session bodies reference
   // pre-load ids, so they clear instead of haunting the new document.
   const char* path = "/tmp/session_physics_wire_test.json";
-  ::omnicpp::core::ControlCommand save{};
+  ::warploom::core::ControlCommand save{};
   save.kind = Kind::SaveDocument;
   save.text = path;
   r = session.on_control(save);
   ASSERT_TRUE(r.ok) << r.error;
-  ::omnicpp::core::ControlCommand load{};
+  ::warploom::core::ControlCommand load{};
   load.kind = Kind::LoadDocument;
   load.text = path;
   r = session.on_control(load);

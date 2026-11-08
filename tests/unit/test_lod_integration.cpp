@@ -25,11 +25,11 @@
 
 namespace {
 
-using omnicpp::render::Allocation;
-using omnicpp::render::SceneMatrix;
-using omnicpp::render::ScenePbrObject;
-using omnicpp::render::VulkanPbrScene;
-using omnicpp::render::scene_identity_matrix;
+using warploom::render::Allocation;
+using warploom::render::SceneMatrix;
+using warploom::render::ScenePbrObject;
+using warploom::render::VulkanPbrScene;
+using warploom::render::scene_identity_matrix;
 
 SceneMatrix make_perspective(float fov_y_degrees, float aspect, float znear,
                              float zfar) {
@@ -88,13 +88,13 @@ void build_bar(float height, std::vector<float>& verts,
 }
 
 struct LodIntegrationHarness {
-  omnicpp::render::VulkanContext context;
-  omnicpp::render::VulkanMemoryAllocator allocator;
-  omnicpp::render::VulkanDescriptorManager descriptors;
-  omnicpp::render::VulkanOffscreenTarget target;
-  omnicpp::render::VulkanPipeline lit_pipeline;
-  omnicpp::render::VulkanPipeline lod_pipeline;
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanContext context;
+  warploom::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanDescriptorManager descriptors;
+  warploom::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanPipeline lit_pipeline;
+  warploom::render::VulkanPipeline lod_pipeline;
+  warploom::render::VulkanRenderer renderer;
 
   VkDescriptorSetLayout mesh_layout{VK_NULL_HANDLE};
   VkDescriptorSetLayout textures_layout{VK_NULL_HANDLE};
@@ -106,7 +106,7 @@ struct LodIntegrationHarness {
   // Two bars, each with hi + lo mesh variants (separate SSBO sets).
   struct Bar {
     Allocation va_hi{}, ia_hi{}, va_lo{}, ia_lo{};
-    omnicpp::render::SceneMesh mesh_hi{}, mesh_lo{};
+    warploom::render::SceneMesh mesh_hi{}, mesh_lo{};
   } bars[kInstanceCount];
 
   // Selection buffer + compute pipeline.
@@ -127,14 +127,14 @@ struct LodIntegrationHarness {
     queue_family =
         static_cast<std::uint32_t>(context.queue_families().graphics_family);
 
-    const std::vector<omnicpp::render::ReflectedBinding> mesh_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> mesh_bindings = {
         {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
          VK_SHADER_STAGE_VERTEX_BIT}};
     auto ml = descriptors.create_layout(mesh_bindings, 16U);
     if (!ml.is_ok()) return false;
     mesh_layout = ml.value();
 
-    const std::vector<omnicpp::render::ReflectedBinding> textures_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> textures_bindings = {
         {1U, 0U, 0U, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
          VK_SHADER_STAGE_FRAGMENT_BIT}};
     auto tl = descriptors.create_layout(textures_bindings, 1U, true);
@@ -144,7 +144,7 @@ struct LodIntegrationHarness {
     if (!ts.is_ok()) return false;
     textures_set = ts.value();
 
-    const std::vector<omnicpp::render::ReflectedBinding> material_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> material_bindings = {
         {2U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
          VK_SHADER_STAGE_FRAGMENT_BIT}};
     auto mal = descriptors.create_layout(material_bindings, 8U);
@@ -154,7 +154,7 @@ struct LodIntegrationHarness {
     if (!ms.is_ok()) return false;
     material_set = ms.value();
     auto ma = allocator.create_buffer(
-        sizeof(omnicpp::render::PbrMaterialData),
+        sizeof(warploom::render::PbrMaterialData),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -234,7 +234,7 @@ struct LodIntegrationHarness {
             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (!lb.is_ok()) return false;
     lod_buf = lb.value();
-    const std::vector<omnicpp::render::ReflectedBinding> lod_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> lod_bindings = {
         {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
          VK_SHADER_STAGE_COMPUTE_BIT}};
     auto ll = descriptors.create_layout(lod_bindings, 8U);
@@ -404,11 +404,11 @@ struct LodIntegrationHarness {
     return ok;
   }
 
-  [[nodiscard]] omnicpp_test::ReadbackResult render(const VulkanPbrScene& scene) {
-    auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  [[nodiscard]] warploom_test::ReadbackResult render(const VulkanPbrScene& scene) {
+    auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
         context.device(), queue_family);
     if (!pool_result.is_ok()) return {};
-    auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
         context.device(), pool_result.value());
     if (!cb_result.is_ok()) {
       vkDestroyCommandPool(context.device(), pool_result.value(), nullptr);
@@ -451,7 +451,7 @@ struct LodIntegrationHarness {
     vkDestroyFence(context.device(), fence, nullptr);
     vkDestroyCommandPool(context.device(), pool_result.value(), nullptr);
     if (!submitted) return {};
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         context.physical_device(), context.device(), context.graphics_queue(),
         queue_family, target.image(), target.format(), 256U, 256U,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -504,7 +504,7 @@ TEST(VulkanHardware, LodIntegrationSelectsVariants) {
   }
 
   // White-ish dielectric so the bars shade visibly.
-  omnicpp::render::PbrMaterialData material{};
+  warploom::render::PbrMaterialData material{};
   material.base_color_factor = {0.9f, 0.9f, 0.9f, 1.0f};
   material.metallic_factor = 0.0f;
   material.roughness_factor = 0.9f;

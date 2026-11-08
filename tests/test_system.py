@@ -1,5 +1,5 @@
 """
-System tests for complete OmniCpp pipeline.
+System tests for complete Warploom pipeline.
 
 This module contains system tests that verify the entire build and development
 pipeline from source code to executable artifacts.
@@ -32,15 +32,15 @@ class TestCompleteBuildPipeline(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
     
-    def test_omnicpp_controller_exists(self):
-        """Test that OmniCppController.py exists and is executable."""
-        controller_path = self.project_root / "OmniCppController.py"
+    def test_warploom_controller_exists(self):
+        """Test that WarploomController.py exists and is executable."""
+        controller_path = self.project_root / "WarploomController.py"
         self.assertTrue(controller_path.exists())
         self.assertTrue(os.access(controller_path, os.R_OK))
     
     def test_build_scripts_exist(self):
         """Test that all build scripts exist."""
-        scripts_dir = self.project_root / "omni_scripts"
+        scripts_dir = self.project_root / "warploom_scripts"
         self.assertTrue(scripts_dir.exists())
         
         required_scripts = [
@@ -102,7 +102,7 @@ class TestCompleteBuildPipeline(unittest.TestCase):
         self.assertTrue(analysis_dir.exists())
         
         analysis_files = [
-            "omnicpp_controller_analysis.md",
+            "warploom_controller_analysis.md",
             "build_module_analysis.md",
             "cmake_module_analysis.md",
             "conan_module_analysis.md",
@@ -136,11 +136,11 @@ class TestPythonCodeQuality(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.project_root = Path(__file__).parent.parent
-        self.omni_scripts_dir = self.project_root / "omni_scripts"
+        self.warploom_scripts_dir = self.project_root / "warploom_scripts"
     
     def test_python_files_have_docstrings(self):
         """Test that Python files have module docstrings."""
-        python_files = list(self.omni_scripts_dir.glob("*.py"))
+        python_files = list(self.warploom_scripts_dir.glob("*.py"))
         
         for py_file in python_files:
             if py_file.name != "__init__.py":
@@ -161,7 +161,7 @@ class TestPythonCodeQuality(unittest.TestCase):
         for py_file in python_files:
             try:
                 module_name = py_file.replace(".py", "")
-                __import__(f"omni_scripts.{module_name}")
+                __import__(f"warploom_scripts.{module_name}")
             except ImportError as e:
                 self.fail(f"Failed to import {py_file}: {e}")
 
@@ -243,8 +243,8 @@ class TestSpecsDocumentation(unittest.TestCase):
     def test_requirements_exist(self):
         """Test that requirements documentation exists."""
         requirements_files = [
-            "omnicpp-analysis-refactor/requirements.md",
-            "omnicpp-full-analysis-refactor/requirements.md"
+            "warploom-analysis-refactor/requirements.md",
+            "warploom-full-analysis-refactor/requirements.md"
         ]
         
         for req_file in requirements_files:
@@ -253,12 +253,12 @@ class TestSpecsDocumentation(unittest.TestCase):
     
     def test_design_documentation_exists(self):
         """Test that design documentation exists."""
-        design_file = self.specs_dir / "omnicpp-analysis-refactor" / "design.md"
+        design_file = self.specs_dir / "warploom-analysis-refactor" / "design.md"
         self.assertTrue(design_file.exists())
     
     def test_tasks_documentation_exists(self):
         """Test that tasks documentation exists."""
-        tasks_file = self.specs_dir / "omnicpp-full-analysis-refactor" / "tasks.md"
+        tasks_file = self.specs_dir / "warploom-full-analysis-refactor" / "tasks.md"
         self.assertTrue(tasks_file.exists())
 
 

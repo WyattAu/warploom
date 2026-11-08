@@ -26,7 +26,7 @@ std::vector<std::uint8_t> red_blue_bc1() {
 
 TEST(BcDecode, Bc1OpaquePaletteIsExact) {
   std::string error;
-  const auto decoded = omnicpp::asset::decode_bc_level(
+  const auto decoded = warploom::asset::decode_bc_level(
       4U, 4U, 131U, red_blue_bc1().data(), 8U, &error);
   ASSERT_TRUE(decoded.is_ok()) << error;
   const auto& rgba = decoded.value().rgba;
@@ -53,7 +53,7 @@ TEST(BcDecode, Bc1TransparentCornerIsExact) {
   const std::vector<std::uint8_t> block = {0x1F, 0x00, 0x00, 0xF8,
                                            0xE4, 0xE4, 0xE4, 0xE4};
   std::string error;
-  const auto decoded = omnicpp::asset::decode_bc_level(4U, 4U, 131U,
+  const auto decoded = warploom::asset::decode_bc_level(4U, 4U, 131U,
                                                        block.data(), 8U,
                                                        &error);
   ASSERT_TRUE(decoded.is_ok()) << error;
@@ -77,7 +77,7 @@ TEST(BcDecode, Bc3EightAlphaModeIsExact) {
       255U, 0U, 0x88U, 0xC6U, 0xFAU, 0x88U, 0xC6U, 0xFAU,  // alpha
       0x00, 0xF8, 0x1F, 0x00, 0xE4, 0xE4, 0xE4, 0xE4};    // red/blue
   std::string error;
-  const auto decoded = omnicpp::asset::decode_bc_level(4U, 4U, 137U,
+  const auto decoded = warploom::asset::decode_bc_level(4U, 4U, 137U,
                                                        block.data(), 16U,
                                                        &error);
   ASSERT_TRUE(decoded.is_ok()) << error;
@@ -105,7 +105,7 @@ TEST(BcDecode, Bc3SixAlphaModeIsExact) {
       0U, 255U, 0x6DU, 0xDBU, 0xB6U, 0x6DU, 0xDBU, 0xB6U,  // alpha
       0x00, 0xF8, 0x1F, 0x00, 0x00, 0x00, 0x00, 0x00};    // red, all 0
   std::string error;
-  const auto decoded = omnicpp::asset::decode_bc_level(4U, 4U, 137U,
+  const auto decoded = warploom::asset::decode_bc_level(4U, 4U, 137U,
                                                        block.data(), 16U,
                                                        &error);
   ASSERT_TRUE(decoded.is_ok()) << error;
@@ -127,7 +127,7 @@ TEST(BcDecode, Bc3TransparentCornerKeepsExplicitAlpha) {
       200U, 100U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,  // alpha
       0x1F, 0x00, 0x00, 0xF8, 0xFF, 0xFF, 0xFF, 0xFF};      // blue/red, all 3
   std::string error;
-  const auto decoded = omnicpp::asset::decode_bc_level(4U, 4U, 138U,
+  const auto decoded = warploom::asset::decode_bc_level(4U, 4U, 138U,
                                                        block.data(), 16U,
                                                        &error);
   ASSERT_TRUE(decoded.is_ok()) << error;
@@ -160,7 +160,7 @@ TEST(BcDecode, GridCropsNonMultipleOfFour) {
   blocks.insert(blocks.end(), bl.begin(), bl.end());
   blocks.insert(blocks.end(), br.begin(), br.end());
   std::string error;
-  const auto decoded = omnicpp::asset::decode_bc_level(6U, 6U, 131U,
+  const auto decoded = warploom::asset::decode_bc_level(6U, 6U, 131U,
                                                        blocks.data(),
                                                        blocks.size(), &error);
   ASSERT_TRUE(decoded.is_ok()) << error;
@@ -179,7 +179,7 @@ TEST(BcDecode, GridCropsNonMultipleOfFour) {
 }
 
 TEST(BcDecode, LevelSizesFollowTheBlockFormula) {
-  using omnicpp::asset::bc_level_bytes;
+  using warploom::asset::bc_level_bytes;
   // 8x8 BC1 (8-byte blocks): 4 blocks L0, 1 block L1, still 1 block L2
   // (2x2 needs ceil(2/4) = 1 block per side).
   EXPECT_EQ(bc_level_bytes(8U, 8U, 8U, 0U), 32U);
@@ -188,16 +188,16 @@ TEST(BcDecode, LevelSizesFollowTheBlockFormula) {
   // 6x6 BC3 (16-byte blocks): 2x2 blocks.
   EXPECT_EQ(bc_level_bytes(6U, 6U, 16U, 0U), 64U);
   // Format predicates.
-  EXPECT_TRUE(omnicpp::asset::is_bc1_format(131U));
-  EXPECT_TRUE(omnicpp::asset::is_bc1_format(134U));
-  EXPECT_TRUE(omnicpp::asset::is_bc3_format(137U));
-  EXPECT_TRUE(omnicpp::asset::is_bc3_format(138U));
-  EXPECT_TRUE(omnicpp::asset::is_bc_format(132U));
-  EXPECT_FALSE(omnicpp::asset::is_bc_format(37U));
-  EXPECT_FALSE(omnicpp::asset::is_bc_format(158U));
-  EXPECT_EQ(omnicpp::asset::bc_block_bytes(131U), 8U);
-  EXPECT_EQ(omnicpp::asset::bc_block_bytes(138U), 16U);
-  EXPECT_EQ(omnicpp::asset::bc_block_bytes(158U), 0U);
+  EXPECT_TRUE(warploom::asset::is_bc1_format(131U));
+  EXPECT_TRUE(warploom::asset::is_bc1_format(134U));
+  EXPECT_TRUE(warploom::asset::is_bc3_format(137U));
+  EXPECT_TRUE(warploom::asset::is_bc3_format(138U));
+  EXPECT_TRUE(warploom::asset::is_bc_format(132U));
+  EXPECT_FALSE(warploom::asset::is_bc_format(37U));
+  EXPECT_FALSE(warploom::asset::is_bc_format(158U));
+  EXPECT_EQ(warploom::asset::bc_block_bytes(131U), 8U);
+  EXPECT_EQ(warploom::asset::bc_block_bytes(138U), 16U);
+  EXPECT_EQ(warploom::asset::bc_block_bytes(158U), 0U);
 }
 
 TEST(BcDecode, RejectsBadPayloads) {
@@ -206,7 +206,7 @@ TEST(BcDecode, RejectsBadPayloads) {
   {
     std::vector<std::uint8_t> short_block(63U, 0U);
     error.clear();
-    EXPECT_FALSE(omnicpp::asset::decode_bc_level(4U, 4U, 137U,
+    EXPECT_FALSE(warploom::asset::decode_bc_level(4U, 4U, 137U,
                                                  short_block.data(),
                                                  short_block.size(), &error)
                      .is_ok());
@@ -216,7 +216,7 @@ TEST(BcDecode, RejectsBadPayloads) {
   {
     std::vector<std::uint8_t> block(8U, 0U);
     error.clear();
-    EXPECT_FALSE(omnicpp::asset::decode_bc_level(0U, 4U, 131U, block.data(),
+    EXPECT_FALSE(warploom::asset::decode_bc_level(0U, 4U, 131U, block.data(),
                                                  block.size(), &error)
                      .is_ok());
     EXPECT_NE(error.find("nonzero"), std::string::npos) << error;
@@ -225,7 +225,7 @@ TEST(BcDecode, RejectsBadPayloads) {
   {
     std::vector<std::uint8_t> block(8U, 0U);
     error.clear();
-    EXPECT_FALSE(omnicpp::asset::decode_bc_level(4U, 4U, 158U, block.data(),
+    EXPECT_FALSE(warploom::asset::decode_bc_level(4U, 4U, 158U, block.data(),
                                                  block.size(), &error)
                      .is_ok());
     EXPECT_NE(error.find("158"), std::string::npos) << error;

@@ -171,7 +171,7 @@ The MSVC Detector discovers Microsoft Visual C++ compilers installed on the syst
 
 ```python
 # Example: Detect MSVC compilers
-from omni_scripts.compilers.msvc_detector import MSVCDetector
+from warploom_scripts.compilers.msvc_detector import MSVCDetector
 
 detector = MSVCDetector()
 compilers = detector.detect()
@@ -236,7 +236,7 @@ The MSVC-Clang Detector discovers Clang compilers that use MSVC libraries and he
 
 ```python
 # Example: Detect MSVC-Clang compilers
-from omni_scripts.compilers.msvc_clang_detector import MSVCClangDetector
+from warploom_scripts.compilers.msvc_clang_detector import MSVCClangDetector
 
 detector = MSVCClangDetector()
 compilers = detector.detect()
@@ -298,7 +298,7 @@ The MinGW-GCC Detector discovers GCC compilers for Windows via MinGW distributio
 
 ```python
 # Example: Detect MinGW-GCC compilers
-from omni_scripts.compilers.mingw_gcc_detector import MinGWDetector
+from warploom_scripts.compilers.mingw_gcc_detector import MinGWDetector
 
 detector = MinGWDetector()
 compilers = detector.detect()
@@ -358,7 +358,7 @@ The MinGW-Clang Detector discovers Clang compilers for Windows via MinGW distrib
 
 ```python
 # Example: Detect MinGW-Clang compilers
-from omni_scripts.compilers.mingw_clang_detector import MinGWClangDetector
+from warploom_scripts.compilers.mingw_clang_detector import MinGWClangDetector
 
 detector = MinGWClangDetector()
 compilers = detector.detect()
@@ -411,7 +411,7 @@ The MSVC Terminal Detector discovers Visual Studio Developer Command Prompts and
 
 ```python
 # Example: Detect MSVC terminals
-from omni_scripts.compilers.msvc_terminal_detector import MSVCTerminalDetector
+from warploom_scripts.compilers.msvc_terminal_detector import MSVCTerminalDetector
 
 detector = MSVCTerminalDetector()
 terminals = detector.detect()
@@ -451,7 +451,7 @@ The MSYS2 Terminal Detector discovers MSYS2 shell environments for MinGW compile
 
 ```python
 # Example: Detect MSYS2 terminals
-from omni_scripts.compilers.msys2_terminal_detector import MSYS2TerminalDetector
+from warploom_scripts.compilers.msys2_terminal_detector import MSYS2TerminalDetector
 
 detector = MSYS2TerminalDetector()
 terminals = detector.detect()
@@ -490,7 +490,7 @@ The Linux Cross-Compiler detects toolchains for cross-compiling to Linux from Wi
 
 ```python
 # Example: Detect Linux cross-compiler
-from omni_scripts.compilers.linux_cross_compiler import LinuxCrossCompiler
+from warploom_scripts.compilers.linux_cross_compiler import LinuxCrossCompiler
 
 cross_compiler = LinuxCrossCompiler("x86_64-linux-gnu")
 info = cross_compiler.detect()
@@ -533,7 +533,7 @@ The WASM Cross-Compiler detects Emscripten for WebAssembly compilation.
 
 ```python
 # Example: Detect WASM cross-compiler
-from omni_scripts.compilers.wasm_cross_compiler import WASMCrossCompiler
+from warploom_scripts.compilers.wasm_cross_compiler import WASMCrossCompiler
 
 cross_compiler = WASMCrossCompiler()
 info = cross_compiler.detect()
@@ -580,7 +580,7 @@ The Android Cross-Compiler detects Android NDK for Android compilation.
 
 ```python
 # Example: Detect Android cross-compiler
-from omni_scripts.compilers.android_cross_compiler import AndroidCrossCompiler
+from warploom_scripts.compilers.android_cross_compiler import AndroidCrossCompiler
 
 cross_compiler = AndroidCrossCompiler("arm64-v8a")
 info = cross_compiler.detect()
@@ -635,9 +635,9 @@ class CompilerFactory:
 #### Usage Example
 
 ```python
-from omni_scripts.compilers.factory import CompilerFactory
-from omni_scripts.compilers.msvc_detector import MSVCDetector
-from omni_scripts.compilers.mingw_gcc_detector import MinGWDetector
+from warploom_scripts.compilers.factory import CompilerFactory
+from warploom_scripts.compilers.msvc_detector import MSVCDetector
+from warploom_scripts.compilers.mingw_gcc_detector import MinGWDetector
 
 # Create factory
 factory = CompilerFactory()
@@ -681,8 +681,8 @@ class CompilerManager:
 #### Usage Example
 
 ```python
-from omni_scripts.compilers.manager import CompilerManager
-from omni_scripts.compilers.factory import CompilerFactory
+from warploom_scripts.compilers.manager import CompilerManager
+from warploom_scripts.compilers.factory import CompilerFactory
 
 # Create manager
 factory = CompilerFactory()
@@ -723,7 +723,7 @@ class CacheManager:
 #### Usage Example
 
 ```python
-from omni_scripts.compilers.cache import CacheManager
+from warploom_scripts.compilers.cache import CacheManager
 
 # Create cache manager
 cache = CacheManager(cache_file=".compiler_cache.json", ttl=3600)
@@ -763,7 +763,7 @@ class RetryHandler:
 #### Usage Example
 
 ```python
-from omni_scripts.compilers.retry import RetryHandler
+from warploom_scripts.compilers.retry import RetryHandler
 
 # Create retry handler
 retry_handler = RetryHandler(max_retries=3, retry_delay=1.0, backoff_factor=2.0)
@@ -799,8 +799,8 @@ class FallbackHandler:
 #### Usage Example
 
 ```python
-from omni_scripts.compilers.fallback import FallbackHandler
-from omni_scripts.compilers.error_handler import ErrorHandler
+from warploom_scripts.compilers.fallback import FallbackHandler
+from warploom_scripts.compilers.error_handler import ErrorHandler
 
 # Create fallback handler
 error_handler = ErrorHandler()
@@ -844,7 +844,7 @@ class ErrorHandler:
 #### Usage Example
 
 ```python
-from omni_scripts.compilers.error_handler import ErrorHandler, ErrorSeverity
+from warploom_scripts.compilers.error_handler import ErrorHandler, ErrorSeverity
 
 # Create error handler
 error_handler = ErrorHandler()
@@ -895,7 +895,7 @@ class CompilerDetectionLogger:
 #### Usage Example
 
 ```python
-from omni_scripts.compilers.logging_integration import CompilerDetectionLogger
+from warploom_scripts.compilers.logging_integration import CompilerDetectionLogger
 
 # Create logger
 logger = CompilerDetectionLogger(level="INFO", verbose=True)
@@ -921,7 +921,7 @@ logger.log_compiler_selected("msvc", "x64", "19.40.0")
 ### 7.1 Basic Compiler Detection
 
 ```python
-from omni_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
+from warploom_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
 
 # Create detection system
 cds = CompilerDetectionSystem()
@@ -940,7 +940,7 @@ for compiler_type, compilers in result.compilers.items():
 ### 7.2 Selecting a Compiler
 
 ```python
-from omni_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
+from warploom_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
 
 # Create detection system
 cds = CompilerDetectionSystem()
@@ -956,7 +956,7 @@ if compiler:
 ### 7.3 Setting Up Environment
 
 ```python
-from omni_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
+from warploom_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
 
 # Create detection system
 cds = CompilerDetectionSystem()
@@ -973,7 +973,7 @@ for key, value in env.items():
 ### 7.4 Executing Commands
 
 ```python
-from omni_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
+from warploom_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
 
 # Create detection system
 cds = CompilerDetectionSystem()
@@ -990,7 +990,7 @@ else:
 ### 7.5 Cross-Compilation Setup
 
 ```python
-from omni_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
+from warploom_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
 
 # Create detection system
 cds = CompilerDetectionSystem()
@@ -1007,8 +1007,8 @@ for key, value in env.items():
 ### 7.6 Compiler Selection with Requirements
 
 ```python
-from omni_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
-from omni_scripts.compilers.data_structures import CompilerRequirements
+from warploom_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
+from warploom_scripts.compilers.data_structures import CompilerRequirements
 
 # Create detection system
 cds = CompilerDetectionSystem()
@@ -1033,7 +1033,7 @@ if compiler:
 ### 7.7 Terminal Detection
 
 ```python
-from omni_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
+from warploom_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
 
 # Create detection system
 cds = CompilerDetectionSystem()
@@ -1049,7 +1049,7 @@ if terminal:
 ### 7.8 Cache Management
 
 ```python
-from omni_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
+from warploom_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
 
 # Create detection system
 cds = CompilerDetectionSystem()
@@ -1067,8 +1067,8 @@ print("Cache cleared")
 ### 7.9 Error Handling
 
 ```python
-from omni_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
-from omni_scripts.compilers.error_handler import ErrorSeverity
+from warploom_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
+from warploom_scripts.compilers.error_handler import ErrorSeverity
 
 # Create detection system
 cds = CompilerDetectionSystem()
@@ -1088,7 +1088,7 @@ if result.errors:
 ### 7.10 Complete Build Workflow
 
 ```python
-from omni_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
+from warploom_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
 
 # Create detection system
 cds = CompilerDetectionSystem()
@@ -1373,7 +1373,7 @@ print("Build succeeded!")
 1. **Enable Parallel Detection:**
 
    ```python
-   from omni_scripts.compilers.parallel_detector import ParallelDetector
+   from warploom_scripts.compilers.parallel_detector import ParallelDetector
 
    parallel_detector = ParallelDetector(max_workers=4)
    results = parallel_detector.detect_parallel(detectors)
@@ -1396,8 +1396,8 @@ print("Build succeeded!")
 Enable debug mode for detailed logging:
 
 ```python
-from omni_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
-from omni_scripts.compilers.logging_integration import CompilerDetectionLogger
+from warploom_scripts.compilers.compiler_detection_system import CompilerDetectionSystem
+from warploom_scripts.compilers.logging_integration import CompilerDetectionLogger
 
 # Create logger with debug mode
 logger = CompilerDetectionLogger(level="DEBUG", verbose=True)
@@ -1712,7 +1712,7 @@ The compiler detection system uses a JSON configuration file at `config/compiler
 ### 10.3 Programmatic Configuration
 
 ```python
-from omni_scripts.compilers.config import ConfigurationIntegration
+from warploom_scripts.compilers.config import ConfigurationIntegration
 
 # Load configuration
 config = ConfigurationIntegration("config/compilers.json")

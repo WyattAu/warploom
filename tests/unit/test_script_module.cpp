@@ -21,8 +21,8 @@
 
 namespace {
 
-using omnicpp::core::ScriptModule;
-using omnicpp::core::ScriptModuleApi;
+using warploom::core::ScriptModule;
+using warploom::core::ScriptModuleApi;
 
 //! Deterministic builtin tick: outputs[i] = inputs[i] + dt * (i + 1).
 std::int32_t builtin_tick(double dt, const double* inputs,
@@ -40,7 +40,7 @@ std::int32_t builtin_tick(double dt, const double* inputs,
 }
 
 //! Registers the test builtin once per process; returns its API for checks.
-std::int32_t builtin_abi() noexcept { return omnicpp::core::kScriptModuleAbi; }
+std::int32_t builtin_abi() noexcept { return warploom::core::kScriptModuleAbi; }
 const char* builtin_name() noexcept { return "test_builtin"; }
 
 ScriptModuleApi register_test_builtin() {
@@ -153,7 +153,7 @@ TEST(ScriptModule, SharedObjectMissingSymbol) {
       ScriptModule::load_shared(WARPLOOM_TEST_MODULE_MISSING, error);
   EXPECT_EQ(module, nullptr);
   EXPECT_NE(error.find("missing symbol"), std::string::npos);
-  EXPECT_NE(error.find("omnicpp_module_tick"), std::string::npos);
+  EXPECT_NE(error.find("warploom_module_tick"), std::string::npos);
 }
 
 TEST(ScriptModule, SharedObjectAbiMismatch) {

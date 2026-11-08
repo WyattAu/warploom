@@ -9,14 +9,14 @@
 
 #include "warploom/render/vulkan_renderer.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
 namespace warploom::render {
 
 namespace {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 constexpr std::uint32_t kSkyWidth = 256U;
 constexpr std::uint32_t kSkyHeight = 128U;
 constexpr std::uint32_t kPrefilterBase = 64U;
@@ -33,7 +33,7 @@ bool VulkanIblBaker::initialize(VkDevice device, VkQueue graphics_queue,
                                 VulkanDescriptorManager& descriptors,
                                 const std::string& shader_dir,
                                 std::string& error) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   device_ = device;
   allocator_ = &allocator;
   descriptors_ = &descriptors;
@@ -326,7 +326,7 @@ bool VulkanIblBaker::initialize(VkDevice device, VkQueue graphics_queue,
 #endif
 }
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 bool VulkanIblBaker::create_image(VkImage& image, Allocation& memory,
                                   std::uint32_t width, std::uint32_t height,
                                   std::uint32_t mips, std::uint32_t layers,
@@ -389,10 +389,10 @@ void VulkanIblBaker::transition(VkCommandBuffer cb, VkImage image,
   vkCmdPipelineBarrier(cb, src_stage, dst_stage, 0U, 0U, nullptr, 0U, nullptr,
                        1U, &barrier);
 }
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN
 
 bool VulkanIblBaker::bake(const IblBakeParams& params) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device_ == VK_NULL_HANDLE || pool_ == VK_NULL_HANDLE) return false;
   auto cb_result = VulkanRenderer::allocate_command_buffer(device_, pool_);
   if (!cb_result.is_ok()) return false;
@@ -513,7 +513,7 @@ bool VulkanIblBaker::bake(const IblBakeParams& params) {
 }
 
 void VulkanIblBaker::cleanup(VkDevice device) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device == VK_NULL_HANDLE) return;
   sky_pipeline_.cleanup(device);
   prefilter_pipeline_.cleanup(device);

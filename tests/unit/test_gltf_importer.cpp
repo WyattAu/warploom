@@ -18,10 +18,10 @@
 
 namespace {
 
-using omnicpp::asset::GltfMeshImport;
-using omnicpp::asset::import_gltf_mesh;
-using omnicpp::asset::kSceneVertexFloats;
-using omnicpp::core::RuntimeError;
+using warploom::asset::GltfMeshImport;
+using warploom::asset::import_gltf_mesh;
+using warploom::asset::kSceneVertexFloats;
+using warploom::core::RuntimeError;
 
 // Vertex layout offsets within the eleven-float canonical stream.
 constexpr std::size_t kPos = 0U;   // position.xyz
@@ -1210,8 +1210,8 @@ TEST(GltfImporter, RejectsStridedImageBufferView) {
 
 namespace {
 
-using omnicpp::asset::GltfSceneImport;
-using omnicpp::asset::import_gltf_scene;
+using warploom::asset::GltfSceneImport;
+using warploom::asset::import_gltf_scene;
 
 struct SceneFixture {
   std::string json;
@@ -1766,7 +1766,7 @@ TEST(GltfImporter, ExternalImageResolvedThroughLoader) {
       R"(,"images":[{"uri":"textures/albedo.png"}],"textures":[{"source":0}])");
 
   std::size_t calls = 0;
-  omnicpp::asset::ExternalFileLoader loader =
+  warploom::asset::ExternalFileLoader loader =
       [&](const std::string& uri, std::string& error,
           std::vector<std::uint8_t>& bytes) -> bool {
         ++calls;
@@ -1817,7 +1817,7 @@ TEST(GltfImporter, ExternalImageLoaderFailureRejected) {
   const TriangleFixture doc = textured_triangle_doc(
       R"(,"baseColorTexture":{"index":0})",
       R"(,"images":[{"uri":"missing.png"}],"textures":[{"source":0}])");
-  omnicpp::asset::ExternalFileLoader loader =
+  warploom::asset::ExternalFileLoader loader =
       [&](const std::string&, std::string& error,
           std::vector<std::uint8_t>&) -> bool {
         error = "no such file on the test filesystem";
@@ -1845,7 +1845,7 @@ TEST(GltfImporter, UnreferencedExternalImageNeverCallsLoader) {
   const TriangleFixture doc = textured_triangle_doc(
       "", R"(,"images":[{"uri":"unused.png"}],"textures":[{"source":0}])");
   std::size_t calls = 0;
-  omnicpp::asset::ExternalFileLoader loader =
+  warploom::asset::ExternalFileLoader loader =
       [&](const std::string&, std::string& error,
           std::vector<std::uint8_t>&) -> bool {
         ++calls;
@@ -1868,7 +1868,7 @@ TEST(GltfImporter, ExternalImageLoaderEmptyFileRejected) {
   const TriangleFixture doc = textured_triangle_doc(
       R"(,"baseColorTexture":{"index":0})",
       R"(,"images":[{"uri":"empty.png"}],"textures":[{"source":0}])");
-  omnicpp::asset::ExternalFileLoader loader =
+  warploom::asset::ExternalFileLoader loader =
       [&](const std::string&, std::string&, std::vector<std::uint8_t>& bytes)
           -> bool {
         bytes.clear();
@@ -1897,7 +1897,7 @@ TEST(GltfImporter, ExternalImageResolvedThroughSceneImport) {
   const std::string json = R"({"asset":{"version":"2.0"},"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],)" +
                            doc.json.substr(doc.json.find(R"("buffers")"));
   std::size_t calls = 0;
-  omnicpp::asset::ExternalFileLoader loader =
+  warploom::asset::ExternalFileLoader loader =
       [&](const std::string& uri, std::string& error,
           std::vector<std::uint8_t>& bytes) -> bool {
         ++calls;
@@ -1909,7 +1909,7 @@ TEST(GltfImporter, ExternalImageResolvedThroughSceneImport) {
         return true;
       };
   std::string detail;
-  auto result = omnicpp::asset::import_gltf_scene(
+  auto result = warploom::asset::import_gltf_scene(
       json.data(), json.size(), doc.bin.data(), doc.bin.size(), 0U, &detail,
       &loader);
   ASSERT_TRUE(result.is_ok()) << detail;

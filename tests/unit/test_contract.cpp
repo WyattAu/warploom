@@ -1,5 +1,5 @@
 //! @file test_contract.cpp
-//! @brief Contract-facility proofs: OMNICPP_CONTRACT violations abort with a
+//! @brief Contract-facility proofs: WARPLOOM_CONTRACT violations abort with a
 //!        diagnostic naming the expression and location, and the ECS runs its
 //!        full lifecycle under check-mode contracts (every converted invariant
 //!        holds on the happy path).
@@ -38,7 +38,7 @@ TEST(Contract, ViolationAborts) {
 }
 
 TEST(Contract, EcsLifecycleUnderContracts) {
-  omnicpp::core::World world;
+  warploom::core::World world;
   const auto e1 = world.create_entity();
   const auto e2 = world.create_entity();
   EXPECT_NE(e1.id, e2.id);
@@ -50,7 +50,7 @@ TEST(Contract, EcsLifecycleUnderContracts) {
   EXPECT_EQ(world.get_component<int>(e1), 41);
 
   std::size_t visits = 0;
-  world.for_each<int>([&](omnicpp::core::Entity, int& v) {
+  world.for_each<int>([&](warploom::core::Entity, int& v) {
     v += 1;
     ++visits;
   });

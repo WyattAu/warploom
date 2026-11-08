@@ -6,11 +6,11 @@
 
 #include <cstdint>
 
-extern "C" std::int32_t omnicpp_module_abi() { return 2; }
+extern "C" std::int32_t warploom_module_abi() { return 2; }
 
-extern "C" const char* omnicpp_module_name() { return "fixture_abi2"; }
+extern "C" const char* warploom_module_name() { return "fixture_abi2"; }
 
-extern "C" std::int32_t omnicpp_module_tick(double, const double*,
+extern "C" std::int32_t warploom_module_tick(double, const double*,
                                             std::uint32_t, double*,
                                             std::uint32_t) {
   return -2;

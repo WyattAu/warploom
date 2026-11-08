@@ -12,7 +12,7 @@ Scenario schema (all keys optional except name):
 {
   "name": "zoom_and_fade",
   "model": "mannequin",           // mannequin | cesiumman | cubes
-  "frames": 420,                  // OMNICPP_MAX_FRAMES
+  "frames": 420,                  // WARPLOOM_MAX_FRAMES
   "fixed_dt": 0.01666667,
   "capture_every": 105,           // 0 disables captures
   "capture_limit": 8,
@@ -48,7 +48,7 @@ REPO = Path(__file__).resolve().parent.parent
 VIEWPORT = REPO / "build" / "vulkan-validation" / "bin" / "warploom_viewport"
 ANALYZER = REPO / "scripts" / "analyze_telemetry.py"
 MODELS = {
-    # OMNICPP_MODEL is a path WITHOUT the .gltf extension (the viewport
+    # WARPLOOM_MODEL is a path WITHOUT the .gltf extension (the viewport
     # appends it); buffer URIs resolve relative to the document's directory.
     "mannequin": (REPO / "assets" / "models" / "mannequin", 1.0),
     "cesiumman": (REPO / "assets" / "models" / "cesiumman" / "CesiumMan",
@@ -108,18 +108,18 @@ def find_shader_dir():
 
 def run_viewport(telemetry_dir, scenario):
     env = dict(os.environ)
-    env["OMNICPP_MAX_FRAMES"] = str(scenario.get("frames", 300))
-    env["OMNICPP_FIXED_DT"] = str(scenario.get("fixed_dt", 0.01666667))
-    env["OMNICPP_TELEMETRY_DIR"] = str(telemetry_dir)
-    env["OMNICPP_CAPTURE_EVERY"] = str(scenario.get("capture_every", 0))
-    env["OMNICPP_CAPTURE_LIMIT"] = str(scenario.get("capture_limit", 8))
-    if "OMNICPP_SHADER_DIR" not in env:
+    env["WARPLOOM_MAX_FRAMES"] = str(scenario.get("frames", 300))
+    env["WARPLOOM_FIXED_DT"] = str(scenario.get("fixed_dt", 0.01666667))
+    env["WARPLOOM_TELEMETRY_DIR"] = str(telemetry_dir)
+    env["WARPLOOM_CAPTURE_EVERY"] = str(scenario.get("capture_every", 0))
+    env["WARPLOOM_CAPTURE_LIMIT"] = str(scenario.get("capture_limit", 8))
+    if "WARPLOOM_SHADER_DIR" not in env:
         shader_dir = find_shader_dir()
         if shader_dir:
-            env["OMNICPP_SHADER_DIR"] = shader_dir
+            env["WARPLOOM_SHADER_DIR"] = shader_dir
     model = scenario.get("model", "mannequin")
     if model in MODELS:
-        env["OMNICPP_MODEL"] = str(MODELS[model][0])
+        env["WARPLOOM_MODEL"] = str(MODELS[model][0])
     elif model != "cubes":
         raise SystemExit(f"unknown model {model}")
     if scenario.get("input_script"):
@@ -127,7 +127,7 @@ def run_viewport(telemetry_dir, scenario):
         with open(script_path, "w", encoding="utf-8") as handle:
             for event in scenario["input_script"]:
                 handle.write(json.dumps(event) + "\n")
-        env["OMNICPP_INPUT_SCRIPT"] = str(script_path)
+        env["WARPLOOM_INPUT_SCRIPT"] = str(script_path)
     log_path = telemetry_dir / "run.log"
     with open(log_path, "w", encoding="utf-8") as log:
         proc = subprocess.run([str(VIEWPORT)], env=env, stdout=log,

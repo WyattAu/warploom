@@ -12,11 +12,11 @@ def create_directory_structure():
     
     # Define directories to create
     directories = [
-        "omni_scripts/controller",
-        "omni_scripts/logging",
-        "omni_scripts/platform",
-        "omni_scripts/compilers",
-        "omni_scripts/build_system",
+        "warploom_scripts/controller",
+        "warploom_scripts/logging",
+        "warploom_scripts/platform",
+        "warploom_scripts/compilers",
+        "warploom_scripts/build_system",
         "tests",
         "tests/unit",
         "tests/integration",
@@ -24,11 +24,11 @@ def create_directory_structure():
     
     # Define __init__.py files to create
     init_files = [
-        "omni_scripts/controller/__init__.py",
-        "omni_scripts/logging/__init__.py",
-        "omni_scripts/platform/__init__.py",
-        "omni_scripts/compilers/__init__.py",
-        "omni_scripts/build_system/__init__.py",
+        "warploom_scripts/controller/__init__.py",
+        "warploom_scripts/logging/__init__.py",
+        "warploom_scripts/platform/__init__.py",
+        "warploom_scripts/compilers/__init__.py",
+        "warploom_scripts/build_system/__init__.py",
         "tests/__init__.py",
         "tests/unit/__init__.py",
         "tests/integration/__init__.py",
@@ -37,35 +37,35 @@ def create_directory_structure():
     # Define placeholder module files based on requirements
     placeholder_files = [
         # Controller module files
-        "omni_scripts/controller/base.py",
-        "omni_scripts/controller/build_controller.py",
-        "omni_scripts/controller/config_controller.py",
-        "omni_scripts/controller/test_controller.py",
+        "warploom_scripts/controller/base.py",
+        "warploom_scripts/controller/build_controller.py",
+        "warploom_scripts/controller/config_controller.py",
+        "warploom_scripts/controller/test_controller.py",
         
         # Logging module files
-        "omni_scripts/logging/logger.py",
-        "omni_scripts/logging/config.py",
-        "omni_scripts/logging/formatters.py",
-        "omni_scripts/logging/handlers.py",
+        "warploom_scripts/logging/logger.py",
+        "warploom_scripts/logging/config.py",
+        "warploom_scripts/logging/formatters.py",
+        "warploom_scripts/logging/handlers.py",
         
         # Platform detection module files
-        "omni_scripts/platform/detector.py",
-        "omni_scripts/platform/windows.py",
-        "omni_scripts/platform/linux.py",
-        "omni_scripts/platform/macos.py",
+        "warploom_scripts/platform/detector.py",
+        "warploom_scripts/platform/windows.py",
+        "warploom_scripts/platform/linux.py",
+        "warploom_scripts/platform/macos.py",
         
         # Compilers module files
-        "omni_scripts/compilers/base.py",
-        "omni_scripts/compilers/msvc.py",
-        "omni_scripts/compilers/gcc.py",
-        "omni_scripts/compilers/clang.py",
-        "omni_scripts/compilers/detector.py",
+        "warploom_scripts/compilers/base.py",
+        "warploom_scripts/compilers/msvc.py",
+        "warploom_scripts/compilers/gcc.py",
+        "warploom_scripts/compilers/clang.py",
+        "warploom_scripts/compilers/detector.py",
         
         # Build system module files
-        "omni_scripts/build_system/cmake.py",
-        "omni_scripts/build_system/conan.py",
-        "omni_scripts/build_system/vcpkg.py",
-        "omni_scripts/build_system/optimizer.py",
+        "warploom_scripts/build_system/cmake.py",
+        "warploom_scripts/build_system/conan.py",
+        "warploom_scripts/build_system/vcpkg.py",
+        "warploom_scripts/build_system/optimizer.py",
     ]
     
     results = {

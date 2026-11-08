@@ -32,8 +32,8 @@
 
 namespace {
 
-using omnicpp::render::Allocation;
-using omnicpp::render::VulkanPbrScene;
+using warploom::render::Allocation;
+using warploom::render::VulkanPbrScene;
 
 constexpr std::uint32_t kSize = 256U;
 // Surface-anchored eye: the sky model is a planetary shell, so a unit-scale
@@ -69,13 +69,13 @@ SkyParamsUbo canonical_sky_params() {
 }
 
 struct ParityHarness {
-  omnicpp::render::VulkanContext context;
-  omnicpp::render::VulkanMemoryAllocator allocator;
-  omnicpp::render::VulkanDescriptorManager descriptors;
-  omnicpp::render::VulkanOffscreenTarget target;
-  omnicpp::render::VulkanPipeline sky_pipeline;
-  omnicpp::render::VulkanRenderer renderer;
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanContext context;
+  warploom::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanDescriptorManager descriptors;
+  warploom::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanPipeline sky_pipeline;
+  warploom::render::VulkanRenderer renderer;
+  warploom::render::VulkanPathTracer tracer;
 
   VkDescriptorSetLayout sky_layout{VK_NULL_HANDLE};
   VkDescriptorSet sky_set{VK_NULL_HANDLE};
@@ -114,7 +114,7 @@ struct ParityHarness {
       return false;
     }
 
-    const std::vector<omnicpp::render::ReflectedBinding> sky_bindings = {
+    const std::vector<warploom::render::ReflectedBinding> sky_bindings = {
         {0U, 0U, 1U, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
          VK_SHADER_STAGE_FRAGMENT_BIT}};
     auto sky_layout_result = descriptors.create_layout(sky_bindings, 4U);
@@ -206,8 +206,8 @@ struct ParityHarness {
     return scene;
   }
 
-  [[nodiscard]] omnicpp_test::ReadbackResult render_raster_sky() {
-    auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  [[nodiscard]] warploom_test::ReadbackResult render_raster_sky() {
+    auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
         context.device(), cmd_pool);
     if (!cb_result.is_ok()) return {};
     const VkCommandBuffer cb = cb_result.value();
@@ -256,7 +256,7 @@ struct ParityHarness {
     }
     vkDestroyFence(context.device(), fence, nullptr);
     if (!submitted) return {};
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         context.physical_device(), context.device(), context.graphics_queue(),
         queue_family, target.image(), target.format(), kSize, kSize,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -288,19 +288,19 @@ struct ParityHarness {
     VkBufferDeviceAddressInfo addr_info{};
     addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     addr_info.buffer = geo_alloc.buffer;
-    omnicpp::render::PathTracerConfig cfg{};
+    warploom::render::PathTracerConfig cfg{};
     cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
     cfg.width = kSize;
     cfg.height = kSize;
     cfg.max_bounces = 1U;  // every ray misses on its first segment
-    omnicpp::render::PathTracerMesh mesh{};
+    warploom::render::PathTracerMesh mesh{};
     mesh.vertex_buffer_address =
         vkGetBufferDeviceAddress(context.device(), &addr_info);
     mesh.triangle_count = 1U;
     mesh.max_vertex = 2U;
     cfg.meshes = {mesh};
     cfg.instances = {
-        omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.8F)};
+        warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.8F)};
     // Analytic sky with every word pinned to the canonical set — never rely
     // on the struct defaults matching the raster harness by coincidence.
     cfg.sky.mode = 1U;
@@ -319,7 +319,7 @@ struct ParityHarness {
       return ::warploom::core::Result<std::vector<float>>::error(
           ::warploom::core::RuntimeError::invalid_config);
     }
-    omnicpp::render::PathTracerCamera cam{};
+    warploom::render::PathTracerCamera cam{};
     cam.position = {0.0F, 0.0F, 0.0F};
     cam.right = {1.0F, 0.0F, 0.0F};
     // Same zenith view as the raster harness above.
@@ -331,7 +331,7 @@ struct ParityHarness {
     cam.aspect = 1.0F;
     tracer.set_camera(cam);
 
-    auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
         context.device(), cmd_pool);
     if (!cb_result.is_ok()) {
       return ::warploom::core::Result<std::vector<float>>::error(

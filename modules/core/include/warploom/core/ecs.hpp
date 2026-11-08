@@ -129,8 +129,8 @@ public:
 
   void copy_from(std::size_t dst_idx, const IComponentArray& src_base, std::size_t src_idx) override {
     const auto& src = static_cast<const ComponentArray&>(src_base);
-    OMNICPP_CONTRACT(dst_idx < data_.size());  // copy_from: dst out of bounds"
-    OMNICPP_CONTRACT(src_idx < src.data_.size());  // copy_from: src out of bounds"
+    WARPLOOM_CONTRACT(dst_idx < data_.size());  // copy_from: dst out of bounds"
+    WARPLOOM_CONTRACT(src_idx < src.data_.size());  // copy_from: src out of bounds"
     data_[dst_idx] = src.data_[src_idx];
   }
 
@@ -147,11 +147,11 @@ public:
   }
 
   [[nodiscard]] T& at(std::size_t index) noexcept {
-    OMNICPP_CONTRACT(index < data_.size());  // ComponentArray::at out of bounds"
+    WARPLOOM_CONTRACT(index < data_.size());  // ComponentArray::at out of bounds"
     return data_[index];
   }
   [[nodiscard]] const T& at(std::size_t index) const noexcept {
-    OMNICPP_CONTRACT(index < data_.size());  // ComponentArray::at out of bounds"
+    WARPLOOM_CONTRACT(index < data_.size());  // ComponentArray::at out of bounds"
     return data_[index];
   }
   [[nodiscard]] T* data() noexcept { return data_.data(); }
@@ -194,14 +194,14 @@ public:
   template <typename T>
   [[nodiscard]] detail::ComponentArray<T>& get_array() {
     const auto tid = component_type_id<T>();
-    OMNICPP_CONTRACT(tid < arrays_.size() && arrays_[tid] != nullptr);  // array must be pre-created"
+    WARPLOOM_CONTRACT(tid < arrays_.size() && arrays_[tid] != nullptr);  // array must be pre-created"
     return static_cast<detail::ComponentArray<T>&>(*arrays_[tid]);
   }
 
   template <typename T>
   [[nodiscard]] const detail::ComponentArray<T>& get_array() const {
     const auto tid = component_type_id<T>();
-    OMNICPP_CONTRACT(tid < arrays_.size() && arrays_[tid] != nullptr);  // array must be pre-created"
+    WARPLOOM_CONTRACT(tid < arrays_.size() && arrays_[tid] != nullptr);  // array must be pre-created"
     return static_cast<const detail::ComponentArray<T>&>(*arrays_[tid]);
   }
 
@@ -287,7 +287,7 @@ public:
   //! the removed slot). Callers must update entity_locations_ for the returned
   //! entity. Returns kNullEntity if no relocation happened (removed last element).
   [[nodiscard]] Entity remove_entity(std::size_t index) {
-    OMNICPP_CONTRACT(index < entities_.size());
+    WARPLOOM_CONTRACT(index < entities_.size());
     Entity swapped{kNullEntity};
     if (index + 1 < entities_.size()) {
       swapped = entities_.back();
@@ -403,7 +403,7 @@ public:
   template <typename T>
   T& add_component(Entity entity, T component = {}) {
     const auto idx = entity.id;
-    OMNICPP_CONTRACT(idx < entity_locations_.size());
+    WARPLOOM_CONTRACT(idx < entity_locations_.size());
 
     const auto new_tid = component_type_id<T>();
 
@@ -475,20 +475,20 @@ public:
   template <typename T>
   [[nodiscard]] T& get_component(Entity entity) {
     const auto idx = entity.id;
-    OMNICPP_CONTRACT(idx < entity_locations_.size());
+    WARPLOOM_CONTRACT(idx < entity_locations_.size());
     auto& loc = entity_locations_[idx];
-    OMNICPP_CONTRACT(loc.archetype);
-    OMNICPP_CONTRACT(loc.archetype->has<T>());
+    WARPLOOM_CONTRACT(loc.archetype);
+    WARPLOOM_CONTRACT(loc.archetype->has<T>());
     return loc.archetype->get_array<T>().at(loc.index);
   }
 
   template <typename T>
   [[nodiscard]] const T& get_component(Entity entity) const {
     const auto idx = entity.id;
-    OMNICPP_CONTRACT(idx < entity_locations_.size());
+    WARPLOOM_CONTRACT(idx < entity_locations_.size());
     auto& loc = entity_locations_[idx];
-    OMNICPP_CONTRACT(loc.archetype);
-    OMNICPP_CONTRACT(loc.archetype->has<T>());
+    WARPLOOM_CONTRACT(loc.archetype);
+    WARPLOOM_CONTRACT(loc.archetype->has<T>());
     return loc.archetype->get_array<T>().at(loc.index);
   }
 
@@ -1063,18 +1063,3 @@ private:
 };
 
 } // namespace warploom::core
-// S2-B compat footer: legacy `omnicpp::*` spellings keep resolving
-// during the transition (removed with the S5 identity pass -
-// docs/warploom-core-plan.md, phase B). A using-directive in a
-// namespace extension (NOT a type alias - ill-formed for namespaces)
-// makes the old spellings name the SAME types, and legally coexists
-// with real `omnicpp::core` extension blocks elsewhere (extension
-// blocks merge). One directive per namespace THIS header declares,
-// each under its OWN guard (a shared guard would suppress later
-// headers' distinct directives).
-#ifndef WARPLOOM_COMPAT_CORE_NS
-#define WARPLOOM_COMPAT_CORE_NS
-namespace omnicpp::core {
-    using namespace ::warploom::core;
-}
-#endif  // WARPLOOM_COMPAT_CORE_NS

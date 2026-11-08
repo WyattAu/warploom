@@ -5,7 +5,7 @@
 
 #include "warploom/render/vulkan_surface.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #ifdef __linux__
 #include <xcb/xcb.h>
@@ -27,7 +27,7 @@ namespace warploom::render {
     VkInstance instance,
     const SurfaceCreateInfo& info,
     VkSurfaceKHR& surface) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!instance) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::vulkan_not_available);
   }

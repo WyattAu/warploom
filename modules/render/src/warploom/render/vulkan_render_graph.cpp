@@ -4,13 +4,13 @@
 #include <stdexcept>
 #include <unordered_map>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
 namespace {
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 [[nodiscard]] VkImageAspectFlags barrier_aspect_mask(
     VkImageLayout layout, std::uint32_t explicit_aspect) noexcept {
   if (explicit_aspect != 0U) return explicit_aspect;
@@ -57,7 +57,7 @@ RenderPassAttachment color_attachment(
   a.format = format;
   a.used_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   a.final_layout = final_layout;
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   a.access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
   a.stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 #else
@@ -79,7 +79,7 @@ RenderPassAttachment depth_attachment(
   a.format = format;
   a.used_layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
   a.final_layout = final_layout;
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   a.access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
   a.stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
             VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
@@ -127,7 +127,7 @@ bool access_ordering_matters(std::uint32_t prev_access, std::uint32_t prev_stage
   return prev_writes || next_writes;
 }
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 constexpr std::uint32_t kSampleReadAccess = VK_ACCESS_SHADER_READ_BIT;
 constexpr std::uint32_t kSampleReadStage =
     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
@@ -269,7 +269,7 @@ void execute_render_graph(
     void (*record_pass)(VkCommandBuffer, const GraphPass&, void*)) {
   if (!command_buffer) return;
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   for (std::size_t p = 0; p < passes.size() && p < compiled.barriers_per_pass.size(); ++p) {
     const auto& barriers = compiled.barriers_per_pass[p];
     if (!barriers.empty()) {
@@ -434,7 +434,7 @@ void execute_graph(
     std::uint32_t current_family,
     void (*record_dynamic)(VkCommandBuffer, const GraphDynamicPass&, void*)) {
   if (!command_buffer) return;
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   // Staging vectors for the steady-state frame path (no heap operations);
   // thread_local keeps concurrent recording on separate buffers safe.
   thread_local std::vector<VkImageMemoryBarrier> vk_barriers;

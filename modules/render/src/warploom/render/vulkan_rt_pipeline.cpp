@@ -10,7 +10,7 @@
 #include <cstring>
 #include <utility>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -18,7 +18,7 @@ namespace warploom::render {
 
 namespace {
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 PFN_vkCreateRayTracingPipelinesKHR create_rt_pipelines_fn(VkDevice device) noexcept {
   return reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
@@ -40,13 +40,13 @@ VkDeviceSize align_up(VkDeviceSize v, VkDeviceSize align) noexcept {
   return (v + align - 1) & ~(align - 1);
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN
 
 }  // namespace
 
 VulkanRtPipeline::~VulkanRtPipeline() = default;
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 ::warploom::core::Result<void> VulkanRtPipeline::create(
     VkPhysicalDevice physical_device, VkDevice device, VkPipelineLayout layout,
@@ -258,6 +258,6 @@ void VulkanRtPipeline::cleanup(VkDevice device) noexcept {
   device_ = VK_NULL_HANDLE;
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN
 
 }  // namespace warploom::render

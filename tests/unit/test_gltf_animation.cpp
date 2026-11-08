@@ -74,18 +74,18 @@ Mannequin load_mannequin() {
 
 //! Compose local matrices down the mannequin hierarchy (mirror of the
 //! engine helpers, kept independent so the test cross-checks the engine).
-std::vector<omnicpp::asset::GltfTransform> test_locals(
-    const omnicpp::asset::GltfAnimationDocument& doc) {
-  std::vector<omnicpp::asset::GltfTransform> locals(doc.nodes.size());
+std::vector<warploom::asset::GltfTransform> test_locals(
+    const warploom::asset::GltfAnimationDocument& doc) {
+  std::vector<warploom::asset::GltfTransform> locals(doc.nodes.size());
   for (std::size_t i = 0; i < doc.nodes.size(); ++i) {
-    locals[i] = omnicpp::asset::gltf_local_matrix(doc.nodes[i]);
+    locals[i] = warploom::asset::gltf_local_matrix(doc.nodes[i]);
   }
   return locals;
 }
 
 //! Hash a whole imported document (vertices, indices, skins, animations) so
 //! the GLB and glTF import paths can be compared byte-exactly.
-std::string document_fingerprint(const omnicpp::asset::GltfAnimationDocument& doc) {
+std::string document_fingerprint(const warploom::asset::GltfAnimationDocument& doc) {
   std::size_t hash = 1469598103934665603ULL;  // FNV offset basis.
   auto mix = [&hash](const void* data, std::size_t size) {
     const auto* bytes = static_cast<const std::uint8_t*>(data);
@@ -168,27 +168,27 @@ std::vector<char> pack_glb(std::string_view json, const std::vector<char>& bin) 
   return glb;
 }
 
-void apply_pose(omnicpp::asset::GltfAnimationDocument& doc,
-                const omnicpp::asset::GltfAnimationImport& anim,
+void apply_pose(warploom::asset::GltfAnimationDocument& doc,
+                const warploom::asset::GltfAnimationImport& anim,
                 float time) {
   for (const auto& channel : anim.channels) {
     float out[4];
-    omnicpp::asset::sample_gltf_channel(
+    warploom::asset::sample_gltf_channel(
         anim.samplers[channel.sampler], time, out);
     auto& node = doc.nodes[channel.target_node];
     switch (channel.path) {
-      case omnicpp::asset::GltfChannel::Path::Translation:
+      case warploom::asset::GltfChannel::Path::Translation:
         node.translation[0] = out[0];
         node.translation[1] = out[1];
         node.translation[2] = out[2];
         break;
-      case omnicpp::asset::GltfChannel::Path::Rotation:
+      case warploom::asset::GltfChannel::Path::Rotation:
         node.rotation[0] = out[0];
         node.rotation[1] = out[1];
         node.rotation[2] = out[2];
         node.rotation[3] = out[3];
         break;
-      case omnicpp::asset::GltfChannel::Path::Scale:
+      case warploom::asset::GltfChannel::Path::Scale:
         node.scale[0] = out[0];
         node.scale[1] = out[1];
         node.scale[2] = out[2];
@@ -203,7 +203,7 @@ TEST(GltfAnimation, MannequinImportsWithSkinAndAnimation) {
   const Mannequin m = load_mannequin();
   ASSERT_FALSE(m.json.empty());
   std::string error;
-  auto result = omnicpp::asset::import_gltf_animation_document(
+  auto result = warploom::asset::import_gltf_animation_document(
       m.json.data(), m.json.size(),
       reinterpret_cast<const std::uint8_t*>(m.bin.data()), m.bin.size(),
       &error);
@@ -246,7 +246,7 @@ TEST(GltfAnimation, RestPoseSkinningReproducesBindPose) {
   const Mannequin m = load_mannequin();
   ASSERT_FALSE(m.json.empty());
   std::string error;
-  auto result = omnicpp::asset::import_gltf_animation_document(
+  auto result = warploom::asset::import_gltf_animation_document(
       m.json.data(), m.json.size(),
       reinterpret_cast<const std::uint8_t*>(m.bin.data()), m.bin.size(),
       &error);
@@ -254,8 +254,8 @@ TEST(GltfAnimation, RestPoseSkinningReproducesBindPose) {
   auto doc = result.value();
 
   // Rest pose: global(j) * IBM(j) must be identity for every joint.
-  std::vector<omnicpp::asset::GltfTransform> globals;
-  omnicpp::asset::gltf_global_matrices(doc, test_locals(doc), globals);
+  std::vector<warploom::asset::GltfTransform> globals;
+  warploom::asset::gltf_global_matrices(doc, test_locals(doc), globals);
   const auto& skin = doc.skins[0];
   for (std::size_t j = 0; j < skin.joints.size(); ++j) {
     const auto& g = globals[skin.joints[j]];
@@ -277,8 +277,8 @@ TEST(GltfAnimation, RestPoseSkinningReproducesBindPose) {
     }
   }
   // Skinned vertex at rest == bind vertex (single-joint bindings).
-  std::vector<omnicpp::asset::GltfTransform> joints;
-  omnicpp::asset::gltf_skin_matrices(doc, 0, globals, joints);
+  std::vector<warploom::asset::GltfTransform> joints;
+  warploom::asset::gltf_skin_matrices(doc, 0, globals, joints);
   for (std::size_t mesh_i = 0; mesh_i < doc.meshes.size(); ++mesh_i) {
     const auto& mesh = doc.meshes[mesh_i];
     const auto& binding = doc.skin_bindings[mesh_i];
@@ -310,7 +310,7 @@ TEST(GltfAnimation, WalkCycleSamplingMatchesKeyframes) {
   const Mannequin m = load_mannequin();
   ASSERT_FALSE(m.json.empty());
   std::string error;
-  auto result = omnicpp::asset::import_gltf_animation_document(
+  auto result = warploom::asset::import_gltf_animation_document(
       m.json.data(), m.json.size(),
       reinterpret_cast<const std::uint8_t*>(m.bin.data()), m.bin.size(),
       &error);
@@ -322,7 +322,7 @@ TEST(GltfAnimation, WalkCycleSamplingMatchesKeyframes) {
   // the hip-bob translation uses its own 3-key grid.
   for (const auto& sampler : anim.samplers) {
     ASSERT_EQ(sampler.interpolation,
-              omnicpp::asset::GltfSamplerInterpolation::Linear);
+              warploom::asset::GltfSamplerInterpolation::Linear);
     ASSERT_TRUE(sampler.times.size() == 5U || sampler.times.size() == 3U)
         << "unexpected keyframe count";
   }
@@ -343,16 +343,16 @@ TEST(GltfAnimation, WalkCycleSamplingMatchesKeyframes) {
   }
   // Mid-stride interpolation: t=0.125 -> half of the t=[0.0,0.25] swing.
   float out[4];
-  omnicpp::asset::sample_gltf_channel(hip_sampler, 0.125f, out);
+  warploom::asset::sample_gltf_channel(hip_sampler, 0.125f, out);
   const float theta_half =
       amplitude * std::sin(2.0f * static_cast<float>(M_PI) * 0.0f) / 2.0f +
       amplitude * std::sin(2.0f * static_cast<float>(M_PI) * 0.25f) / 2.0f;
   const float slerp_w = std::cos(theta_half / 2.0f);
   EXPECT_NEAR(out[3], slerp_w, 1e-4f);
   // Clamping: t=2.0 holds the last keyframe; t=-1 holds the first.
-  omnicpp::asset::sample_gltf_channel(hip_sampler, 2.0f, out);
+  warploom::asset::sample_gltf_channel(hip_sampler, 2.0f, out);
   EXPECT_NEAR(out[0], hip_sampler.values[4U * 4U + 0], 1e-6f);
-  omnicpp::asset::sample_gltf_channel(hip_sampler, -1.0f, out);
+  warploom::asset::sample_gltf_channel(hip_sampler, -1.0f, out);
   EXPECT_NEAR(out[0], hip_sampler.values[0], 1e-6f);
 }
 
@@ -360,7 +360,7 @@ TEST(GltfAnimation, AnimationMovesTheMannequin) {
   const Mannequin m = load_mannequin();
   ASSERT_FALSE(m.json.empty());
   std::string error;
-  auto result = omnicpp::asset::import_gltf_animation_document(
+  auto result = warploom::asset::import_gltf_animation_document(
       m.json.data(), m.json.size(),
       reinterpret_cast<const std::uint8_t*>(m.bin.data()), m.bin.size(),
       &error);
@@ -372,9 +372,9 @@ TEST(GltfAnimation, AnimationMovesTheMannequin) {
   // forward (z) when the right swings back — visible skeletal motion.
   auto foot_z = [&](float time) {
     apply_pose(doc, anim, time);
-    std::vector<omnicpp::asset::GltfTransform> locals = test_locals(doc);
-    std::vector<omnicpp::asset::GltfTransform> globals;
-    omnicpp::asset::gltf_global_matrices(doc, locals, globals);
+    std::vector<warploom::asset::GltfTransform> locals = test_locals(doc);
+    std::vector<warploom::asset::GltfTransform> globals;
+    warploom::asset::gltf_global_matrices(doc, locals, globals);
     // l_knee is joint node 12: world z of the knee joint.
     return globals[12][14];
   };
@@ -391,12 +391,12 @@ TEST(GltfAnimation, ImportIsByteDeterministic) {
   const Mannequin m = load_mannequin();
   ASSERT_FALSE(m.json.empty());
   std::string error;
-  auto first = omnicpp::asset::import_gltf_animation_document(
+  auto first = warploom::asset::import_gltf_animation_document(
       m.json.data(), m.json.size(),
       reinterpret_cast<const std::uint8_t*>(m.bin.data()), m.bin.size(),
       &error);
   ASSERT_TRUE(first.is_ok()) << error;
-  auto second = omnicpp::asset::import_gltf_animation_document(
+  auto second = warploom::asset::import_gltf_animation_document(
       m.json.data(), m.json.size(),
       reinterpret_cast<const std::uint8_t*>(m.bin.data()), m.bin.size(),
       &error);
@@ -421,7 +421,7 @@ TEST(GltfAnimation, ImportIsByteDeterministic) {
   }
   EXPECT_EQ(std::memcmp(a.skins[0].inverse_bind_matrices.data(),
                         b.skins[0].inverse_bind_matrices.data(),
-                        15U * sizeof(omnicpp::asset::GltfTransform)),
+                        15U * sizeof(warploom::asset::GltfTransform)),
             0);
 }
 
@@ -430,7 +430,7 @@ TEST(GltfAnimation, RejectsMalformedSkeletalDocuments) {
   ASSERT_FALSE(m.json.empty());
   std::string error;
   auto import = [&](const std::string& json) {
-    return omnicpp::asset::import_gltf_animation_document(
+    return warploom::asset::import_gltf_animation_document(
         json.data(), json.size(),
         reinterpret_cast<const std::uint8_t*>(m.bin.data()), m.bin.size(),
         &error);
@@ -570,42 +570,42 @@ TEST(GltfAnimation, RejectsMalformedSkeletalDocuments) {
 }
 
 TEST(GltfSamplerMath, StepAndExactKeyframeSemantics) {
-  omnicpp::asset::GltfSampler step;
-  step.interpolation = omnicpp::asset::GltfSamplerInterpolation::Step;
+  warploom::asset::GltfSampler step;
+  step.interpolation = warploom::asset::GltfSamplerInterpolation::Step;
   step.stride = 3;
   step.times = {0.0f, 1.0f, 2.0f};
   step.values = {0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 2.0f, 2.0f, 2.0f};
 
   float out[4];
   // STEP holds the previous keyframe inside a segment.
-  omnicpp::asset::sample_gltf_channel(step, 0.5f, out);
+  warploom::asset::sample_gltf_channel(step, 0.5f, out);
   EXPECT_FLOAT_EQ(out[0], 0.0f);
-  omnicpp::asset::sample_gltf_channel(step, 1.5f, out);
+  warploom::asset::sample_gltf_channel(step, 1.5f, out);
   EXPECT_FLOAT_EQ(out[0], 1.0f);
   // Exact keyframe hits return the exact keyframe.
-  omnicpp::asset::sample_gltf_channel(step, 1.0f, out);
+  warploom::asset::sample_gltf_channel(step, 1.0f, out);
   EXPECT_FLOAT_EQ(out[1], 1.0f);
 
   // LINEAR lerp on a translation channel.
-  omnicpp::asset::GltfSampler linear;
-  linear.interpolation = omnicpp::asset::GltfSamplerInterpolation::Linear;
+  warploom::asset::GltfSampler linear;
+  linear.interpolation = warploom::asset::GltfSamplerInterpolation::Linear;
   linear.stride = 3;
   linear.times = {0.0f, 1.0f};
   linear.values = {0.0f, 0.0f, 0.0f, 2.0f, 4.0f, -6.0f};
-  omnicpp::asset::sample_gltf_channel(linear, 0.25f, out);
+  warploom::asset::sample_gltf_channel(linear, 0.25f, out);
   EXPECT_FLOAT_EQ(out[0], 0.5f);
   EXPECT_FLOAT_EQ(out[1], 1.0f);
   EXPECT_FLOAT_EQ(out[2], -1.5f);
 
   // 90-degree X rotation slerped half-way is 45 degrees.
-  omnicpp::asset::GltfSampler rot;
-  rot.interpolation = omnicpp::asset::GltfSamplerInterpolation::Linear;
+  warploom::asset::GltfSampler rot;
+  rot.interpolation = warploom::asset::GltfSamplerInterpolation::Linear;
   rot.stride = 4;
   rot.times = {0.0f, 1.0f};
   rot.values = {0.0f, 0.0f, 0.0f, 1.0f,
                 std::sin(1.5707963f / 2.0f), 0.0f, 0.0f,
                 std::cos(1.5707963f / 2.0f)};
-  omnicpp::asset::sample_gltf_channel(rot, 0.5f, out);
+  warploom::asset::sample_gltf_channel(rot, 0.5f, out);
   EXPECT_NEAR(out[0], std::sin(0.78539816f / 2.0f), 1e-6f);
   EXPECT_NEAR(out[3], std::cos(0.78539816f / 2.0f), 1e-6f);
 }
@@ -625,7 +625,7 @@ TEST(GltfAnimation, CesiumManRealAssetImports) {
                         bin_bytes).empty());
   const std::string asset_dir =
       std::string(WARPLOOM_TEST_ASSET_DIR) + "/cesiumman/";
-  const omnicpp::asset::ExternalFileLoader loader =
+  const warploom::asset::ExternalFileLoader loader =
       [&asset_dir](const std::string& uri, std::string& load_error,
                    std::vector<std::uint8_t>& out_bytes) {
         std::vector<char> bytes;
@@ -638,7 +638,7 @@ TEST(GltfAnimation, CesiumManRealAssetImports) {
       };
 
   std::string error;
-  auto imported = omnicpp::asset::import_gltf_animation_document(
+  auto imported = warploom::asset::import_gltf_animation_document(
       json_bytes.data(), json_bytes.size(),
       reinterpret_cast<const std::uint8_t*>(bin_bytes.data()),
       bin_bytes.size(), &error, &loader);
@@ -662,13 +662,13 @@ TEST(GltfAnimation, CesiumManRealAssetImports) {
   // Sampling the 2 s cycle at its 1 s midpoint must move joints: global
   // joint transforms differ from rest pose for >= 3 of the 19 joints.
   const auto rest = test_locals(doc);
-  std::vector<omnicpp::asset::GltfTransform> rest_globals;
-  omnicpp::asset::gltf_global_matrices(doc, rest, rest_globals);
-  omnicpp::asset::GltfAnimationDocument posed = doc;
+  std::vector<warploom::asset::GltfTransform> rest_globals;
+  warploom::asset::gltf_global_matrices(doc, rest, rest_globals);
+  warploom::asset::GltfAnimationDocument posed = doc;
   apply_pose(posed, posed.animations[0], 1.0F);
   const auto mid = test_locals(posed);
-  std::vector<omnicpp::asset::GltfTransform> mid_globals;
-  omnicpp::asset::gltf_global_matrices(posed, mid, mid_globals);
+  std::vector<warploom::asset::GltfTransform> mid_globals;
+  warploom::asset::gltf_global_matrices(posed, mid, mid_globals);
   std::size_t moved = 0;
   for (std::size_t j = 0; j < 19U; ++j) {
     const auto& a = rest_globals[doc.skins[0].joints[j]];
@@ -703,9 +703,9 @@ TEST(GltfAnimation, MatrixNodeDecomposesToTrs) {
      {"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR"},
      {"bufferView":1,"componentType":5126,"count":2,"type":"VEC3"}],
    "buffers":[{"byteLength":32,"uri":"data:application/octet-stream;base64,AAAAAAAAgD8AAIA/AAAAQAAAQEAAAIBAAACgQAAAwEA="}]})glTF";
-  omnicpp::asset::GltfAnimationDocument doc;
+  warploom::asset::GltfAnimationDocument doc;
   std::string error;
-  const auto imported = omnicpp::asset::import_gltf_animation_document(
+  const auto imported = warploom::asset::import_gltf_animation_document(
       json.data(), json.size(), nullptr, 0U, &error);
   ASSERT_TRUE(imported.is_ok()) << error;
   doc = std::move(imported).value();
@@ -723,7 +723,7 @@ TEST(GltfAnimation, MatrixNodeDecomposesToTrs) {
 
   // Recomposing local TRS must reproduce the input matrix exactly.
   const float m[16] = {1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 5, 0, 1};
-  const auto local = omnicpp::asset::gltf_local_matrix(root);
+  const auto local = warploom::asset::gltf_local_matrix(root);
   for (std::size_t i = 0; i < 16U; ++i) {
     EXPECT_NEAR(local[i], m[i], 1e-5F) << "index " << i;
   }
@@ -744,7 +744,7 @@ TEST(GltfAnimation, MatrixNodeWithShearIsRejected) {
    "accessors":[],
    "buffers":[]})glTF";
   std::string error;
-  const auto imported = omnicpp::asset::import_gltf_animation_document(
+  const auto imported = warploom::asset::import_gltf_animation_document(
       json.data(), json.size(), nullptr, 0U, &error);
   EXPECT_FALSE(imported.is_ok());
   EXPECT_NE(error.find("shear"), std::string::npos) << error;
@@ -754,31 +754,31 @@ TEST(GltfAnimation, MatrixNodeWithShearIsRejected) {
 TEST(GltfAnimation, BlendPoseEndpointsAndMidpoint) {
   // Endpoints are exact; the midpoint of a 90-degree rotation pair is the
   // 45-degree quaternion, and translation/scale blend linearly.
-  omnicpp::asset::GltfSkinNode a{};
+  warploom::asset::GltfSkinNode a{};
   a.translation[1] = 1.0F;
   a.scale[2] = 2.0F;
   // Identity rotation.
   const float qa[4] = {0.0F, 0.0F, 0.0F, 1.0F};
   std::copy(qa, qa + 4, a.rotation);
 
-  omnicpp::asset::GltfSkinNode b{};
+  warploom::asset::GltfSkinNode b{};
   b.translation[1] = 3.0F;
   b.scale[2] = 4.0F;
   // 90 degrees about X.
   const float qb[4] = {std::sqrt(0.5F), 0.0F, 0.0F, std::sqrt(0.5F)};
   std::copy(qb, qb + 4, b.rotation);
 
-  omnicpp::asset::GltfSkinNode out{};
-  omnicpp::asset::blend_pose(a, b, 0.0F, out);
+  warploom::asset::GltfSkinNode out{};
+  warploom::asset::blend_pose(a, b, 0.0F, out);
   EXPECT_FLOAT_EQ(out.translation[1], 1.0F);
   EXPECT_FLOAT_EQ(out.scale[2], 2.0F);
   EXPECT_FLOAT_EQ(out.rotation[3], 1.0F);
 
-  omnicpp::asset::blend_pose(a, b, 1.0F, out);
+  warploom::asset::blend_pose(a, b, 1.0F, out);
   EXPECT_FLOAT_EQ(out.translation[1], 3.0F);
   EXPECT_FLOAT_EQ(out.rotation[0], qb[0]);
 
-  omnicpp::asset::blend_pose(a, b, 0.5F, out);
+  warploom::asset::blend_pose(a, b, 0.5F, out);
   EXPECT_FLOAT_EQ(out.translation[1], 2.0F);
   EXPECT_FLOAT_EQ(out.scale[2], 3.0F);
   // Midpoint rotation: 45 degrees about X, unit norm.
@@ -789,9 +789,9 @@ TEST(GltfAnimation, BlendPoseEndpointsAndMidpoint) {
   EXPECT_NEAR(out.rotation[3], 0.9238795F, 1e-5F);
 
   // Alpha clamps outside [0,1].
-  omnicpp::asset::blend_pose(a, b, -1.0F, out);
+  warploom::asset::blend_pose(a, b, -1.0F, out);
   EXPECT_FLOAT_EQ(out.translation[1], 1.0F);
-  omnicpp::asset::blend_pose(a, b, 2.0F, out);
+  warploom::asset::blend_pose(a, b, 2.0F, out);
   EXPECT_FLOAT_EQ(out.translation[1], 3.0F);
 }
 
@@ -799,7 +799,7 @@ TEST(GltfAnimation, CrossFadeWalkToIdleOnMannequin) {
   const Mannequin m = load_mannequin();
   ASSERT_FALSE(m.json.empty());
   std::string error;
-  auto imported = omnicpp::asset::import_gltf_animation_document(
+  auto imported = warploom::asset::import_gltf_animation_document(
       m.json.data(), m.json.size(),
       reinterpret_cast<const std::uint8_t*>(m.bin.data()), m.bin.size(),
       &error);
@@ -812,11 +812,11 @@ TEST(GltfAnimation, CrossFadeWalkToIdleOnMannequin) {
   // alpha = 0 keeps the base (rest) pose; alpha = 1 is exactly the clip.
   // The chest is sampled at t = 0.5 (its scale keyframe trough; t = 0.25 is
   // the exact keyframe midpoint, where the breath is 1.0 by construction).
-  std::vector<omnicpp::asset::GltfSkinNode> rest = doc.nodes;
-  std::vector<omnicpp::asset::GltfSkinNode> idle_full = rest;
-  omnicpp::asset::sample_clip_blended(doc, idle, 0.5F, 1.0F, idle_full);
-  std::vector<omnicpp::asset::GltfSkinNode> half = rest;
-  omnicpp::asset::sample_clip_blended(doc, idle, 0.5F, 0.5F, half);
+  std::vector<warploom::asset::GltfSkinNode> rest = doc.nodes;
+  std::vector<warploom::asset::GltfSkinNode> idle_full = rest;
+  warploom::asset::sample_clip_blended(doc, idle, 0.5F, 1.0F, idle_full);
+  std::vector<warploom::asset::GltfSkinNode> half = rest;
+  warploom::asset::sample_clip_blended(doc, idle, 0.5F, 0.5F, half);
 
   // Idle drives the chest scale (node 2): the half fade must land strictly
   // between rest (1.0) and the idle pose on that component.
@@ -829,10 +829,10 @@ TEST(GltfAnimation, CrossFadeWalkToIdleOnMannequin) {
 
   // Idle drives arm rotations (nodes 5 and 8): blending moves them too.
   // Arms peak at t = 0.25 (sin(pi/2) = 1), so sample those there.
-  std::vector<omnicpp::asset::GltfSkinNode> arms_in = rest;
-  omnicpp::asset::sample_clip_blended(doc, idle, 0.25F, 1.0F, arms_in);
-  std::vector<omnicpp::asset::GltfSkinNode> arms_half = rest;
-  omnicpp::asset::sample_clip_blended(doc, idle, 0.25F, 0.5F, arms_half);
+  std::vector<warploom::asset::GltfSkinNode> arms_in = rest;
+  warploom::asset::sample_clip_blended(doc, idle, 0.25F, 1.0F, arms_in);
+  std::vector<warploom::asset::GltfSkinNode> arms_half = rest;
+  warploom::asset::sample_clip_blended(doc, idle, 0.25F, 0.5F, arms_half);
   const float arm_rest = doc.nodes[5].rotation[0];
   const float arm_idle = arms_in[5].rotation[0];
   EXPECT_NE(arm_rest, arm_idle);
@@ -841,9 +841,9 @@ TEST(GltfAnimation, CrossFadeWalkToIdleOnMannequin) {
 
   // Walk at a keyframe, blended fully in, must equal direct channel
   // sampling (the determinism contract carries through blending).
-  std::vector<omnicpp::asset::GltfSkinNode> walk_full = rest;
-  omnicpp::asset::sample_clip_blended(doc, walk, 0.25F, 1.0F, walk_full);
-  omnicpp::asset::GltfAnimationDocument direct = doc;
+  std::vector<warploom::asset::GltfSkinNode> walk_full = rest;
+  warploom::asset::sample_clip_blended(doc, walk, 0.25F, 1.0F, walk_full);
+  warploom::asset::GltfAnimationDocument direct = doc;
   apply_pose(direct, walk, 0.25F);
   for (std::size_t i = 0; i < walk_full.size(); ++i) {
     EXPECT_NEAR(walk_full[i].rotation[0], direct.nodes[i].rotation[0], 1e-6F);
@@ -868,16 +868,16 @@ TEST(GltfAnimation, GlbContainerImportsIdenticallyToJson) {
   const std::vector<char> glb_bytes =
       pack_glb(json_asset.json, json_asset.bin);
 
-  omnicpp::asset::GltfAnimationDocument glb_doc;
+  warploom::asset::GltfAnimationDocument glb_doc;
   std::string glb_error;
-  const auto glb_import = omnicpp::asset::import_gltf_animation_document(
+  const auto glb_import = warploom::asset::import_gltf_animation_document(
       glb_bytes.data(), glb_bytes.size(), nullptr, 0U, &glb_error);
   ASSERT_TRUE(glb_import.is_ok()) << glb_error;
   glb_doc = std::move(glb_import).value();
 
-  omnicpp::asset::GltfAnimationDocument json_doc;
+  warploom::asset::GltfAnimationDocument json_doc;
   std::string json_error;
-  const auto json_import = omnicpp::asset::import_gltf_animation_document(
+  const auto json_import = warploom::asset::import_gltf_animation_document(
       json_asset.json.data(), json_asset.json.size(),
       reinterpret_cast<const std::uint8_t*>(json_asset.bin.data()),
       json_asset.bin.size(), &json_error);
@@ -912,7 +912,7 @@ TEST(GltfAnimation, GlbContainerRejectsMalformedContainers) {
     ASSERT_FALSE(broken.empty()) << "pack_glb produced no bytes to corrupt";
     broken[0] = 'X';
     std::string error;
-    const auto imported = omnicpp::asset::import_gltf_animation_document(
+    const auto imported = warploom::asset::import_gltf_animation_document(
         broken.data(), broken.size(), nullptr, 0U, &error);
     EXPECT_FALSE(imported.is_ok());
     EXPECT_NE(error.find("neither a JSON glTF document"), std::string::npos)
@@ -924,7 +924,7 @@ TEST(GltfAnimation, GlbContainerRejectsMalformedContainers) {
     std::uint32_t version = 3;
     std::memcpy(broken.data() + 4, &version, 4);
     std::string error;
-    const auto imported = omnicpp::asset::import_gltf_animation_document(
+    const auto imported = warploom::asset::import_gltf_animation_document(
         broken.data(), broken.size(), nullptr, 0U, &error);
     EXPECT_FALSE(imported.is_ok());
     EXPECT_NE(error.find("version"), std::string::npos) << error;
@@ -935,7 +935,7 @@ TEST(GltfAnimation, GlbContainerRejectsMalformedContainers) {
     std::uint32_t length = static_cast<std::uint32_t>(broken.size()) + 100U;
     std::memcpy(broken.data() + 8, &length, 4);
     std::string error;
-    const auto imported = omnicpp::asset::import_gltf_animation_document(
+    const auto imported = warploom::asset::import_gltf_animation_document(
         broken.data(), broken.size(), nullptr, 0U, &error);
     EXPECT_FALSE(imported.is_ok());
     EXPECT_NE(error.find("length"), std::string::npos) << error;
@@ -946,7 +946,7 @@ TEST(GltfAnimation, GlbContainerRejectsMalformedContainers) {
     std::uint32_t length = 1U << 20;
     std::memcpy(broken.data() + 12, &length, 4);
     std::string error;
-    const auto imported = omnicpp::asset::import_gltf_animation_document(
+    const auto imported = warploom::asset::import_gltf_animation_document(
         broken.data(), broken.size(), nullptr, 0U, &error);
     EXPECT_FALSE(imported.is_ok());
     EXPECT_NE(error.find("length"), std::string::npos) << error;
@@ -964,7 +964,7 @@ TEST(GltfAnimation, GlbContainerRejectsMalformedContainers) {
                         std::to_string(json_asset.bin.size() - 8U));
     const std::vector<char> broken = pack_glb(tweaked, json_asset.bin);
     std::string error;
-    const auto imported = omnicpp::asset::import_gltf_animation_document(
+    const auto imported = warploom::asset::import_gltf_animation_document(
         broken.data(), broken.size(), nullptr, 0U, &error);
     EXPECT_FALSE(imported.is_ok());
     // Either the GLB-specific check or the generic buffer-size check may
@@ -985,7 +985,7 @@ TEST(GltfAnimation, GlbContainerRejectsMalformedContainers) {
     tweaked.insert(insert_at, "{ \"byteLength\" : 16 },");
     const std::vector<char> broken = pack_glb(tweaked, json_asset.bin);
     std::string error;
-    const auto imported = omnicpp::asset::import_gltf_animation_document(
+    const auto imported = warploom::asset::import_gltf_animation_document(
         broken.data(), broken.size(), nullptr, 0U, &error);
     EXPECT_FALSE(imported.is_ok()) << error;
   }
@@ -1010,38 +1010,38 @@ TEST(GltfAnimation, CubicSplineTranslationHermite) {
    {"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR"},
    {"bufferView":1,"componentType":5126,"count":6,"type":"VEC3"}],
  "buffers":[{"byteLength":80,"uri":"data:application/octet-stream;base64,AAAAAAAAgD8AAAAAAAAAAAAAAAAAACBBAACgQQAA8EEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACBCAABIQgAAcEIAAAAAAAAAAAAAAAA="}]})glTF";
-  omnicpp::asset::GltfAnimationDocument doc;
+  warploom::asset::GltfAnimationDocument doc;
   std::string error;
-  const auto imported = omnicpp::asset::import_gltf_animation_document(
+  const auto imported = warploom::asset::import_gltf_animation_document(
       json.data(), json.size(), nullptr, 0U, &error);
   ASSERT_TRUE(imported.is_ok()) << error;
   doc = std::move(imported).value();
   ASSERT_EQ(doc.animations.size(), 1U);
   const auto& sampler = doc.animations[0].samplers[0];
   EXPECT_EQ(sampler.interpolation,
-            omnicpp::asset::GltfSamplerInterpolation::CubicSpline);
+            warploom::asset::GltfSamplerInterpolation::CubicSpline);
   ASSERT_EQ(sampler.values.size(), 2U * 3U);
   ASSERT_EQ(sampler.in_tangents.size(), 2U * 3U);
 
   float out[4];
   // Quarter point: h00 = 0.84375, h01 = 0.15625 (tangent terms vanish):
   // 0.84375 * 10 + 0.15625 * 40 = 14.6875.
-  omnicpp::asset::sample_gltf_channel(sampler, 0.25F, out);
+  warploom::asset::sample_gltf_channel(sampler, 0.25F, out);
   EXPECT_NEAR(out[0], 14.6875F, 1e-4F);
   // Midpoint: every component is the average of the two keyframe values.
-  omnicpp::asset::sample_gltf_channel(sampler, 0.5F, out);
+  warploom::asset::sample_gltf_channel(sampler, 0.5F, out);
   EXPECT_NEAR(out[0], 25.0F, 1e-4F);
   EXPECT_NEAR(out[1], 35.0F, 1e-4F);
   EXPECT_NEAR(out[2], 45.0F, 1e-4F);
   // Exact keyframe hits are exact (determinism contract).
-  omnicpp::asset::sample_gltf_channel(sampler, 0.0F, out);
+  warploom::asset::sample_gltf_channel(sampler, 0.0F, out);
   EXPECT_FLOAT_EQ(out[0], 10.0F);
-  omnicpp::asset::sample_gltf_channel(sampler, 1.0F, out);
+  warploom::asset::sample_gltf_channel(sampler, 1.0F, out);
   EXPECT_FLOAT_EQ(out[2], 60.0F);
   // Clamp outside the keyframe range.
-  omnicpp::asset::sample_gltf_channel(sampler, -1.0F, out);
+  warploom::asset::sample_gltf_channel(sampler, -1.0F, out);
   EXPECT_FLOAT_EQ(out[1], 20.0F);
-  omnicpp::asset::sample_gltf_channel(sampler, 2.0F, out);
+  warploom::asset::sample_gltf_channel(sampler, 2.0F, out);
   EXPECT_FLOAT_EQ(out[0], 40.0F);
 }
 
@@ -1062,9 +1062,9 @@ TEST(GltfAnimation, CubicSplineTangentsSteerTheCurve) {
    {"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR"},
    {"bufferView":1,"componentType":5126,"count":6,"type":"VEC3"}],
  "buffers":[{"byteLength":80,"uri":"data:application/octet-stream;base64,AAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAAAA="}]})glTF";
-  omnicpp::asset::GltfAnimationDocument doc;
+  warploom::asset::GltfAnimationDocument doc;
   std::string error;
-  const auto imported = omnicpp::asset::import_gltf_animation_document(
+  const auto imported = warploom::asset::import_gltf_animation_document(
       json.data(), json.size(), nullptr, 0U, &error);
   ASSERT_TRUE(imported.is_ok()) << error;
   doc = std::move(imported).value();
@@ -1073,7 +1073,7 @@ TEST(GltfAnimation, CubicSplineTangentsSteerTheCurve) {
   float out[4];
   // Quarter point: h00*0 + h10*1 + h01*1 + h11*1 = 0.078125 + 0.15625 +
   // 0.015625 = 0.25.
-  omnicpp::asset::sample_gltf_channel(sampler, 0.25F, out);
+  warploom::asset::sample_gltf_channel(sampler, 0.25F, out);
   EXPECT_NEAR(out[0], 0.25F, 1e-4F);
 }
 
@@ -1093,16 +1093,16 @@ TEST(GltfAnimation, CubicSplineRotationStaysUnit) {
    {"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR"},
    {"bufferView":1,"componentType":5126,"count":6,"type":"VEC4"}],
  "buffers":[{"byteLength":104,"uri":"data:application/octet-stream;base64,AAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABTvwz4AAAAAXoNsPwAAAAAAAAAAAAAAAAAAgD8="}]})glTF";
-  omnicpp::asset::GltfAnimationDocument doc;
+  warploom::asset::GltfAnimationDocument doc;
   std::string error;
-  const auto imported = omnicpp::asset::import_gltf_animation_document(
+  const auto imported = warploom::asset::import_gltf_animation_document(
       json.data(), json.size(), nullptr, 0U, &error);
   ASSERT_TRUE(imported.is_ok()) << error;
   doc = std::move(imported).value();
   const auto& sampler = doc.animations[0].samplers[0];
 
   float out[4];
-  omnicpp::asset::sample_gltf_channel(sampler, 0.5F, out);
+  warploom::asset::sample_gltf_channel(sampler, 0.5F, out);
   const float norm = std::sqrt(out[0] * out[0] + out[1] * out[1] +
                                out[2] * out[2] + out[3] * out[3]);
   EXPECT_NEAR(norm, 1.0F, 1e-5F);
@@ -1129,7 +1129,7 @@ TEST(GltfAnimation, CubicSplineRejectsWrongOutputCount) {
    {"bufferView":1,"componentType":5126,"count":2,"type":"VEC3"}],
  "buffers":[{"byteLength":32,"uri":"data:application/octet-stream;base64,AAAAAAAAgD8AACBBAACgQQAA8EEAACBCAABIQgAAcEI="}]})glTF";
   std::string error;
-  const auto imported = omnicpp::asset::import_gltf_animation_document(
+  const auto imported = warploom::asset::import_gltf_animation_document(
       json.data(), json.size(), nullptr, 0U, &error);
   EXPECT_FALSE(imported.is_ok());
   EXPECT_NE(error.find("3x .input count"), std::string::npos)

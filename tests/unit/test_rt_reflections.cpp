@@ -51,23 +51,23 @@ namespace {
 //! %f varargs consume a double; make the required promotion explicit.
 inline double dbl(float v) noexcept { return static_cast<double>(v); }
 
-using omnicpp::render::Allocation;
-using omnicpp::render::BlasBuildInput;
-using omnicpp::render::BottomLevelAS;
-using omnicpp::render::PbrMaterialData;
-using omnicpp::render::SceneMatrix;
-using omnicpp::render::SceneMesh;
-using omnicpp::render::ScenePbrObject;
-using omnicpp::render::TlasInstance;
-using omnicpp::render::TopLevelAS;
-using omnicpp::render::VulkanAccelerationStructureBuilder;
-using omnicpp::render::VulkanContext;
-using omnicpp::render::VulkanDescriptorManager;
-using omnicpp::render::VulkanMemoryAllocator;
-using omnicpp::render::VulkanOffscreenTarget;
-using omnicpp::render::VulkanPbrScene;
-using omnicpp::render::VulkanPipeline;
-using omnicpp::render::VulkanScratchPool;
+using warploom::render::Allocation;
+using warploom::render::BlasBuildInput;
+using warploom::render::BottomLevelAS;
+using warploom::render::PbrMaterialData;
+using warploom::render::SceneMatrix;
+using warploom::render::SceneMesh;
+using warploom::render::ScenePbrObject;
+using warploom::render::TlasInstance;
+using warploom::render::TopLevelAS;
+using warploom::render::VulkanAccelerationStructureBuilder;
+using warploom::render::VulkanContext;
+using warploom::render::VulkanDescriptorManager;
+using warploom::render::VulkanMemoryAllocator;
+using warploom::render::VulkanOffscreenTarget;
+using warploom::render::VulkanPbrScene;
+using warploom::render::VulkanPipeline;
+using warploom::render::VulkanScratchPool;
 
 constexpr std::uint32_t kImg = 256;
 
@@ -270,7 +270,7 @@ bool make_solid_texture(VkDevice dev, VkPhysicalDevice pd, VkQueue q,
   auto mem = alloc.bind_image(t.image, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   if (!mem.is_ok()) return fail();
   t.allocation = mem.value();
-  omnicpp::render::VulkanFrameUploadArena arena;
+  warploom::render::VulkanFrameUploadArena arena;
   if (!arena.initialize(dev, pd, family, 1U, 1U << 20).is_ok()) return fail();
   if (!arena.begin_frame(0).is_ok()) return fail();
   auto span = arena.acquire(4);
@@ -399,7 +399,7 @@ struct ReflectionHarness {
     auto ms = desc.allocate_set(mat_layout);
     if (!ms.is_ok()) return false;
     mat_set = ms.value();
-    auto mb = alloc.create_buffer(2 * sizeof(omnicpp::render::PbrMaterialData),
+    auto mb = alloc.create_buffer(2 * sizeof(warploom::render::PbrMaterialData),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (!mb.is_ok()) return false;
@@ -434,7 +434,7 @@ struct ReflectionHarness {
     return true;
   }
 
-  void write_materials(const omnicpp::render::PbrMaterialData* m,
+  void write_materials(const warploom::render::PbrMaterialData* m,
                        std::uint32_t n) {
     std::memcpy(mat_buf_alloc.mapped, m, n * sizeof(*m));
   }
@@ -495,7 +495,7 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
   const SceneMatrix cam_vp =
       mat4_multiply(make_perspective(45.0f, 1.0f, 0.1f, 100.0f), cam_view);
 
-  omnicpp::render::PbrMaterialData mats[2]{};  mats[0].base_color_factor = {0.75f, 0.75f, 0.75f, 1.0f};  // gray floor
+  warploom::render::PbrMaterialData mats[2]{};  mats[0].base_color_factor = {0.75f, 0.75f, 0.75f, 1.0f};  // gray floor
   mats[0].roughness_factor = 0.2f;
   mats[0].metallic_factor = 0.0f;
   mats[1].base_color_factor = {0.9f, 0.1f, 0.1f, 1.0f};     // red cube
@@ -586,10 +586,10 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
   ASSERT_TRUE(scratch_addr.is_ok());
 
   // Build: BLAS floor -> barrier -> BLAS cube -> barrier -> TLAS.
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       h.ctx.device(), h.qf);
   ASSERT_TRUE(pool.is_ok());
-  auto cb = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cb = warploom::render::VulkanRenderer::allocate_command_buffer(
       h.ctx.device(), pool.value());
   ASSERT_TRUE(cb.is_ok());
   VkCommandBufferBeginInfo bi{};
@@ -670,7 +670,7 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
       true, true, true).is_ok());
 
   // ---- Render ---------------------------------------------------------------
-  omnicpp::render::VulkanPbrScene scene{};  scene.pipeline = pipe.pipeline();
+  warploom::render::VulkanPbrScene scene{};  scene.pipeline = pipe.pipeline();
   scene.pipeline_layout = pipe.pipeline_layout();
   scene.camera.view_projection = cam_vp;
   scene.camera_position = {cam_eye[0], cam_eye[1], cam_eye[2], 1.0f};
@@ -693,10 +693,10 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
   cube_obj.material_index = 1;
   scene.objects = {floor_obj, cube_obj};
 
-  auto pr = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pr = warploom::render::VulkanRenderer::create_command_pool(
       h.ctx.device(), h.qf);
   ASSERT_TRUE(pr.is_ok());
-  auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cr = warploom::render::VulkanRenderer::allocate_command_buffer(
       h.ctx.device(), pr.value());
   ASSERT_TRUE(cr.is_ok());
   VkCommandBuffer rcb = cr.value();
@@ -705,8 +705,8 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
   rbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(rcb, &rbi);
 
-  omnicpp::render::VulkanRenderer renderer;
-  omnicpp::render::VulkanRenderer::PbrFrameTargets targets{};
+  warploom::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer::PbrFrameTargets targets{};
   targets.render_pass = h.target.render_pass();
   targets.framebuffer = h.target.framebuffer();
   targets.width = kImg;
@@ -722,7 +722,7 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
   ASSERT_TRUE(submit_and_wait(h.ctx.device(), h.ctx.graphics_queue(), rcb));
   vkDestroyCommandPool(h.ctx.device(), pr.value(), nullptr);
 
-  const auto rb = omnicpp_test::readback_swapchain_image(
+  const auto rb = warploom_test::readback_swapchain_image(
       h.ctx.physical_device(), h.ctx.device(), h.ctx.graphics_queue(), h.qf,
       h.target.image(), h.target.format(), kImg, kImg,
       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -745,7 +745,7 @@ TEST(rt_reflections, floor_mirror_shows_ray_queried_cube) {
     const int py = static_cast<int>((y * 0.5f + 0.5f) * float(kImg));
     return {px, py};
   };
-  auto channels = [&](const omnicpp_test::ReadbackResult& r, int px, int py) {
+  auto channels = [&](const warploom_test::ReadbackResult& r, int px, int py) {
     // px/py arrive as ints for readability at the call sites; every caller
     // passes a non-negative pixel coordinate, and the buffer index needs all
     // three terms unsigned.
@@ -906,12 +906,12 @@ bool make_solid_cube(VkDevice dev, VkQueue q, std::uint32_t family,
     std::memcpy(static_cast<std::uint8_t*>(stage_a.mapped) + i * 4U,
                 rgba.data(), 4);
   }
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(dev, family);
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(dev, family);
   if (!pool.is_ok()) {
     alloc.destroy_allocation(stage_a);
     return fail();
   }
-  auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cb_r = warploom::render::VulkanRenderer::allocate_command_buffer(
       dev, pool.value());
   if (!cb_r.is_ok()) {
     alloc.destroy_allocation(stage_a);
@@ -1053,7 +1053,7 @@ TEST(rt_sub_toggles, reflect_and_ao_flags) {
       mat4_multiply(make_perspective(45.0f, 1.0f, 0.1f, 100.0f),
                     make_look_at(cam_eye, {0.0f, -0.2f, -3.0f}, {0, 1, 0}));
 
-  omnicpp::render::PbrMaterialData mats[2]{};
+  warploom::render::PbrMaterialData mats[2]{};
   mats[0].base_color_factor = {0.75f, 0.75f, 0.75f, 1.0f};
   mats[0].roughness_factor = 0.2f;
   mats[0].metallic_factor = 0.0f;
@@ -1135,10 +1135,10 @@ TEST(rt_sub_toggles, reflect_and_ao_flags) {
   auto scratch_addr = scratch_pool.acquire(h.alloc, h.ctx.device(), scratch_bytes);
   ASSERT_TRUE(scratch_addr.is_ok());
   {
-    auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+    auto pool = warploom::render::VulkanRenderer::create_command_pool(
         h.ctx.device(), h.qf);
     ASSERT_TRUE(pool.is_ok());
-    auto cb = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cb = warploom::render::VulkanRenderer::allocate_command_buffer(
         h.ctx.device(), pool.value());
     ASSERT_TRUE(cb.is_ok());
     VkCommandBufferBeginInfo bi{};
@@ -1248,7 +1248,7 @@ TEST(rt_sub_toggles, reflect_and_ao_flags) {
     return {static_cast<int>((x * 0.5f + 0.5f) * float(kImg)),
             static_cast<int>((y * 0.5f + 0.5f) * float(kImg))};
   };
-  auto channels = [&](const omnicpp_test::ReadbackResult& r, int px, int py) {
+  auto channels = [&](const warploom_test::ReadbackResult& r, int px, int py) {
     const std::uint32_t packed =
         r.pixels[static_cast<std::size_t>(py) * static_cast<std::size_t>(kImg) +
                  static_cast<std::size_t>(px)];
@@ -1274,8 +1274,8 @@ TEST(rt_sub_toggles, reflect_and_ao_flags) {
     FAIL() << "stale projection: a probe pixel projects outside the image";
   }
 
-  auto render = [&](std::uint32_t flags) -> omnicpp_test::ReadbackResult {
-    omnicpp::render::VulkanPbrScene scene{};
+  auto render = [&](std::uint32_t flags) -> warploom_test::ReadbackResult {
+    warploom::render::VulkanPbrScene scene{};
     scene.pipeline = pipe.pipeline();
     scene.pipeline_layout = pipe.pipeline_layout();
     scene.camera.view_projection = cam_vp;
@@ -1300,10 +1300,10 @@ TEST(rt_sub_toggles, reflect_and_ao_flags) {
                                       cube_center[2]);
     cube_obj.material_index = 1;
     scene.objects = {floor_obj, cube_obj};
-    auto pr = omnicpp::render::VulkanRenderer::create_command_pool(
+    auto pr = warploom::render::VulkanRenderer::create_command_pool(
         h.ctx.device(), h.qf);
     EXPECT_TRUE(pr.is_ok());
-    auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cr = warploom::render::VulkanRenderer::allocate_command_buffer(
         h.ctx.device(), pr.value());
     EXPECT_TRUE(cr.is_ok());
     VkCommandBuffer rcb = cr.value();
@@ -1311,8 +1311,8 @@ TEST(rt_sub_toggles, reflect_and_ao_flags) {
     rbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     rbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     EXPECT_EQ(vkBeginCommandBuffer(rcb, &rbi), VK_SUCCESS);
-    omnicpp::render::VulkanRenderer renderer;
-    omnicpp::render::VulkanRenderer::PbrFrameTargets targets{};
+    warploom::render::VulkanRenderer renderer;
+    warploom::render::VulkanRenderer::PbrFrameTargets targets{};
     targets.render_pass = h.target.render_pass();
     targets.framebuffer = h.target.framebuffer();
     targets.width = kImg;
@@ -1327,15 +1327,15 @@ TEST(rt_sub_toggles, reflect_and_ao_flags) {
     EXPECT_EQ(vkEndCommandBuffer(rcb), VK_SUCCESS);
     EXPECT_TRUE(submit_and_wait(h.ctx.device(), h.ctx.graphics_queue(), rcb));
     vkDestroyCommandPool(h.ctx.device(), pr.value(), nullptr);
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         h.ctx.physical_device(), h.ctx.device(), h.ctx.graphics_queue(), h.qf,
         h.target.image(), h.target.format(), kImg, kImg,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, true);
   };
   constexpr std::uint32_t kReflect =
-      omnicpp::render::VulkanPbrScene::kRtFlagReflections;
-  constexpr std::uint32_t kAo = omnicpp::render::VulkanPbrScene::kRtFlagAo;
+      warploom::render::VulkanPbrScene::kRtFlagReflections;
+  constexpr std::uint32_t kAo = warploom::render::VulkanPbrScene::kRtFlagAo;
 
   const auto base = render(0U);
   ASSERT_GT(base.non_clear_pixels, 800U) << "flags-0 frame rendered nothing";
@@ -1366,7 +1366,7 @@ TEST(rt_sub_toggles, reflect_and_ao_flags) {
       << "miss reflection did not brighten the control pixel";
 
   const auto ao = render(kAo);
-  auto patch_mean = [&](const omnicpp_test::ReadbackResult& r, int cx, int cy) {
+  auto patch_mean = [&](const warploom_test::ReadbackResult& r, int cx, int cy) {
     double sum = 0.0;
     for (int dy = -2; dy <= 2; ++dy) {
       for (int dx = -2; dx <= 2; ++dx) {

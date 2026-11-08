@@ -153,7 +153,7 @@ TEST(Ktx2Decoder, DecodesLevel0FromMipChainedContainer) {
       make_ktx2(kWidth, kHeight, 4U);
 
   std::string error;
-  const auto decoded = omnicpp::asset::decode_ktx2(container.data(),
+  const auto decoded = warploom::asset::decode_ktx2(container.data(),
                                                    container.size(), &error);
   ASSERT_TRUE(decoded.is_ok()) << error;
   const auto& image = decoded.value();
@@ -170,7 +170,7 @@ TEST(Ktx2Decoder, DecodesLevel0FromMipChainedContainer) {
 
   // The magic-byte dispatch routes the same container to the same decoder.
   const auto via_dispatch =
-      omnicpp::asset::decode_image(container.data(), container.size(), &error);
+      warploom::asset::decode_image(container.data(), container.size(), &error);
   ASSERT_TRUE(via_dispatch.is_ok()) << error;
   EXPECT_EQ(via_dispatch.value().width, kWidth);
   EXPECT_EQ(via_dispatch.value().rgba.size(), image.rgba.size());
@@ -179,7 +179,7 @@ TEST(Ktx2Decoder, DecodesLevel0FromMipChainedContainer) {
 TEST(Ktx2Decoder, DecodesSingleLevelMinimalContainer) {
   const std::vector<std::uint8_t> container = make_ktx2(2U, 1U, 1U);
   std::string error;
-  const auto decoded = omnicpp::asset::decode_ktx2(container.data(),
+  const auto decoded = warploom::asset::decode_ktx2(container.data(),
                                                    container.size(), &error);
   ASSERT_TRUE(decoded.is_ok()) << error;
   EXPECT_EQ(decoded.value().width, 2U);
@@ -197,7 +197,7 @@ TEST(Ktx2Decoder, RejectsDimensionsAboveDecodedSizeCap) {
   poke32(container, 16U, 30000U);  // pixelWidth
   poke32(container, 20U, 30000U);  // pixelHeight
   std::string error;
-  const auto decoded = omnicpp::asset::decode_ktx2(container.data(),
+  const auto decoded = warploom::asset::decode_ktx2(container.data(),
                                                    container.size(), &error);
   EXPECT_FALSE(decoded.is_ok());
   EXPECT_NE(error.find("decoded-size cap"), std::string::npos) << error;
@@ -211,7 +211,7 @@ TEST(Ktx2Decoder, ValidRejectsWrapped32BitProduct) {
   // uint32 check below pins the wrap fact the fix guards against, so this
   // test cannot pass by accident on any platform.
   EXPECT_EQ(65536U * 65536U * 4U, 0U);  // 32-bit wrap premise
-  omnicpp::asset::DecodedImage image;
+  warploom::asset::DecodedImage image;
   image.width = 65536U;
   image.height = 65536U;
   image.rgba.clear();
@@ -224,7 +224,7 @@ TEST(Ktx2Decoder, RejectsMalformedContainers) {
     std::vector<std::uint8_t> container = make_ktx2(4U, 4U, 1U);
     container[0] = 0x00;
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("identifier"), std::string::npos) << error;
@@ -234,7 +234,7 @@ TEST(Ktx2Decoder, RejectsMalformedContainers) {
     std::vector<std::uint8_t> container = make_ktx2(4U, 4U, 1U);
     poke32(container, 8U, 158U);  // VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("vkFormat 158"), std::string::npos) << error;
@@ -244,7 +244,7 @@ TEST(Ktx2Decoder, RejectsMalformedContainers) {
     std::vector<std::uint8_t> container = make_ktx2(4U, 4U, 1U);
     poke32(container, 40U, 1U);  // BasisLZ
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("supercompressionScheme"), std::string::npos)
@@ -255,7 +255,7 @@ TEST(Ktx2Decoder, RejectsMalformedContainers) {
     std::vector<std::uint8_t> container = make_ktx2(4U, 4U, 1U);
     poke32(container, 16U, 0U);
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("nonzero"), std::string::npos) << error;
@@ -265,7 +265,7 @@ TEST(Ktx2Decoder, RejectsMalformedContainers) {
     std::vector<std::uint8_t> container = make_ktx2(4U, 4U, 1U);
     poke32(container, 24U, 2U);
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("3D"), std::string::npos) << error;
@@ -275,7 +275,7 @@ TEST(Ktx2Decoder, RejectsMalformedContainers) {
     std::vector<std::uint8_t> container = make_ktx2(4U, 4U, 1U);
     poke32(container, 28U, 2U);
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("arrays"), std::string::npos) << error;
@@ -285,7 +285,7 @@ TEST(Ktx2Decoder, RejectsMalformedContainers) {
     std::vector<std::uint8_t> container = make_ktx2(4U, 4U, 1U);
     poke32(container, 32U, 6U);
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("cubemap"), std::string::npos) << error;
@@ -295,7 +295,7 @@ TEST(Ktx2Decoder, RejectsMalformedContainers) {
     std::vector<std::uint8_t> container = make_ktx2(4U, 4U, 1U);
     poke32(container, 36U, 0U);
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("levelCount"), std::string::npos) << error;
@@ -305,7 +305,7 @@ TEST(Ktx2Decoder, RejectsMalformedContainers) {
     std::vector<std::uint8_t> container = make_ktx2(8U, 8U, 2U);
     poke_level64(container, 1U, 2U, 9999U);  // uncompressedByteLength
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("level 1"), std::string::npos) << error;
@@ -317,7 +317,7 @@ TEST(Ktx2Decoder, RejectsMalformedContainers) {
     std::vector<std::uint8_t> container = make_ktx2(8U, 8U, 2U);
     poke_level64(container, 1U, 0U, container.size() + 100U);
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("runs past the end"), std::string::npos) << error;
@@ -327,7 +327,7 @@ TEST(Ktx2Decoder, RejectsMalformedContainers) {
     std::vector<std::uint8_t> container = make_ktx2(8U, 8U, 2U);
     poke_level64(container, 1U, 1U, 4U);  // byteLength < uncompressed
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("is compressed"), std::string::npos) << error;
@@ -337,7 +337,7 @@ TEST(Ktx2Decoder, RejectsMalformedContainers) {
     std::vector<std::uint8_t> container = make_ktx2(4U, 4U, 1U);
     container.resize(40U);
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("80-byte header"), std::string::npos) << error;
@@ -352,7 +352,7 @@ TEST(Ktx2Decoder, DecodesBc1Container) {
   const std::vector<std::uint8_t> container =
       make_ktx2_bc(8U, 8U, 2U, 131U, red_block, 32U, 8U);
   std::string error;
-  const auto decoded = omnicpp::asset::decode_ktx2(container.data(),
+  const auto decoded = warploom::asset::decode_ktx2(container.data(),
                                                    container.size(), &error);
   ASSERT_TRUE(decoded.is_ok()) << error;
   const auto& image = decoded.value();
@@ -367,7 +367,7 @@ TEST(Ktx2Decoder, DecodesBc1Container) {
   }
   // The magic-byte dispatch routes the BC container to the same decoder.
   const auto via_dispatch =
-      omnicpp::asset::decode_image(container.data(), container.size(),
+      warploom::asset::decode_image(container.data(), container.size(),
                                     &error);
   ASSERT_TRUE(via_dispatch.is_ok()) << error;
   EXPECT_EQ(via_dispatch.value().rgba, image.rgba);
@@ -382,7 +382,7 @@ TEST(Ktx2Decoder, DecodesBc3Container) {
   const std::vector<std::uint8_t> container =
       make_ktx2_bc(4U, 4U, 1U, 138U, red_block, 16U, 16U);
   std::string error;
-  const auto decoded = omnicpp::asset::decode_ktx2(container.data(),
+  const auto decoded = warploom::asset::decode_ktx2(container.data(),
                                                    container.size(), &error);
   ASSERT_TRUE(decoded.is_ok()) << error;
   const auto& image = decoded.value();
@@ -407,7 +407,7 @@ TEST(Ktx2Decoder, RejectsBadBcContainers) {
     poke_level64(container, 0U, 1U, 24U);  // byteLength
     poke_level64(container, 0U, 2U, 24U);  // uncompressedByteLength
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("does not match the spec size"), std::string::npos)
@@ -419,7 +419,7 @@ TEST(Ktx2Decoder, RejectsBadBcContainers) {
         make_ktx2_bc(8U, 8U, 1U, 131U, red_block, 32U, 32U);
     container.resize(container.size() - 8U);
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("runs past the end"), std::string::npos) << error;
@@ -430,7 +430,7 @@ TEST(Ktx2Decoder, RejectsBadBcContainers) {
         make_ktx2_bc(4U, 4U, 1U, 137U, red_block, 8U, 8U);
     poke32(container, 12U, 2U);  // typeSize
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("typeSize"), std::string::npos) << error;
@@ -446,7 +446,7 @@ TEST(Ktx2Decoder, RejectsBadBcContainers) {
         make_ktx2_bc(4U, 4U, 1U, 137U, red_block16, 16U, 16U);
     poke_level64(container, 0U, 1U, 4U);  // byteLength < uncompressed
     std::string error;
-    const auto decoded = omnicpp::asset::decode_ktx2(
+    const auto decoded = warploom::asset::decode_ktx2(
         container.data(), container.size(), &error);
     EXPECT_FALSE(decoded.is_ok());
     EXPECT_NE(error.find("is compressed"), std::string::npos) << error;

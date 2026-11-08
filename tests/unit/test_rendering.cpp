@@ -41,13 +41,13 @@ struct HiZCallbackState {
   bool saw_previous{false};
   bool valid{true};
   bool reject{false};
-  omnicpp::render::VulkanRenderer* renderer{nullptr};
+  warploom::render::VulkanRenderer* renderer{nullptr};
 };
 
   // Used by HIZGraphContractRunsHeadless below, which executes in every
   // configuration -- unlike the XCB-gated swapchain test, which never compiled
   // into the unit-test target at all.
-  bool record_hiz_contract(VkCommandBuffer, const omnicpp::render::HiZFrameRecord& record,
+  bool record_hiz_contract(VkCommandBuffer, const warploom::render::HiZFrameRecord& record,
                            void* user_data) {
     auto* state = static_cast<HiZCallbackState*>(user_data);
     if (state == nullptr || record.depth_image == VK_NULL_HANDLE ||
@@ -86,7 +86,7 @@ struct HiZCallbackState {
 #include "vulkan_test_readback.hpp"
 #include "vulkan_test_buffer_readback.hpp"
 
-using namespace omnicpp_test;
+using namespace warploom_test;
 
 } // namespace
 #endif
@@ -96,18 +96,18 @@ using namespace omnicpp_test;
 // ============================================================================
 
 TEST(VulkanContext, AvailabilityCheck) {
-  bool available = omnicpp::render::VulkanContext::is_available();
+  bool available = warploom::render::VulkanContext::is_available();
   (void)available;
 }
 
 TEST(VulkanContext, RuntimeErrorCodesExist) {
-  EXPECT_NE(omnicpp::core::RuntimeError::ok, omnicpp::core::RuntimeError::vulkan_not_available);
+  EXPECT_NE(warploom::core::RuntimeError::ok, warploom::core::RuntimeError::vulkan_not_available);
 }
 
 TEST(VulkanContext, InitializeWithoutVulkan) {
-  omnicpp::render::VulkanContext ctx;
+  warploom::render::VulkanContext ctx;
   auto result = ctx.initialize("TestApp", false);
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     EXPECT_FALSE(result.is_ok());
     EXPECT_FALSE(ctx.is_initialized());
   } else {
@@ -117,14 +117,14 @@ TEST(VulkanContext, InitializeWithoutVulkan) {
 }
 
 TEST(VulkanContext, DoubleInitializeIsIdempotent) {
-  omnicpp::render::VulkanContext ctx;
+  warploom::render::VulkanContext ctx;
   auto r1 = ctx.initialize("TestApp", false);
   auto r2 = ctx.initialize("TestApp", false);
   EXPECT_EQ(r1.is_ok(), r2.is_ok());
 }
 
 TEST(VulkanContext, CleanupIsIdempotent) {
-  omnicpp::render::VulkanContext ctx;
+  warploom::render::VulkanContext ctx;
   (void)ctx.initialize("TestApp", false);
   ctx.cleanup();
   ctx.cleanup();
@@ -132,7 +132,7 @@ TEST(VulkanContext, CleanupIsIdempotent) {
 }
 
 TEST(VulkanContext, DevicePropertiesAreEmptyBeforeInit) {
-  omnicpp::render::VulkanContext ctx;
+  warploom::render::VulkanContext ctx;
   const auto& props = ctx.device_properties();
   EXPECT_TRUE(props.name.empty());
   EXPECT_EQ(props.api_version, 0u);
@@ -143,12 +143,12 @@ TEST(VulkanContext, DevicePropertiesAreEmptyBeforeInit) {
 // ============================================================================
 
 TEST(QueueFamilyIndices, DefaultIsIncomplete) {
-  omnicpp::render::QueueFamilyIndices indices;
+  warploom::render::QueueFamilyIndices indices;
   EXPECT_FALSE(indices.is_complete());
 }
 
 TEST(QueueFamilyIndices, CompleteWhenBothSet) {
-  omnicpp::render::QueueFamilyIndices indices;
+  warploom::render::QueueFamilyIndices indices;
   indices.graphics_family = 0;
   indices.present_family = 1;
   EXPECT_TRUE(indices.is_complete());
@@ -167,33 +167,33 @@ TEST(QueueFamilyIndices, CompleteWhenBothSet) {
 //! renderer path exists so this can run without a window system.
 TEST(HiZGraph, ContractHoldsOnARealFrame) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppHiZContract", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomHiZContract", true).is_ok());
 
   constexpr std::uint32_t kWidth = 256U;
   constexpr std::uint32_t kHeight = 256U;
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   // One colour image to render into. The render pass (and therefore the depth
   // attachment the H-Z path reads) is the same VulkanRenderPass object
   // initialize() receives, so the barriers under test are the real ones.
-  omnicpp::render::VulkanOffscreenTarget color_target;
+  warploom::render::VulkanOffscreenTarget color_target;
   ASSERT_TRUE(color_target
                   .create(context.device(), context.physical_device(),
                           VK_FORMAT_B8G8R8A8_UNORM, kWidth, kHeight, &allocator)
                   .is_ok());
 
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+      warploom::render::VulkanRenderPass::find_supported_depth_format(
           context.physical_device());
   ASSERT_NE(depth_format, VK_FORMAT_UNDEFINED);
-  omnicpp::render::VulkanRenderPass render_pass;
+  warploom::render::VulkanRenderPass render_pass;
   ASSERT_TRUE(render_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
                                 depth_format)
                   .is_ok());
@@ -212,7 +212,7 @@ TEST(HiZGraph, ContractHoldsOnARealFrame) {
                   .is_ok());
   ASSERT_EQ(render_pass.framebuffer_count(), 1U);
 
-  omnicpp::render::RendererConfig config;
+  warploom::render::RendererConfig config;
   config.enable_hiz = true;
   config.enable_hdr_compose = false;
 #ifdef WARPLOOM_TEST_SHADER_DIR
@@ -220,7 +220,7 @@ TEST(HiZGraph, ContractHoldsOnARealFrame) {
       std::string(WARPLOOM_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
 #endif
 
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   const auto init = renderer.initialize_headless(context, render_pass, kWidth,
                                                  kHeight, config);
   ASSERT_TRUE(init.is_ok()) << "initialize_headless: "
@@ -292,27 +292,27 @@ TEST(HiZGraph, ContractHoldsOnARealFrame) {
 //! it fails on the pre-fix binding and passes on the tracked one.
 TEST(HiZGraph, ComposeDepthReductionIsValidationClean) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
   constexpr std::uint32_t kSize = 256U;
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppHiZCompose", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomHiZCompose", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device()).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget ldr;
+  warploom::render::VulkanOffscreenTarget ldr;
   ASSERT_TRUE(ldr
                   .create(context.device(), context.physical_device(),
                           VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator,
                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
                   .is_ok());
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+      warploom::render::VulkanRenderPass::find_supported_depth_format(
           context.physical_device());
   ASSERT_NE(depth_format, VK_FORMAT_UNDEFINED);
-  omnicpp::render::VulkanRenderPass present_pass;
+  warploom::render::VulkanRenderPass present_pass;
   ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
                                   depth_format)
                   .is_ok());
@@ -329,7 +329,7 @@ TEST(HiZGraph, ComposeDepthReductionIsValidationClean) {
                                        kSize, kSize)
                   .is_ok());
 
-  omnicpp::render::RendererConfig config;
+  warploom::render::RendererConfig config;
   config.enable_hiz = true;
   config.enable_hdr_compose = true;
   config.enable_bloom = false;
@@ -337,7 +337,7 @@ TEST(HiZGraph, ComposeDepthReductionIsValidationClean) {
   config.hiz_reduction_shader_path =
       std::string(WARPLOOM_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
 
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   const auto init =
       renderer.initialize_headless(context, present_pass, kSize, kSize, config,
                                    VK_FORMAT_B8G8R8A8_UNORM);
@@ -348,7 +348,7 @@ TEST(HiZGraph, ComposeDepthReductionIsValidationClean) {
 
   // Scene content into the HDR intermediate, so the compose depth the
   // reduction must sample actually describes a drawn frame.
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline
                   .load_shader_file(context.device(),
@@ -443,27 +443,27 @@ TEST(HiZGraph, ComposeDepthReductionIsValidationClean) {
 //! still passes, which is exactly the gap this test closes.
 TEST(HiZGraph, DepthSnapshotsMatchLiveDepth) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
   constexpr std::uint32_t kSize = 256U;
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppHiZSnapshot", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomHiZSnapshot", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device()).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget ldr;
+  warploom::render::VulkanOffscreenTarget ldr;
   ASSERT_TRUE(ldr
                   .create(context.device(), context.physical_device(),
                           VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator,
                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
                   .is_ok());
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+      warploom::render::VulkanRenderPass::find_supported_depth_format(
           context.physical_device());
   ASSERT_NE(depth_format, VK_FORMAT_UNDEFINED);
-  omnicpp::render::VulkanRenderPass present_pass;
+  warploom::render::VulkanRenderPass present_pass;
   ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
                                   depth_format)
                   .is_ok());
@@ -480,7 +480,7 @@ TEST(HiZGraph, DepthSnapshotsMatchLiveDepth) {
                                        kSize, kSize)
                   .is_ok());
 
-  omnicpp::render::RendererConfig config;
+  warploom::render::RendererConfig config;
   config.enable_hiz = true;
   config.enable_hdr_compose = true;
   config.enable_bloom = false;
@@ -488,7 +488,7 @@ TEST(HiZGraph, DepthSnapshotsMatchLiveDepth) {
   config.hiz_reduction_shader_path =
       std::string(WARPLOOM_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
 
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   const auto init =
       renderer.initialize_headless(context, present_pass, kSize, kSize, config,
                                    VK_FORMAT_B8G8R8A8_UNORM);
@@ -496,7 +496,7 @@ TEST(HiZGraph, DepthSnapshotsMatchLiveDepth) {
                             << static_cast<std::uint32_t>(init.error());
   ASSERT_TRUE(renderer.hiz_direct_enabled());
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline
                   .load_shader_file(context.device(),
@@ -712,34 +712,34 @@ TEST(HiZGraph, DepthSnapshotsMatchLiveDepth) {
 //! fails the word comparison while the graphics path stays green.
 TEST(HiZGraph, ComputeReduceMatchesGraphicsReduce) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
-  omnicpp::render::VulkanContext probe;
-  ASSERT_TRUE(probe.initialize("OmniCppHiZProbe", true).is_ok());
+  warploom::render::VulkanContext probe;
+  ASSERT_TRUE(probe.initialize("WarploomHiZProbe", true).is_ok());
   const bool dedicated = probe.has_dedicated_compute();
   probe.cleanup();
   if (!dedicated) {
     GTEST_SKIP() << "no COMPUTE-only family: compute reduce not testable here";
   }
   constexpr std::uint32_t kSize = 256U;
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppHiZCompute", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomHiZCompute", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device()).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget ldr;
+  warploom::render::VulkanOffscreenTarget ldr;
   ASSERT_TRUE(ldr
                   .create(context.device(), context.physical_device(),
                           VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator,
                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
                   .is_ok());
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+      warploom::render::VulkanRenderPass::find_supported_depth_format(
           context.physical_device());
   ASSERT_NE(depth_format, VK_FORMAT_UNDEFINED);
-  omnicpp::render::VulkanRenderPass present_pass;
+  warploom::render::VulkanRenderPass present_pass;
   ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
                                   depth_format)
                   .is_ok());
@@ -756,7 +756,7 @@ TEST(HiZGraph, ComputeReduceMatchesGraphicsReduce) {
                                        kSize, kSize)
                   .is_ok());
 
-  omnicpp::render::RendererConfig config;
+  warploom::render::RendererConfig config;
   config.enable_hiz = true;
   config.enable_hdr_compose = true;
   config.enable_bloom = false;
@@ -765,7 +765,7 @@ TEST(HiZGraph, ComputeReduceMatchesGraphicsReduce) {
       std::string(WARPLOOM_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
   config.hiz_compute_reduce = true;
 
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   const auto init =
       renderer.initialize_headless(context, present_pass, kSize, kSize, config,
                                    VK_FORMAT_B8G8R8A8_UNORM);
@@ -775,7 +775,7 @@ TEST(HiZGraph, ComputeReduceMatchesGraphicsReduce) {
   ASSERT_TRUE(renderer.hiz_compute_reduce_enabled())
       << "dedicated compute exists but the compute path did not arm";
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline
                   .load_shader_file(context.device(),
@@ -867,34 +867,34 @@ TEST(HiZGraph, ComputeReduceMatchesGraphicsReduce) {
 //! scene, so every snapshot is the same depth).
 TEST(HiZGraph, PipelinedComputeReduceMatchesSyncReduce) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
-  omnicpp::render::VulkanContext probe;
-  ASSERT_TRUE(probe.initialize("OmniCppHiZProbe", true).is_ok());
+  warploom::render::VulkanContext probe;
+  ASSERT_TRUE(probe.initialize("WarploomHiZProbe", true).is_ok());
   const bool dedicated = probe.has_dedicated_compute();
   probe.cleanup();
   if (!dedicated) {
     GTEST_SKIP() << "no COMPUTE-only family: pipelined reduce not testable here";
   }
   constexpr std::uint32_t kSize = 256U;
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppHiZPipelined", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomHiZPipelined", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device()).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget ldr;
+  warploom::render::VulkanOffscreenTarget ldr;
   ASSERT_TRUE(ldr
                   .create(context.device(), context.physical_device(),
                           VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator,
                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
                   .is_ok());
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+      warploom::render::VulkanRenderPass::find_supported_depth_format(
           context.physical_device());
   ASSERT_NE(depth_format, VK_FORMAT_UNDEFINED);
-  omnicpp::render::VulkanRenderPass present_pass;
+  warploom::render::VulkanRenderPass present_pass;
   ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
                                   depth_format)
                   .is_ok());
@@ -911,7 +911,7 @@ TEST(HiZGraph, PipelinedComputeReduceMatchesSyncReduce) {
                                        kSize, kSize)
                   .is_ok());
 
-  omnicpp::render::RendererConfig config;
+  warploom::render::RendererConfig config;
   config.enable_hiz = true;
   config.enable_hdr_compose = true;
   config.enable_bloom = false;
@@ -921,7 +921,7 @@ TEST(HiZGraph, PipelinedComputeReduceMatchesSyncReduce) {
   config.hiz_compute_reduce = true;
   config.hiz_compute_pipelined = true;
 
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   const auto init =
       renderer.initialize_headless(context, present_pass, kSize, kSize, config,
                                    VK_FORMAT_B8G8R8A8_UNORM);
@@ -933,7 +933,7 @@ TEST(HiZGraph, PipelinedComputeReduceMatchesSyncReduce) {
   ASSERT_TRUE(renderer.hiz_pipelined_enabled())
       << "pipelined H-Z requested but the handoff did not arm";
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline
                   .load_shader_file(context.device(),
@@ -1029,27 +1029,27 @@ TEST(HiZGraph, PipelinedComputeReduceMatchesSyncReduce) {
 //! commit) and this test keeps it pinned from now on.
 TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
   constexpr std::uint32_t kSize = 256U;
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppComposeHash", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomComposeHash", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   // LDR presentation stand-in: what the tonemap writes and what we read back.
-  omnicpp::render::VulkanOffscreenTarget ldr;
+  warploom::render::VulkanOffscreenTarget ldr;
   ASSERT_TRUE(ldr
                   .create(context.device(), context.physical_device(),
                           VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator,
                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
                   .is_ok());
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+      warploom::render::VulkanRenderPass::find_supported_depth_format(
           context.physical_device());
-  omnicpp::render::VulkanRenderPass present_pass;
+  warploom::render::VulkanRenderPass present_pass;
   ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
                                   depth_format)
                   .is_ok());
@@ -1063,13 +1063,13 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
                                        kSize, kSize)
                   .is_ok());
 
-  omnicpp::render::RendererConfig config;
+  warploom::render::RendererConfig config;
   config.enable_hiz = false;
   config.enable_hdr_compose = true;
   config.enable_bloom = false;
   config.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
 
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   const auto init =
       renderer.initialize_headless(context, present_pass, kSize, kSize, config,
                                    VK_FORMAT_B8G8R8A8_UNORM);
@@ -1079,7 +1079,7 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
 
   // The scene pipeline must be built for the HDR intermediate, exactly as the
   // viewport builds its scene pipelines when compose is on.
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline
                   .load_shader_file(context.device(),
@@ -1166,7 +1166,7 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
   // construction and the assertion would be vacuous.
   {
     // The probe scene replaces the pinned one for the duration.
-    omnicpp::render::VulkanPipeline probe_pipeline;
+    warploom::render::VulkanPipeline probe_pipeline;
     ASSERT_TRUE(probe_pipeline
                     .load_shader_file(context.device(),
                                       shader_dir + "/triangle.vert.spv")
@@ -1308,30 +1308,30 @@ TEST(VulkanHardware, HeadlessComposeFrameGoldenHash) {
 //! gate accepts them.
 TEST(VulkanHardware, UnifiedFrameWithExternalTonemapSourceRecords) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
   constexpr std::uint32_t kSize = 256U;
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppUnifiedPT", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomUnifiedPT", true).is_ok());
   if (!context.has_ray_tracing() || !context.has_ray_tracing_pipeline()) {
     context.cleanup();
     GTEST_SKIP() << "ray tracing pipeline not available on this device";
   }
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device()).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget ldr;
+  warploom::render::VulkanOffscreenTarget ldr;
   ASSERT_TRUE(ldr
                   .create(context.device(), context.physical_device(),
                           VK_FORMAT_B8G8R8A8_UNORM, kSize, kSize, &allocator,
                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
                   .is_ok());
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+      warploom::render::VulkanRenderPass::find_supported_depth_format(
           context.physical_device());
-  omnicpp::render::VulkanRenderPass present_pass;
+  warploom::render::VulkanRenderPass present_pass;
   ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
                                   depth_format)
                   .is_ok());
@@ -1345,18 +1345,18 @@ TEST(VulkanHardware, UnifiedFrameWithExternalTonemapSourceRecords) {
                                        kSize, kSize)
                   .is_ok());
 
-  omnicpp::render::RendererConfig config;
+  warploom::render::RendererConfig config;
   config.enable_hiz = false;
   config.enable_hdr_compose = true;
   config.enable_bloom = false;
   config.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   ASSERT_TRUE(renderer
                   .initialize_headless(context, present_pass, kSize, kSize,
                                        config, VK_FORMAT_B8G8R8A8_UNORM)
                   .is_ok());
   ASSERT_TRUE(renderer.hdr_compose_active());
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline
                   .load_shader_file(context.device(),
@@ -1383,24 +1383,24 @@ TEST(VulkanHardware, UnifiedFrameWithExternalTonemapSourceRecords) {
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   ASSERT_TRUE(geo.is_ok());
-  omnicpp::render::Allocation geo_alloc = geo.value();
+  warploom::render::Allocation geo_alloc = geo.value();
   std::memcpy(geo_alloc.mapped, tri.data(), tri.size() * sizeof(float));
   VkBufferDeviceAddressInfo addr{};
   addr.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   addr.buffer = geo_alloc.buffer;
-  omnicpp::render::VulkanPathTracer tracer;
-  omnicpp::render::PathTracerConfig tcfg{};
+  warploom::render::VulkanPathTracer tracer;
+  warploom::render::PathTracerConfig tcfg{};
   tcfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   tcfg.width = kSize;
   tcfg.height = kSize;
   tcfg.max_bounces = 2U;
-  omnicpp::render::PathTracerMesh mesh{};
+  warploom::render::PathTracerMesh mesh{};
   mesh.vertex_buffer_address =
       vkGetBufferDeviceAddress(context.device(), &addr);
   mesh.triangle_count = 1U;
   mesh.max_vertex = 2U;
   tcfg.meshes = {mesh};
-  tcfg.instances = {omnicpp::render::PathTracerInstance::translated(
+  tcfg.instances = {warploom::render::PathTracerInstance::translated(
       {0.0F, 0.0F, 0.0F}, 0.8F)};
   ASSERT_TRUE(tracer
                   .create(context.physical_device(), context.device(),
@@ -1410,7 +1410,7 @@ TEST(VulkanHardware, UnifiedFrameWithExternalTonemapSourceRecords) {
                           allocator, tcfg)
                   .is_ok());
   ASSERT_TRUE(tracer.ready());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.0F, 4.0F};
   cam.forward = {0.0F, 0.0F, -1.0F};
   tracer.set_camera(cam);
@@ -1421,7 +1421,7 @@ TEST(VulkanHardware, UnifiedFrameWithExternalTonemapSourceRecords) {
                                        tracer.accum_view());
   ASSERT_TRUE(renderer.compose_uses_external_source());
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       context.device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool.is_ok());
@@ -1446,7 +1446,7 @@ TEST(VulkanHardware, UnifiedFrameWithExternalTonemapSourceRecords) {
   // orders the dispatch; the unified frame's graph orders the tonemap
   // sample after it the same way the viewport's pre-pass does).
   {
-    auto cb_r = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    auto cb_r = warploom::render::VulkanRenderer::allocate_command_buffer(
         context.device(), pool.value());
     ASSERT_TRUE(cb_r.is_ok());
     VkCommandBufferBeginInfo bi{};
@@ -1519,16 +1519,16 @@ TEST(VulkanHardware, UnifiedFrameWithExternalTonemapSourceRecords) {
 //!      so leaving PT cannot leave the chain pointing at a stale image.
 TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppPTCompose", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomPTCompose", true).is_ok());
   if (!context.has_ray_tracing() || !context.has_ray_tracing_pipeline()) {
     context.cleanup();
     GTEST_SKIP() << "ray tracing pipeline not available on this device";
   }
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device())
                   .is_ok());
 
@@ -1540,15 +1540,15 @@ TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
   // the result -- R8G8B8A8 where the render pass declared BGRA -- which is
   // what a magic number buys.
   constexpr VkFormat kLdrFormat = VK_FORMAT_B8G8R8A8_UNORM;
-  omnicpp::render::VulkanOffscreenTarget ldr;
+  warploom::render::VulkanOffscreenTarget ldr;
   ASSERT_TRUE(ldr
                   .create(context.device(), context.physical_device(),
                           kLdrFormat, kSize, kSize, &allocator,
                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
                   .is_ok());
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(context.physical_device());
-  omnicpp::render::VulkanRenderPass present_pass;
+      warploom::render::VulkanRenderPass::find_supported_depth_format(context.physical_device());
+  warploom::render::VulkanRenderPass present_pass;
   ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
                                   depth_format)
                   .is_ok());
@@ -1578,25 +1578,25 @@ TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   ASSERT_TRUE(geo.is_ok());
-  omnicpp::render::Allocation geo_alloc = geo.value();
+  warploom::render::Allocation geo_alloc = geo.value();
   std::memcpy(geo_alloc.mapped, tris.data(), tris.size() * sizeof(float));
   VkBufferDeviceAddressInfo addr{};
   addr.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   addr.buffer = geo_alloc.buffer;
 
-  omnicpp::render::VulkanPathTracer tracer;
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::VulkanPathTracer tracer;
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = kSize;
   cfg.height = kSize;
   cfg.max_bounces = 2U;
-  omnicpp::render::PathTracerMesh mesh{};
+  warploom::render::PathTracerMesh mesh{};
   mesh.vertex_buffer_address =
       vkGetBufferDeviceAddress(context.device(), &addr);
   mesh.triangle_count = 12U;
   mesh.max_vertex = 35U;
   cfg.meshes = {mesh};
-  cfg.instances = {omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.8F)};
+  cfg.instances = {warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.8F)};
   ASSERT_TRUE(tracer
                   .create(context.physical_device(), context.device(),
                           context.graphics_queue(),
@@ -1605,13 +1605,13 @@ TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
                           allocator, cfg)
                   .is_ok());
   ASSERT_TRUE(tracer.ready());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.0F, 4.0F};
   cam.forward = {0.0F, 0.0F, -1.0F};
   tracer.set_camera(cam);
 
-  omnicpp::render::VulkanComposeChain chain;
-  omnicpp::render::ComposeChainConfig cc{};
+  warploom::render::VulkanComposeChain chain;
+  warploom::render::ComposeChainConfig cc{};
   cc.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
   // 0.05, not 1.0: at full exposure the sky fills the frame and ACES clamps
   // it, so a correct mean and an 8x-bright sum are indistinguishable. That is
@@ -1627,7 +1627,7 @@ TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
   ASSERT_TRUE(chain.ready());
   chain.set_external_source(tracer.accum_image(), tracer.accum_view());
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       context.device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool.is_ok());
@@ -1639,7 +1639,7 @@ TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
   // from no-accumulation -- mean brightness does NOT (ACES + gamma compress a
   // 1/n brightness difference into a few percent, which is why the first
   // version of this assertion passed a sabotaged build).
-  const auto luma_stats = [](const omnicpp_test::ReadbackResult& r) {
+  const auto luma_stats = [](const warploom_test::ReadbackResult& r) {
     std::vector<double> luma(r.pixels.size());
     double sum = 0.0;
     for (std::size_t i = 0; i < r.pixels.size(); ++i) {
@@ -1661,7 +1661,7 @@ TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
     for (std::uint32_t f = 0; f < frames; ++f) {
       const bool clear = (tracer.sample_count() == 0U);
       auto cb =
-          omnicpp::render::VulkanRenderer::allocate_command_buffer(context.device(),
+          warploom::render::VulkanRenderer::allocate_command_buffer(context.device(),
                                                                   cmd_pool);
       EXPECT_TRUE(cb.is_ok());
       VkCommandBuffer cmd = cb.value();
@@ -1692,7 +1692,7 @@ TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
       vkDestroyFence(context.device(), fence, nullptr);
     }
   };
-  const auto read_now = [&]() -> omnicpp_test::ReadbackResult {
+  const auto read_now = [&]() -> warploom_test::ReadbackResult {
     return readback_swapchain_image(
         context.physical_device(), context.device(), context.graphics_queue(),
         static_cast<std::uint32_t>(context.queue_families().graphics_family),
@@ -1701,14 +1701,14 @@ TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
   };
 
   accumulate(1U);
-  const omnicpp_test::ReadbackResult one = read_now();
+  const warploom_test::ReadbackResult one = read_now();
   ASSERT_GT(one.non_clear_pixels, 0U)
       << "one path-traced sample tonemapped to a black frame";
   const auto [mean_one, std_one] = luma_stats(one);
 
   accumulate(7U);  // 7 more -> 8 samples total
   EXPECT_EQ(tracer.sample_count(), 8U);
-  const omnicpp_test::ReadbackResult eight = read_now();
+  const warploom_test::ReadbackResult eight = read_now();
   ASSERT_GT(eight.non_clear_pixels, 0U);
   EXPECT_NE(eight.hash, one.hash)
       << "eight accumulated samples produced the same image as one: the "
@@ -1757,30 +1757,30 @@ TEST(VulkanHardware, PathTracedFrameConvergesThroughCompose) {
 //! ThroughCompose's noise-floor argument.
 TEST(VulkanHardware, PathTracedFrameLayersBloom) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppPTBloom", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomPTBloom", true).is_ok());
   if (!context.has_ray_tracing() || !context.has_ray_tracing_pipeline()) {
     context.cleanup();
     GTEST_SKIP() << "ray tracing pipeline not available on this device";
   }
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device())
                   .is_ok());
 
   constexpr std::uint32_t kSize = 64U;
   constexpr VkFormat kLdrFormat = VK_FORMAT_B8G8R8A8_UNORM;
-  omnicpp::render::VulkanOffscreenTarget ldr;
+  warploom::render::VulkanOffscreenTarget ldr;
   ASSERT_TRUE(ldr
                   .create(context.device(), context.physical_device(),
                           kLdrFormat, kSize, kSize, &allocator,
                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
                   .is_ok());
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(context.physical_device());
-  omnicpp::render::VulkanRenderPass present_pass;
+      warploom::render::VulkanRenderPass::find_supported_depth_format(context.physical_device());
+  warploom::render::VulkanRenderPass present_pass;
   ASSERT_TRUE(present_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
                                   depth_format)
                   .is_ok());
@@ -1809,25 +1809,25 @@ TEST(VulkanHardware, PathTracedFrameLayersBloom) {
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   ASSERT_TRUE(geo.is_ok());
-  omnicpp::render::Allocation geo_alloc = geo.value();
+  warploom::render::Allocation geo_alloc = geo.value();
   std::memcpy(geo_alloc.mapped, tris.data(), tris.size() * sizeof(float));
   VkBufferDeviceAddressInfo addr{};
   addr.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   addr.buffer = geo_alloc.buffer;
 
-  omnicpp::render::VulkanPathTracer tracer;
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::VulkanPathTracer tracer;
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = kSize;
   cfg.height = kSize;
   cfg.max_bounces = 2U;
-  omnicpp::render::PathTracerMesh mesh{};
+  warploom::render::PathTracerMesh mesh{};
   mesh.vertex_buffer_address =
       vkGetBufferDeviceAddress(context.device(), &addr);
   mesh.triangle_count = 12U;
   mesh.max_vertex = 35U;
   cfg.meshes = {mesh};
-  cfg.instances = {omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.8F)};
+  cfg.instances = {warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.8F)};
   ASSERT_TRUE(tracer
                   .create(context.physical_device(), context.device(),
                           context.graphics_queue(),
@@ -1836,13 +1836,13 @@ TEST(VulkanHardware, PathTracedFrameLayersBloom) {
                           allocator, cfg)
                   .is_ok());
   ASSERT_TRUE(tracer.ready());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.0F, 4.0F};
   cam.forward = {0.0F, 0.0F, -1.0F};
   tracer.set_camera(cam);
 
-  omnicpp::render::VulkanComposeChain chain;
-  omnicpp::render::ComposeChainConfig cc{};
+  warploom::render::VulkanComposeChain chain;
+  warploom::render::ComposeChainConfig cc{};
   cc.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
   // 1.0, not the convergence probe's 0.05: the white sky (radiance 1.0)
   // must sit ABOVE the 0.8 Karis threshold, or "bloom changes nothing"
@@ -1864,7 +1864,7 @@ TEST(VulkanHardware, PathTracedFrameLayersBloom) {
   ASSERT_TRUE(chain.pt_bloom_available());
   chain.set_external_source(tracer.accum_image(), tracer.accum_view());
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       context.device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool.is_ok());
@@ -1887,7 +1887,7 @@ TEST(VulkanHardware, PathTracedFrameLayersBloom) {
   };
   const auto record_compose = [&]() {
     auto cb =
-        omnicpp::render::VulkanRenderer::allocate_command_buffer(context.device(),
+        warploom::render::VulkanRenderer::allocate_command_buffer(context.device(),
                                                                 cmd_pool);
     EXPECT_TRUE(cb.is_ok());
     VkCommandBuffer cmd = cb.value();
@@ -1903,14 +1903,14 @@ TEST(VulkanHardware, PathTracedFrameLayersBloom) {
                  ldr.image(), ldr.image_view(), kSize, kSize);
     submit(cmd);
   };
-  const auto read_now = [&]() -> omnicpp_test::ReadbackResult {
+  const auto read_now = [&]() -> warploom_test::ReadbackResult {
     return readback_swapchain_image(
         context.physical_device(), context.device(), context.graphics_queue(),
         static_cast<std::uint32_t>(context.queue_families().graphics_family),
         ldr.image(), kLdrFormat, kSize, kSize, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, true);
   };
-  const auto mean_luma = [](const omnicpp_test::ReadbackResult& r) {
+  const auto mean_luma = [](const warploom_test::ReadbackResult& r) {
     double sum = 0.0;
     for (const std::uint32_t px : r.pixels) {
       sum += static_cast<double>(px & 0xFFU) +
@@ -1926,7 +1926,7 @@ TEST(VulkanHardware, PathTracedFrameLayersBloom) {
   for (std::uint32_t f = 0; f < 8U; ++f) {
     const bool clear = (tracer.sample_count() == 0U);
     auto cb =
-        omnicpp::render::VulkanRenderer::allocate_command_buffer(context.device(),
+        warploom::render::VulkanRenderer::allocate_command_buffer(context.device(),
                                                                 cmd_pool);
     ASSERT_TRUE(cb.is_ok());
     VkCommandBuffer cmd = cb.value();
@@ -1945,7 +1945,7 @@ TEST(VulkanHardware, PathTracedFrameLayersBloom) {
   }
   EXPECT_EQ(tracer.sample_count(), 8U);
   record_compose();
-  const omnicpp_test::ReadbackResult pt_only = read_now();
+  const warploom_test::ReadbackResult pt_only = read_now();
   ASSERT_GT(pt_only.non_clear_pixels, 0U)
       << "PT-only baseline came back black";
   const double mean_off = mean_luma(pt_only);
@@ -1955,7 +1955,7 @@ TEST(VulkanHardware, PathTracedFrameLayersBloom) {
   // the 1/n divide identical between the two frames.
   ASSERT_TRUE(chain.set_bloom_enabled(true));
   record_compose();
-  const omnicpp_test::ReadbackResult pt_bloom = read_now();
+  const warploom_test::ReadbackResult pt_bloom = read_now();
   ASSERT_GT(pt_bloom.non_clear_pixels, 0U)
       << "PT+bloom frame came back black";
   const double mean_on = mean_luma(pt_bloom);
@@ -2002,11 +2002,11 @@ TEST(VulkanHardware, PathTracedFrameLayersBloom) {
 //! -- and the composite is explained.
 TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppCaptureArrange", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomCaptureArrange", true).is_ok());
   if (!context.has_ray_tracing() || !context.has_ray_tracing_pipeline()) {
     context.cleanup();
     GTEST_SKIP() << "ray tracing pipeline not available on this device";
@@ -2015,12 +2015,12 @@ TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
   constexpr std::uint32_t kSize = 64U;
   const VkFormat kLdrFormat = VK_FORMAT_B8G8R8A8_UNORM;
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
-  omnicpp::render::VulkanRenderPass present_pass;
+  warploom::render::VulkanRenderPass present_pass;
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(context.physical_device());
+      warploom::render::VulkanRenderPass::find_supported_depth_format(context.physical_device());
   ASSERT_TRUE(present_pass.create(context.device(), kLdrFormat, depth_format).is_ok());
   ASSERT_TRUE(present_pass
                   .create_depth_resources(context.device(),
@@ -2031,11 +2031,11 @@ TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
   // Two LDR targets: one plays the role of the "swapchain" image, one plays
   // the capture's own LDR target (the viewport composes into a framebuffer
   // that is not the one the chain was ensured against).
-  omnicpp::render::VulkanOffscreenTarget ldr;
+  warploom::render::VulkanOffscreenTarget ldr;
   ASSERT_TRUE(ldr.create(context.device(), context.physical_device(), kLdrFormat,
                          kSize, kSize, &allocator,
                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT).is_ok());
-  omnicpp::render::VulkanOffscreenTarget capture_ldr;
+  warploom::render::VulkanOffscreenTarget capture_ldr;
   ASSERT_TRUE(capture_ldr.create(context.device(), context.physical_device(), kLdrFormat,
                                  kSize, kSize, &allocator,
                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT).is_ok());
@@ -2062,26 +2062,26 @@ TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   ASSERT_TRUE(geo.is_ok());
-  omnicpp::render::Allocation geo_alloc = geo.value();
+  warploom::render::Allocation geo_alloc = geo.value();
   std::memcpy(geo_alloc.mapped, tris.data(), tris.size() * sizeof(float));
   VkBufferDeviceAddressInfo addr{};
   addr.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   addr.buffer = geo_alloc.buffer;
 
-  omnicpp::render::PathTracerConfig cfg{};
+  warploom::render::PathTracerConfig cfg{};
   cfg.shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cfg.width = kSize;
   cfg.height = kSize;
   cfg.max_bounces = 2U;
-  omnicpp::render::PathTracerMesh mesh{};
+  warploom::render::PathTracerMesh mesh{};
   mesh.vertex_buffer_address = static_cast<std::uint64_t>(
       vkGetBufferDeviceAddress(context.device(), &addr));
   mesh.triangle_count = 12U;
   mesh.max_vertex = 35U;
   cfg.meshes = {mesh};
-  cfg.instances = {omnicpp::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.8F)};
+  cfg.instances = {warploom::render::PathTracerInstance::translated({0.0F, 0.0F, 0.0F}, 0.8F)};
 
-  omnicpp::render::VulkanPathTracer tracer;
+  warploom::render::VulkanPathTracer tracer;
   ASSERT_TRUE(tracer
                   .create(context.physical_device(), context.device(),
                           context.graphics_queue(),
@@ -2090,13 +2090,13 @@ TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
                           allocator, cfg)
                   .is_ok());
   ASSERT_TRUE(tracer.ready());
-  omnicpp::render::PathTracerCamera cam{};
+  warploom::render::PathTracerCamera cam{};
   cam.position = {0.0F, 0.0F, 4.0F};
   cam.forward = {0.0F, 0.0F, -1.0F};
   tracer.set_camera(cam);
 
-  omnicpp::render::VulkanComposeChain chain;
-  omnicpp::render::ComposeChainConfig cc{};
+  warploom::render::VulkanComposeChain chain;
+  warploom::render::ComposeChainConfig cc{};
   cc.compose_shader_dir = WARPLOOM_TEST_SHADER_DIR;
   cc.exposure = 0.05F;
   ASSERT_TRUE(chain
@@ -2107,7 +2107,7 @@ TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
   ASSERT_TRUE(chain.ready());
   chain.set_external_source(tracer.accum_image(), tracer.accum_view());
 
-  auto pool = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool = warploom::render::VulkanRenderer::create_command_pool(
       context.device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family));
   VkCommandPool cmd_pool = pool.value();
@@ -2116,7 +2116,7 @@ TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
   const auto accumulate = [&](std::uint32_t frames) {
     for (std::uint32_t f = 0; f < frames; ++f) {
       const bool clear = (tracer.sample_count() == 0U);
-      auto cb = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+      auto cb = warploom::render::VulkanRenderer::allocate_command_buffer(
           context.device(), cmd_pool);
       VkCommandBuffer cmd = cb.value();
       VkCommandBufferBeginInfo bi{};
@@ -2165,16 +2165,16 @@ TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
   };
 
   accumulate(8U);
-  const auto read_now = [&]() -> omnicpp_test::ReadbackResult {
+  const auto read_now = [&]() -> warploom_test::ReadbackResult {
     return readback_swapchain_image(
         context.physical_device(), context.device(), context.graphics_queue(),
         static_cast<std::uint32_t>(context.queue_families().graphics_family),
         capture_ldr.image(), kLdrFormat, kSize, kSize,
         VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, true);
   };
-  const omnicpp_test::ReadbackResult composed = read_now();
+  const warploom_test::ReadbackResult composed = read_now();
   ASSERT_GT(composed.non_clear_pixels, 0U) << "the compose produced nothing";
-  const auto luma = [](const omnicpp_test::ReadbackResult& r) {
+  const auto luma = [](const warploom_test::ReadbackResult& r) {
     double sum = 0.0;
     for (std::size_t i = 0; i < r.pixels.size(); ++i) {
       sum += static_cast<double>(r.pixels[i] & 0xFFU);
@@ -2205,7 +2205,7 @@ TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
       << "not cover the target";
 
   // The same accumulation composed WITHOUT the scene pass: the control.
-  auto cb2 = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  auto cb2 = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), cmd_pool);
   VkCommandBuffer cmd2 = cb2.value();
   VkCommandBufferBeginInfo bi2{};
@@ -2273,26 +2273,26 @@ TEST(VulkanHardware, CaptureArrangementScenePassBeforeCompose) {
 //!      generation.
 TEST(HiZGraph, PackedPyramidMatchesAbi) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
   constexpr std::uint32_t kWidth = 256U;
   constexpr std::uint32_t kHeight = 256U;
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppPackedHiZ", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomPackedHiZ", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(
       allocator.initialize(context.device(), context.physical_device()).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget color;
+  warploom::render::VulkanOffscreenTarget color;
   ASSERT_TRUE(color
                   .create(context.device(), context.physical_device(),
                           VK_FORMAT_B8G8R8A8_UNORM, kWidth, kHeight, &allocator)
                   .is_ok());
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+      warploom::render::VulkanRenderPass::find_supported_depth_format(
           context.physical_device());
-  omnicpp::render::VulkanRenderPass render_pass;
+  warploom::render::VulkanRenderPass render_pass;
   ASSERT_TRUE(render_pass.create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
                                  depth_format)
                   .is_ok());
@@ -2309,20 +2309,20 @@ TEST(HiZGraph, PackedPyramidMatchesAbi) {
                                        kWidth, kHeight)
                   .is_ok());
 
-  omnicpp::render::RendererConfig config;
+  warploom::render::RendererConfig config;
   config.enable_hiz = true;
   config.enable_hdr_compose = false;
   config.hiz_reduction_shader_path =
       std::string(WARPLOOM_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
 
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   const auto init =
       renderer.initialize_headless(context, render_pass, kWidth, kHeight,
                                    config, VK_FORMAT_B8G8R8A8_UNORM);
   ASSERT_TRUE(init.is_ok()) << static_cast<std::uint32_t>(init.error());
   ASSERT_TRUE(renderer.hiz_direct_enabled());
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(
       pipeline.load_shader_file(context.device(),
@@ -2362,7 +2362,7 @@ TEST(HiZGraph, PackedPyramidMatchesAbi) {
   const std::uint32_t total_words =
       packed.level_offsets.back() +
       packed.level_dims.back().first * packed.level_dims.back().second;
-  const auto rb = omnicpp_test::readback_buffer(
+  const auto rb = warploom_test::readback_buffer(
       context.physical_device(), context.device(), context.graphics_queue(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family),
       packed.buffer.buffer,
@@ -2433,13 +2433,13 @@ TEST(HiZGraph, PackedPyramidMatchesAbi) {
 }
 
 TEST(VulkanSwapchain, QuerySupportReturnsEmptyWithoutVulkan) {
-  auto details = omnicpp::render::VulkanSwapchain::query_swapchain_support(nullptr, nullptr);
+  auto details = warploom::render::VulkanSwapchain::query_swapchain_support(nullptr, nullptr);
   EXPECT_FALSE(details.is_valid());
 }
 
 TEST(VulkanHardware, HeadlessSwapchainAndRenderSubmission) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(VK_USE_PLATFORM_XCB_KHR)
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
   const char* display_name = std::getenv("DISPLAY");
   if (!display_name) GTEST_SKIP() << "DISPLAY is unavailable";
 
@@ -2462,8 +2462,8 @@ TEST(VulkanHardware, HeadlessSwapchainAndRenderSubmission) {
   xcb_map_window(connection, window);
   xcb_flush(connection);
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppHardwareTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomHardwareTest", true).is_ok());
   ASSERT_TRUE(context.has_validation());
   // The swapchain submission checks below were authored against hardware
   // rasterization semantics; under a software ICD (llvmpipe selected via
@@ -2476,10 +2476,10 @@ TEST(VulkanHardware, HeadlessSwapchainAndRenderSubmission) {
   }
 
   VkSurfaceKHR surface = VK_NULL_HANDLE;
-  omnicpp::render::SurfaceCreateInfo surface_info;
+  warploom::render::SurfaceCreateInfo surface_info;
   surface_info.display = connection;
   surface_info.window = reinterpret_cast<void*>(static_cast<std::uintptr_t>(window));
-  auto surface_result = omnicpp::render::create_platform_surface(context.instance(), surface_info, surface);
+  auto surface_result = warploom::render::create_platform_surface(context.instance(), surface_info, surface);
   if (!surface_result.is_ok()) {
     context.cleanup();
     xcb_destroy_window(connection, window);
@@ -2488,20 +2488,20 @@ TEST(VulkanHardware, HeadlessSwapchainAndRenderSubmission) {
   }
   ASSERT_NE(surface, VK_NULL_HANDLE);
 
-  omnicpp::render::VulkanSwapchain swapchain;
+  warploom::render::VulkanSwapchain swapchain;
   ASSERT_TRUE(swapchain.create(context.device(), context.physical_device(), surface, {}).is_ok());
   ASSERT_TRUE(swapchain.create_image_views(context.device()).is_ok());
 
-  const VkFormat depth_format = omnicpp::render::VulkanRenderPass::find_supported_depth_format(context.physical_device());
+  const VkFormat depth_format = warploom::render::VulkanRenderPass::find_supported_depth_format(context.physical_device());
   ASSERT_NE(depth_format, VK_FORMAT_UNDEFINED);
-  omnicpp::render::VulkanRenderPass render_pass;
+  warploom::render::VulkanRenderPass render_pass;
   ASSERT_TRUE(render_pass.create(context.device(), swapchain.image_format(), depth_format).is_ok());
   ASSERT_TRUE(render_pass.create_depth_resources(context.device(), context.physical_device(), depth_format,
                                                  swapchain.extent_width(), swapchain.extent_height()).is_ok());
   ASSERT_TRUE(render_pass.create_framebuffers(context.device(), swapchain.image_views(),
                                               swapchain.extent_width(), swapchain.extent_height()).is_ok());
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
 #ifdef WARPLOOM_TEST_SHADER_DIR
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_file(context.device(), shader_dir + "/triangle.vert.spv").is_ok());
@@ -2514,14 +2514,14 @@ TEST(VulkanHardware, HeadlessSwapchainAndRenderSubmission) {
 #endif
 
   ASSERT_TRUE(render_pass.depth_is_sampleable());
-  omnicpp::render::RendererConfig renderer_config;
+  warploom::render::RendererConfig renderer_config;
   renderer_config.enable_hiz = true;
   renderer_config.hiz_tile_size = 32U;
 #ifdef WARPLOOM_TEST_SHADER_DIR
   renderer_config.hiz_reduction_shader_path =
       std::string(WARPLOOM_TEST_SHADER_DIR) + "/depth_reduce_image.comp.spv";
 #endif
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   renderer.set_timeline_pacing(context.has_timeline_semaphores());
   ASSERT_TRUE(renderer.initialize(context, swapchain, render_pass, renderer_config).is_ok());
   ASSERT_TRUE(renderer.hiz_direct_enabled());
@@ -2655,7 +2655,7 @@ TEST(VulkanWayland, CreateSurfaceOnLiveCompositor) {
   // against" — kwin_wayland is live on this machine, so the engine-side
   // creation path is proven here. The viewport's Wayland backend (swapchain
   // presentation + input) is the separate remaining half, not this test.
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
   const char* display_name = std::getenv("WAYLAND_DISPLAY");
@@ -2679,15 +2679,15 @@ TEST(VulkanWayland, CreateSurfaceOnLiveCompositor) {
   wl_surface* wl_surface = wl_compositor_create_surface(globals.compositor);
   ASSERT_NE(wl_surface, nullptr);
 
-  omnicpp::render::VulkanContext context;
+  warploom::render::VulkanContext context;
   ASSERT_TRUE(context.initialize("WarploomWaylandProof", true).is_ok());
   ASSERT_TRUE(context.has_validation());
-  omnicpp::render::SurfaceCreateInfo surface_info;
-  surface_info.platform = omnicpp::render::SurfacePlatform::Wayland;
+  warploom::render::SurfaceCreateInfo surface_info;
+  surface_info.platform = warploom::render::SurfacePlatform::Wayland;
   surface_info.display = display;
   surface_info.window = wl_surface;
   VkSurfaceKHR surface = VK_NULL_HANDLE;
-  auto surface_result = omnicpp::render::create_platform_surface(
+  auto surface_result = warploom::render::create_platform_surface(
       context.instance(), surface_info, surface);
   ASSERT_TRUE(surface_result.is_ok())
       << "engine Wayland surface creation failed";
@@ -2728,7 +2728,7 @@ TEST(VulkanWayland, CreateSurfaceOnLiveCompositor) {
 // ============================================================================
 
 TEST(VulkanMemoryAllocator, UninitializedCreateBufferFails) {
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   auto result = allocator.create_buffer(1024, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   EXPECT_FALSE(result.is_ok());
@@ -2738,18 +2738,18 @@ TEST(VulkanMemoryAllocator, UninitializedCreateBufferFails) {
 
 TEST(VulkanHardware, AllocatorSubAllocationAndUploadRing) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppAllocatorTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomAllocatorTest", true).is_ok());
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   // --- Sub-allocation: many buffers land inside one host-visible block. ---
   constexpr std::size_t kBufferCount = 8;
   constexpr VkDeviceSize kBufferSize = 4096;
-  std::vector<omnicpp::render::Allocation> allocations;
+  std::vector<warploom::render::Allocation> allocations;
   for (std::size_t i = 0; i < kBufferCount; ++i) {
     auto result = allocator.create_buffer(
         kBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -2779,15 +2779,15 @@ TEST(VulkanHardware, AllocatorSubAllocationAndUploadRing) {
   ASSERT_TRUE(dst_result.is_ok());
 
   // --- Upload ring: staged copy of every pattern to the device buffer. ---
-  omnicpp::render::VulkanUploadRing ring;
+  warploom::render::VulkanUploadRing ring;
   ASSERT_TRUE(ring.initialize(context.device(), context.physical_device(),
                               static_cast<std::uint32_t>(context.queue_families().graphics_family),
                               1u << 20u).is_ok());
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool command_pool = pool_result.value();
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), command_pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer command_buffer = cb_result.value();
@@ -2849,8 +2849,8 @@ TEST(VulkanHardware, AllocatorSubAllocationAndUploadRing) {
 
   // --- Free-list coalescing: free all, stats return to zero used. ---
   for (auto& allocation : allocations) allocator.destroy_allocation(allocation);
-  omnicpp::render::Allocation dst_allocation = dst_result.value();
-  omnicpp::render::Allocation check_allocation = check_result.value();
+  warploom::render::Allocation dst_allocation = dst_result.value();
+  warploom::render::Allocation check_allocation = check_result.value();
   allocator.destroy_allocation(dst_allocation);
   allocator.destroy_allocation(check_allocation);
   stats = allocator.stats();
@@ -2873,19 +2873,19 @@ TEST(VulkanHardware, AllocatorSubAllocationAndUploadRing) {
 
 TEST(SpirvReflection, RejectsInvalidCode) {
   const std::uint32_t bad_magic[] = {0xDEADBEEF, 0, 0, 0, 0};
-  EXPECT_TRUE(omnicpp::render::reflect_spirv_resources(bad_magic, 5).empty());
-  EXPECT_TRUE(omnicpp::render::reflect_spirv_resources(
+  EXPECT_TRUE(warploom::render::reflect_spirv_resources(bad_magic, 5).empty());
+  EXPECT_TRUE(warploom::render::reflect_spirv_resources(
       static_cast<const std::uint32_t*>(nullptr), 0).empty());
   const std::uint8_t odd_bytes[] = {0x03, 0x02, 0x23, 0x07, 0x00};
-  EXPECT_TRUE(omnicpp::render::reflect_spirv_resources(odd_bytes, 5).empty());
+  EXPECT_TRUE(warploom::render::reflect_spirv_resources(odd_bytes, 5).empty());
 }
 
 TEST(VulkanHardware, DescriptorReflectionAndUboRender) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppDescriptorTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomDescriptorTest", true).is_ok());
 
   // --- Load the UBO fragment shader and reflect it. ---
   std::ifstream frag_file(std::string(WARPLOOM_TEST_SHADER_DIR) + "/ubo_triangle.frag.spv",
@@ -2895,7 +2895,7 @@ TEST(VulkanHardware, DescriptorReflectionAndUboRender) {
       (std::istreambuf_iterator<char>(frag_file)), std::istreambuf_iterator<char>());
   ASSERT_GE(frag_spirv.size(), 20U);
 
-  const auto bindings = omnicpp::render::reflect_spirv_resources(
+  const auto bindings = warploom::render::reflect_spirv_resources(
       frag_spirv.data(), frag_spirv.size());
   ASSERT_EQ(bindings.size(), 1U);
   EXPECT_EQ(bindings[0].set, 0U);
@@ -2905,9 +2905,9 @@ TEST(VulkanHardware, DescriptorReflectionAndUboRender) {
             static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_FRAGMENT_BIT));
 
   // --- Create layout + set through the manager, bind a real UBO. ---
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
 
   auto layout_result = manager.create_layout(bindings, 1);
@@ -2926,13 +2926,13 @@ TEST(VulkanHardware, DescriptorReflectionAndUboRender) {
                                    ubo_result.value().buffer, 0, 256).is_ok());
 
   // --- Pipeline with the reflected layout. ---
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, 320, 240, &allocator).is_ok());
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
                                               shader_dir + "/triangle.vert.spv", "vertex").is_ok());
@@ -2946,11 +2946,11 @@ TEST(VulkanHardware, DescriptorReflectionAndUboRender) {
       pipeline.pipeline_layout(), false, false, false).is_ok());
 
   // --- Render one frame offscreen. ---
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool command_pool = pool_result.value();
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), command_pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer command_buffer = cb_result.value();
@@ -3014,7 +3014,7 @@ TEST(VulkanHardware, DescriptorReflectionAndUboRender) {
   vkDestroyCommandPool(context.device(), command_pool, nullptr);
   pipeline.cleanup(context.device());
   target.cleanup(context.device());
-  omnicpp::render::Allocation ubo_allocation = ubo_result.value();
+  warploom::render::Allocation ubo_allocation = ubo_result.value();
   allocator.destroy_allocation(ubo_allocation);
   manager.cleanup();
   allocator.cleanup();
@@ -3035,11 +3035,11 @@ TEST(VulkanHardware, AllocatorAlignmentPadSubAllocation) {
 // offset 0 followed by a 1024-aligned image). Exercises the padded path with
 // remainder, the padded path consuming the whole range, and the plain carve.
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppAllocatorPadTest", true).is_ok());
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomAllocatorPadTest", true).is_ok());
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   // Small buffer lands at block offset 0; the aligned image must carve a pad.
@@ -3082,9 +3082,9 @@ TEST(VulkanHardware, AllocatorAlignmentPadSubAllocation) {
   // Drain: freeing in order must coalesce back to one full free range.
   const auto stats_before = allocator.stats();
   EXPECT_EQ(stats_before.allocation_count, 3U);
-  omnicpp::render::Allocation a0 = small_result.value();
-  omnicpp::render::Allocation a1 = image_alloc.value();
-  omnicpp::render::Allocation a2 = tail_result.value();
+  warploom::render::Allocation a0 = small_result.value();
+  warploom::render::Allocation a1 = image_alloc.value();
+  warploom::render::Allocation a2 = tail_result.value();
   allocator.destroy_allocation(a0);
   allocator.destroy_allocation(a1);
   allocator.destroy_allocation(a2);
@@ -3102,10 +3102,10 @@ TEST(VulkanHardware, AllocatorAlignmentPadSubAllocation) {
 
 TEST(VulkanHardware, BindlessDescriptorIndexingRender) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppBindlessTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomBindlessTest", true).is_ok());
   if (!context.has_descriptor_indexing()) {
     GTEST_SKIP() << "Device does not support descriptor indexing (bindless)";
   }
@@ -3118,7 +3118,7 @@ TEST(VulkanHardware, BindlessDescriptorIndexingRender) {
       (std::istreambuf_iterator<char>(frag_file)), std::istreambuf_iterator<char>());
   ASSERT_GE(frag_spirv.size(), 20U);
 
-  const auto bindings = omnicpp::render::reflect_spirv_resources(
+  const auto bindings = warploom::render::reflect_spirv_resources(
       frag_spirv.data(), frag_spirv.size());
   ASSERT_EQ(bindings.size(), 1U);
   EXPECT_EQ(bindings[0].set, 0U);
@@ -3127,9 +3127,9 @@ TEST(VulkanHardware, BindlessDescriptorIndexingRender) {
   EXPECT_EQ(bindings[0].stage_flags,
             static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_FRAGMENT_BIT));
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
 
   // --- Bindless layout: 1 set, partially bound + update-after-bind. ---
@@ -3148,7 +3148,7 @@ TEST(VulkanHardware, BindlessDescriptorIndexingRender) {
 
   // --- Fill the palette through the staging upload ring (ring owns its
   // command buffer: acquire() opens recording, submit() closes it). ---
-  omnicpp::render::VulkanUploadRing ring;
+  warploom::render::VulkanUploadRing ring;
   ASSERT_TRUE(ring.initialize(
       context.device(), context.physical_device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family),
@@ -3167,13 +3167,13 @@ TEST(VulkanHardware, BindlessDescriptorIndexingRender) {
   }};
   std::memcpy(staging.value().host_data, palette_colors.data(), kPaletteBytes);
 
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool command_pool = pool_result.value();
 
   {
-    const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
         context.device(), command_pool);
     ASSERT_TRUE(cb_result.is_ok());
     const VkCommandBuffer upload_cmd = cb_result.value();
@@ -3205,13 +3205,13 @@ TEST(VulkanHardware, BindlessDescriptorIndexingRender) {
                                    palette_result.value().buffer, 0, VK_WHOLE_SIZE).is_ok());
 
   // --- Pipeline: bindless fragment stage + push constants for the band index. ---
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, 320, 240, &allocator).is_ok());
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
                                               shader_dir + "/triangle.vert.spv", "vertex").is_ok());
@@ -3228,7 +3228,7 @@ TEST(VulkanHardware, BindlessDescriptorIndexingRender) {
 
   // --- Record one command buffer: 8 horizontal bands, one push-constant
   // value each, verifying non-uniform descriptor state per draw. ---
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), command_pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer command_buffer = cb_result.value();
@@ -3298,7 +3298,7 @@ TEST(VulkanHardware, BindlessDescriptorIndexingRender) {
   pipeline.cleanup(context.device());
   target.cleanup(context.device());
   ring.cleanup();
-  omnicpp::render::Allocation palette_allocation = palette_result.value();
+  warploom::render::Allocation palette_allocation = palette_result.value();
   allocator.destroy_allocation(palette_allocation);
   manager.cleanup();
   allocator.cleanup();
@@ -3319,10 +3319,10 @@ TEST(VulkanHardware, BindlessDescriptorIndexingRender) {
 // color — proving per-element descriptor writes and the non-uniform path.
 TEST(VulkanHardware, BindlessTextureArrayRender) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppBindlessTexTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomBindlessTexTest", true).is_ok());
   if (!context.has_descriptor_indexing()) {
     GTEST_SKIP() << "Device does not support descriptor indexing (bindless)";
   }
@@ -3333,7 +3333,7 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
   ASSERT_TRUE(frag_file.good());
   const std::vector<std::uint8_t> frag_spirv(
       (std::istreambuf_iterator<char>(frag_file)), std::istreambuf_iterator<char>());
-  const auto bindings = omnicpp::render::reflect_spirv_resources(
+  const auto bindings = warploom::render::reflect_spirv_resources(
       frag_spirv.data(), frag_spirv.size());
   ASSERT_EQ(bindings.size(), 1U);
   EXPECT_EQ(bindings[0].binding, 0U);
@@ -3342,9 +3342,9 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
   EXPECT_EQ(bindings[0].stage_flags,
             static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_FRAGMENT_BIT));
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
 
   // --- Bindless layout (partially bound + update-after-bind). ---
@@ -3370,18 +3370,18 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
   // --- Two 8x8 solid-color textures: element 0 = red, element 1 = green. ---
   VkImage images[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
   VkImageView views[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-  omnicpp::render::Allocation allocations[2];
+  warploom::render::Allocation allocations[2];
   const std::uint32_t colors[2] = {
       0xFF0000FFU,  // BGRA unpacked little-endian: red
       0xFF00FF00U,  // green
   };
 
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool command_pool = pool_result.value();
 
-  omnicpp::render::VulkanUploadRing ring;
+  warploom::render::VulkanUploadRing ring;
   ASSERT_TRUE(ring.initialize(
       context.device(), context.physical_device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family),
@@ -3441,7 +3441,7 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
     const auto& span0 = staging0.value();
     const auto& span1 = staging1.value();
     const VkBuffer src = ring.ring_buffer();
-    const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+    const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
         context.device(), command_pool);
     ASSERT_TRUE(cb_result.is_ok());
     const VkCommandBuffer upload_cmd = cb_result.value();
@@ -3508,13 +3508,13 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
   // --- Offscreen target + pipeline with the bindless set + push constants. ---
   constexpr std::uint32_t kTargetW = 64;
   constexpr std::uint32_t kTargetH = 64;
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, kTargetW, kTargetH, &allocator).is_ok());
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
                                               shader_dir + "/triangle.vert.spv", "vertex").is_ok());
@@ -3531,7 +3531,7 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
 
   // --- Two draws: draw 0 samples element 0 (red), draw 1 element 1 (green).
   // Draw 1 runs after a full-screen clear so content is attributable. ---
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), command_pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer command_buffer = cb_result.value();
@@ -3626,12 +3626,12 @@ TEST(VulkanHardware, BindlessTextureArrayRender) {
 // graphics pass consumed compute's data through GPU-side synchronization.
 TEST(VulkanHardware, ComputeToGraphicsEventHandoff) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppComputeHandoffTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomComputeHandoffTest", true).is_ok());
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   constexpr std::uint32_t kWidth = 64;
@@ -3653,14 +3653,14 @@ TEST(VulkanHardware, ComputeToGraphicsEventHandoff) {
   ASSERT_TRUE(comp_file.good());
   const std::vector<std::uint8_t> comp_spirv(
       (std::istreambuf_iterator<char>(comp_file)), std::istreambuf_iterator<char>());
-  const auto comp_bindings = omnicpp::render::reflect_spirv_resources(
+  const auto comp_bindings = warploom::render::reflect_spirv_resources(
       comp_spirv.data(), comp_spirv.size());
   ASSERT_EQ(comp_bindings.size(), 1U);
   EXPECT_EQ(comp_bindings[0].type, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
   EXPECT_EQ(comp_bindings[0].stage_flags,
             static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_COMPUTE_BIT));
 
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
   auto comp_layout = manager.create_layout(comp_bindings, 1);
   ASSERT_TRUE(comp_layout.is_ok());
@@ -3670,7 +3670,7 @@ TEST(VulkanHardware, ComputeToGraphicsEventHandoff) {
                                    gradient.value().buffer, 0, VK_WHOLE_SIZE).is_ok());
 
   // --- Compute pipeline. ---
-  omnicpp::render::VulkanPipeline compute_pipeline;
+  warploom::render::VulkanPipeline compute_pipeline;
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(compute_pipeline.load_shader_stage_file(
       context.device(), shader_dir + "/fill_gradient.comp.spv", "compute").is_ok());
@@ -3686,7 +3686,7 @@ TEST(VulkanHardware, ComputeToGraphicsEventHandoff) {
   ASSERT_TRUE(frag_file.good());
   const std::vector<std::uint8_t> frag_spirv(
       (std::istreambuf_iterator<char>(frag_file)), std::istreambuf_iterator<char>());
-  const auto frag_bindings = omnicpp::render::reflect_spirv_resources(
+  const auto frag_bindings = warploom::render::reflect_spirv_resources(
       frag_spirv.data(), frag_spirv.size());
   ASSERT_EQ(frag_bindings.size(), 1U);
   EXPECT_EQ(frag_bindings[0].type, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
@@ -3698,13 +3698,13 @@ TEST(VulkanHardware, ComputeToGraphicsEventHandoff) {
   ASSERT_TRUE(manager.write_buffer(gfx_set.value(), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                    gradient.value().buffer, 0, VK_WHOLE_SIZE).is_ok());
 
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, kWidth, kHeight, &allocator).is_ok());
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
-  omnicpp::render::VulkanPipeline gfx_pipeline;
+  warploom::render::VulkanPipeline gfx_pipeline;
   ASSERT_TRUE(gfx_pipeline.load_shader_stage_file(
       context.device(), shader_dir + "/gradient_triangle.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(gfx_pipeline.load_shader_stage_file(
@@ -3723,11 +3723,11 @@ TEST(VulkanHardware, ComputeToGraphicsEventHandoff) {
   VkEvent handoff_event = VK_NULL_HANDLE;
   ASSERT_EQ(vkCreateEvent(context.device(), &event_info, nullptr, &handoff_event), VK_SUCCESS);
 
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool command_pool = pool_result.value();
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), command_pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer command_buffer = cb_result.value();
@@ -3750,7 +3750,7 @@ TEST(VulkanHardware, ComputeToGraphicsEventHandoff) {
   vkCmdDispatch(command_buffer, (kValues + 63U) / 64U, 1, 1);
 
   // Handoff: signal after compute writes, wait before graphics reads.
-  omnicpp::render::cmd_signal_event(command_buffer, handoff_event,
+  warploom::render::cmd_signal_event(command_buffer, handoff_event,
                                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
   // Graphics pass.
@@ -3823,7 +3823,7 @@ TEST(VulkanHardware, ComputeToGraphicsEventHandoff) {
   gfx_pipeline.cleanup(context.device());
   compute_pipeline.cleanup(context.device());
   target.cleanup(context.device());
-  omnicpp::render::Allocation grad = gradient.value();
+  warploom::render::Allocation grad = gradient.value();
   allocator.destroy_allocation(grad);
   manager.cleanup();
   allocator.cleanup();
@@ -3835,10 +3835,10 @@ TEST(VulkanHardware, ComputeToGraphicsEventHandoff) {
 
 TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppAsyncComputeTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomAsyncComputeTest", true).is_ok());
   if (!context.has_timeline_semaphores()) {
     GTEST_SKIP() << "Timeline semaphores unavailable";
   }
@@ -3846,7 +3846,7 @@ TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
     GTEST_SKIP() << "No COMPUTE-only family: async overlap not testable here";
   }
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   const std::uint32_t comp_family = context.compute_family_index();
@@ -3864,7 +3864,7 @@ TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
   ASSERT_TRUE(vertices.is_ok());
   std::memset(vertices.value().mapped, 0, static_cast<std::size_t>(kDataBytes));
 
-  omnicpp::render::AsyncComputeQueue async;
+  warploom::render::AsyncComputeQueue async;
   ASSERT_TRUE(async.initialize(context.device(), context.compute_queue(), comp_family).is_ok());
 
   // --- Compute pipeline: gen_triangle writes positions + hues. ---
@@ -3873,12 +3873,12 @@ TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
   ASSERT_TRUE(comp_file.good());
   const std::vector<std::uint8_t> comp_spirv(
       (std::istreambuf_iterator<char>(comp_file)), std::istreambuf_iterator<char>());
-  const auto comp_bindings = omnicpp::render::reflect_spirv_resources(
+  const auto comp_bindings = warploom::render::reflect_spirv_resources(
       comp_spirv.data(), comp_spirv.size());
   ASSERT_EQ(comp_bindings.size(), 1U);
   EXPECT_EQ(comp_bindings[0].type, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
   auto comp_layout = manager.create_layout(comp_bindings, 1);
   ASSERT_TRUE(comp_layout.is_ok());
@@ -3887,7 +3887,7 @@ TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
   ASSERT_TRUE(manager.write_buffer(comp_set.value(), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                    vertices.value().buffer, 0, VK_WHOLE_SIZE).is_ok());
 
-  omnicpp::render::VulkanPipeline compute_pipeline;
+  warploom::render::VulkanPipeline compute_pipeline;
   ASSERT_TRUE(compute_pipeline.load_shader_stage_file(
       context.device(), shader_dir + "/gen_triangle.comp.spv", "compute").is_ok());
   const VkPushConstantRange comp_push{
@@ -3898,13 +3898,13 @@ TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
       context.device(), compute_pipeline.pipeline_layout()).is_ok());
 
   // --- Graphics pipeline: vertex-pull triangle tinted by the compute hue. ---
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, 64, 64, &allocator).is_ok());
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
-  omnicpp::render::VulkanPipeline gfx_pipeline;
+  warploom::render::VulkanPipeline gfx_pipeline;
   ASSERT_TRUE(gfx_pipeline.load_shader_stage_file(
       context.device(), shader_dir + "/vertexpull_triangle.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(gfx_pipeline.load_shader_stage_file(
@@ -3915,14 +3915,14 @@ TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
   ASSERT_TRUE(vp_file.good());
   const std::vector<std::uint8_t> vp_spirv(
       (std::istreambuf_iterator<char>(vp_file)), std::istreambuf_iterator<char>());
-  const auto vp_bindings = omnicpp::render::reflect_spirv_resources(
+  const auto vp_bindings = warploom::render::reflect_spirv_resources(
       vp_spirv.data(), vp_spirv.size());
   ASSERT_EQ(vp_bindings.size(), 1U);
   std::ifstream vf_file(shader_dir + "/vertexpull_triangle.frag.spv", std::ios::binary);
   ASSERT_TRUE(vf_file.good());
   const std::vector<std::uint8_t> vf_spirv(
       (std::istreambuf_iterator<char>(vf_file)), std::istreambuf_iterator<char>());
-  const auto vf_bindings = omnicpp::render::reflect_spirv_resources(
+  const auto vf_bindings = warploom::render::reflect_spirv_resources(
       vf_spirv.data(), vf_spirv.size());
   ASSERT_TRUE(vf_bindings.empty());  // hue frag reads only the varying
   auto gfx_layout = manager.create_layout(vp_bindings, 1);
@@ -3937,11 +3937,11 @@ TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
       context.device(), target.render_pass(), target.format(),
       gfx_pipeline.pipeline_layout(), false, false, false).is_ok());
 
-  const auto gfx_pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto gfx_pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(gfx_pool_result.is_ok());
   const VkCommandPool gfx_pool = gfx_pool_result.value();
-  const auto gfx_cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto gfx_cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), gfx_pool);
   ASSERT_TRUE(gfx_cb_result.is_ok());
   const VkCommandBuffer gfx_cb = gfx_cb_result.value();
@@ -4081,7 +4081,7 @@ TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
   gfx_pipeline.cleanup(context.device());
   compute_pipeline.cleanup(context.device());
   target.cleanup(context.device());
-  omnicpp::render::Allocation verts = vertices.value();
+  warploom::render::Allocation verts = vertices.value();
   allocator.destroy_allocation(verts);
   manager.cleanup();
   allocator.cleanup();
@@ -4093,12 +4093,12 @@ TEST(VulkanHardware, AsyncComputeTimelineOverlap) {
 
 TEST(VulkanHardware, RenderGraphTwoPassBarriersAndRender) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppRenderGraphTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomRenderGraphTest", true).is_ok());
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   // Two independent offscreen targets: pass 0 renders the triangle into A,
@@ -4106,12 +4106,12 @@ TEST(VulkanHardware, RenderGraphTwoPassBarriersAndRender) {
   // difference). The graph must barrier A between the passes and initialize B.
   constexpr std::uint32_t kWidth = 320;
   constexpr std::uint32_t kHeight = 240;
-  omnicpp::render::VulkanOffscreenTarget target_a;
+  warploom::render::VulkanOffscreenTarget target_a;
   ASSERT_TRUE(target_a.create(context.device(), context.physical_device(),
                               VK_FORMAT_B8G8R8A8_UNORM, kWidth, kHeight, &allocator).is_ok());
   ASSERT_TRUE(target_a.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target_a.create_framebuffer(context.device()).is_ok());
-  omnicpp::render::VulkanOffscreenTarget target_b;
+  warploom::render::VulkanOffscreenTarget target_b;
   ASSERT_TRUE(target_b.create(context.device(), context.physical_device(),
                               VK_FORMAT_B8G8R8A8_UNORM, kWidth, kHeight, &allocator).is_ok());
   ASSERT_TRUE(target_b.create_render_pass(context.device()).is_ok());
@@ -4119,7 +4119,7 @@ TEST(VulkanHardware, RenderGraphTwoPassBarriersAndRender) {
 
 #ifdef WARPLOOM_TEST_SHADER_DIR
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
                                               shader_dir + "/triangle.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
@@ -4134,14 +4134,14 @@ TEST(VulkanHardware, RenderGraphTwoPassBarriersAndRender) {
 #endif
 
   // Declare passes: A keeps TRANSFER_SRC (readback later), B keeps TRANSFER_SRC.
-  std::vector<omnicpp::render::GraphPass> passes(2);
+  std::vector<warploom::render::GraphPass> passes(2);
   passes[0].name = "scene_a";
   passes[0].render_pass = target_a.render_pass();
   passes[0].framebuffer = target_a.framebuffer();
   passes[0].width = kWidth;
   passes[0].height = kHeight;
   passes[0].user_data = &target_a;
-  passes[0].attachments.push_back(omnicpp::render::color_attachment(
+  passes[0].attachments.push_back(warploom::render::color_attachment(
       target_a.image(), target_a.image_view(), target_a.format(),
       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL));
 
@@ -4151,12 +4151,12 @@ TEST(VulkanHardware, RenderGraphTwoPassBarriersAndRender) {
   passes[1].width = kWidth;
   passes[1].height = kHeight;
   passes[1].user_data = &target_b;
-  passes[1].attachments.push_back(omnicpp::render::color_attachment(
+  passes[1].attachments.push_back(warploom::render::color_attachment(
       target_b.image(), target_b.image_view(), target_b.format(),
       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL));
 
   // Compile and verify the compiler computed initialization barriers.
-  const auto compiled = omnicpp::render::compile_render_graph(passes);
+  const auto compiled = warploom::render::compile_render_graph(passes);
   ASSERT_EQ(compiled.barriers_per_pass.size(), 2U);
   ASSERT_EQ(compiled.barriers_per_pass[0].size(), 1U); // A: UNDEFINED -> COLOR
   EXPECT_EQ(compiled.barriers_per_pass[0][0].image, target_a.image());
@@ -4164,11 +4164,11 @@ TEST(VulkanHardware, RenderGraphTwoPassBarriersAndRender) {
   EXPECT_EQ(compiled.barriers_per_pass[1][0].image, target_b.image());
 
   // Execute: two draws, one per pass, through the graph executor.
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool command_pool = pool_result.value();
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), command_pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer command_buffer = cb_result.value();
@@ -4182,9 +4182,9 @@ TEST(VulkanHardware, RenderGraphTwoPassBarriersAndRender) {
   passes[1].clear_values = clear_b.data();
   passes[1].clear_value_count = 1;
 
-  auto record = [](VkCommandBuffer cmd, const omnicpp::render::GraphPass& pass,
+  auto record = [](VkCommandBuffer cmd, const warploom::render::GraphPass& pass,
                    void* user_data) {
-    auto* pipe = static_cast<omnicpp::render::VulkanPipeline*>(user_data);
+    auto* pipe = static_cast<warploom::render::VulkanPipeline*>(user_data);
     VkViewport viewport{};
     viewport.width = static_cast<float>(pass.width);
     viewport.height = static_cast<float>(pass.height);
@@ -4204,7 +4204,7 @@ TEST(VulkanHardware, RenderGraphTwoPassBarriersAndRender) {
   begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   ASSERT_EQ(vkBeginCommandBuffer(command_buffer, &begin), VK_SUCCESS);
-  omnicpp::render::execute_render_graph(command_buffer, passes, compiled, record);
+  warploom::render::execute_render_graph(command_buffer, passes, compiled, record);
   ASSERT_EQ(vkEndCommandBuffer(command_buffer), VK_SUCCESS);
 
   VkFenceCreateInfo fence_info{};
@@ -4219,7 +4219,7 @@ TEST(VulkanHardware, RenderGraphTwoPassBarriersAndRender) {
   ASSERT_EQ(vkWaitForFences(context.device(), 1, &fence, VK_TRUE, UINT64_MAX), VK_SUCCESS);
 
   // Both targets must hold rendered triangle content.
-  for (const omnicpp::render::VulkanOffscreenTarget* target : {&target_a, &target_b}) {
+  for (const warploom::render::VulkanOffscreenTarget* target : {&target_a, &target_b}) {
     const auto readback = readback_swapchain_image(
         context.physical_device(), context.device(), context.graphics_queue(),
         static_cast<std::uint32_t>(context.queue_families().graphics_family),
@@ -4245,25 +4245,25 @@ TEST(VulkanHardware, RenderGraphTwoPassBarriersAndRender) {
 
 TEST(VulkanHardware, ParallelRecorderMultithreadedBands) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppParallelRecorderTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomParallelRecorderTest", true).is_ok());
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   constexpr std::uint32_t kWidth = 320;
   constexpr std::uint32_t kHeight = 256; // divisible by band count
   constexpr std::uint32_t kBandCount = 4;
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, kWidth, kHeight, &allocator).is_ok());
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
                                               shader_dir + "/triangle.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
@@ -4275,7 +4275,7 @@ TEST(VulkanHardware, ParallelRecorderMultithreadedBands) {
 
   // Record 4 bands on 4 threads; each band draws the full-width triangle
   // clipped to its scissor (the geometry spans the whole viewport vertically).
-  omnicpp::render::VulkanParallelRecorder recorder;
+  warploom::render::VulkanParallelRecorder recorder;
   ASSERT_TRUE(recorder.initialize(
       context.device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family),
@@ -4300,11 +4300,11 @@ TEST(VulkanHardware, ParallelRecorderMultithreadedBands) {
   EXPECT_EQ(secondaries.value().size(), kBandCount);
 
   // Execute secondaries inside one primary buffer and render pass.
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool command_pool = pool_result.value();
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), command_pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer command_buffer = cb_result.value();
@@ -4371,12 +4371,12 @@ TEST(VulkanHardware, ParallelRecorderMultithreadedBands) {
 // interleaving pressure to surface latent data races.
 TEST(VulkanHardware, ParallelRecorderContentionStress) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppParallelStressTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomParallelStressTest", true).is_ok());
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   constexpr std::uint32_t kWidth = 256;
@@ -4385,14 +4385,14 @@ TEST(VulkanHardware, ParallelRecorderContentionStress) {
   const std::uint32_t band_count =
       static_cast<std::uint32_t>(std::max(8U, std::thread::hardware_concurrency() * 2U));
 
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, kWidth, kHeight, &allocator).is_ok());
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
                                               shader_dir + "/triangle.vert.spv", "vertex").is_ok());
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
@@ -4402,7 +4402,7 @@ TEST(VulkanHardware, ParallelRecorderContentionStress) {
       context.device(), target.render_pass(), target.format(),
       pipeline.pipeline_layout(), false, false, false).is_ok());
 
-  omnicpp::render::VulkanParallelRecorder recorder;
+  warploom::render::VulkanParallelRecorder recorder;
   ASSERT_TRUE(recorder.initialize(
       context.device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family),
@@ -4410,7 +4410,7 @@ TEST(VulkanHardware, ParallelRecorderContentionStress) {
 
   // Exercise both execution backends: persistent job-system workers (the
   // allocation-free frame path) and ad-hoc threads (the fallback).
-  omnicpp::core::JobSystem jobs;
+  warploom::core::JobSystem jobs;
   ASSERT_TRUE(jobs.initialize());
   recorder.set_job_system(&jobs);
   auto record_frame = [&](int wave) {
@@ -4433,11 +4433,11 @@ TEST(VulkanHardware, ParallelRecorderContentionStress) {
     return secondaries;
   };
 
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool command_pool = pool_result.value();
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), command_pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer command_buffer = cb_result.value();
@@ -4502,10 +4502,10 @@ TEST(VulkanHardware, ParallelRecorderContentionStress) {
 
 TEST(VulkanHardware, OffscreenTriangleReadback) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppOffscreenTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomOffscreenTest", true).is_ok());
 
   // Feature negotiation smoke assertions for this driver stack.
   EXPECT_TRUE(context.has_synchronization2());
@@ -4513,19 +4513,19 @@ TEST(VulkanHardware, OffscreenTriangleReadback) {
   EXPECT_GT(context.device_properties().timestamp_period_ns, 0.0f);
 
   // The offscreen target now allocates through the block sub-allocator.
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
 
   constexpr std::uint32_t width = 640;
   constexpr std::uint32_t height = 480;
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, width, height,
                             &allocator).is_ok());
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
 #ifdef WARPLOOM_TEST_SHADER_DIR
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_file(context.device(), shader_dir + "/triangle.vert.spv").is_ok());
@@ -4537,11 +4537,11 @@ TEST(VulkanHardware, OffscreenTriangleReadback) {
   GTEST_SKIP() << "Test shaders were not compiled";
 #endif
 
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool command_pool = pool_result.value();
-  const auto command_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto command_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), command_pool);
   ASSERT_TRUE(command_result.is_ok());
   const VkCommandBuffer command_buffer = command_result.value();
@@ -4635,7 +4635,7 @@ TEST(VulkanHardware, OffscreenTriangleReadback) {
 
 TEST(VulkanHardware, SwapchainRecreationStress) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(VK_USE_PLATFORM_XCB_KHR)
-  if (!omnicpp::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
+  if (!warploom::render::VulkanContext::is_available()) GTEST_SKIP() << "Vulkan loader unavailable";
   const char* display_name = std::getenv("DISPLAY");
   if (!display_name) GTEST_SKIP() << "DISPLAY is unavailable";
 
@@ -4658,14 +4658,14 @@ TEST(VulkanHardware, SwapchainRecreationStress) {
   xcb_map_window(connection, window);
   xcb_flush(connection);
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppRecreationTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomRecreationTest", true).is_ok());
 
   VkSurfaceKHR surface = VK_NULL_HANDLE;
-  omnicpp::render::SurfaceCreateInfo surface_info;
+  warploom::render::SurfaceCreateInfo surface_info;
   surface_info.display = connection;
   surface_info.window = reinterpret_cast<void*>(static_cast<std::uintptr_t>(window));
-  auto surface_result = omnicpp::render::create_platform_surface(context.instance(), surface_info, surface);
+  auto surface_result = warploom::render::create_platform_surface(context.instance(), surface_info, surface);
   if (!surface_result.is_ok()) {
     context.cleanup();
     xcb_destroy_window(connection, window);
@@ -4674,20 +4674,20 @@ TEST(VulkanHardware, SwapchainRecreationStress) {
   }
   ASSERT_NE(surface, VK_NULL_HANDLE);
 
-  omnicpp::render::VulkanSwapchain swapchain;
+  warploom::render::VulkanSwapchain swapchain;
   ASSERT_TRUE(swapchain.create(context.device(), context.physical_device(), surface, {}).is_ok());
   ASSERT_TRUE(swapchain.create_image_views(context.device()).is_ok());
 
-  const VkFormat depth_format = omnicpp::render::VulkanRenderPass::find_supported_depth_format(context.physical_device());
+  const VkFormat depth_format = warploom::render::VulkanRenderPass::find_supported_depth_format(context.physical_device());
   ASSERT_NE(depth_format, VK_FORMAT_UNDEFINED);
-  omnicpp::render::VulkanRenderPass render_pass;
+  warploom::render::VulkanRenderPass render_pass;
   ASSERT_TRUE(render_pass.create(context.device(), swapchain.image_format(), depth_format).is_ok());
   ASSERT_TRUE(render_pass.create_depth_resources(context.device(), context.physical_device(), depth_format,
                                                  swapchain.extent_width(), swapchain.extent_height()).is_ok());
   ASSERT_TRUE(render_pass.create_framebuffers(context.device(), swapchain.image_views(),
                                               swapchain.extent_width(), swapchain.extent_height()).is_ok());
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
 #ifdef WARPLOOM_TEST_SHADER_DIR
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(), shader_dir + "/triangle.vert.spv", "vertex").is_ok());
@@ -4700,7 +4700,7 @@ TEST(VulkanHardware, SwapchainRecreationStress) {
   GTEST_SKIP() << "Test shaders were not compiled";
 #endif
 
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   renderer.set_timeline_pacing(context.has_timeline_semaphores());
   ASSERT_TRUE(renderer.initialize(context, swapchain, render_pass).is_ok());
   renderer.set_synchronization2(context.has_synchronization2());
@@ -4759,17 +4759,17 @@ TEST(VulkanHardware, SwapchainRecreationStress) {
 //! vkAllocateMemory calls.
 TEST(VulkanRenderPass, DepthResourceRecreateReleasesTheOldAttachment) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppDepthRecreate", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomDepthRecreate", true).is_ok());
 
   const VkFormat depth_format =
-      omnicpp::render::VulkanRenderPass::find_supported_depth_format(
+      warploom::render::VulkanRenderPass::find_supported_depth_format(
           context.physical_device());
   ASSERT_NE(depth_format, VK_FORMAT_UNDEFINED);
-  omnicpp::render::VulkanRenderPass render_pass;
+  warploom::render::VulkanRenderPass render_pass;
   ASSERT_TRUE(render_pass
                   .create(context.device(), VK_FORMAT_B8G8R8A8_UNORM,
                           depth_format)
@@ -4826,24 +4826,24 @@ TEST(VulkanSwapchain, ChooseSurfaceFormatPrefersSRGB) {
   std::vector<VkSurfaceFormatKHR> formats = {
       VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
       VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}};
-  const auto chosen = omnicpp::render::VulkanSwapchain::choose_surface_format(formats);
+  const auto chosen = warploom::render::VulkanSwapchain::choose_surface_format(formats);
   EXPECT_EQ(chosen.format, VK_FORMAT_B8G8R8A8_SRGB);
 #else
   std::vector<VkFormat> formats = {50, 44};
-  const auto chosen = omnicpp::render::VulkanSwapchain::choose_surface_format(formats);
+  const auto chosen = warploom::render::VulkanSwapchain::choose_surface_format(formats);
   EXPECT_EQ(chosen, static_cast<VkFormat>(50));
 #endif
 }
 
 TEST(VulkanSwapchain, ChoosePresentModeReturnsValidValue) {
   std::vector<VkPresentModeKHR> modes = {VK_PRESENT_MODE_FIFO_KHR, VK_PRESENT_MODE_MAILBOX_KHR};
-  const auto chosen = omnicpp::render::VulkanSwapchain::choose_present_mode(modes, true);
+  const auto chosen = warploom::render::VulkanSwapchain::choose_present_mode(modes, true);
   EXPECT_EQ(chosen, VK_PRESENT_MODE_FIFO_KHR);
 }
 
 TEST(VulkanSwapchain, ChoosePresentModeMailboxWithoutVsync) {
   std::vector<VkPresentModeKHR> modes = {VK_PRESENT_MODE_FIFO_KHR, VK_PRESENT_MODE_MAILBOX_KHR};
-  const auto chosen = omnicpp::render::VulkanSwapchain::choose_present_mode(modes, false);
+  const auto chosen = warploom::render::VulkanSwapchain::choose_present_mode(modes, false);
   EXPECT_EQ(chosen, VK_PRESENT_MODE_MAILBOX_KHR);
 }
 
@@ -4852,7 +4852,7 @@ TEST(VulkanSwapchain, ChooseExtentClampsToCapabilities) {
   caps.minImageExtent = {100, 100};
   caps.maxImageExtent = {2000, 2000};
   caps.currentExtent = {std::numeric_limits<std::uint32_t>::max(), std::numeric_limits<std::uint32_t>::max()};
-  const auto extent = omnicpp::render::VulkanSwapchain::choose_extent(caps, 5000, 5000);
+  const auto extent = warploom::render::VulkanSwapchain::choose_extent(caps, 5000, 5000);
   EXPECT_EQ(extent.width, 2000u);
   EXPECT_EQ(extent.height, 2000u);
 }
@@ -4860,32 +4860,32 @@ TEST(VulkanSwapchain, ChooseExtentClampsToCapabilities) {
 TEST(VulkanSwapchain, ChooseExtentUsesCurrentExtentWhenDefined) {
   VkSurfaceCapabilitiesKHR caps{};
   caps.currentExtent = {1920, 1080};
-  const auto extent = omnicpp::render::VulkanSwapchain::choose_extent(caps, 800, 600);
+  const auto extent = warploom::render::VulkanSwapchain::choose_extent(caps, 800, 600);
   EXPECT_EQ(extent.width, 1920u);
   EXPECT_EQ(extent.height, 1080u);
 }
 
 TEST(VulkanSwapchain, CreateFailsWithoutDevice) {
-  omnicpp::render::VulkanSwapchain swapchain;
+  warploom::render::VulkanSwapchain swapchain;
   auto result = swapchain.create(nullptr, nullptr, nullptr, {});
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanSwapchain, CreateImageViewsFailsWithoutImages) {
-  omnicpp::render::VulkanSwapchain swapchain;
+  warploom::render::VulkanSwapchain swapchain;
   auto result = swapchain.create_image_views(nullptr);
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanSwapchain, CleanupIsIdempotent) {
-  omnicpp::render::VulkanSwapchain swapchain;
+  warploom::render::VulkanSwapchain swapchain;
   swapchain.cleanup(nullptr);
   swapchain.cleanup(nullptr);
   EXPECT_FALSE(swapchain.is_valid());
 }
 
 TEST(VulkanSwapchain, RecreateFailsWithZeroDimensions) {
-  omnicpp::render::VulkanSwapchain swapchain;
+  warploom::render::VulkanSwapchain swapchain;
   auto result = swapchain.recreate(nullptr, nullptr, nullptr, 0, 0);
   EXPECT_FALSE(result.is_ok());
 }
@@ -4895,37 +4895,37 @@ TEST(VulkanSwapchain, RecreateFailsWithZeroDimensions) {
 // ============================================================================
 
 TEST(VulkanRenderPass, CreateFailsWithoutDevice) {
-  omnicpp::render::VulkanRenderPass rp;
+  warploom::render::VulkanRenderPass rp;
   auto result = rp.create(nullptr, static_cast<VkFormat>(43), static_cast<VkFormat>(100));
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanRenderPass, FramebufferCountZeroBeforeCreation) {
-  omnicpp::render::VulkanRenderPass rp;
+  warploom::render::VulkanRenderPass rp;
   EXPECT_EQ(rp.framebuffer_count(), 0u);
 }
 
 TEST(VulkanRenderPass, CleanupIsIdempotent) {
-  omnicpp::render::VulkanRenderPass rp;
+  warploom::render::VulkanRenderPass rp;
   rp.cleanup(nullptr);
   rp.cleanup(nullptr);
   EXPECT_EQ(rp.render_pass(), nullptr);
 }
 
 TEST(VulkanRenderPass, FindSupportedDepthFormatReturnsUndefinedWithoutDevice) {
-  const auto format = omnicpp::render::VulkanRenderPass::find_supported_depth_format(nullptr);
+  const auto format = warploom::render::VulkanRenderPass::find_supported_depth_format(nullptr);
   EXPECT_EQ(format, VK_FORMAT_UNDEFINED);
 }
 
 TEST(VulkanOffscreenTarget, RejectsInvalidDimensions) {
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   auto result = target.create(nullptr, nullptr, VK_FORMAT_UNDEFINED, 0, 0);
   EXPECT_FALSE(result.is_ok());
   EXPECT_FALSE(target.is_valid());
 }
 
 TEST(VulkanOffscreenTarget, CleanupIsIdempotent) {
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   target.cleanup(nullptr);
   target.cleanup(nullptr);
   EXPECT_FALSE(target.is_valid());
@@ -4936,33 +4936,33 @@ TEST(VulkanOffscreenTarget, CleanupIsIdempotent) {
 // ============================================================================
 
 TEST(VulkanPipeline, LoadShaderFailsWithEmptyData) {
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   auto result = pipeline.load_shader(nullptr, nullptr, 0);
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanPipeline, LoadShaderFromBytesFailsWithEmpty) {
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   std::vector<std::uint8_t> empty;
   auto result = pipeline.load_shader_from_bytes(nullptr, empty);
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanPipeline, LoadShaderFromBytesFailsWithOddSize) {
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   std::vector<std::uint8_t> bad(5, 0);
   auto result = pipeline.load_shader_from_bytes(nullptr, bad);
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanPipeline, CreateGraphicsPipelineFailsWithoutDevice) {
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   auto result = pipeline.create_graphics_pipeline(nullptr, nullptr, static_cast<VkFormat>(43));
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanPipeline, CleanupIsIdempotent) {
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   pipeline.cleanup(nullptr);
   pipeline.cleanup(nullptr);
   EXPECT_EQ(pipeline.pipeline(), nullptr);
@@ -4970,13 +4970,13 @@ TEST(VulkanPipeline, CleanupIsIdempotent) {
 }
 
 TEST(VulkanPipeline, LoadShaderFileFailsWithNonexistentFile) {
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   auto result = pipeline.load_shader_file(nullptr, "/nonexistent/shader.spv");
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanPipeline, LoadShaderStageFailsWithNullDevice) {
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   EXPECT_FALSE(pipeline.load_shader_stage_file(nullptr, "/nonexistent.spv", "vertex").is_ok());
   EXPECT_FALSE(pipeline.has_stage("vertex"));
   EXPECT_FALSE(pipeline.has_stage("unknown"));
@@ -4984,8 +4984,8 @@ TEST(VulkanPipeline, LoadShaderStageFailsWithNullDevice) {
 }
 
 TEST(VulkanRenderer, ResyncFailsBeforeInit) {
-  omnicpp::render::VulkanSwapchain swapchain;
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanSwapchain swapchain;
+  warploom::render::VulkanRenderer renderer;
   EXPECT_FALSE(renderer.resync_for_swapchain(swapchain, nullptr).is_ok());
 }
 
@@ -4994,62 +4994,62 @@ TEST(VulkanRenderer, ResyncFailsBeforeInit) {
 // ============================================================================
 
 TEST(VulkanRenderer, InitializeFailsWithoutContext) {
-  omnicpp::render::VulkanContext ctx;
-  omnicpp::render::VulkanSwapchain swapchain;
-  omnicpp::render::VulkanRenderPass render_pass;
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanContext ctx;
+  warploom::render::VulkanSwapchain swapchain;
+  warploom::render::VulkanRenderPass render_pass;
+  warploom::render::VulkanRenderer renderer;
   auto result = renderer.initialize(ctx, swapchain, render_pass);
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanRenderer, IsFalseBeforeInit) {
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   EXPECT_FALSE(renderer.is_initialized());
   EXPECT_EQ(renderer.frame_count(), 0u);
 }
 
 TEST(VulkanRenderer, RejectsZeroFramesInFlight) {
-  omnicpp::render::VulkanContext context;
-  omnicpp::render::VulkanSwapchain swapchain;
-  omnicpp::render::VulkanRenderPass render_pass;
-  omnicpp::render::VulkanRenderer renderer;
-  omnicpp::render::RendererConfig config;
+  warploom::render::VulkanContext context;
+  warploom::render::VulkanSwapchain swapchain;
+  warploom::render::VulkanRenderPass render_pass;
+  warploom::render::VulkanRenderer renderer;
+  warploom::render::RendererConfig config;
   config.max_frames_in_flight = 0;
   auto result = renderer.initialize(context, swapchain, render_pass, config);
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanRenderer, CleanupIsIdempotent) {
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   renderer.cleanup(nullptr);
   renderer.cleanup(nullptr);
   EXPECT_FALSE(renderer.is_initialized());
 }
 
 TEST(VulkanRenderer, CreateCommandPoolFailsWithoutDevice) {
-  auto result = omnicpp::render::VulkanRenderer::create_command_pool(nullptr, 0);
+  auto result = warploom::render::VulkanRenderer::create_command_pool(nullptr, 0);
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanRenderer, AllocateCommandBufferFailsWithoutDevice) {
-  auto result = omnicpp::render::VulkanRenderer::allocate_command_buffer(nullptr, nullptr);
+  auto result = warploom::render::VulkanRenderer::allocate_command_buffer(nullptr, nullptr);
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanRenderer, BeginFrameFailsBeforeInit) {
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   auto result = renderer.begin_frame();
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanRenderer, EndFrameFailsBeforeInit) {
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   auto result = renderer.end_frame();
   EXPECT_FALSE(result.is_ok());
 }
 
 TEST(VulkanRenderer, WaitIdleIsSafeBeforeInit) {
-  omnicpp::render::VulkanRenderer renderer;
+  warploom::render::VulkanRenderer renderer;
   renderer.wait_idle();
 }
 
@@ -5058,7 +5058,7 @@ TEST(VulkanRenderer, WaitIdleIsSafeBeforeInit) {
 // ============================================================================
 
 TEST(FrameResources, CleanupIsIdempotent) {
-  omnicpp::render::FrameResources frame;
+  warploom::render::FrameResources frame;
   frame.cleanup(nullptr);
   frame.cleanup(nullptr);
   EXPECT_EQ(frame.command_buffer, nullptr);
@@ -5069,7 +5069,7 @@ TEST(FrameResources, CleanupIsIdempotent) {
 // ============================================================================
 
 TEST(SwapchainConfig, DefaultValues) {
-  omnicpp::render::SwapchainConfig config;
+  warploom::render::SwapchainConfig config;
   EXPECT_EQ(config.width, 800u);
   EXPECT_EQ(config.height, 600u);
   EXPECT_TRUE(config.vsync);
@@ -5077,7 +5077,7 @@ TEST(SwapchainConfig, DefaultValues) {
 }
 
 TEST(RendererConfig, DefaultValues) {
-  omnicpp::render::RendererConfig config;
+  warploom::render::RendererConfig config;
   EXPECT_EQ(config.max_frames_in_flight, 2u);
   EXPECT_FLOAT_EQ(config.clear_color_r, 0.0f);
   EXPECT_FLOAT_EQ(config.clear_color_a, 1.0f);
@@ -5089,20 +5089,20 @@ TEST(RendererConfig, DefaultValues) {
 // ============================================================================
 
 TEST(SoftwareRasterizer, ClearSetsBlack) {
-  omnicpp::render::SoftwareRasterizer rast(64, 64);
+  warploom::render::SoftwareRasterizer rast(64, 64);
   rast.clear(0xFF000000);
   EXPECT_EQ(rast.get_pixel(0, 0), 0xFF000000u);
   EXPECT_EQ(rast.get_pixel(32, 32), 0xFF000000u);
 }
 
 TEST(SoftwareRasterizer, ClearSetsDepth) {
-  omnicpp::render::SoftwareRasterizer rast(8, 8);
+  warploom::render::SoftwareRasterizer rast(8, 8);
   rast.clear(0xFF000000, 0.5f);
   EXPECT_FLOAT_EQ(rast.depth_data()[0], 0.5f);
 }
 
 TEST(SoftwareRasterizer, DrawTriangleFillsPixels) {
-  omnicpp::render::SoftwareRasterizer rast(100, 100);
+  warploom::render::SoftwareRasterizer rast(100, 100);
   rast.clear(0xFF000000);
   rast.draw_triangle(10, 10, 0, 0xFFFF0000, 90, 10, 0, 0xFF00FF00, 50, 90, 0, 0xFF0000FF);
   EXPECT_NE(rast.get_pixel(50, 50), 0xFF000000u);
@@ -5111,8 +5111,8 @@ TEST(SoftwareRasterizer, DrawTriangleFillsPixels) {
 }
 
 TEST(SoftwareRasterizer, DrawTriangleIsDeterministic) {
-  omnicpp::render::SoftwareRasterizer rast1(64, 64);
-  omnicpp::render::SoftwareRasterizer rast2(64, 64);
+  warploom::render::SoftwareRasterizer rast1(64, 64);
+  warploom::render::SoftwareRasterizer rast2(64, 64);
   rast1.clear(0xFF000000);
   rast2.clear(0xFF000000);
   rast1.draw_triangle(10, 10, 0, 0xFFFF0000, 50, 10, 0, 0xFF00FF00, 30, 50, 0, 0xFF0000FF);
@@ -5121,7 +5121,7 @@ TEST(SoftwareRasterizer, DrawTriangleIsDeterministic) {
 }
 
 TEST(SoftwareRasterizer, DepthBufferClosesFarther) {
-  omnicpp::render::SoftwareRasterizer rast(100, 100);
+  warploom::render::SoftwareRasterizer rast(100, 100);
   rast.clear(0xFF000000);
   rast.draw_triangle(20, 20, 0.5f, 0xFF0000FF, 80, 20, 0.5f, 0xFF0000FF, 50, 80, 0.5f, 0xFF0000FF);
   rast.draw_triangle(20, 20, 0.1f, 0xFFFF0000, 80, 20, 0.1f, 0xFFFF0000, 50, 80, 0.1f, 0xFFFF0000);
@@ -5130,8 +5130,8 @@ TEST(SoftwareRasterizer, DepthBufferClosesFarther) {
 }
 
 TEST(SoftwareRasterizer, BothWindingOrdersRasterize) {
-  omnicpp::render::SoftwareRasterizer rast1(100, 100);
-  omnicpp::render::SoftwareRasterizer rast2(100, 100);
+  warploom::render::SoftwareRasterizer rast1(100, 100);
+  warploom::render::SoftwareRasterizer rast2(100, 100);
   rast1.clear(0xFF000000);
   rast2.clear(0xFF000000);
   rast1.draw_triangle(50, 10, 0, 0xFFFF0000, 90, 90, 0, 0xFF00FF00, 10, 90, 0, 0xFF0000FF);
@@ -5141,7 +5141,7 @@ TEST(SoftwareRasterizer, BothWindingOrdersRasterize) {
 }
 
 TEST(SoftwareRasterizer, FrameHashChangesWithContent) {
-  omnicpp::render::SoftwareRasterizer rast(32, 32);
+  warploom::render::SoftwareRasterizer rast(32, 32);
   rast.clear(0xFF000000);
   std::uint64_t hash_empty = rast.frame_hash();
   rast.draw_triangle(5, 5, 0, 0xFFFF0000, 25, 5, 0, 0xFF00FF00, 15, 25, 0, 0xFF0000FF);
@@ -5149,12 +5149,12 @@ TEST(SoftwareRasterizer, FrameHashChangesWithContent) {
 }
 
 TEST(SoftwareRasterizer, WidthAndHeightAreCorrect) {
-  omnicpp::render::SoftwareRasterizer rast(320, 240);
+  warploom::render::SoftwareRasterizer rast(320, 240);
   EXPECT_EQ(rast.width(), 320u);
   EXPECT_EQ(rast.height(), 240u);
 }
 
 TEST(SoftwareRasterizer, GetPixelOutOfBoundsReturnsZero) {
-  omnicpp::render::SoftwareRasterizer rast(10, 10);
+  warploom::render::SoftwareRasterizer rast(10, 10);
   EXPECT_EQ(rast.get_pixel(100, 100), 0u);
 }

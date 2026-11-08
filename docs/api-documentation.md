@@ -1,4 +1,4 @@
-# OmniCpp Game Engine - API Documentation
+# Warploom Game Engine - API Documentation
 
 ## Table of Contents
 - [Engine API](#engine-api)
@@ -27,7 +27,7 @@ Initialize the engine and all subsystems.
 
 **Example**:
 ```cpp
-omnicpp::IEngine* engine = omnicpp::create_engine(config);
+warploom::IEngine* engine = warploom::create_engine(config);
 if (!engine->initialize()) {
     std::cerr << "Failed to initialize engine" << std::endl;
     return -1;
@@ -41,7 +41,7 @@ Shutdown the engine and cleanup all resources.
 **Example**:
 ```cpp
 engine->shutdown();
-omnicpp::destroy_engine(engine);
+warploom::destroy_engine(engine);
 ```
 
 ##### `is_initialized() -> bool`
@@ -999,7 +999,7 @@ The engine uses C++ exceptions for error handling.
 ```cpp
 try {
     engine->initialize();
-} catch (const omnicpp::EngineException& e) {
+} catch (const warploom::EngineException& e) {
     std::cerr << "Engine error: " << e.what() << std::endl;
 }
 ```

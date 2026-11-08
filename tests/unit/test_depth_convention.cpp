@@ -9,7 +9,7 @@
 #include "warploom/render/vulkan_hiz_pyramid.hpp"
 
 TEST(DepthConvention, MatchesCanonicalProjection) {
-  using omnicpp::render::depth::ndc_from_view_distance;
+  using warploom::render::depth::ndc_from_view_distance;
   constexpr float near_plane = 0.1f;
   constexpr float far_plane = 100.0f;
 
@@ -20,7 +20,7 @@ TEST(DepthConvention, MatchesCanonicalProjection) {
 }
 
 TEST(DepthConvention, SphereNearestDepthIsConservative) {
-  using omnicpp::render::depth::sphere_nearest_depth;
+  using warploom::render::depth::sphere_nearest_depth;
   const float front = sphere_nearest_depth(-10.0f, 1.0f, 0.1f, 100.0f);
   const float center = sphere_nearest_depth(-10.0f, 0.0f, 0.1f, 100.0f);
   EXPECT_LT(front, center);
@@ -28,7 +28,7 @@ TEST(DepthConvention, SphereNearestDepthIsConservative) {
 }
 
 TEST(HiZPyramid, ComputesRuntimeMipChain) {
-  using omnicpp::render::VulkanHiZPyramid;
+  using warploom::render::VulkanHiZPyramid;
   EXPECT_EQ(VulkanHiZPyramid::mip_levels_for_extent(0, 64), 0U);
   EXPECT_EQ(VulkanHiZPyramid::mip_levels_for_extent(1, 1), 1U);
   EXPECT_EQ(VulkanHiZPyramid::mip_levels_for_extent(256, 256), 9U);

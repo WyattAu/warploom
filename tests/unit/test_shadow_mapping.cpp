@@ -37,12 +37,12 @@
 
 namespace {
 
-using omnicpp::render::PbrMaterialData;
-using omnicpp::render::SceneMatrix;
-using omnicpp::render::SceneMesh;
-using omnicpp::render::ScenePbrObject;
-using omnicpp::render::VulkanPbrScene;
-using omnicpp::render::scene_identity_matrix;
+using warploom::render::PbrMaterialData;
+using warploom::render::SceneMatrix;
+using warploom::render::SceneMesh;
+using warploom::render::ScenePbrObject;
+using warploom::render::VulkanPbrScene;
+using warploom::render::scene_identity_matrix;
 
 SceneMatrix make_perspective(float fov_y_deg, float aspect, float zn, float zf) {
   SceneMatrix m = scene_identity_matrix();
@@ -69,8 +69,8 @@ SceneMatrix make_translation(float x, float y, float z) {
 }
 
 struct CubeUpload {
-  omnicpp::render::Allocation va{};
-  omnicpp::render::Allocation ia{};
+  warploom::render::Allocation va{};
+  warploom::render::Allocation ia{};
   SceneMesh mesh{};
 };
 
@@ -101,11 +101,11 @@ struct SolidTexture {
   VkImage image{VK_NULL_HANDLE};
   VkImageView view{VK_NULL_HANDLE};
   VkSampler sampler{VK_NULL_HANDLE};
-  omnicpp::render::Allocation allocation{};
+  warploom::render::Allocation allocation{};
 };
 
 bool make_solid_texture(VkDevice dev, VkPhysicalDevice pd, VkQueue q,
-    uint32_t family, omnicpp::render::VulkanMemoryAllocator& alloc,
+    uint32_t family, warploom::render::VulkanMemoryAllocator& alloc,
     const std::array<uint8_t,4>& rgba, SolidTexture& out) {
   out = {};
   SolidTexture t{};
@@ -128,7 +128,7 @@ bool make_solid_texture(VkDevice dev, VkPhysicalDevice pd, VkQueue q,
   auto mem = alloc.bind_image(t.image, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   if (!mem.is_ok()) return fail();
   t.allocation = mem.value();
-  omnicpp::render::VulkanFrameUploadArena arena;
+  warploom::render::VulkanFrameUploadArena arena;
   if (!arena.initialize(dev, pd, family, 1U, 1U<<20).is_ok()) return fail();
   if (!arena.begin_frame(0).is_ok()) return fail();
   auto span = arena.acquire(4);
@@ -153,7 +153,7 @@ bool make_solid_texture(VkDevice dev, VkPhysicalDevice pd, VkQueue q,
   return true;
 }
 
-void destroy_solid(VkDevice d, omnicpp::render::VulkanMemoryAllocator& a, SolidTexture& t) {
+void destroy_solid(VkDevice d, warploom::render::VulkanMemoryAllocator& a, SolidTexture& t) {
   if (t.sampler) vkDestroySampler(d, t.sampler, nullptr);
   if (t.view) vkDestroyImageView(d, t.view, nullptr);
   if (t.allocation.is_valid()) a.destroy_allocation(t.allocation);
@@ -165,9 +165,9 @@ void destroy_solid(VkDevice d, omnicpp::render::VulkanMemoryAllocator& a, SolidT
 // Shadow harness
 // ============================================================================
 struct ShadowHarness {
-  omnicpp::render::VulkanContext ctx;
-  omnicpp::render::VulkanMemoryAllocator alloc;
-  omnicpp::render::VulkanDescriptorManager desc;
+  warploom::render::VulkanContext ctx;
+  warploom::render::VulkanMemoryAllocator alloc;
+  warploom::render::VulkanDescriptorManager desc;
   VkDescriptorSetLayout mesh_layout{};
   VkDescriptorSetLayout tex_layout{};
   VkDescriptorSetLayout mat_layout{};
@@ -175,15 +175,15 @@ struct ShadowHarness {
   VkDescriptorSet mat_set{};
   SolidTexture white;
   CubeUpload cube;
-  omnicpp::render::VulkanOffscreenTarget target;
-  omnicpp::render::VulkanPipeline main_pipe;  // pbr_shadow (4-set)
-  omnicpp::render::VulkanPipeline shadow_pipe;
-  omnicpp::render::Allocation mat_buf_alloc{};
-  omnicpp::render::Allocation shadow_ubo_alloc{};
+  warploom::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanPipeline main_pipe;  // pbr_shadow (4-set)
+  warploom::render::VulkanPipeline shadow_pipe;
+  warploom::render::Allocation mat_buf_alloc{};
+  warploom::render::Allocation shadow_ubo_alloc{};
   VkDescriptorSet shadow_set{};
   VkDescriptorSetLayout shadow_layout{};
   VkImage shadow_img{};
-  omnicpp::render::Allocation shadow_mem{};
+  warploom::render::Allocation shadow_mem{};
   VkImageView shadow_depth_view{};
   VkImageView shadow_sample_view{};
   VkSampler shadow_sampler{};
@@ -378,10 +378,10 @@ struct ShadowHarness {
     std::memcpy(mat_buf_alloc.mapped, m, n*sizeof(PbrMaterialData));
   }
 
-  omnicpp_test::ReadbackResult render(const VulkanPbrScene& scene) {
-    auto pr = omnicpp::render::VulkanRenderer::create_command_pool(ctx.device(), qf);
+  warploom_test::ReadbackResult render(const VulkanPbrScene& scene) {
+    auto pr = warploom::render::VulkanRenderer::create_command_pool(ctx.device(), qf);
     if (!pr.is_ok()) return {};
-    auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(ctx.device(), pr.value());
+    auto cr = warploom::render::VulkanRenderer::allocate_command_buffer(ctx.device(), pr.value());
     if (!cr.is_ok()) { vkDestroyCommandPool(ctx.device(), pr.value(), nullptr); return {}; }
     VkCommandBuffer cb = cr.value();
     VkFenceCreateInfo fi{}; fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -397,8 +397,8 @@ struct ShadowHarness {
     // barrier via compile_graph, and records both passes through
     // execute_graph. The hand-sequenced version of this test proved the
     // same pixels; this path proves the graph produces identical output.
-    omnicpp::render::VulkanRenderer frame_renderer;
-    omnicpp::render::VulkanRenderer::PbrFrameTargets targets{};
+    warploom::render::VulkanRenderer frame_renderer;
+    warploom::render::VulkanRenderer::PbrFrameTargets targets{};
     targets.shadow_render_pass = shadow_rp;
     targets.shadow_framebuffer = shadow_fb;
     targets.shadow_image = shadow_img;
@@ -429,7 +429,7 @@ struct ShadowHarness {
     vkWaitForFences(ctx.device(), 1, &fence, VK_TRUE, UINT64_MAX);
     vkDestroyFence(ctx.device(), fence, nullptr);
     vkDestroyCommandPool(ctx.device(), pr.value(), nullptr);
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         ctx.physical_device(), ctx.device(), ctx.graphics_queue(),
         qf, target.image(), target.format(), 256, 256,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,

@@ -1,6 +1,6 @@
 # License
 
-OmniCppLib is licensed under the Apache License 2.0.
+WarploomLib is licensed under the Apache License 2.0.
 
 ```
 Apache License

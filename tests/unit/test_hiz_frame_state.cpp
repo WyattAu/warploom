@@ -7,14 +7,14 @@
 #include "warploom/render/vulkan_render_graph.hpp"
 
 TEST(HiZFrameState, ConfiguresRuntimeExtentAndInvalidatesFirstFrame) {
-  omnicpp::render::VulkanHiZFrameState state;
+  warploom::render::VulkanHiZFrameState state;
   ASSERT_TRUE(state.configure(640U, 480U, 32U).is_ok());
   EXPECT_EQ(state.pyramid_width(), 20U);
   EXPECT_EQ(state.pyramid_height(), 15U);
   EXPECT_EQ(state.levels(), 5U);
   EXPECT_FALSE(state.has_previous_frame());
-  EXPECT_TRUE(omnicpp::render::has_hiz_invalidation(
-      state.invalidation(), omnicpp::render::HiZInvalidation::resize));
+  EXPECT_TRUE(warploom::render::has_hiz_invalidation(
+      state.invalidation(), warploom::render::HiZInvalidation::resize));
 
   const auto first = state.begin_frame();
   EXPECT_EQ(first.write_index, 0U);
@@ -23,7 +23,7 @@ TEST(HiZFrameState, ConfiguresRuntimeExtentAndInvalidatesFirstFrame) {
   state.complete_frame(first);
   EXPECT_TRUE(state.has_previous_frame());
   EXPECT_EQ(state.write_index(), 1U);
-  EXPECT_EQ(state.invalidation(), omnicpp::render::HiZInvalidation::none);
+  EXPECT_EQ(state.invalidation(), warploom::render::HiZInvalidation::none);
 
   const auto second = state.begin_frame();
   EXPECT_EQ(second.write_index, 1U);
@@ -34,7 +34,7 @@ TEST(HiZFrameState, ConfiguresRuntimeExtentAndInvalidatesFirstFrame) {
 }
 
 TEST(HiZFrameState, CameraAndProjectionChangesInvalidatePreviousDepth) {
-  omnicpp::render::VulkanHiZFrameState state;
+  warploom::render::VulkanHiZFrameState state;
   ASSERT_TRUE(state.configure(256U, 256U, 32U, 4U).is_ok());
   auto token = state.begin_frame();
   state.complete_frame(token);
@@ -42,21 +42,21 @@ TEST(HiZFrameState, CameraAndProjectionChangesInvalidatePreviousDepth) {
 
   state.mark_camera_cut();
   EXPECT_FALSE(state.has_previous_frame());
-  EXPECT_TRUE(omnicpp::render::has_hiz_invalidation(
-      state.invalidation(), omnicpp::render::HiZInvalidation::camera_cut));
+  EXPECT_TRUE(warploom::render::has_hiz_invalidation(
+      state.invalidation(), warploom::render::HiZInvalidation::camera_cut));
 
   state.mark_projection_change();
-  EXPECT_TRUE(omnicpp::render::has_hiz_invalidation(
-      state.invalidation(), omnicpp::render::HiZInvalidation::projection_change));
+  EXPECT_TRUE(warploom::render::has_hiz_invalidation(
+      state.invalidation(), warploom::render::HiZInvalidation::projection_change));
 
   const auto stale = state.begin_frame();
   state.complete_frame(stale);
   EXPECT_TRUE(state.has_previous_frame());
-  EXPECT_EQ(state.invalidation(), omnicpp::render::HiZInvalidation::none);
+  EXPECT_EQ(state.invalidation(), warploom::render::HiZInvalidation::none);
 }
 
 TEST(HiZFrameState, RejectsInvalidConfigurationAndStaleCompletion) {
-  omnicpp::render::VulkanHiZFrameState state;
+  warploom::render::VulkanHiZFrameState state;
   EXPECT_FALSE(state.configure(0U, 64U).is_ok());
   EXPECT_FALSE(state.configure(64U, 64U, 0U).is_ok());
   ASSERT_TRUE(state.configure(64U, 64U, 32U, 2U).is_ok());
@@ -73,7 +73,7 @@ TEST(HiZFrameState, RejectsInvalidConfigurationAndStaleCompletion) {
 }
 
 TEST(RenderGraph, CompilesPerMipImageUses) {
-  using namespace omnicpp::render;
+  using namespace warploom::render;
   const VkImage image = reinterpret_cast<VkImage>(static_cast<std::uintptr_t>(0x1234));
 
   GraphComputePass reduce_level_zero{};

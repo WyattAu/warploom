@@ -1,3 +1,3 @@
 """
-Unit tests for OmniCpp build system
+Unit tests for Warploom build system
 """

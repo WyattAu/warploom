@@ -3,13 +3,13 @@
 
 #include "warploom/render/vulkan_rt_query.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
 namespace warploom::render {
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 void VulkanRtQuery::get_properties(VkPhysicalDevice physical_device,
                                    RtSbtProperties& out) noexcept {
@@ -42,6 +42,6 @@ void VulkanRtQuery::get_properties(VkPhysicalDevice physical_device,
       ((out.handle_size + alignment - 1U) / alignment) * alignment;
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN
 
 }  // namespace warploom::render

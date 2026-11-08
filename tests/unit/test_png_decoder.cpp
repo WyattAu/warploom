@@ -22,9 +22,9 @@
 
 namespace {
 
-using omnicpp::asset::DecodedImage;
-using omnicpp::asset::decode_png;
-using omnicpp::core::RuntimeError;
+using warploom::asset::DecodedImage;
+using warploom::asset::decode_png;
+using warploom::core::RuntimeError;
 
 // ============================================================================
 // Golden blobs from Python zlib (independent encoder)

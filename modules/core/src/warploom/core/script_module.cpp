@@ -59,15 +59,15 @@ std::unique_ptr<ScriptModule> ScriptModule::load_shared(
     return nullptr;
   }
   // S5-B phase 3 (docs/warploom-identity-plan.md): the warploom_module_*
-  // C ABI family is primary; legacy omnicpp_module_* modules keep loading
+  // C ABI family is primary; legacy warploom_module_* modules keep loading
   // through the per-symbol fallback (removed post-0.1).
   const auto resolve = [&](const char* suffix) {
     void* ptr = dlsym(handle, (std::string("warploom_module_") + suffix).c_str());
     if (ptr != nullptr) return ptr;
-    ptr = dlsym(handle, (std::string("omnicpp_module_") + suffix).c_str());
+    ptr = dlsym(handle, (std::string("warploom_module_") + suffix).c_str());
     if (ptr == nullptr) {
       error = std::string("missing symbol warploom_module_") + suffix +
-              " (and legacy omnicpp_module_" + suffix + ") in " + path;
+              " (and legacy warploom_module_" + suffix + ") in " + path;
     }
     return ptr;
   };
@@ -101,9 +101,9 @@ std::unique_ptr<ScriptModule> ScriptModule::load_shared(
 }
 
 bool ScriptModule::register_builtin(std::string name, ScriptModuleApi api) {
-  OMNICPP_CONTRACT(api.abi_version != nullptr);
-  OMNICPP_CONTRACT(api.name != nullptr);
-  OMNICPP_CONTRACT(api.tick != nullptr);
+  WARPLOOM_CONTRACT(api.abi_version != nullptr);
+  WARPLOOM_CONTRACT(api.name != nullptr);
+  WARPLOOM_CONTRACT(api.tick != nullptr);
   const std::lock_guard<std::mutex> lock(builtin_mutex());
   return builtin_registry().emplace(std::move(name), api).second;
 }

@@ -10,9 +10,9 @@
 //! dependency, and it keeps modules hot-swappable at the SO boundary.
 //!
 //! Module contract (either language):
-//!   EXPORT int32_t omnicpp_module_abi(void);          // returns 1
-//!   EXPORT const char* omnicpp_module_name(void);     // stable name
-//!   EXPORT int32_t omnicpp_module_tick(double dt,     // fixed timestep
+//!   EXPORT int32_t warploom_module_abi(void);          // returns 1
+//!   EXPORT const char* warploom_module_name(void);     // stable name
+//!   EXPORT int32_t warploom_module_tick(double dt,     // fixed timestep
 //!                                      const double* inputs,
 //!                                      uint32_t input_count,
 //!                                      double* outputs,
@@ -96,18 +96,3 @@ class ScriptModule final {
 //! builtin test modules are proven deterministic byte-for-byte in tests.
 
 }  // namespace warploom::core
-// S2-B compat footer: legacy `omnicpp::*` spellings keep resolving
-// during the transition (removed with the S5 identity pass -
-// docs/warploom-core-plan.md, phase B). A using-directive in a
-// namespace extension (NOT a type alias - ill-formed for namespaces)
-// makes the old spellings name the SAME types, and legally coexists
-// with real `omnicpp::core` extension blocks elsewhere (extension
-// blocks merge). One directive per namespace THIS header declares,
-// each under its OWN guard (a shared guard would suppress later
-// headers' distinct directives).
-#ifndef WARPLOOM_COMPAT_CORE_NS
-#define WARPLOOM_COMPAT_CORE_NS
-namespace omnicpp::core {
-    using namespace ::warploom::core;
-}
-#endif  // WARPLOOM_COMPAT_CORE_NS

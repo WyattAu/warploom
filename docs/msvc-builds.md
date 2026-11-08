@@ -1,6 +1,6 @@
-# MSVC Build Instructions for OmniCpp
+# MSVC Build Instructions for Warploom
 
-This guide provides comprehensive instructions for building OmniCpp with Microsoft Visual Studio (MSVC) on Windows.
+This guide provides comprehensive instructions for building Warploom with Microsoft Visual Studio (MSVC) on Windows.
 
 ## Prerequisites
 
@@ -76,7 +76,7 @@ setx QT_PLUGIN_PATH "%QT_DIR%\plugins"
 
 ### Using CMake Presets
 
-OmniCpp provides pre-configured CMake presets for MSVC builds:
+Warploom provides pre-configured CMake presets for MSVC builds:
 
 #### Debug Build
 
@@ -152,9 +152,9 @@ cmake --preset=msvc-debug
 cmake --build --preset=msvc-debug
 ```
 
-## Using OmniCppController.py
+## Using WarploomController.py
 
-For comprehensive builds using the OmniCppController:
+For comprehensive builds using the WarploomController:
 
 ```bash
 # Activate Python environment
@@ -165,8 +165,8 @@ python -m venv venv
 pip install -r requirements.txt
 
 # Run MSVC builds
-python OmniCppController.py --build-platform msvc --config debug
-python OmniCppController.py --build-platform msvc --config release
+python WarploomController.py --build-platform msvc --config debug
+python WarploomController.py --build-platform msvc --config release
 ```
 
 ## Troubleshooting

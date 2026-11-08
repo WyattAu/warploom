@@ -240,7 +240,7 @@ ninja
 ninja install
 ```
 
-> Legacy `OMNICPP_BUILD_GAME` (dropped above) gated a game target archived
+> Legacy `WARPLOOM_BUILD_GAME` (dropped above) gated a game target archived
 > in Phase 0 — it built nothing even before the rename. The runnable app
 > (viewport) is `-DWARPLOOM_BUILD_EXAMPLES=ON`.
 
@@ -676,8 +676,8 @@ CMake Error: Could not create build directory
 sudo chown -R $USER:$USER build/
 
 # Or use a different build directory
-mkdir -p ~/build/omnicpp
-cd ~/build/omnicpp
+mkdir -p ~/build/warploom
+cd ~/build/warploom
 cmake /path/to/project
 ```
 

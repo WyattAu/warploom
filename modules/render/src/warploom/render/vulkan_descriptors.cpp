@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <utility>
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -118,7 +118,7 @@ enum ResourceKind : std::uint32_t {
 std::vector<ReflectedBinding> reflect_spirv_resources(
     const std::uint32_t* code, std::size_t code_word_count) {
   std::vector<ReflectedBinding> out;
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!code || code_word_count < 5) return out;
   if (code[0] != kSpirvMagic) return out;
 
@@ -387,7 +387,7 @@ std::vector<ReflectedBinding> reflect_spirv_resources(
 VulkanDescriptorManager::~VulkanDescriptorManager() { cleanup(); }
 
 ::warploom::core::Result<void> VulkanDescriptorManager::initialize(VkDevice device) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -400,7 +400,7 @@ VulkanDescriptorManager::~VulkanDescriptorManager() { cleanup(); }
 }
 
 void VulkanDescriptorManager::cleanup() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (device_) {
     for (const auto& info : layouts_) {
       if (info.layout) vkDestroyDescriptorSetLayout(device_, info.layout, nullptr);
@@ -414,7 +414,7 @@ void VulkanDescriptorManager::cleanup() noexcept {
 
 const DescriptorSetLayoutInfo* VulkanDescriptorManager::find_layout(
     VkDescriptorSetLayout layout) const noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   for (const auto& info : layouts_) {
     if (info.layout == layout) return &info;
   }
@@ -427,7 +427,7 @@ const DescriptorSetLayoutInfo* VulkanDescriptorManager::find_layout(
 ::warploom::core::Result<VkDescriptorSetLayout> VulkanDescriptorManager::create_layout(
     const std::vector<ReflectedBinding>& bindings, std::uint32_t sets_to_reserve,
     bool bindless) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device_) {
     return ::warploom::core::Result<VkDescriptorSetLayout>::error(
         ::warploom::core::RuntimeError::invalid_config);
@@ -537,7 +537,7 @@ const DescriptorSetLayoutInfo* VulkanDescriptorManager::find_layout(
 
 ::warploom::core::Result<VkDescriptorSet> VulkanDescriptorManager::allocate_set(
     VkDescriptorSetLayout layout) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   const DescriptorSetLayoutInfo* info = find_layout(layout);
   if (!device_ || !info || !info->pool || !layout) {
     return ::warploom::core::Result<VkDescriptorSet>::error(
@@ -564,7 +564,7 @@ const DescriptorSetLayoutInfo* VulkanDescriptorManager::find_layout(
 ::warploom::core::Result<void> VulkanDescriptorManager::write_buffer(
     VkDescriptorSet set, std::uint32_t binding, VkDescriptorType type,
     VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device_ || !set || !buffer) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -591,7 +591,7 @@ const DescriptorSetLayoutInfo* VulkanDescriptorManager::find_layout(
     VkDescriptorSet set, std::uint32_t binding, VkDescriptorType type,
     VkSampler sampler, VkImageView view, VkImageLayout layout,
     [[maybe_unused]] std::uint32_t array_element) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device_ || !set || !view) {
     return ::warploom::core::Result<void>::error(::warploom::core::RuntimeError::invalid_config);
   }
@@ -619,7 +619,7 @@ const DescriptorSetLayoutInfo* VulkanDescriptorManager::find_layout(
 ::warploom::core::Result<void> VulkanDescriptorManager::write_acceleration_structure(
     VkDescriptorSet set, std::uint32_t binding, VkDescriptorType type,
     VkAccelerationStructureKHR as, std::uint32_t array_element) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!device_ || !set || as == VK_NULL_HANDLE ||
       type != VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) {
     return ::warploom::core::Result<void>::error(

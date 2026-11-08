@@ -25,7 +25,7 @@ Socket resolution (first hit wins):
   1. `python3 tools/warploom_mcp.py --sock /path/to.sock`
   2. `$WARPLOOM_SOCK` (MCP-specific override, checked first so an MCP
      client can point at headless or viewport without disturbing them)
-  3. `$WARPLOOM_CONTROL_SOCKET` / `$OMNICPP_CONTROL_SOCKET` (the same env
+  3. `$WARPLOOM_CONTROL_SOCKET` / `$WARPLOOM_CONTROL_SOCKET` (the same env
      the hosts themselves read, so the bridge defaults to the live host)
   4. `/tmp/warploom.sock`
 
@@ -54,7 +54,7 @@ def resolve_sock(explicit=None):
     if explicit:
         return explicit
     for env in ("WARPLOOM_SOCK", "WARPLOOM_CONTROL_SOCKET",
-                "OMNICPP_CONTROL_SOCKET"):
+                "WARPLOOM_CONTROL_SOCKET"):
         val = os.environ.get(env)
         if val:
             return val
@@ -435,7 +435,7 @@ def main(argv=None):
     parser.add_argument("--sock", default=None,
                         help="engine control socket path "
                              "(else $WARPLOOM_SOCK / $WARPLOOM_CONTROL_SOCKET / "
-                             "$OMNICPP_CONTROL_SOCKET / /tmp/warploom.sock)")
+                             "$WARPLOOM_CONTROL_SOCKET / /tmp/warploom.sock)")
     args = parser.parse_args(argv)
     serve(resolve_sock(args.sock))
 

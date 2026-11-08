@@ -18,7 +18,7 @@
 #include "warploom/render/vulkan_command.hpp"
 #include "warploom/render/vulkan_descriptors.hpp"
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 #include <vulkan/vulkan.h>
 #endif
 
@@ -26,7 +26,7 @@ namespace warploom::render {
 
 namespace {
 
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
 
 //! Host mirror of pt_real's Params block (camera words, dims incl. the sky
 //! mode in dims[3], then the five sky vec4s). ONE definition: three
@@ -77,7 +77,7 @@ struct TracerGpuParams {
   return module;
 }
 
-#endif  // OMNICPP_HAS_VULKAN
+#endif  // WARPLOOM_HAS_VULKAN
 
 }  // namespace
 
@@ -86,7 +86,7 @@ struct TracerGpuParams {
     [[maybe_unused]] VkQueue graphics_queue, [[maybe_unused]] std::uint32_t graphics_family,
     [[maybe_unused]] VulkanMemoryAllocator& allocator,
     [[maybe_unused]] const PathTracerConfig& config) {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (failed_) {
     return ::warploom::core::Result<void>::error(
         ::warploom::core::RuntimeError::invalid_config);
@@ -643,7 +643,7 @@ struct TracerGpuParams {
 void VulkanPathTracer::record_round([[maybe_unused]] VkCommandBuffer command_buffer,
                                     [[maybe_unused]] std::uint32_t frame,
                                     [[maybe_unused]] bool clear_first) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!ready_ || command_buffer == VK_NULL_HANDLE) return;
 
   // Live-PT stepping discipline: a camera move since the last round restarts
@@ -782,7 +782,7 @@ void VulkanPathTracer::record_round([[maybe_unused]] VkCommandBuffer command_buf
 }
 
 void VulkanPathTracer::record_denoise([[maybe_unused]] VkCommandBuffer command_buffer) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!ready_ || command_buffer == VK_NULL_HANDLE) return;
 
   // Input scope: the round's trace writes (storage images, GENERAL). The
@@ -880,7 +880,7 @@ void VulkanPathTracer::record_denoise([[maybe_unused]] VkCommandBuffer command_b
 }
 
 void VulkanPathTracer::set_camera([[maybe_unused]] const PathTracerCamera& camera) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (params_allocation_.mapped == nullptr) return;
   auto* gpu_params = static_cast<TracerGpuParams*>(params_allocation_.mapped);
   // Change detection BEFORE the write: any field-wise difference in the
@@ -931,7 +931,7 @@ void VulkanPathTracer::set_camera([[maybe_unused]] const PathTracerCamera& camer
 
 ::warploom::core::Result<std::vector<float>> VulkanPathTracer::read_image_sum(
     [[maybe_unused]] VkImage image) const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!ready_ || allocator_ == nullptr || image == VK_NULL_HANDLE) {
     return ::warploom::core::Result<std::vector<float>>::error(
         ::warploom::core::RuntimeError::invalid_config);
@@ -1022,7 +1022,7 @@ void VulkanPathTracer::set_camera([[maybe_unused]] const PathTracerCamera& camer
 }
 
 ::warploom::core::Result<std::vector<float>> VulkanPathTracer::read_mean() const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   auto sums = read_image_sum(accum_image_);
   if (!sums.is_ok()) {
     return ::warploom::core::Result<std::vector<float>>::error(
@@ -1040,7 +1040,7 @@ void VulkanPathTracer::set_camera([[maybe_unused]] const PathTracerCamera& camer
 
 ::warploom::core::Result<std::vector<float>> VulkanPathTracer::read_second_moment()
     const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   auto sums = read_image_sum(moment_image_);
   if (!sums.is_ok()) {
     return ::warploom::core::Result<std::vector<float>>::error(
@@ -1060,7 +1060,7 @@ void VulkanPathTracer::set_camera([[maybe_unused]] const PathTracerCamera& camer
 
 ::warploom::core::Result<std::vector<float>> VulkanPathTracer::read_gbuffer()
     const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   // No divide: the G-buffer is overwritten per round, not accumulated.
   // read_image_sum copies WITHOUT dividing, which is exactly the raw
   // texel contract here -- shared path, not a second copy sequence.
@@ -1073,7 +1073,7 @@ void VulkanPathTracer::set_camera([[maybe_unused]] const PathTracerCamera& camer
 
 void VulkanPathTracer::set_adaptive_enabled(
     [[maybe_unused]] bool enabled) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   adaptive_enabled_ = enabled;
   if (params_allocation_.mapped != nullptr) {
     auto* gpu_params = static_cast<TracerGpuParams*>(params_allocation_.mapped);
@@ -1086,7 +1086,7 @@ void VulkanPathTracer::set_adaptive_enabled(
 
 bool VulkanPathTracer::upload_adaptive_mask(
     [[maybe_unused]] const std::vector<std::uint32_t>& mask) noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   const std::size_t texels =
       static_cast<std::size_t>(width_) * static_cast<std::size_t>(height_);
   if (mask.size() != texels || mask_allocation_.mapped == nullptr) return false;
@@ -1101,7 +1101,7 @@ bool VulkanPathTracer::upload_adaptive_mask(
 
 ::warploom::core::Result<std::vector<std::uint32_t>>
 VulkanPathTracer::read_per_pixel_counts() const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   if (!ready_ || allocator_ == nullptr || count_image_ == VK_NULL_HANDLE) {
     return ::warploom::core::Result<std::vector<std::uint32_t>>::error(
         ::warploom::core::RuntimeError::invalid_config);
@@ -1186,7 +1186,7 @@ VulkanPathTracer::read_per_pixel_counts() const {
 
 ::warploom::core::Result<std::vector<float>> VulkanPathTracer::read_adaptive_mean()
     const {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   auto sums = read_image_sum(accum_image_);
   auto counts = read_per_pixel_counts();
   if (!sums.is_ok() || !counts.is_ok()) {
@@ -1214,7 +1214,7 @@ VulkanPathTracer::read_per_pixel_counts() const {
 }
 
 void VulkanPathTracer::destroy_resources() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   ready_ = false;
   if (device_ == VK_NULL_HANDLE) return;
 
@@ -1314,7 +1314,7 @@ void VulkanPathTracer::destroy_resources() noexcept {
 }
 
 void VulkanPathTracer::destroy() noexcept {
-#ifdef OMNICPP_HAS_VULKAN
+#ifdef WARPLOOM_HAS_VULKAN
   destroy_resources();
   device_ = VK_NULL_HANDLE;
   allocator_ = nullptr;

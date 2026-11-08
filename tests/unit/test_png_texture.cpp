@@ -130,7 +130,7 @@ std::vector<std::uint8_t> read_image_bytes(
   VkMemoryRequirements requirements{};
   vkGetBufferMemoryRequirements(device, buffer, &requirements);
   std::uint32_t memory_type = 0;
-  if (!omnicpp_test::find_host_memory_type(
+  if (!warploom_test::find_host_memory_type(
           physical_device, requirements.memoryTypeBits,
           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
           memory_type)) {
@@ -228,7 +228,7 @@ std::vector<std::uint8_t> read_image_bytes(
 
 TEST(VulkanHardware, PngDecodedTextureUploadAndSample) {
 #if WARPLOOM_VULKAN_TYPES_AVAILABLE && defined(WARPLOOM_TEST_SHADER_DIR)
-  if (!omnicpp::render::VulkanContext::is_available()) {
+  if (!warploom::render::VulkanContext::is_available()) {
     GTEST_SKIP() << "Vulkan loader unavailable";
   }
 
@@ -253,11 +253,11 @@ TEST(VulkanHardware, PngDecodedTextureUploadAndSample) {
       kTextureSize, kTextureSize, source_rgba);
 
   // --- CPU decode: the PNG decoder must reproduce the source grid. ---
-  omnicpp::asset::DecodedImage decoded;
+  warploom::asset::DecodedImage decoded;
   {
     std::string error;
     auto decode_result =
-        omnicpp::asset::decode_png(png.data(), png.size(), &error);
+        warploom::asset::decode_png(png.data(), png.size(), &error);
     ASSERT_TRUE(decode_result.is_ok()) << "PNG decode failed: " << error;
     decoded = std::move(decode_result).value();
   }
@@ -265,12 +265,12 @@ TEST(VulkanHardware, PngDecodedTextureUploadAndSample) {
   ASSERT_EQ(decoded.height, kTextureSize);
   EXPECT_EQ(decoded.rgba, source_rgba);
 
-  omnicpp::render::VulkanContext context;
-  ASSERT_TRUE(context.initialize("OmniCppPngTextureTest", true).is_ok());
+  warploom::render::VulkanContext context;
+  ASSERT_TRUE(context.initialize("WarploomPngTextureTest", true).is_ok());
 
-  omnicpp::render::VulkanMemoryAllocator allocator;
+  warploom::render::VulkanMemoryAllocator allocator;
   ASSERT_TRUE(allocator.initialize(context.device(), context.physical_device()).is_ok());
-  omnicpp::render::VulkanDescriptorManager manager;
+  warploom::render::VulkanDescriptorManager manager;
   ASSERT_TRUE(manager.initialize(context.device()).is_ok());
 
   // --- GPU texture: image + device-local memory + view + sampler. ---
@@ -291,7 +291,7 @@ TEST(VulkanHardware, PngDecodedTextureUploadAndSample) {
             VK_SUCCESS);
   auto image_memory = allocator.bind_image(texture_image, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   ASSERT_TRUE(image_memory.is_ok());
-  omnicpp::render::Allocation texture_allocation = image_memory.value();
+  warploom::render::Allocation texture_allocation = image_memory.value();
 
   VkImageViewCreateInfo view_info{};
   view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -316,7 +316,7 @@ TEST(VulkanHardware, PngDecodedTextureUploadAndSample) {
             VK_SUCCESS);
 
   // --- Upload through the frame arena's image-copy path. ---
-  omnicpp::render::VulkanFrameUploadArena arena;
+  warploom::render::VulkanFrameUploadArena arena;
   ASSERT_TRUE(arena.initialize(
       context.device(), context.physical_device(),
       static_cast<std::uint32_t>(context.queue_families().graphics_family),
@@ -337,7 +337,7 @@ TEST(VulkanHardware, PngDecodedTextureUploadAndSample) {
   ASSERT_TRUE(frag_file.good());
   const std::vector<std::uint8_t> frag_spirv(
       (std::istreambuf_iterator<char>(frag_file)), std::istreambuf_iterator<char>());
-  const auto bindings = omnicpp::render::reflect_spirv_resources(
+  const auto bindings = warploom::render::reflect_spirv_resources(
       frag_spirv.data(), frag_spirv.size());
   ASSERT_EQ(bindings.size(), 1U);
   EXPECT_EQ(bindings[0].binding, 0U);
@@ -352,14 +352,14 @@ TEST(VulkanHardware, PngDecodedTextureUploadAndSample) {
                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0).is_ok());
 
   // --- Offscreen target + textured-quad pipeline. ---
-  omnicpp::render::VulkanOffscreenTarget target;
+  warploom::render::VulkanOffscreenTarget target;
   ASSERT_TRUE(target.create(context.device(), context.physical_device(),
                             VK_FORMAT_B8G8R8A8_UNORM, kTargetSize, kTargetSize,
                             &allocator).is_ok());
   ASSERT_TRUE(target.create_render_pass(context.device()).is_ok());
   ASSERT_TRUE(target.create_framebuffer(context.device()).is_ok());
 
-  omnicpp::render::VulkanPipeline pipeline;
+  warploom::render::VulkanPipeline pipeline;
   const std::string shader_dir = WARPLOOM_TEST_SHADER_DIR;
   ASSERT_TRUE(pipeline.load_shader_stage_file(context.device(),
                                               shader_dir + "/textured_quad.vert.spv",
@@ -374,11 +374,11 @@ TEST(VulkanHardware, PngDecodedTextureUploadAndSample) {
       pipeline.pipeline_layout(), false, false, false).is_ok());
 
   // --- Record + submit one frame. ---
-  const auto pool_result = omnicpp::render::VulkanRenderer::create_command_pool(
+  const auto pool_result = warploom::render::VulkanRenderer::create_command_pool(
       context.device(), static_cast<std::uint32_t>(context.queue_families().graphics_family));
   ASSERT_TRUE(pool_result.is_ok());
   const VkCommandPool command_pool = pool_result.value();
-  const auto cb_result = omnicpp::render::VulkanRenderer::allocate_command_buffer(
+  const auto cb_result = warploom::render::VulkanRenderer::allocate_command_buffer(
       context.device(), command_pool);
   ASSERT_TRUE(cb_result.is_ok());
   const VkCommandBuffer command_buffer = cb_result.value();

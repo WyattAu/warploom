@@ -1,4 +1,4 @@
-# OmniCpp - Troubleshooting Guide
+# Warploom - Troubleshooting Guide
 
 ## Table of Contents
 - [Build System Issues](#build-system-issues)
@@ -14,18 +14,18 @@
 
 ### Python Import Errors
 
-**Symptom**: `ImportError: cannot import name 'X' from 'omni_scripts.utils'`
+**Symptom**: `ImportError: cannot import name 'X' from 'warploom_scripts.utils'`
 
 **Cause**: Missing or incorrect imports in Python modules.
 
 **Solution**:
-1. Check `omni_scripts/utils/__init__.py` for exported symbols
+1. Check `warploom_scripts/utils/__init__.py` for exported symbols
 2. Verify all required functions are defined in `utils.py`
 3. Restart Python interpreter
 
 **Example**:
 ```python
-# omni_scripts/utils/__init__.py
+# warploom_scripts/utils/__init__.py
 from .utils import (
     run_command,
     detect_platform,
@@ -84,7 +84,7 @@ cmake --build build --verbose 2>&1 | grep library
 3. Check `dependencies.cmake` for correct library names
 4. Rebuild with clean:
 ```bash
-python OmniCppController.py build standalone "Clean Build Pipeline" default debug
+python WarploomController.py build standalone "Clean Build Pipeline" default debug
 ```
 
 ### Build Performance Issues
@@ -96,7 +96,7 @@ python OmniCppController.py build standalone "Clean Build Pipeline" default debu
 **Solution**:
 1. Increase parallel jobs:
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug --parallel 8
+python WarploomController.py build standalone "Build Project" default debug --parallel 8
 ```
 
 2. Use ccache for faster rebuilds:
@@ -111,7 +111,7 @@ cmake -DCMAKE_C_COMPILER_LAUNCHER=ccache ..
 
 3. Disable unnecessary features:
 ```bash
-cmake -DOMNICPP_BUILD_TESTS=OFF ..
+cmake -DWARPLOOM_BUILD_TESTS=OFF ..
 ```
 
 ## Compiler Issues
@@ -494,7 +494,7 @@ int main(int argc, char* argv[]) {
 **Solution**:
 1. Check engine configuration:
 ```cpp
-omnicpp::EngineConfig config;
+warploom::EngineConfig config;
 config.renderer = nullptr;  // Use default
 config.logger = nullptr;    // Use default
 // ... other subsystems
@@ -503,15 +503,15 @@ config.logger = nullptr;    // Use default
 2. Verify all subsystems can be created:
 ```cpp
 // Test each subsystem individually
-auto renderer = omnicpp::create_vulkan_renderer();
-auto input = omnicpp::create_input_manager();
+auto renderer = warploom::create_vulkan_renderer();
+auto input = warploom::create_input_manager();
 // ...
 ```
 
 3. Check logs for specific error:
 ```cpp
-omnicpp::ILogger* logger = omnicpp::create_console_logger();
-logger->set_level(omnicpp::LogLevel::Debug);
+warploom::ILogger* logger = warploom::create_console_logger();
+logger->set_level(warploom::LogLevel::Debug);
 ```
 
 ### Entity Creation Fails
@@ -531,10 +531,10 @@ if (scene.get_entity_count() >= kMaxEntities) {
 
 2. Initialize scene before creating entities:
 ```cpp
-omnicpp::Scene scene;
+warploom::Scene scene;
 scene.initialize();  // Must call first
 
-omnicpp::Entity entity = scene.create_entity();
+warploom::Entity entity = scene.create_entity();
 ```
 
 ### Component Access Fails
@@ -651,10 +651,10 @@ void Scene::render(IRenderer* renderer, const Camera& camera) {
 1. Use memory profiler:
 ```bash
 # Linux
-valgrind --leak-check=full ./build/debug/omnicpp
+valgrind --leak-check=full ./build/debug/warploom
 
 # Windows
-drmemory ./build/debug/omnicpp.exe
+drmemory ./build/debug/warploom.exe
 ```
 
 2. Implement resource pooling:
@@ -759,7 +759,7 @@ cp vcpkg_installed/x64-windows/bin/*.dll build/debug/
 
 2. Use static linking:
 ```bash
-cmake -DOMNICPP_USE_STATIC_RUNTIME=ON ..
+cmake -DWARPLOOM_USE_STATIC_RUNTIME=ON ..
 ```
 
 #### UAC Prompt
@@ -799,7 +799,7 @@ export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 
 2. Use RPATH in CMake:
 ```cmake
-set_target_properties(omnicpp PROPERTIES
+set_target_properties(warploom PROPERTIES
     INSTALL_RPATH "$ORIGIN/../lib"
 )
 ```
@@ -832,7 +832,7 @@ sudo apt install qt6-wayland-client
 **Solution**:
 1. Sign application:
 ```bash
-codesign --deep --force --verify --verbose --sign "Developer ID Application" ./build/release/omnicpp.app
+codesign --deep --force --verify --verbose --sign "Developer ID Application" ./build/release/warploom.app
 ```
 
 2. Disable Gatekeeper (development only):
@@ -849,12 +849,12 @@ sudo spctl --master-disable
 **Solution**:
 1. Notarize application:
 ```bash
-xcrun notarytool submit ./omnicpp.dmg --apple-id "com.example.omnicpp" --password "@keychain:altool" --wait
+xcrun notarytool submit ./warploom.dmg --apple-id "com.example.warploom" --password "@keychain:altool" --wait
 ```
 
 2. Staple ticket:
 ```bash
-xcrun stapler staple ./omnicpp.dmg ./omnicpp.dmg
+xcrun stapler staple ./warploom.dmg ./warploom.dmg
 ```
 
 ## Getting Help
@@ -864,7 +864,7 @@ xcrun stapler staple ./omnicpp.dmg ./omnicpp.dmg
 Check log files for detailed error information:
 
 - **Build logs**: `build/build.log`
-- **Engine logs**: `omnicpp.log`
+- **Engine logs**: `warploom.log`
 - **Test logs**: `tests/test_log.txt`
 
 ### Debug Builds
@@ -872,7 +872,7 @@ Check log files for detailed error information:
 Always use debug builds when troubleshooting:
 
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug
+python WarploomController.py build standalone "Build Project" default debug
 ```
 
 ### Verbose Output
@@ -880,7 +880,7 @@ python OmniCppController.py build standalone "Build Project" default debug
 Enable verbose output for more information:
 
 ```bash
-python OmniCppController.py build standalone "Build Project" default debug --verbose
+python WarploomController.py build standalone "Build Project" default debug --verbose
 ```
 
 ### Community Support
@@ -889,7 +889,7 @@ Get help from the community:
 
 - **GitHub Issues**: [repository-url]/issues
 - **Discord**: [discord-invite-link]
-- **Stack Overflow**: Tag questions with `omnicpp`
+- **Stack Overflow**: Tag questions with `warploom`
 
 ### Reporting Bugs
 

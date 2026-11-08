@@ -33,9 +33,9 @@
 
 namespace {
 
-using omnicpp::core::JobCounter;
-using omnicpp::core::JobPriority;
-using omnicpp::core::JobSystem;
+using warploom::core::JobCounter;
+using warploom::core::JobPriority;
+using warploom::core::JobSystem;
 
 //! Prevent gtest assertions in worker threads (undefined behavior there):
 //! record order under a lock and assert on the main thread instead.
@@ -208,9 +208,9 @@ TEST(JobSystem, DispatchOverheadIsSubMicrosecond) {
   std::vector<std::uint64_t> dispatch_ns;
   dispatch_ns.reserve(kBurst);
   for (std::size_t i = 0; i < static_cast<std::size_t>(kBurst); ++i) {
-    const auto t0 = omnicpp::core::SteadyClock::now_ns();
+    const auto t0 = warploom::core::SteadyClock::now_ns();
     ASSERT_TRUE(jobs.submit(JobPriority::render, &counter, [] {}));
-    const auto t1 = omnicpp::core::SteadyClock::now_ns();
+    const auto t1 = warploom::core::SteadyClock::now_ns();
     dispatch_ns.push_back(static_cast<std::uint64_t>(t1 - t0));
   }
   counter.wait();

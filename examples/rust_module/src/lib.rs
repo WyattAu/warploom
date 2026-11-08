@@ -1,12 +1,12 @@
-//! omnicpp_example_module — Rust gameplay module implementing the engine's
+//! warploom_example_module — Rust gameplay module implementing the engine's
 //! C ABI (`#[no_mangle] pub extern "C"`), the exact contract documented in
 //! `engine/core/script_module.hpp`. No external crates: the module depends
 //! only on `core`, so it links against nothing but libc.
 //!
 //! Contract:
-//!   omnicpp_module_abi()  -> 1
-//!   omnicpp_module_name() -> "rust_example"
-//!   omnicpp_module_tick(dt, inputs, n, outputs, cap)
+//!   warploom_module_abi()  -> 1
+//!   warploom_module_name() -> "rust_example"
+//!   warploom_module_tick(dt, inputs, n, outputs, cap)
 //!     Pure function of (dt, inputs): outputs[i] = inputs[i] * 0.5 + dt.
 //!     Returns the output count, or a negative error code.
 //!
@@ -20,7 +20,7 @@ const MODULE_ABI: i32 = 1;
 
 /// Deterministic tick: outputs[i] = inputs[i] * 0.5 + dt.
 #[no_mangle]
-pub extern "C" fn omnicpp_module_tick(
+pub extern "C" fn warploom_module_tick(
     dt: f64,
     inputs: *const f64,
     input_count: u32,
@@ -45,11 +45,11 @@ pub extern "C" fn omnicpp_module_tick(
 }
 
 #[no_mangle]
-pub extern "C" fn omnicpp_module_abi() -> c_int {
+pub extern "C" fn warploom_module_abi() -> c_int {
     MODULE_ABI
 }
 
 #[no_mangle]
-pub extern "C" fn omnicpp_module_name() -> *const c_char {
+pub extern "C" fn warploom_module_name() -> *const c_char {
     b"rust_example\0".as_ptr() as *const c_char
 }

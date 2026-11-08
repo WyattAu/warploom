@@ -24,12 +24,12 @@
 
 namespace {
 
-using omnicpp::render::Allocation;
-using omnicpp::render::VulkanContext;
-using omnicpp::render::VulkanDescriptorManager;
-using omnicpp::render::VulkanMemoryAllocator;
-using omnicpp::render::VulkanOffscreenTarget;
-using omnicpp::render::VulkanPipeline;
+using warploom::render::Allocation;
+using warploom::render::VulkanContext;
+using warploom::render::VulkanDescriptorManager;
+using warploom::render::VulkanMemoryAllocator;
+using warploom::render::VulkanOffscreenTarget;
+using warploom::render::VulkanPipeline;
 
 struct SkyParamsUbo {
   float sun_direction[4];
@@ -111,14 +111,14 @@ struct SkyHarness {
     return true;
   }
 
-  omnicpp_test::ReadbackResult render(const SkyParamsUbo& params,
+  warploom_test::ReadbackResult render(const SkyParamsUbo& params,
                                       const SkyPush& push) {
     std::memcpy(ubo.mapped, &params, sizeof(params));
 
     VkDevice dev = ctx.device();
-    auto pr = omnicpp::render::VulkanRenderer::create_command_pool(dev, qf);
+    auto pr = warploom::render::VulkanRenderer::create_command_pool(dev, qf);
     if (!pr.is_ok()) return {};
-    auto cr = omnicpp::render::VulkanRenderer::allocate_command_buffer(dev, pr.value());
+    auto cr = warploom::render::VulkanRenderer::allocate_command_buffer(dev, pr.value());
     if (!cr.is_ok()) {
       vkDestroyCommandPool(dev, pr.value(), nullptr);
       return {};
@@ -164,7 +164,7 @@ struct SkyHarness {
     vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
     vkDestroyFence(dev, fence, nullptr);
     vkDestroyCommandPool(dev, pr.value(), nullptr);
-    return omnicpp_test::readback_swapchain_image(
+    return warploom_test::readback_swapchain_image(
         ctx.physical_device(), dev, ctx.graphics_queue(), qf,
         target.image(), target.format(), 256, 256,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,

@@ -600,7 +600,7 @@ namespace {
 ControlServer::~ControlServer() { stop(); }
 
 bool ControlServer::start(const std::string& path, std::string& error) {
-  OMNICPP_CONTRACT(!path.empty());
+  WARPLOOM_CONTRACT(!path.empty());
   if (listen_fd_ >= 0) {
     error = "already running";
     return false;
@@ -674,7 +674,7 @@ void ControlServer::queue_reply(Client& client, const ControlReply& reply) const
 }
 
 void ControlServer::drop_client(std::size_t index) {
-  OMNICPP_CONTRACT(index < clients_.size());
+  WARPLOOM_CONTRACT(index < clients_.size());
   if (clients_[index].fd >= 0) ::close(clients_[index].fd);
   clients_.erase(clients_.begin() + static_cast<std::ptrdiff_t>(index));
 }

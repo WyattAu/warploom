@@ -67,7 +67,7 @@ void write_escaped(std::string& out, std::string_view text) {
 void write_number(std::string& out, double v) {
   char buf[64];
   const int n = std::snprintf(buf, sizeof(buf), "%.17g", v);
-  OMNICPP_CONTRACT(n > 0 && static_cast<std::size_t>(n) < sizeof(buf));
+  WARPLOOM_CONTRACT(n > 0 && static_cast<std::size_t>(n) < sizeof(buf));
   out.append(buf, static_cast<std::size_t>(n));
 }
 
@@ -1632,7 +1632,7 @@ bool SetPropertyCommand::apply(SceneDocument& doc, std::string& error) {
 
 void SetPropertyCommand::undo(SceneDocument& doc) {
   SceneObject* object = doc.find(object_id_);
-  OMNICPP_CONTRACT(object != nullptr);
+  WARPLOOM_CONTRACT(object != nullptr);
   if (existed_) {
     object->properties.insert_or_assign(key_, old_value_);
   } else {
@@ -1682,7 +1682,7 @@ void SpawnObjectCommand::undo(SceneDocument& doc) {
       return;
     }
   }
-  OMNICPP_CONTRACT(false && "spawn undo: object vanished");
+  WARPLOOM_CONTRACT(false && "spawn undo: object vanished");
 }
 
 std::string SpawnObjectCommand::describe() const {
@@ -1718,7 +1718,7 @@ bool SetPropertiesCommand::apply(SceneDocument& doc, std::string& error) {
 
 void SetPropertiesCommand::undo(SceneDocument& doc) {
   SceneObject* object = doc.find(object_id_);
-  OMNICPP_CONTRACT(object != nullptr);
+  WARPLOOM_CONTRACT(object != nullptr);
   for (std::size_t i = 0; i < entries_.size(); ++i) {
     if (existed_[i]) {
       object->properties.insert_or_assign(entries_[i].first, old_values_[i]);
@@ -1752,7 +1752,7 @@ bool DestroyObjectCommand::apply(SceneDocument& doc, std::string& error) {
 }
 
 void DestroyObjectCommand::undo(SceneDocument& doc) {
-  OMNICPP_CONTRACT(applied_);
+  WARPLOOM_CONTRACT(applied_);
   const auto at = doc.objects.begin() +
                   static_cast<std::ptrdiff_t>(std::min(index_, doc.objects.size()));
   doc.objects.insert(at, captured_);
@@ -1788,8 +1788,8 @@ bool AddNodeCommand::apply(SceneDocument& doc, std::string& error) {
 }
 
 void AddNodeCommand::undo(SceneDocument& doc) {
-  OMNICPP_CONTRACT(node_id_ != 0U);
-  OMNICPP_CONTRACT(doc.node_graph.remove_node(node_id_));
+  WARPLOOM_CONTRACT(node_id_ != 0U);
+  WARPLOOM_CONTRACT(doc.node_graph.remove_node(node_id_));
   doc.node_layout.erase(node_id_);
   // Restore the id cursor so spawn+undo+redo claims the SAME id again —
   // the byte-determinism contract for spawn+undo round-trips.
@@ -1816,20 +1816,20 @@ bool RemoveNodeCommand::apply(SceneDocument& doc, std::string& error) {
       captured_links_.push_back(l);
     }
   }
-  OMNICPP_CONTRACT(doc.node_graph.remove_node(node_id_));
+  WARPLOOM_CONTRACT(doc.node_graph.remove_node(node_id_));
   doc.node_layout.erase(node_id_);
   applied_ = true;
   return true;
 }
 
 void RemoveNodeCommand::undo(SceneDocument& doc) {
-  OMNICPP_CONTRACT(applied_);
-  OMNICPP_CONTRACT(
+  WARPLOOM_CONTRACT(applied_);
+  WARPLOOM_CONTRACT(
       doc.node_graph.add_node_with_id(captured_.id, captured_.type,
                                       captured_.params));
   for (const auto& l : captured_links_) {
     std::string link_error;
-    OMNICPP_CONTRACT(doc.node_graph.add_link(l.from_node, l.from_pin,
+    WARPLOOM_CONTRACT(doc.node_graph.add_link(l.from_node, l.from_pin,
                                              l.to_node, l.to_pin,
                                              link_error));
   }
@@ -1869,8 +1869,8 @@ bool AddClipCommand::apply(SceneDocument& doc, std::string& error) {
 }
 
 void AddClipCommand::undo(SceneDocument& doc) {
-  OMNICPP_CONTRACT(clip_id_ != 0U);
-  OMNICPP_CONTRACT(bumped_);
+  WARPLOOM_CONTRACT(clip_id_ != 0U);
+  WARPLOOM_CONTRACT(bumped_);
   for (auto it = doc.clips.rbegin(); it != doc.clips.rend(); ++it) {
     if (it->id == clip_id_) {
       doc.clips.erase(std::next(it).base());
@@ -1904,7 +1904,7 @@ bool RemoveClipCommand::apply(SceneDocument& doc, std::string& error) {
 }
 
 void RemoveClipCommand::undo(SceneDocument& doc) {
-  OMNICPP_CONTRACT(applied_);
+  WARPLOOM_CONTRACT(applied_);
   // Re-insert at the id-ordered slot (ids are monotonic, so the captured
   // clip's position is the first clip with a larger id — or the end).
   std::size_t at = doc.clips.size();
@@ -1940,9 +1940,9 @@ bool MoveClipCommand::apply(SceneDocument& doc, std::string& error) {
 }
 
 void MoveClipCommand::undo(SceneDocument& doc) {
-  OMNICPP_CONTRACT(applied_);
+  WARPLOOM_CONTRACT(applied_);
   TimelineClip* clip = doc.find_clip(clip_id_);
-  OMNICPP_CONTRACT(clip != nullptr);
+  WARPLOOM_CONTRACT(clip != nullptr);
   clip->start_frame = old_start_;
   applied_ = false;
 }
@@ -1978,11 +1978,11 @@ bool LinkNodesCommand::apply(SceneDocument& doc, std::string& error) {
 }
 
 void LinkNodesCommand::undo(SceneDocument& doc) {
-  OMNICPP_CONTRACT(applied_);
-  OMNICPP_CONTRACT(doc.node_graph.remove_link(to_node_, to_pin_));
+  WARPLOOM_CONTRACT(applied_);
+  WARPLOOM_CONTRACT(doc.node_graph.remove_link(to_node_, to_pin_));
   if (had_previous_) {
     std::string link_error;
-    OMNICPP_CONTRACT(doc.node_graph.add_link(previous_.from_node,
+    WARPLOOM_CONTRACT(doc.node_graph.add_link(previous_.from_node,
                                              previous_.from_pin,
                                              previous_.to_node,
                                              previous_.to_pin, link_error));
@@ -2012,14 +2012,14 @@ bool UnlinkNodeCommand::apply(SceneDocument& doc, std::string& error) {
             to_pin_ + "\"";
     return false;
   }
-  OMNICPP_CONTRACT(doc.node_graph.remove_link(to_node_, to_pin_));
+  WARPLOOM_CONTRACT(doc.node_graph.remove_link(to_node_, to_pin_));
   return true;
 }
 
 void UnlinkNodeCommand::undo(SceneDocument& doc) {
-  OMNICPP_CONTRACT(had_link_);
+  WARPLOOM_CONTRACT(had_link_);
   std::string link_error;
-  OMNICPP_CONTRACT(doc.node_graph.add_link(captured_.from_node,
+  WARPLOOM_CONTRACT(doc.node_graph.add_link(captured_.from_node,
                                            captured_.from_pin, captured_.to_node,
                                            captured_.to_pin, link_error));
 }
@@ -2065,7 +2065,7 @@ void SetNodeParamCommand::undo(SceneDocument& doc) {
     }
     return;
   }
-  OMNICPP_CONTRACT(false && "set_node_param undo: node vanished");
+  WARPLOOM_CONTRACT(false && "set_node_param undo: node vanished");
 }
 
 std::string SetNodeParamCommand::describe() const {
@@ -2125,9 +2125,9 @@ bool PasteSubgraphCommand::apply(SceneDocument& doc, std::string& error) {
 }
 
 void PasteSubgraphCommand::undo(SceneDocument& doc) {
-  OMNICPP_CONTRACT(applied_);
+  WARPLOOM_CONTRACT(applied_);
   for (auto it = new_ids_.rbegin(); it != new_ids_.rend(); ++it) {
-    OMNICPP_CONTRACT(doc.node_graph.remove_node(*it));
+    WARPLOOM_CONTRACT(doc.node_graph.remove_node(*it));
     doc.node_layout.erase(*it);
   }
   if (!new_ids_.empty()) {
@@ -2149,7 +2149,7 @@ std::string PasteSubgraphCommand::describe() const {
 
 bool CommandStack::execute(std::unique_ptr<Command> command,
                            std::string& error) {
-  OMNICPP_CONTRACT(command != nullptr);
+  WARPLOOM_CONTRACT(command != nullptr);
   if (!command->apply(*doc_, error)) {
     return false;
   }

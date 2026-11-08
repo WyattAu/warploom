@@ -4,7 +4,7 @@
   "datefmt": "%Y-%m-%d %H:%M:%S",
   "console_handler_enabled": true,
   "file_handler_enabled": true,
-  "file_path": "logs/omnicpp_python.log",
+  "file_path": "logs/warploom_python.log",
   "max_bytes": 10485760,
   "backup_count": 5,
   "colored_output": true

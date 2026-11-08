@@ -57,17 +57,17 @@
 
 namespace {
 
-using omnicpp::render::Allocation;
-using omnicpp::render::BlasBuildInput;
-using omnicpp::render::BottomLevelAS;
-using omnicpp::render::TopLevelAS;
-using omnicpp::render::TlasInstance;
-using omnicpp::render::VulkanAccelerationStructureBuilder;
-using omnicpp::render::VulkanContext;
-using omnicpp::render::VulkanDescriptorManager;
-using omnicpp::render::VulkanMemoryAllocator;
-using omnicpp::render::VulkanRtPipeline;
-using omnicpp::render::VulkanScratchPool;
+using warploom::render::Allocation;
+using warploom::render::BlasBuildInput;
+using warploom::render::BottomLevelAS;
+using warploom::render::TopLevelAS;
+using warploom::render::TlasInstance;
+using warploom::render::VulkanAccelerationStructureBuilder;
+using warploom::render::VulkanContext;
+using warploom::render::VulkanDescriptorManager;
+using warploom::render::VulkanMemoryAllocator;
+using warploom::render::VulkanRtPipeline;
+using warploom::render::VulkanScratchPool;
 
 constexpr std::uint32_t kImg = 64;
 constexpr std::uint32_t kFrames = 8;
@@ -491,12 +491,12 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
   auto scratch1 = scratch_pool.acquire(alloc, ctx.device(), 1U << 20U);
   ASSERT_TRUE(scratch1.is_ok());
 
-  auto pool_r = omnicpp::render::VulkanRenderer::create_command_pool(
+  auto pool_r = warploom::render::VulkanRenderer::create_command_pool(
       ctx.device(), qf);
   ASSERT_TRUE(pool_r.is_ok());
   VkCommandPool cmd_pool = pool_r.value();
   auto cb_r =
-      omnicpp::render::VulkanRenderer::allocate_command_buffer(ctx.device(),
+      warploom::render::VulkanRenderer::allocate_command_buffer(ctx.device(),
                                                                cmd_pool);
   ASSERT_TRUE(cb_r.is_ok());
   VkCommandBuffer build_cb = cb_r.value();
@@ -627,7 +627,7 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
   // round. flat mode first (dims.z=0), then bounce mode (dims.z=1).
   auto record_round = [&](std::uint32_t /*frame*/, bool clear_first) {
     auto r_cb_r =
-        omnicpp::render::VulkanRenderer::allocate_command_buffer(ctx.device(),
+        warploom::render::VulkanRenderer::allocate_command_buffer(ctx.device(),
                                                                  cmd_pool);
     EXPECT_TRUE(r_cb_r.is_ok());
     VkCommandBuffer cb = r_cb_r.value();
@@ -705,7 +705,7 @@ TEST(path_tracing, trace_rays_probes_accumulation_determinism) {
     EXPECT_TRUE(rb_buf.is_ok());
     Allocation rb = rb_buf.value();
     auto cbr =
-        omnicpp::render::VulkanRenderer::allocate_command_buffer(ctx.device(),
+        warploom::render::VulkanRenderer::allocate_command_buffer(ctx.device(),
                                                                  cmd_pool);
     EXPECT_TRUE(cbr.is_ok());
     VkCommandBuffer cb = cbr.value();
