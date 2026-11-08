@@ -36,7 +36,7 @@ jobs:
             libx11-dev libxcb1-dev pkg-config
 
       - name: Cache third-party sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/warploom/cpm
           key: cpm-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'vcpkg.json', 'cmake/FindDependencies.cmake') }}
