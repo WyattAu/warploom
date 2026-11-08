@@ -1,5 +1,5 @@
 """
-Build optimization module for OmniCPP build system.
+Build optimization module for Warploom build system.
 
 Provides build optimization strategies, parallel build support,
 and performance tuning for CMake builds.

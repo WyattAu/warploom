@@ -110,7 +110,7 @@ VSCode provides Linux-specific tasks and debug configurations:
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd OmniCPP-template
+cd warploom
 ```
 
 2. Install Python dependencies:
@@ -159,7 +159,7 @@ python WarploomController.py build tests "Build Tests" default debug
 ### Directory Layout
 
 ```
-OmniCPP-template/
+warploom/
 ├── include/           # Public headers
 │   ├── engine/       # Engine interfaces
 │   └── WarploomLib/  # Library headers
@@ -463,7 +463,7 @@ Use RenderDoc for graphics debugging:
 
 Configure Visual Studio for debugging:
 
-1. Open `OmniCPP-template.sln`
+1. Open the generated solution
 2. Set startup project to `warploom_tests`
 3. Set breakpoints
 4. Press F5 to start debugging

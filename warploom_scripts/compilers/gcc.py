@@ -1,6 +1,6 @@
 # warploom_scripts/compilers/gcc.py
 """
-GCC compiler detection and validation for OmniCPP project.
+GCC compiler detection and validation for Warploom project.
 
 Provides GCC-specific compiler detection, version checking,
 and C++23 support validation.

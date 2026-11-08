@@ -1,6 +1,6 @@
 # Frequently Asked Questions
 
-Welcome to the OmniCPP-template FAQ. This section provides quick answers to common questions about the project, build system, and development workflow.
+Welcome to the Warploom FAQ. This section provides quick answers to common questions about the project, build system, and development workflow.
 
 ## Quick Navigation
 
@@ -10,12 +10,12 @@ Welcome to the OmniCPP-template FAQ. This section provides quick answers to comm
 
 ## Getting Started
 
-### What is OmniCPP-template?
+### What is Warploom?
 
-**TL;DR:** OmniCPP-template is a C++23 best practice template with a game engine and game example monorepo.
+**TL;DR:** Warploom is a C++23 engine with deterministic simulation, Vulkan rendering, and a time-warp editor.
 
 **The Deep Dive:**
-OmniCPP-template is a comprehensive C++23 project template that demonstrates modern C++ best practices, including:
+Warploom is a comprehensive C++23 project that demonstrates modern C++ best practices, including:
 - A modular game engine architecture with ECS (Entity Component System)
 - Cross-platform build system supporting Windows, Linux, and WebAssembly
 - Multiple compiler support (MSVC, MSVC-Clang, MinGW-GCC, MinGW-Clang, GCC, Clang)
@@ -23,7 +23,7 @@ OmniCPP-template is a comprehensive C++23 project template that demonstrates mod
 - Code quality tools (clang-format, clang-tidy, pylint, mypy)
 
 **The Analogy:**
-Think of OmniCPP-template as a "starter kit" for C++ game development-like a pre-assembled LEGO set where all the pieces are designed to work together, but you can still customize and extend it however you want.
+Think of Warploom as a "starter kit" for C++ game development-like a pre-assembled LEGO set where all the pieces are designed to work together, but you can still customize and extend it however you want.
 
 ### How do I get started?
 

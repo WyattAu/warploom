@@ -1,6 +1,6 @@
 # warploom_scripts/utils/system_utils.py
 """
-System utility functions for OmniCPP project.
+System utility functions for Warploom project.
 
 Provides system detection, command execution, and platform-specific operations.
 """

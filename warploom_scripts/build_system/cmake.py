@@ -1,5 +1,5 @@
 """
-CMake wrapper and integration module for OmniCPP build system.
+CMake wrapper and integration module for Warploom build system.
 
 Provides CMake configuration, build functions, preset management,
 and toolchain file selection for cross-platform compilation.

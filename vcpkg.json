@@ -3,7 +3,7 @@
   "name": "warploom",
   "version": "0.0.5",
   "description": "Warploom: data-oriented C++ engine with deterministic simulation, a Vulkan renderer and a time-warp editor.",
-  "homepage": "https://github.com/WyattAu/OmniCPP-template",
+  "homepage": "https://github.com/WyattAu/warploom",
   "builtin-baseline": "2024-06-17",
   "dependencies": [
     {

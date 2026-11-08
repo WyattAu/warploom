@@ -1,5 +1,5 @@
 """
-Conan package manager integration module for OmniCPP build system.
+Conan package manager integration module for Warploom build system.
 
 Provides Conan package installation, profile management,
 and Conan integration with CMake.

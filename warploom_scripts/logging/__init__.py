@@ -1,7 +1,7 @@
 """
-OmniCPP Logging System
+Warploom Logging System
 
-This package provides a comprehensive logging infrastructure for the OmniCPP project.
+This package provides a comprehensive logging infrastructure for the Warploom project.
 It supports multiple handlers, custom formatters, and configuration-driven behavior.
 
 Usage:

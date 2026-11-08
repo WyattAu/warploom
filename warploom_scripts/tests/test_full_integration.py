@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive Integration Tests for OmniCPP Build System
+Comprehensive Integration Tests for Warploom Build System
 
 This module tests the integration of all components:
 - Logging system

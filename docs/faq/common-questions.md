@@ -7,7 +7,7 @@
 > build path.
 
 
-General questions about the OmniCPP-template project.
+General questions about the Warploom project.
 
 ## Table of Contents
 
@@ -27,7 +27,7 @@ General questions about the OmniCPP-template project.
 **The Deep Dive:**
 
 ```
-OmniCPP-template/
+warploom/
 ├── src/                    # Source code
 │   ├── engine/             # Game engine implementation
 │   └── game/              # Game/example implementation

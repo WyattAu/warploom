@@ -1,6 +1,6 @@
 # warploom_scripts/compilers/msvc.py
 """
-MSVC compiler detection and validation for OmniCPP project.
+MSVC compiler detection and validation for Warploom project.
 
 Provides MSVC-specific compiler detection, version checking,
 and C++23 support validation.

@@ -1,5 +1,5 @@
 """
-Custom log handlers for the OmniCPP logging system.
+Custom log handlers for the Warploom logging system.
 
 This module provides custom handlers for different logging output destinations:
 - ConsoleHandler: Console output with optional color support

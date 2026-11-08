@@ -262,6 +262,89 @@ not.
   Session-level Step is ack-only by design — the game is the host. Next:
   the content pipeline (glTF/compressed textures).
 
+## Loops 24–26 notes (content pipeline, PT normals, driven skinning)
+
+- [loop24-bc-textures.md](loop24-bc-textures.md) — in-tree BC1/BC3
+  decode for KTX2, first of the content-pipeline arc (real-world BC
+  payloads failed the load; RGBA8-only was a silent content constraint).
+- [loop25-duff-onb-faceforward.md](loop25-duff-onb-faceforward.md) —
+  true Duff ONB + Faceforward hit normals (Duff et al., JCGT 2017);
+  fixes a naive ±Z-degenerate projection and an inward position-fetch
+  cross that two probes had coincided in hiding.
+- [loop26-gpu-driven-skinning.md](loop26-gpu-driven-skinning.md) —
+  GPU-driven skinned draws (R3): palette join key rides the driven
+  payload pad word, skin stream parallel to the vertex stream,
+  partitioned static/skinned indirect draws; byte-identical CPU parity
+  (`GpuDrivenSkinnedMatchesCpuSkinnedPixels`), sabotaged both
+  directions. Tet-cage RT skinning (Gruen et al., HPG 2026) explicitly
+  NOT adopted — answers per-frame BLAS cost, not draw-path parity.
+
+## Loops 27–29 notes (dynamic rendering, async compute, live-PT stepping)
+
+- [loop27-dynamic-rendering.md](loop27-dynamic-rendering.md) —
+  dynamic rendering for fullscreen passes, stages 0–3 landed (Blade
+  stages; bloom downsample, tonemap, scene node off baked passes).
+- [loop28-async-compute-spike.md](loop28-async-compute-spike.md) —
+  async-compute overlap for the H-Z reduce, verdict ADOPT, staged
+  migration; the spike stays green in-suite as the measurement record.
+- [loop29-live-pt-spikes.md](loop29-live-pt-spikes.md) — live-PT
+  stepping discipline LANDED (pose-smear closed); adaptive and
+  denoiser SPIKES measured, builds specified not started.
+
+## Loops 30–35 notes (denoiser arc: spike, consumer, exhausted negatives)
+
+- [loop30-edge-denoiser.md](loop30-edge-denoiser.md) — edge-stopped
+  a-trous spike on the G-buffer signal (Dammertz et al., HPG 2010).
+- [loop31-render-path-denoiser.md](loop31-render-path-denoiser.md) —
+  render-path denoiser consumer LANDED: `record_denoise()`, live
+  `set_denoise` (protocol v1.18).
+- [loop32-curved-scene-normal-term.md](loop32-curved-scene-normal-term.md) —
+  curved-scene spike for the normal term; gain composition inverted
+  vs the planar scene.
+- [loop33-edge-iteration-diverges.md](loop33-edge-iteration-diverges.md) —
+  negative: multi-iteration WITH geometry guidance still diverges
+  (stale guidance keeps the width wide).
+- [loop34-variance-update.md](loop34-variance-update.md) — negative:
+  per-iteration variance update still diverges; the filter-loop
+  branch is exhausted, single-iteration stays the v1 filter.
+- [loop35-live-pt-consumer.md](loop35-live-pt-consumer.md) — denoiser
+  on a live app scene + the defects the live path exposed (resize
+  dropping denoise/sample-target settings, depth-attachment leak,
+  `clips_info` invalid JSON, g3 frame-contract rewrite).
+
+## Other notes
+
+- [trial638-xpbd-compliance.md](trial638-xpbd-compliance.md) —
+  exact-XPBD compliance formulation, ADOPTED (verdict in ADR-008).
+- [wayland-backend.md](wayland-backend.md) — Wayland backend research
+  (E6): xdg-shell window + swapchain present, viewport slice (loop69);
+  engine half landed in loop68. Vendor docs only, labelled as such.
+
+## Loops 36+ disposition (topic-organized; no per-loop files)
+
+Work after loop35 was recorded by topic, not by loop file.
+Technique adoption is covered; the rest is proof/plumbing recorded
+in the roadmap and rendering status, which the discipline explicitly
+exempts from research notes ("say so and skip rather than padding"):
+
+- [physics-solver.md](physics-solver.md) — the XPBD/speculative arc:
+  substepping + compliance staging (MIG 2016; SIGGRAPH 2021/2025),
+  speculative contacts (Catto/Box2D), capsule sweep, compliant
+  rewind, wake-up and default-on (loops 52/55/57/58/61/62/63/67);
+  exact compliance via trial638 → ADR-008 (`docs/paradigm-adr.md`).
+- [wayland-backend.md](wayland-backend.md) — E6 Wayland slices
+  (loops 68–70; pointer input deferred to loop71).
+- Roadmap/status-recorded proof and plumbing (no technique borrowed):
+  loop38 live concurrent record+play closing D2; loop43 campaign
+  update; loop44 cnc sabotage validation; loop46 headless proof
+  series; loop49 wire physics (protocol v1.19); loop56 phys
+  save/load round-trip; loop65 wire execution of the loop62/63
+  headers; loop66 compiler-warning closure on the same headers.
+- Honest remainder: loop numbers 36, 37, 39–42, 45, 47, 48, 50, 51,
+  53, 54, 60, 64 (plus 59, named only inside the "loop55–59 solver
+  changes" range) leave no docs trace. Confirm against git history
+  when a terminal is available; if plumbing/proof, nothing is owed.
+
 ## Follow-up searches for the next loop
 
 - Visual-scripting execution models (dataflow pull vs imperative push, and

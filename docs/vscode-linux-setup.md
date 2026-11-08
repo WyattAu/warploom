@@ -16,7 +16,7 @@
 
 ## Overview
 
-This guide provides comprehensive instructions for setting up Visual Studio Code (VSCode) for C++ development on Linux with the OmniCPP Template project. It covers installation, extensions, configuration, build tasks, debugging, and integration with Nix and CachyOS.
+This guide provides comprehensive instructions for setting up Visual Studio Code (VSCode) for C++ development on Linux with the Warploom project. It covers installation, extensions, configuration, build tasks, debugging, and integration with Nix and CachyOS.
 
 ### Why VSCode for Linux C++ Development?
 
@@ -1437,7 +1437,7 @@ Validate task configurations to prevent injection attacks (addresses TM-LX-005):
 
 ## Summary
 
-This guide provides comprehensive VSCode setup for Linux C++ development with the OmniCPP Template project. Key points:
+This guide provides comprehensive VSCode setup for Linux C++ development with the Warploom project. Key points:
 
 - **Installation:** Install VSCode and required extensions
 - **Configuration:** Configure C/C++ IntelliSense and CMake Tools

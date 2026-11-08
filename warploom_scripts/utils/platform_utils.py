@@ -1,6 +1,6 @@
 # warploom_scripts/utils/platform_utils.py
 """
-Platform detection utility functions for OmniCPP project.
+Platform detection utility functions for Warploom project.
 
 Provides system detection and platform-specific operations.
 """

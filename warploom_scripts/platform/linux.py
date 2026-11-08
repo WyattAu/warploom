@@ -1,6 +1,6 @@
 # warploom_scripts/platform/linux.py
 """
-Linux-specific platform detection for OmniCPP project.
+Linux-specific platform detection for Warploom project.
 
 Provides Linux platform detection including GCC and Clang compiler detection,
 and terminal environment setup for Linux compilers.

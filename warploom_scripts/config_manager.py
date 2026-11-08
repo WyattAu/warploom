@@ -3,7 +3,7 @@
 Configuration Manager - Load, validate, and manage configuration files
 
 This module provides configuration file loading, validation, caching,
-and management for OmniCPP build system.
+and management for Warploom build system.
 """
 
 from __future__ import annotations

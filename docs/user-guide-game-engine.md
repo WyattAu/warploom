@@ -42,7 +42,7 @@ The Warploom Game Engine is a modern, high-performance C++ game engine built wit
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd OmniCPP-template
+cd warploom
 ```
 
 2. Build the engine library:

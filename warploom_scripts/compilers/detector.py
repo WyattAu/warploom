@@ -1,6 +1,6 @@
 # warploom_scripts/compilers/detector.py
 """
-Compiler detection module for OmniCPP project.
+Compiler detection module for Warploom project.
 
 Provides compiler detection capabilities including MSVC, GCC, Clang,
 and C++23 support validation.

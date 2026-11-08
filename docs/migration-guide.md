@@ -1,10 +1,10 @@
-# OmniCPP Migration Guide
+# Warploom Migration Guide
 
 This guide helps you migrate from the old build system to the new integrated system with logging, platform detection, compiler detection, and terminal setup.
 
 ## Overview
 
-The OmniCPP build system has been significantly enhanced with the following new components:
+The Warploom build system has been significantly enhanced with the following new components:
 
 1. **Comprehensive Logging System** - Structured logging with multiple handlers and formatters
 2. **Platform Detection** - Automatic OS and architecture detection

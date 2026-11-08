@@ -1,6 +1,6 @@
 # warploom_scripts/utils/command_utils.py
 """
-Command execution utility functions for OmniCPP project.
+Command execution utility functions for Warploom project.
 
 Provides command execution with retry logic and error handling.
 """

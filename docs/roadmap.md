@@ -1160,9 +1160,12 @@ leg (224/224) stays VRAM-gated like all wire proofs, stated not hidden.
       find_package(WarploomPhysics)`, links `Warploom::core` +
       `Warploom::physics`, drives the public API only) configures,
       builds, and runs against the install tree — verified 2026-11-01.
-      Remaining, each blocked and stated: WASM (no emscripten toolchain on
-      this machine), docs rebrand + repo rename (owner decisions, not
-      engineering). Native Wayland surface is half-unblocked: kwin_wayland
+      Remaining: WASM (owner decision 2026-11-08: PROVISION the emsdk
+      toolchain on this machine — install pending, needs a live shell;
+      pin the emsdk version, do not float `latest`); docs rebrand +
+      repo rename DONE 2026-11-08 (owner
+      actions complete; `origin` is `github.com/WyattAu/warploom.git`).
+      Native Wayland surface is half-unblocked: kwin_wayland
       is live here after all, so the engine-side creation path landed in
       loop68 — explicit `SurfacePlatform` discriminator (never probed;
       wrapping Wayland handles as XCB returns a plausible-looking surface,

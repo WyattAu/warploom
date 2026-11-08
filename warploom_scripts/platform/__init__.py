@@ -1,5 +1,5 @@
 """
-Platform detection module for OmniCPP project.
+Platform detection module for Warploom project.
 
 Provides platform detection capabilities including OS, architecture,
 and platform-specific information.

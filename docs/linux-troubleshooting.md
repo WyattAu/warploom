@@ -2,7 +2,7 @@
 
 **Version:** 1.0.0
 **Last Updated:** 2026-01-28
-**Project:** OmniCPP-Template
+**Project:** Warploom
 **References:** [ADR-028](../.specs/02_adrs/ADR-028-cachyos-primary-linux-target.md) | [REQ-008-003](../.specs/04_future_state/reqs/REQ-008-documentation.md)
 
 ---
@@ -26,7 +26,7 @@
 
 ## Introduction to Linux Troubleshooting
 
-This guide provides comprehensive troubleshooting assistance for Linux development with the OmniCPP Template. Linux development presents unique challenges due to distribution fragmentation, package manager diversity, and system configuration variations.
+This guide provides comprehensive troubleshooting assistance for Linux development with Warploom. Linux development presents unique challenges due to distribution fragmentation, package manager diversity, and system configuration variations.
 
 ### Primary Linux Target
 
@@ -1980,7 +1980,7 @@ Before seeking help, gather the following information:
    - [Developer Guide](developer-guide.md)
 
 2. **Project Issues:**
-   - Search existing issues: https://github.com/your-org/OmniCPP-template/issues
+   - Search existing issues: https://github.com/WyattAu/warploom/issues
    - Create new issue with gathered information
    - Include logs, error messages, and reproduction steps
 

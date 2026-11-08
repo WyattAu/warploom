@@ -1,6 +1,6 @@
 # warploom_scripts/utils/exceptions.py
 """
-Custom exception classes for OmniCPP project.
+Custom exception classes for Warploom project.
 
 Provides exception classes for error handling across all modules.
 """

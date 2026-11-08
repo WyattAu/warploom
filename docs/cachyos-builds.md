@@ -2,7 +2,7 @@
 
 **Version:** 1.0.0  
 **Last Updated:** 2026-01-28  
-**Project:** OmniCPP-Template  
+**Project:** Warploom  
 **References:** [ADR-032](../.specs/02_adrs/ADR-032-cachyos-support.md) | [REQ-008-002](../.specs/04_future_state/reqs/REQ-008-documentation.md)
 
 ---
@@ -35,7 +35,7 @@ CachyOS is an Arch Linux derivative optimized for performance. It features a cus
 - **Link-Time Optimization (LTO):** Enabled by default for better performance
 - **Rolling Release Model:** Always up-to-date with latest packages
 
-### Why CachyOS for OmniCPP?
+### Why CachyOS for Warploom?
 
 CachyOS provides an ideal development environment for C++ game engine development:
 
@@ -51,7 +51,7 @@ CachyOS provides an ideal development environment for C++ game engine developmen
 
 ### Prerequisites
 
-Before setting up CachyOS for OmniCPP development, ensure you have:
+Before setting up CachyOS for Warploom development, ensure you have:
 
 - CachyOS installed (minimum version: 2024.01)
 - Root/sudo access for package installation
@@ -885,7 +885,7 @@ sudo pacman-key --refresh-keys
 
 ### Documentation
 
-- [OmniCPP Documentation](index.md)
+- [Warploom Documentation](index.md)
 - [Linux Builds Guide](linux-builds.md)
 - [Developer Guide](developer-guide.md)
 - [Troubleshooting Guide](troubleshooting.md)
@@ -902,7 +902,7 @@ sudo pacman-key --refresh-keys
 
 - [CachyOS Forum](https://forum.cachyos.org/)
 - [CachyOS Discord](https://discord.gg/cachyos)
-- [OmniCPP GitHub](https://github.com/your-org/OmniCPP-template)
+- [Warploom GitHub](https://github.com/WyattAu/warploom)
 
 ---
 

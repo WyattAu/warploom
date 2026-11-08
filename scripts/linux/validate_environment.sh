@@ -97,7 +97,7 @@ show_usage() {
     cat << EOF
 Usage: $SCRIPT_NAME [options]
 
-Validate the Linux build environment for OmniCPP Template.
+Validate the Linux build environment for Warploom.
 
 This script checks for:
   - Linux distribution detection
@@ -817,7 +817,7 @@ main() {
     done
     
     echo -e "${CYAN}========================================${NC}"
-    echo -e "${CYAN}OmniCPP Environment Validation${NC}"
+    echo -e "${CYAN}Warploom Environment Validation${NC}"
     echo -e "${CYAN}========================================${NC}"
     echo ""
     

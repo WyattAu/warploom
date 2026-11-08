@@ -1,6 +1,6 @@
 # warploom_scripts/exceptions.py
 """
-Custom exception hierarchy for the OmniCPP controller.
+Custom exception hierarchy for the Warploom controller.
 
 Provides a structured exception system for controller-related errors,
 including proper context tracking and exit code mapping.

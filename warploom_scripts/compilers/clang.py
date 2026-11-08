@@ -1,6 +1,6 @@
 # warploom_scripts/compilers/clang.py
 """
-Clang compiler detection and validation for OmniCPP project.
+Clang compiler detection and validation for Warploom project.
 
 Provides Clang-specific compiler detection, version checking,
 and C++23 support validation.

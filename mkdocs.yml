@@ -4,8 +4,8 @@ site_description: >-
   Vulkan rendering, and a time-warp editor.
 site_author: Warploom contributors
 
-repo_url: https://github.com/WyattAu/OmniCPP-template
-repo_name: OmniCPP-template
+repo_url: https://github.com/WyattAu/warploom
+repo_name: warploom
 
 theme:
   name: material
@@ -46,7 +46,7 @@ plugins:
       enable_creation_date: true
       type: timeago
   - git-committers:
-      repository: WyattAu/OmniCPP-template
+      repository: WyattAu/warploom
       branch: main
 
 markdown_extensions:

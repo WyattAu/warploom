@@ -1,6 +1,6 @@
 # warploom_scripts/validators/__init__.py
 """
-Validation package for OmniCPP project.
+Validation package for Warploom project.
 
 This package provides comprehensive validation for:
 - Configuration files

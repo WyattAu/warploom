@@ -1,6 +1,6 @@
 # warploom_scripts/platform/windows.py
 """
-Windows-specific platform detection for OmniCPP project.
+Windows-specific platform detection for Warploom project.
 
 Provides Windows platform detection including MSVC and MinGW compiler detection,
 and terminal environment setup for different compilers.

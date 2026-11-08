@@ -1,5 +1,5 @@
 """
-Configuration management for the OmniCPP logging system.
+Configuration management for the Warploom logging system.
 
 This module provides functions to load and validate logging configuration
 from the config/logging_python.json file. It includes sensible defaults

@@ -1,5 +1,5 @@
 """
-Custom log formatters for the OmniCPP logging system.
+Custom log formatters for the Warploom logging system.
 
 This module provides custom formatters for different logging output formats:
 - CustomFormatter: Standard text format with timestamps, levels, and context

@@ -160,14 +160,14 @@ directive. 14 self-spellings → `warploom::editor`; module tests
 ### Phase 3: ABI + strings + repo rename
 
 1. Script-module loader accepts BOTH symbol families: tries
-   `warploom_module_*` first, falls back to `warploom_module_*`; new
+   `warploom_module_*` first, falls back to `omnicpp_module_*`; new
    fixtures export the new family; old-family modules keep loading
    (the shim). Contract string → `"warploom contract violation"`
    (test updated; the old string was never parsed by anything).
-2. GitHub repo rename `OmniCPP-template` → `warploom`: **manual step**
-   (owner action in GitHub UI); local prep: remote URL update,
-   badge/docs sweep, CI trigger paths. Last, after everything else
-   passes with the new identity.
+2. GitHub repo rename `OmniCPP-template` → `warploom`: **DONE 2026-11-08**
+   (owner action in GitHub UI; `origin` is now
+   `github.com/WyattAu/warploom.git`, template remote removed, checkout
+   dir renamed; this docs sweep is the badge/docs half).
 
 ## 3. Risks
 

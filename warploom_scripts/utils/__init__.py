@@ -1,6 +1,6 @@
 # warploom_scripts/utils/__init__.py
 """
-Shared utilities for OmniCPP project.
+Shared utilities for Warploom project.
 
 This package provides common utilities used across all scripts:
 - Exception classes

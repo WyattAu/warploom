@@ -1,6 +1,6 @@
 # warploom_scripts/utils/path_utils.py
 """
-Path utility functions for OmniCPP project.
+Path utility functions for Warploom project.
 
 Provides path manipulation, normalization, and cross-platform path operations.
 """

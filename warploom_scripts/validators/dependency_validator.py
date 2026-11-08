@@ -1,6 +1,6 @@
 # warploom_scripts/validators/dependency_validator.py
 """
-Dependency validation for OmniCPP project.
+Dependency validation for Warploom project.
 
 This module validates:
 - Dependency integrity and versions

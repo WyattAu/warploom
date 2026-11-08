@@ -1,6 +1,6 @@
 # warploom_scripts/validators/config_validator.py
 """
-Configuration file validation for OmniCPP project.
+Configuration file validation for Warploom project.
 
 This module provides schema-based validation for:
 - CMakePresets.json

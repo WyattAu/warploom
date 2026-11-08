@@ -38,7 +38,7 @@ The Warploom Build System is a comprehensive build automation tool designed for 
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd OmniCPP-template
+cd warploom
 ```
 
 2. Install Python dependencies:

@@ -1,6 +1,6 @@
 # warploom_scripts/error_handler.py
 """
-Centralized error handling system for OmniCPP project.
+Centralized error handling system for Warploom project.
 
 This module provides:
 - Custom exception classes for different error types
@@ -30,7 +30,7 @@ class ErrorSeverity(Enum):
 
 
 class WarploomError(Exception):
-    """Base exception class for OmniCPP errors"""
+    """Base exception class for Warploom errors"""
 
     def __init__(self, message: str, severity: ErrorSeverity = ErrorSeverity.MEDIUM,
                  recoverable: bool = True, context: Optional[Dict[str, Any]] = None):

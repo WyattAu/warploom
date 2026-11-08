@@ -1,5 +1,5 @@
 {
-  description = "OmniCPP C++ Development Environment for CachyOS with Qt6, Vulkan, GCC 13, and Clang 19";
+  description = "Warploom C++ Development Environment for CachyOS with Qt6, Vulkan, GCC 13, and Clang 19";
 
   inputs = {
     # Use nixos-unstable for latest packages (pinned via flake.lock for TM-LX-001 security)
@@ -100,7 +100,7 @@
 
           # Environment setup for development shell (REQ-002-006)
           shellHook = ''
-            echo ">> Loaded OmniCPP C++ Development Environment"
+            echo ">> Loaded Warploom C++ Development Environment"
             echo ">> GCC 13 and Clang 19 toolchains available"
             echo ">> Qt6 and Vulkan graphics libraries loaded"
              echo ">> vcpkg package manager ready"

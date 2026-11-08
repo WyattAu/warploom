@@ -1,5 +1,5 @@
 """
-Build system integration module for OmniCPP.
+Build system integration module for Warploom.
 
 Provides unified interface for CMake, Conan, vcpkg,
 and build optimization operations.

@@ -1,5 +1,5 @@
 """
-vcpkg package manager integration module for OmniCPP build system.
+vcpkg package manager integration module for Warploom build system.
 
 Provides vcpkg package installation, triplet management,
 and vcpkg integration with CMake.

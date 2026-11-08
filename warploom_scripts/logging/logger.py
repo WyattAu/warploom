@@ -1,5 +1,5 @@
 """
-Logger setup and unified interface for the OmniCPP logging system.
+Logger setup and unified interface for the Warploom logging system.
 
 This module provides a unified logging interface that can be imported by all
 Python scripts in the project. It handles logger initialization, configuration,

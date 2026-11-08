@@ -1,6 +1,6 @@
 # warploom_scripts/utils/logging_utils.py
 """
-Logging utility functions for OmniCPP project.
+Logging utility functions for Warploom project.
 
 Provides logging functions with timestamps.
 """

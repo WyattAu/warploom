@@ -1,6 +1,6 @@
 # warploom_scripts/utils/file_utils.py
 """
-File utility functions for OmniCPP project.
+File utility functions for Warploom project.
 
 Provides common file operations with error handling and logging.
 """

@@ -193,7 +193,7 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
   engine bugs, both fixed (see R6b note in roadmap.md): the verify gate's
   absolute-index subset check refused PT-with-bloom-off, and the per-frame
   external descriptor write was VUID-03047 with frames in flight.
-- [ ] **RT sub-toggles (R2) + GPU-driven skinned scenes (R3).**
+- [x] **RT sub-toggles (R2) + GPU-driven skinned scenes (R3).** DONE: R2 — reflections/AO sub-toggles, protocol v1.12, live round-trip (roadmap.md E2 R1–R4; rendering-status.md RT-toggle rows); R3 — GPU-driven skinned draws, byte-identical CPU parity `GpuDrivenSkinnedMatchesCpuSkinnedPixels` (docs/research/loop26-gpu-driven-skinning.md).
 - [x] **PT + bloom layering.** DONE 2026-11-01 (RTX 2060): the bloom
   bright-pass reads the external accumulation in GENERAL and divides by
   the sample count BEFORE the Karis threshold (new `bloom_downsample_pt`
@@ -308,9 +308,9 @@ Nothing in T3–T7 may break T0's contracts (determinism, verification).
 ### T8. Productization (proves the engine from outside)
 
 - [ ] **E3 hardware CI runner** — RT tests currently skip on lavapipe;
-  the best subsystem has the least protection.
-- [ ] E6: WASM leg, native Wayland, FetchContent/vcpkg adoption, docs
-  rebrand, repo rename.
+  the best subsystem has the least protection. DEFERRED 2026-11-08 by
+  owner decision; revisit when RT work needs CI protection.
+- [ ] E6: WASM leg (owner decision 2026-11-08: PROVISION emsdk toolchain on this machine; install pending), native Wayland remainder (creation+present+keyboard seat landed, loops 68–70; pointer input deferred to loop71). DONE: FetchContent/vcpkg adoption, docs rebrand, repo rename (`github.com/WyattAu/warploom`). Dogfooding splits stay sequenced after loop71 + the pending commit.
 - [ ] Dogfooding splits per AGENTS.md: viewport split as the natural
   first; then a game consumer (WyattAu/warploom-game pattern exists),
   and a movie/CAD consumer only when the capability needs one. Each:

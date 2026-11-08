@@ -1,6 +1,6 @@
 # warploom_scripts/validators/build_validator.py
 """
-Build output validation for OmniCPP project.
+Build output validation for Warploom project.
 
 This module validates:
 - Build artifacts existence and integrity

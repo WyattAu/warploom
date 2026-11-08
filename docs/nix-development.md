@@ -16,7 +16,7 @@
 
 ## Overview
 
-This document describes how to set up and use the Nix development environment for the OmniCPP Template project on Linux. Nix provides reproducible, declarative development environments that ensure all developers have identical toolchains and dependencies.
+This document describes how to set up and use the Nix development environment for the Warploom project on Linux. Nix provides reproducible, declarative development environments that ensure all developers have identical toolchains and dependencies.
 
 ### What is Nix?
 
@@ -42,7 +42,7 @@ Nix addresses all these issues by providing a completely isolated, reproducible 
 
 ### Project Nix Configuration
 
-The OmniCPP Template provides multiple Nix development shells:
+Warploom provides multiple Nix development shells:
 
 - **default:** Full environment with GCC 13, Clang 19, Qt6, Vulkan, and all tools
 - **gcc:** GCC 13-focused environment
@@ -162,7 +162,7 @@ The [`flake.nix`](../flake.nix:1) file defines all development dependencies and 
 
 ```nix
 {
-  description = "OmniCPP C++ Development Environment for CachyOS with Qt6, Vulkan, GCC 13, and Clang 19";
+  description = "Warploom C++ Development Environment for CachyOS with Qt6, Vulkan, GCC 13, and Clang 19";
 
   inputs = {
     # Use nixos-unstable for latest packages (pinned via flake.lock for security)
@@ -367,7 +367,7 @@ nix develop .#default
 You should see output like:
 
 ```
->> Loaded OmniCPP C++ Development Environment (CachyOS)
+>> Loaded Warploom C++ Development Environment (CachyOS)
 >> GCC 13 and Clang 19 toolchains available
 >> Qt6 and Vulkan graphics libraries loaded
 >> Conan package manager and Python environment ready
