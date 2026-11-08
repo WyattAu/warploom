@@ -33,8 +33,10 @@ namespace compat footers, target aliases, `src/engine`) is removed.
   record/play session arms, and axis-suffix property tracks.
 - Protocol record/replay (`warploom-replay-v1`) with hash-verified hydration
   and opening-checkpoint restore.
-- `tools/live_proof.py`: checked-in socket harness, 64 assertions over the
-  scrubber, save/load round-trip, two-instance record/replay and timeline.
+- `tools/live_proof.py`: checked-in socket harness — 224 assertions at the
+  2026-11-06 measurement (scrubber, save/load round-trip, two-instance
+  record/replay, timeline, render modes, exposure/bloom/RT toggles, stepped
+  PT, resize, scene management), sabotage-validated per leg.
 - CI: `examples` job that builds the viewport and asserts all shaders compile,
   and a `presets` job that checks the documented entry points configure.
 - CMake `buildPresets` and `testPresets` for every preset.
@@ -97,17 +99,20 @@ namespace compat footers, target aliases, `src/engine`) is removed.
 ### Known issues
 
 Deliberately recorded rather than hidden; see `docs/roadmap.md` Phase E.
+Refreshed 2026-11-08 against the measured state:
 
-- The viewport does not use the renderer module's own frame path; the render
-  graph, H-Z occlusion, offscreen targets and post-processing are tested but
-  have no production caller.
-- Physics is 204 lines: semi-implicit Euler, spheres only, an O(n²)
-  broadphase, no joints, and stepped outside the deterministic tick so replay
-  cannot reproduce it.
-- Timeline playback is step-hold; there is no interpolation, and only one
-  track can record or play at a time.
-- The ECS has no production consumer.
-- `format-check` fails: 194 of 195 files do not match `.clang-format`.
-- `WARPLOOM_WARNINGS_AS_ERRORS` defaults off against roughly 270 warnings.
+- The viewport gd demo scene (`WARPLOOM_PHYSICS=1`) still steps its own
+  app-local `PhysicsWorld` per window frame; the deterministic, replayable
+  session sim is a separate path. Migrating the demo scene onto it is the
+  remaining D1 follow-up.
+- Some renderer surfaces remain test-only: the render-graph single-entry
+  path, `record_pbr_frame`, `VulkanOffscreenTarget`, the parallel recorder.
+- Timeline: no per-clip easing selection over the document/wire; lights have
+  no track path.
 - Every ray-tracing test skips in CI, which runs Mesa lavapipe; there is no
-  hardware runner.
+  hardware runner (E3), and the GPU suite is VRAM-gated on the shared
+  RTX 2060 (loop81).
+- The WASM leg (E6) is unprovisioned: emsdk install pending.
+- Deferred renderer features: CSM, SSAO, SSR, TAA, MSAA, deferred shading.
+- PT budget proof on the app scene — the machinery (adaptive sampling,
+  denoiser) is shipped; the budget proof is post-0.1 feature work.

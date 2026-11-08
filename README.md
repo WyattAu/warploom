@@ -1,13 +1,16 @@
 # Warploom
 
 A data-oriented C++ engine with deterministic simulation, Vulkan rendering,
-an ECS foundation, and a time-warp editor; shipped as six installable
+an ECS foundation, and a time-warp editor; shipped as seven installable
 CMake packages (`warploom_asset`, `warploom_core`, `warploom_editor`,
-`warploom_engine`, `warploom_render`, `warploom_ui`).
+`warploom_engine`, `warploom_physics`, `warploom_render`, `warploom_ui`).
 
 The differentiator is **determinism as product**: a session can be recorded,
-replayed, and scrubbed to any frame, and the state comes back exactly. 64
-assertions of that run over a real socket in CI (`tools/live_proof.py`).
+replayed, and scrubbed to any frame, and the state comes back exactly —
+physics included (T4a checkpoints restore the full solver state
+bit-identically). 224 assertions of that run over real sockets, viewport and
+headless hosts (`tools/live_proof.py all`; measured 2026-11-06, extended per
+feature; the headless subset runs in CI).
 
 ## Build
 
@@ -43,15 +46,16 @@ Each has a matching `--build` and `ctest --preset` entry. About 60 more
 
 ## Architecture
 
-Five installable libraries and one headerless aggregate:
+Six installable libraries and one headerless aggregate:
 
 | Package | Target | Contents |
 |---|---|---|
-| `WarploomCore` | `Warploom::core` | deterministic runtime, document/JSON, ECS, node graph, replay/scrubber/recorder, protocol + session, input, physics |
+| `WarploomCore` | `Warploom::core` | deterministic runtime, document/JSON, ECS, node graph, replay/scrubber/recorder, protocol + session, input, physics snapshot codec |
 | `WarploomUI` | `Warploom::ui` | widget primitives, glyph atlas |
 | `WarploomEditor` | `Warploom::editor` | node editor, inspector, graph→animation bridge, clip timeline view |
 | `WarploomRender` | `Warploom::render` | Vulkan context/swapchain/pipelines, render graph, RT, IBL, GPU-driven draw, H-Z occlusion, software rasterizer |
 | `WarploomAsset` | `Warploom::asset` | glTF/GLB + skeletal animation import, PNG/JPEG/KTX2 decoding |
+| `WarploomPhysics` | `Warploom::physics` | header-only deterministic solver: spheres/capsules, XPBD, distance joints, speculative TOI contacts, uniform-grid broadphase |
 | `WarploomEngine` | `Warploom::engine` | INTERFACE aggregate over all five |
 
 Each installs its own `Warploom<Name>Config.cmake` and version file, so a
@@ -59,13 +63,14 @@ consumer needs only `find_package(WarploomRender)` and a link line. There
 is no monolithic engine target.
 
 ```
-modules/core     11,470 lines   22 headers, 11 TUs
-modules/render   13,333 lines   27 headers, 22 TUs
-modules/asset     6,410 lines    6 headers,  6 TUs
-modules/editor    3,278 lines    4 headers,  3 TUs
-modules/ui        1,329 lines    2 headers,  2 TUs
-examples/viewport  5,553 lines   the application
-tests/           37,246 lines   580 tests across 99 suites
+modules/core     16,500 lines   30 headers, 18 TUs
+modules/render   21,549 lines   35 headers, 30 TUs
+modules/asset     6,707 lines    8 headers,  7 TUs
+modules/physics   2,083 lines    1 header,  solver only
+modules/editor    3,671 lines    5 headers,  9 TUs
+modules/ui        1,342 lines    2 headers,  4 TUs
+examples/viewport  9,475 lines   the application
+tests/           56,186 lines   879 tests in five test binaries
 ```
 
 Public headers are spelled `warploom/<module>/<header>.hpp` and reached
@@ -79,39 +84,52 @@ any capability list, including this one. It separates three questions that
 are easy to conflate; is it in the engine, can the app reach it, and what
 proves it.
 
-The short version:
+The short version; every claim carries its proof in
+[`docs/rendering-status.md`](docs/rendering-status.md):
 
 **Strong.** Ray tracing is real: acceleration structures, an RT pipeline with
 a shader-binding table, `vkCmdTraceRaysKHR`, and a loop path tracer checked
-against an independent fp64 Monte-Carlo integrator. The render graph, IBL,
-PBR, GPU-driven cull→indirect, glTF and skeletal import, and the
-determinism/replay/scrub/timeline stack are all implemented and tested.
+against an independent fp64 Monte-Carlo integrator — with adaptive sampling
+and an edge-stopped à-trous denoiser live in the render path. The viewport
+records through the renderer module (Phase B closed the hand-rolled gap).
+Physics is a real deterministic solver (spheres/capsules, distance joints,
+XPBD compliance, speculative TOI contacts, a uniform-grid broadphase proven
+equivalent to all-pairs at 200–8000 bodies), the session sim is wire-driven
+and scrub-restorable bit-identically (T4a), the timeline interpolates
+sub-frame, and the document projects into one ECS driven by one tick.
 
-**Not yet true.** Three things the project is sometimes described as having,
-that it does not:
+**Not yet true** (the current honest gaps, each a named roadmap item):
 
-- **Physics is 204 lines.** Semi-implicit Euler, spheres only, an O(n²)
-  broadphase, no shapes, no joints, and it is stepped outside the
-  deterministic tick; so replay cannot reproduce it.
-- **The app does not use the renderer module.** The viewport hand-rolls its
-  own Vulkan. `record_pbr_frame`, the render graph, H-Z occlusion, offscreen
-  targets and the whole bloom/tonemap chain are real and tested but have no
-  production caller. The application is a weaker renderer than its test suite
-  proves.
-- **The timeline steps rather than interpolates.** Clips, recording,
-  playback and undo all work; playback picks the last key at or before the
-  frame, so there are no curves, one armed track at a time, and the clip
-  strip widget is not wired into the app.
+- **The gd demo scene still steps its own physics world.** The session sim is
+  the deterministic, replayable one; the viewport's `WARPLOOM_PHYSICS=1`
+  scene runs an app-local `PhysicsWorld` stepped per window frame. Migrating
+  it onto the session sim is the remaining D1 follow-up.
+- **Some renderer surfaces are still test-only.** The render-graph
+  single-entry path, `record_pbr_frame`, `VulkanOffscreenTarget` and the
+  parallel recorder are tested but have no production caller — the app drives
+  the two GPU-driven halves separately because it renders a shadow pass
+  between them.
+- **Timeline selection, not capability, is missing.** Sub-frame interpolation
+  works and replays stay deterministic, but no document field or wire command
+  stores a per-clip easing (the app reaches Linear live, Step at whole
+  frames), and lights have no track path.
+- **Every ray-tracing test skips in CI** (Mesa lavapipe has no RT
+  extensions), and on the shared RTX 2060 the GPU suite is VRAM-gated
+  (loop81: 774/779 under trainer memory pressure, with a varying failing
+  set). E3 — a hardware runner — is open.
+- **PT usability at budgets** is proven only on the test scene: the tracer
+  snapshots a static view and holds the camera while active. The app-scene
+  budget proof is post-0.1 feature work.
 
 ## Validation
 
 | Check | Status |
 |---|---|
 | `ctest` | 6/6 suites |
-| Full suite on hardware (RTX 2060) under `VK_LAYER_KHRONOS_validation` | 0 diagnostics, 0 leaks |
-| `default` preset, under `VK_LAYER_KHRONOS_validation` | 580 tests, 0 diagnostics, 0 leaks |
-| `headless-debug`, `asan-ubsan`, `tsan` | **do not build**; see below |
-| `live_proof.py all` over real sockets | 64/64 |
+| `default` preset test count | 879 tests in five binaries (779 unit + 22 core + 49 editor + 19 ui + 10 runtime; counted 2026-11-08 via `--gtest_list_tests`) |
+| Full suite on hardware (RTX 2060) under `VK_LAYER_KHRONOS_validation` | 0 diagnostics, 0 leaks — VRAM-gated when a trainer holds memory (loop81: 774/779, varying failing set = contention, not a fault) |
+| `headless-debug`, `asan-ubsan`, `tsan` | all four presets build warning-free on GCC and clang; sanitizers 0 diagnostics, 0 leaks, 0 races (2026-11-06 re-measure) |
+| `live_proof.py all` over real sockets | 224/224 (2026-11-06; the headless subset runs in CI) |
 | `cpack` | 353-file package: modules, headers, package configs, shaders, viewport |
 
 The Vulkan CI leg is Mesa lavapipe, which has no ray-tracing extensions, so
@@ -123,9 +141,9 @@ All four presets build warning-free on both clang and GCC, and the sanitizer
 presets are now actually run rather than merely configured.
 
 `asan-ubsan` (Debug, `WARPLOOM_USE_VULKAN=OFF`) reports 0 AddressSanitizer
-diagnostics, 0 UndefinedBehaviorSanitizer diagnostics and 0 leaks across 540
-unit tests plus the 39 editor, 10 core, 19 ui and 10 runtime suites. `tsan`
-reports 0 data races over the same 540 tests, which is the first real
+diagnostics, 0 UndefinedBehaviorSanitizer diagnostics and 0 leaks across 673
+unit tests plus the 48 editor, 22 core, 19 ui and 10 runtime suites. `tsan`
+reports 0 data races over the same suites, which is the first real
 verification of the job system's concurrency claims. `headless-debug` builds
 clean and is what CI's live-proof job uses.
 
@@ -149,10 +167,10 @@ themselves.
 ## Layout
 
 ```
-modules/            the five libraries + the aggregate, each a CMake package
-examples/viewport/  the windowed application (XCB + Vulkan)
+modules/            the six libraries + the aggregate, each a CMake package
+examples/viewport/  the windowed application (XCB + Vulkan, native Wayland surface)
 tools/              headless control host used by the live-proof harness
-assets/shaders/     73 GLSL sources, compiled by cmake/Shaders.cmake
+assets/shaders/     82 shader sources, compiled by cmake/Shaders.cmake
 tests/              suites, module fixtures, the live-proof harness
 cmake/              build system: presets live in CMakePresets.json
 docs/               architecture, roadmap, capability status

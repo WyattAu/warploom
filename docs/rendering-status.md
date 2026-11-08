@@ -268,20 +268,34 @@ follow-up.
 
 ## Physics
 
+`modules/physics` is the solver (`warploom::physics::PhysicsWorld`,
+header-only). The bridge lives on `EditorSession` (`spawn_physics_body` /
+`step_physics`), which owns the world and copies body poses into projected
+transforms after `project()` — the header states this explicitly after an
+earlier version wrongly claimed the bridge lived in the solver header.
+
 | Feature | Status |
 |---|---|
-| Semi-implicit Euler integration | yes |
-| Sphere–sphere and sphere–ground contacts | yes |
-| Broadphase | yes — deterministic uniform grid over the frozen snapshot (D1a); all-pairs below 24 bodies or via `set_force_all_pairs` |
-| Collider shapes beyond sphere | capsules + ground plane; boxes: no |
-| Joints / constraints | yes — point-to-point distance joints (stiff or XPBD-compliant) |
-| Continuous collision | opt-in — speculative TOI contacts for spheres (`set_speculative_contacts`); capsules discrete-only, sweep open |
-| ECS integration | no — `physics_world.hpp` documents an ECS bridge that does not exist; `test_physics_ecs_bridge.cpp` tests a helper that exists only in that test file |
-| Replayable | no |
+| Integration | semi-implicit Euler; opt-in XPBD velocity-from-position (compliance) |
+| Contacts | sphere/capsule pairs against each other and the ground plane, with contact torque |
+| Broadphase | deterministic uniform grid over the frozen snapshot (D1a); all-pairs below 24 bodies or via `set_force_all_pairs`; agreement measured at 200/600/1200/1000/4000/8000 bodies (2.10x / 2.89x / 2.92x over all-pairs) |
+| Collider shapes beyond sphere | capsules (segment collider, `half_height`) + ground plane; boxes: no |
+| Joints / constraints | point-to-point distance joints (stiff or XPBD-compliant) |
+| Continuous collision | speculative TOI contacts, default-on since loop58; capsule sweep via bound trigger + 3-Newton surface refinement (loop57), nlerp axes across the substep (loop67) |
+| Sleep / wake | islands with per-body fast-impact wake (loop62) |
+| Session integration | yes — `EditorSession::spawn_physics_body` (v1.19) attaches a body to a document object; poses write into the projected transform after `project()` |
+| Replayable | yes — scrub checkpoints carry the full solver state (T4a `physics_snapshot` codec, bit-identical restore: `PhysicsScrub.RingScrubRestoresPhysicsBitIdentically`); file checkpoints carry `p_hash` and re-simulate through the session's `step_physics` (`ReplayFileRoundTripsPhysicsBitIdentically`) |
+| Wire | `spawn_physics_body` / `get_physics_body` (v1.19), live-proven by the `phys` leg including save/load |
 
-`modules/core/include/warploom/core/physics_world.hpp` is 204 lines,
-about 90 of them logic. Treat "physics engine" in the project's pitch as
-unimplemented.
+Determinism contract (from the module header): `step(dt)` is a pure function
+of the world state — insertion-order bodies, index-order pairs, no wall clock,
+no allocation, no parallelism; N identical runs produce bit-identical
+trajectories.
+
+Still open: the viewport gd demo scene (`WARPLOOM_PHYSICS=1`) steps its own
+`PhysicsWorld` instance per window frame (`examples/viewport/main.cpp`)
+instead of the session sim; migrating it onto the session is the remaining
+D1 follow-up.
 
 ## Timeline ("movie engine")
 
