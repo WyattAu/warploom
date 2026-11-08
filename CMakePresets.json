@@ -737,7 +737,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_USE_VULKAN": "OFF",
         "WARPLOOM_BUILD_TESTS": "OFF",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
@@ -752,7 +752,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_USE_VULKAN": "OFF",
         "WARPLOOM_BUILD_TESTS": "OFF",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
@@ -767,7 +767,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_USE_VULKAN": "OFF",
         "WARPLOOM_BUILD_TESTS": "OFF",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },
@@ -782,7 +782,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "MinSizeRel",
         "WARPLOOM_BUILD_ENGINE": "ON",
-        "WARPLOOM_BUILD_GAME": "ON",
+        "WARPLOOM_USE_VULKAN": "OFF",
         "WARPLOOM_BUILD_TESTS": "OFF",
         "WARPLOOM_BUILD_EXAMPLES": "OFF"
       },

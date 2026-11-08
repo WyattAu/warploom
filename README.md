@@ -41,8 +41,10 @@ glslang-tools`.
 | `release` | optimised build |
 
 Each has a matching `--build` and `ctest --preset` entry. About 60 more
-(compiler, cross and Nix combinations) are `hidden`; reachable with
-`--preset=<name>`, absent from `--list-presets`.
+(compiler, cross and Nix combinations) are `hidden` — inheritance-only
+scaffolding; CMake ≥ 4 rejects hidden presets on the command line, so a
+hidden preset is reached by copying its cache variables onto a visible
+one (or by configuring its build directory directly).
 
 ## Architecture
 

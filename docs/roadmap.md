@@ -1142,6 +1142,15 @@ leg (224/224) stays VRAM-gated like all wire proofs, stated not hidden.
       changed under any of them since the green loop77 run. A shared
       card makes even the CPU-suite host flaky; the runner E3 wants is
       exactly the fix.
+
+      Decision 2026-11-08: no dedicated runner is available from this
+      session, so the interim policy is the documented VRAM window — the
+      gating is now stated rather than discovered by surprise (AGENTS.md
+      verification baseline and README's validation table carry it: budget
+      VRAM before trusting a GPU-suite result; a varying failing set under
+      memory pressure is contention, not a fault). The box stays open: the
+      hardware runner remains the structural fix and the only path to RT
+      regression protection in CI.
 - [x] **E4 warning debt, then `-Werror`** — DONE. All four presets build
       warning-free on BOTH clang and GCC (the GCC gap held the only
       memory-safety findings: dangling-pointer and null-dereference classes),
@@ -1344,7 +1353,8 @@ leg (224/224) stays VRAM-gated like all wire proofs, stated not hidden.
    joined it in loop49 (v1.19 `spawn_physics_body` / `get_physics_body`:
    spawn, step, query, scrub, and bit-identical re-drop over the wire;
    save/load body-clear pinned at dispatch level). D1 (real physics in the
-   viewport demo scene) remains open.
+   viewport demo scene) remains open, now written as the Loop82 step
+   below.
 4. **Signature render feature** — R1 path tracing, toggleable in the
    viewport. **Met.** "Offline-quality stepped PT" runs through the
    deterministic record/replay machinery: pause, accumulate, read back the
@@ -1378,6 +1388,47 @@ leg (224/224) stays VRAM-gated like all wire proofs, stated not hidden.
    steps, not correctness gaps in what 0.1 claims.
 
 It commits to a scope, not a date.
+
+### Loop82 step (written 2026-11-08, not started): the gd demo scene joins the session sim
+
+The last physics gap. The gd scene (`WARPLOOM_PHYSICS=1`) is the only
+simulation left outside the tick: bodies are built app-side
+(`examples/viewport/main.cpp:7639-7657`), stepped on the viewport's own
+`PhysicsWorld` member once per window frame (`main.cpp:8164`), and their
+poses are streamed into the GPU-driven payload from a parallel
+`physics_bodies` vector (`main.cpp:8165-8168`). The session sim — the one
+the `phys` leg proves over the wire — is a separate, fully
+checkpoint-restorable world on `EditorSession`.
+
+Design:
+
+1. At gd scene setup, create document objects for the N bodies and attach
+   each through `EditorSession::spawn_physics_body(oid, body)` (the body's
+   pose is written into the projected transform every tick by the session;
+   `editor_session.hpp:166-177`). The ground slab and the skinned beam stay
+   app-managed — neither is simulated.
+2. Delete the viewport-local world: the `physics_world` member
+   (`main.cpp:554`), the manual step + `physics_bodies` sync
+   (`main.cpp:8163-8169`), and the init-time `add_body` loop.
+3. The gd payload writer reads the N bodies' transforms from
+   `editor.projection()` instead of the local vector (cube mesh scaled to
+   the body radius, as today).
+
+Semantics note, stated up front: `EditorSession::step_physics` substeps at
+≤ `kMaxPhysicsSubstep` = 1/240 s (≤ 8 substeps per tick,
+`editor_session.hpp:181-188`), while the app-local world takes ONE
+1/60 s step per frame. Migrated trajectories WILL differ from the
+app-local build — that is a better solver, not a regression. Pixel A/B
+against the previous commit is therefore NOT the proof. The proofs are:
+
+- two identical gd runs produce bit-identical captures (determinism);
+- scrub-back restores the pile bit-identically (the T4a codec already
+  carries session bodies; this proves the gd scene rides it);
+- pause gates the pile (pause already travels into `tick_session`,
+  `main.cpp:7357`);
+- a live wire extension: spawn/step/scrub the gd scene over the socket,
+  joining the `phys` leg pattern;
+- full suite + 0 VUIDs on the gd configuration.
 
 ## Non-goals (for now)
 
